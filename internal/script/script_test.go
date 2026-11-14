@@ -41,6 +41,10 @@ func TestParse(t *testing.T) {
 		{"unknown key", head + "steps:\n  - step: a\n    bogus: 1\n", []string{"s.yaml:8", "bogus"}},
 		{"two documents", head + "steps: []\n---\nkind: Script\n", []string{"s.yaml", "more than one"}},
 		{"empty", "", []string{"s.yaml", "empty"}},
+		{"exact numbers in json", head + "steps:\n  - step: a\n    request: { service: s, method: POST, path: /x, json: { a: 9007199254740992, b: 0.1, c: [1, 2.5, 18446744073709551615] } }\n", nil},
+		{"wide integer in json", head + "steps:\n  - step: a\n    request: { service: s, method: POST, path: /x, json: { amount: 123456789012345678901234 } }\n", []string{"s.yaml:8", "json", "fewer digits"}},
+		{"wide float in a json list", head + "steps:\n  - step: a\n    request: { service: s, method: POST, path: /x, json: { ids: [1, 12345678901234567891.0] } }\n", []string{"s.yaml:8", "json", "fewer digits"}},
+		{"infinity in json", head + "steps:\n  - step: a\n    request: { service: s, method: POST, path: /x, json: { limit: .inf } }\n", []string{"s.yaml:8", "json", "finite"}},
 		{"non-string key in json", head + "steps:\n  - step: a\n    request: { service: s, method: POST, path: /x, json: { 1: a } }\n", []string{"s.yaml", "steps[0]", "mapping key must be a string"}},
 	}
 	for _, c := range cases {

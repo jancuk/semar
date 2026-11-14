@@ -13,6 +13,9 @@ func Parse(data []byte, name string) (domain.Scenario, error) {
 	if err := yamlfile.Decode(data, name, &s); err != nil {
 		return domain.Scenario{}, err
 	}
+	if err := yamlfile.ExactNumbers(data, name, operandKind); err != nil {
+		return domain.Scenario{}, err
+	}
 	for i := range s.Steps {
 		for j := range s.Steps[i].Expect {
 			c := &s.Steps[i].Expect[j].Check
@@ -34,4 +37,17 @@ func Load(path string) (domain.Scenario, error) {
 		return domain.Scenario{}, fmt.Errorf("read scenario %s: %w", path, err)
 	}
 	return Parse(data, path)
+}
+
+// operandKind names the keys of a check that hold a number, and the type each is decoded into.
+func operandKind(key string) (yamlfile.NumberKind, bool) {
+	switch key {
+	case "equals", "notEquals", "contains":
+		return yamlfile.AnyNumber, true
+	case "greater", "less":
+		return yamlfile.FloatNumber, true
+	case "status", "count":
+		return yamlfile.IntNumber, true
+	}
+	return 0, false
 }
