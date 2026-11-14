@@ -199,7 +199,73 @@ func singleStep() verdict.Input {
 		Steps: map[domain.StepID]verdict.StepEvidence{
 			"only": {Action: ok("a1"), Checks: []check.Result{trueResult()}},
 		},
-		Confirmed: func(domain.Expectation) bool { return true },
+		Confirmed:   func(domain.Expectation) bool { return true },
+		BuildsStart: []domain.BuildRef{{Service: "orders", Commit: "bbbbbbb", ConfigHash: "c1"}},
+		BuildsEnd:   []domain.BuildRef{{Service: "orders", Commit: "bbbbbbb", ConfigHash: "c1"}},
+	}
+}
+
+// writeNeverRan: the write under test (refund) has no expectation and no recorded result,
+// while the setup and the verifying step both look fine.
+func writeNeverRan() verdict.Input {
+	return verdict.Input{
+		Scenario: domain.Scenario{ID: "write", Steps: []domain.Step{
+			{ID: "setup", Setup: true},
+			{ID: "refund"},
+			{ID: "verify", Expect: []domain.Expectation{expectation("verify/0")}},
+		}},
+		Steps: map[domain.StepID]verdict.StepEvidence{
+			"setup":  {Action: ok("a1")},
+			"verify": {Action: ok("a3"), Checks: []check.Result{trueResult()}},
+		},
+		Confirmed:   func(domain.Expectation) bool { return true },
+		BuildsStart: []domain.BuildRef{{Service: "orders", Commit: "bbbbbbb", ConfigHash: "c1"}},
+		BuildsEnd:   []domain.BuildRef{{Service: "orders", Commit: "bbbbbbb", ConfigHash: "c1"}},
+	}
+}
+
+func refundAction(a *domain.Action) mod {
+	return func(in *verdict.Input) { in.Steps["refund"] = verdict.StepEvidence{Action: a} }
+}
+
+// failedOnly: one non-setup step, one expectation, a check recorded as true.
+func failedOnly(a *domain.Action) func() verdict.Input {
+	return func() verdict.Input {
+		in := singleStep()
+		in.Steps["only"] = verdict.StepEvidence{Action: a, Checks: []check.Result{trueResult()}}
+		return in
+	}
+}
+
+// setupOnlyExpectations: the only expectation sits on the setup step.
+func setupOnlyExpectations() verdict.Input {
+	in := pass()
+	for i := range in.Scenario.Steps {
+		in.Scenario.Steps[i].Expect = nil
+	}
+	in.Scenario.Steps[0].Expect = []domain.Expectation{expectation("create-order/0")}
+	for id, ev := range in.Steps {
+		ev.Checks = nil
+		in.Steps[id] = ev
+	}
+	ev := in.Steps["create-order"]
+	ev.Checks = []check.Result{trueResult()}
+	in.Steps["create-order"] = ev
+	return in
+}
+
+func duplicateStep(in *verdict.Input) {
+	in.Scenario.Steps = append(in.Scenario.Steps, in.Scenario.Steps[2])
+}
+
+func noBuilds(start, end bool) mod {
+	return func(in *verdict.Input) {
+		if start {
+			in.BuildsStart = nil
+		}
+		if end {
+			in.BuildsEnd = nil
+		}
 	}
 }
 
@@ -242,8 +308,19 @@ func TestCompute(t *testing.T) {
 		{"no check at all", noChecks, domain.OutcomeInconclusive, []string{"the scenario has no check besides the invariants"}},
 		{"empty scenario", emptyScenario, domain.OutcomeInconclusive, []string{"the scenario has no check besides the invariants"}},
 		{"checks shorter than expect", with(pass, shortChecks), domain.OutcomeInconclusive, []string{"a check could not be evaluated"}},
-		{"checks longer than expect", with(pass, longChecks), domain.OutcomePassed, nil},
-		{"unknown step in the map", with(pass, unknownStepInMap), domain.OutcomePassed, nil},
+		{"checks longer than expect", with(pass, longChecks), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: step order-unchanged"}},
+		{"unknown step in the map", with(pass, unknownStepInMap), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: the evidence holds step ghost"}},
+		{"duplicate step id", with(pass, duplicateStep), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: step order-unchanged"}},
+		{"write step never ran", writeNeverRan, domain.OutcomeInconclusive, []string{"step refund has no recorded result"}},
+		{"write step has a transport error", with(writeNeverRan, refundAction(&domain.Action{ID: "a2", Err: "connection reset"})), domain.OutcomeInconclusive, []string{"step refund failed: connection reset"}},
+		{"write step has no response and no error", with(writeNeverRan, refundAction(&domain.Action{ID: "a2"})), domain.OutcomeInconclusive, []string{"step refund failed: no response was recorded"}},
+		{"transport error with a check recorded as true", failedOnly(&domain.Action{ID: "a1", Err: "timeout"}), domain.OutcomeInconclusive, []string{"step only failed: timeout"}},
+		{"no response with a check recorded as true", failedOnly(&domain.Action{ID: "a1"}), domain.OutcomeInconclusive, []string{"step only failed: no response was recorded"}},
+		{"expectations only on a setup step", setupOnlyExpectations, domain.OutcomeInconclusive, []string{"the scenario has no check besides the invariants"}},
+		{"invariant false on a setup step", with(pass, invariant("create-order", domain.CheckFalse)), domain.OutcomeBlocked, []string{"setup failed: create-order no server error was not met"}},
+		{"no build recorded at all", with(pass, noBuilds(true, true)), domain.OutcomeInconclusive, []string{"no build was recorded"}},
+		{"only the start build recorded", with(pass, noBuilds(false, true)), domain.OutcomeInconclusive, []string{"no build was recorded"}},
+		{"only the end build recorded", with(pass, noBuilds(true, false)), domain.OutcomeInconclusive, []string{"no build was recorded"}},
 		{"stale with a failed check lists both", with(pass, buildsEnd("orders", "aaaaaaa"), checkState("refund-too-much", 0, domain.CheckFalse)), domain.OutcomeStale, []string{"the build changed during the run", "refund-too-much"}},
 		{"blocked wins over failed", with(pass, blocked("gate failed"), checkState("refund-too-much", 0, domain.CheckFalse)), domain.OutcomeBlocked, []string{"gate failed", "refund-too-much"}},
 		{"blocked wins over stale", with(pass, blocked("gate failed"), buildsEnd("orders", "aaaaaaa")), domain.OutcomeBlocked, []string{"gate failed", "the build changed during the run"}},
@@ -296,6 +373,58 @@ func TestComputeRefusedStepAddsNoInconclusiveReason(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("the refusal is reported %d times, want once", n)
+	}
+}
+
+func TestComputeRefusedStepAddsNoReasonBesidesTheRefusal(t *testing.T) {
+	cases := []struct {
+		name string
+		mods []mod
+	}{
+		{"expectation results", []mod{stepRefused("refund-too-much", "denied")}},
+		{"false invariant", []mod{stepRefused("refund-too-much", "denied"), invariant("refund-too-much", domain.CheckFalse)}},
+		{"not evaluated invariant", []mod{stepRefused("refund-too-much", "denied"), invariant("refund-too-much", domain.CheckNotEvaluated)}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := verdict.Compute(with(pass, tc.mods...)())
+			if got.Outcome != domain.OutcomeBlocked {
+				t.Fatalf("outcome = %s", got.Outcome)
+			}
+			if len(got.Reasons) != 1 || !strings.Contains(got.Reasons[0].Text, "denied") {
+				t.Errorf("reasons = %+v, want only the refusal", got.Reasons)
+			}
+		})
+	}
+}
+
+func TestComputeFailedStepNamesTheCauseOnce(t *testing.T) {
+	cases := []struct {
+		name   string
+		action *domain.Action
+	}{
+		{"error", &domain.Action{ID: "a1", Err: "timeout"}},
+		{"no response", &domain.Action{ID: "a1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := failedOnly(tc.action)()
+			ev := in.Steps["only"]
+			ev.Checks = []check.Result{{State: domain.CheckNotEvaluated, Detail: "no response was recorded"}}
+			ev.Invariants = []check.Result{{State: domain.CheckNotEvaluated, Detail: "no response was recorded"}}
+			in.Steps["only"] = ev
+			got := verdict.Compute(in)
+			if len(got.Reasons) != 1 || !strings.Contains(got.Reasons[0].Text, "step only failed") {
+				t.Errorf("reasons = %+v, want only the failed step", got.Reasons)
+			}
+		})
+	}
+}
+
+func TestComputeDuplicateStepListsEachActionOnce(t *testing.T) {
+	got := verdict.Compute(with(pass, duplicateStep)())
+	if want := []domain.ActionID{"a1", "a2", "a3"}; !reflect.DeepEqual(got.Actions, want) {
+		t.Errorf("actions = %v, want %v", got.Actions, want)
 	}
 }
 
@@ -441,51 +570,91 @@ func FuzzCompute(f *testing.F) {
 			at++
 			return b
 		}
+		const (
+			modeOK = iota
+			modeMissing
+			modeErr
+			modeStatus400
+			modeRefused
+			modes
+		)
 		sc := domain.Scenario{ID: "fz"}
 		steps := map[domain.StepID]verdict.StepEvidence{}
 		confirmed := map[string]bool{}
-		anyBad, anyUnconfirmed := false, false
-		checks := 0
+
+		// The oracle reads only these variables, which the generator sets from its own choices.
+		noPassReason := ""
+		setupFailed, anyRefused, anyExpectation := false, false, false
 		for i := 0; i < 3; i++ {
 			id := domain.StepID([]string{"s1", "s2", "s3"}[i])
-			flags := next()
+			setup := next()&1 == 1
+			mode := int(next()) % modes
+			unknownEffect := next()&3 == 0
 			n := int(next() % 3)
-			step := domain.Step{ID: id, Setup: flags&1 == 1}
+			truncate := next()&3 == 0
+			step := domain.Step{ID: id, Setup: setup}
 			ev := verdict.StepEvidence{}
-			if flags&2 == 0 {
-				a := ok("a" + string(id))
-				a.Refused = map[bool]string{true: "denied"}[flags&4 != 0]
-				a.EffectUnknown = flags&8 != 0
-				ev.Action = a
+			switch mode {
+			case modeOK:
+				ev.Action = ok("a" + string(id))
+			case modeStatus400:
+				ev.Action = &domain.Action{ID: domain.ActionID("a" + string(id)), Response: &domain.HTTPResponse{Status: 400 + int(next())%200}}
+			case modeErr:
+				ev.Action = &domain.Action{ID: domain.ActionID("a" + string(id)), Err: "reset"}
+			case modeRefused:
+				ev.Action = &domain.Action{ID: domain.ActionID("a" + string(id)), Refused: "denied"}
+			}
+			if ev.Action != nil && unknownEffect {
+				ev.Action.EffectUnknown = true
+				noPassReason = "an action has an unknown effect"
+			}
+			if mode == modeRefused {
+				anyRefused = true
+			}
+			if setup && mode != modeOK {
+				setupFailed = true
+			}
+			if !setup && (mode == modeMissing || mode == modeErr || mode == modeRefused) {
+				noPassReason = "a non-setup step has no response"
 			}
 			for j := 0; j < n; j++ {
 				cite := string(id) + string(rune('0'+j))
 				step.Expect = append(step.Expect, expectation(cite))
 				confirmed[cite] = next()&1 == 1
-				checks++
+				if !setup {
+					anyExpectation = true
+				}
 				if !confirmed[cite] {
-					anyUnconfirmed = true
+					noPassReason = "an expectation is unconfirmed"
 				}
 				st := states[int(next())%3]
 				if st != domain.CheckTrue {
-					anyBad = true
+					noPassReason = "a check is false or not evaluated"
 				}
 				ev.Checks = append(ev.Checks, check.Result{State: st})
 			}
-			if flags&16 != 0 {
+			if truncate {
 				ev.Checks = ev.Checks[:len(ev.Checks)/2]
 				if len(ev.Checks) < len(step.Expect) {
-					anyBad = true
+					noPassReason = "a check is missing"
 				}
 			}
 			st := states[int(next())%3]
 			if st != domain.CheckTrue {
-				anyBad = true
+				noPassReason = "an invariant is false or not evaluated"
 			}
 			ev.Invariants = []check.Result{{State: st}}
 			sc.Steps = append(sc.Steps, step)
 			steps[id] = ev
 		}
+		if !anyExpectation {
+			noPassReason = "no non-setup step has an expectation"
+		}
+		if next()%4 == 0 {
+			steps["ghost"] = verdict.StepEvidence{Action: ok("zz")}
+			noPassReason = "the evidence has an unknown step"
+		}
+
 		in := verdict.Input{
 			Scenario:    sc,
 			Steps:       steps,
@@ -493,15 +662,37 @@ func FuzzCompute(f *testing.F) {
 			BuildsStart: []domain.BuildRef{{Service: "orders", Commit: "a"}},
 			BuildsEnd:   []domain.BuildRef{{Service: "orders", Commit: "a"}},
 		}
-		buildsDiffer := next()&1 == 1
-		if buildsDiffer {
-			in.BuildsEnd[0].Commit = "b"
+		if next()%4 == 0 {
+			in.Confirmed = nil
+			for _, step := range sc.Steps {
+				if len(step.Expect) > 0 {
+					noPassReason = "an expectation is unconfirmed"
+				}
+			}
 		}
-		hasBlocked := next()&1 == 1
-		if hasBlocked {
+		switch next() % 5 {
+		case 1:
+			in.BuildsEnd[0].Commit = "b"
+			noPassReason = "the builds differ"
+		case 2:
+			in.BuildsStart = nil
+			noPassReason = "a build side is empty"
+		case 3:
+			in.BuildsEnd = nil
+			noPassReason = "a build side is empty"
+		}
+		if next()&1 == 1 {
 			in.Blocked = []string{"blocked"}
+			noPassReason = "something is blocked"
+		}
+		if next()%4 == 0 {
+			in.NotRun = "not run"
+			noPassReason = "not run"
 		}
 		in.Retried = next()&1 == 1
+		if in.Retried {
+			noPassReason = "the script needed a retry"
+		}
 
 		got := verdict.Compute(in)
 		switch got.Outcome {
@@ -510,22 +701,14 @@ func FuzzCompute(f *testing.F) {
 		default:
 			t.Fatalf("unknown outcome %q", got.Outcome)
 		}
-		if got.Outcome != domain.OutcomePassed {
-			return
+		if got.Outcome == domain.OutcomePassed && noPassReason != "" {
+			t.Errorf("passed although: %s", noPassReason)
 		}
-		switch {
-		case anyBad:
-			t.Error("passed with a false or not_evaluated check")
-		case anyUnconfirmed:
-			t.Error("passed with an unconfirmed expectation")
-		case buildsDiffer:
-			t.Error("passed although the builds differ")
-		case hasBlocked:
-			t.Error("passed although something is blocked")
-		case checks == 0:
-			t.Error("passed with no check besides the invariants")
-		case in.Retried:
-			t.Error("passed after a retry")
+		if got.Outcome == domain.OutcomePassed && len(got.Reasons) != 0 {
+			t.Errorf("passed with reasons: %+v", got.Reasons)
+		}
+		if (setupFailed || anyRefused) && in.NotRun == "" && got.Outcome != domain.OutcomeBlocked {
+			t.Errorf("outcome = %s, want blocked: a setup step failed or a step was refused", got.Outcome)
 		}
 	})
 }

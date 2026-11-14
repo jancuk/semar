@@ -36,15 +36,19 @@ const (
 	msgRetried          = "the script needed a retry"
 	msgNoCheck          = "the scenario has no check besides the invariants"
 	msgNoDetail         = "no result was recorded"
+	msgMismatch         = "the recorded evidence does not match the scenario"
+	msgNoBuild          = "no build was recorded"
 )
 
-// outcomeOrder is the order in which the rules decide. The first rule that matched gives the outcome.
-var outcomeOrder = []domain.Outcome{
-	domain.OutcomeNotRun,
-	domain.OutcomeBlocked,
-	domain.OutcomeStale,
-	domain.OutcomeFailed,
-	domain.OutcomeInconclusive,
+// outcomeOrder returns the order in which the rules decide. The first rule that matched gives the outcome.
+func outcomeOrder() [5]domain.Outcome {
+	return [5]domain.Outcome{
+		domain.OutcomeNotRun,
+		domain.OutcomeBlocked,
+		domain.OutcomeStale,
+		domain.OutcomeFailed,
+		domain.OutcomeInconclusive,
+	}
 }
 
 // Compute returns the one outcome and every reason. The same input always gives the same result.
@@ -66,18 +70,29 @@ func Compute(in Input) domain.ScenarioResult {
 	for _, text := range in.Blocked {
 		add(domain.OutcomeBlocked, "", text)
 	}
-	if buildsDiffer(in.BuildsStart, in.BuildsEnd) {
+	buildsRecorded := len(in.BuildsStart) > 0 && len(in.BuildsEnd) > 0
+	if buildsRecorded && buildsDiffer(in.BuildsStart, in.BuildsEnd) {
 		add(domain.OutcomeStale, "", msgBuildChanged)
 	}
 
 	expectations := 0
+	seen := map[domain.StepID]bool{}
 	for _, step := range in.Scenario.Steps {
+		if seen[step.ID] {
+			add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("%s: step %s appears more than once in the scenario", msgMismatch, step.ID))
+			continue
+		}
+		seen[step.ID] = true
 		ev := in.Steps[step.ID]
 		a := ev.Action
 		if a != nil {
 			res.Actions = append(res.Actions, a.ID)
 		}
 		refused := a != nil && a.Refused != ""
+		noResponse := !step.Setup && !refused && a != nil && (a.Err != "" || a.Response == nil)
+		if len(ev.Checks) > len(step.Expect) {
+			add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("%s: step %s has %d check results for %d expectations", msgMismatch, step.ID, len(ev.Checks), len(step.Expect)))
+		}
 
 		switch {
 		case refused:
@@ -89,7 +104,9 @@ func Compute(in Input) domain.ScenarioResult {
 		}
 
 		for i, e := range step.Expect {
-			expectations++
+			if !step.Setup {
+				expectations++
+			}
 			confirmed := in.Confirmed != nil && in.Confirmed(e)
 			r := check.Result{State: domain.CheckNotEvaluated, Detail: msgNoDetail}
 			if i < len(ev.Checks) {
@@ -115,7 +132,7 @@ func Compute(in Input) domain.ScenarioResult {
 			case !confirmed:
 				add(domain.OutcomeInconclusive, step.ID, msgNotConfirmed)
 			}
-			if r.State != domain.CheckTrue && r.State != domain.CheckFalse && a != nil {
+			if r.State != domain.CheckTrue && r.State != domain.CheckFalse && a != nil && !noResponse {
 				text := msgNotEvaluated
 				if r.Detail != "" {
 					text += ": " + r.Detail
@@ -130,14 +147,18 @@ func Compute(in Input) domain.ScenarioResult {
 				State: inv.State, Expected: inv.Expected, Observed: inv.Observed, Detail: inv.Detail,
 				Confirmed: true,
 			})
-			if inv.State == domain.CheckFalse {
+			switch {
+			case refused:
+			case inv.State == domain.CheckFalse && step.Setup:
+				add(domain.OutcomeBlocked, step.ID, fmt.Sprintf("setup failed: %s %s was not met", step.ID, inv.Expected))
+			case inv.State == domain.CheckFalse:
 				text := fmt.Sprintf("step %s broke an invariant: expected %s, observed %s", step.ID, inv.Expected, inv.Observed)
 				if inv.Detail != "" {
 					text += ": " + inv.Detail
 				}
 				add(domain.OutcomeFailed, step.ID, text)
 			}
-			if inv.State != domain.CheckTrue && inv.State != domain.CheckFalse && !refused {
+			if inv.State != domain.CheckTrue && inv.State != domain.CheckFalse && !refused && !noResponse {
 				text := msgNotEvaluated
 				if inv.Detail != "" {
 					text += ": " + inv.Detail
@@ -146,12 +167,32 @@ func Compute(in Input) domain.ScenarioResult {
 			}
 		}
 
-		if a == nil && !step.Setup && len(step.Expect) > 0 {
+		if a == nil && !step.Setup {
 			add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("step %s has no recorded result", step.ID))
+		}
+		if noResponse {
+			cause := "no response was recorded"
+			if a.Err != "" {
+				cause = a.Err
+			}
+			add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("step %s failed: %s", step.ID, cause))
 		}
 		if a != nil && a.EffectUnknown {
 			add(domain.OutcomeInconclusive, step.ID, msgEffectUnknown)
 		}
+	}
+	var unknown []string
+	for id := range in.Steps {
+		if !seen[id] {
+			unknown = append(unknown, string(id))
+		}
+	}
+	slices.Sort(unknown)
+	for _, id := range unknown {
+		add(domain.OutcomeInconclusive, domain.StepID(id), fmt.Sprintf("%s: the evidence holds step %s, which the scenario does not have", msgMismatch, id))
+	}
+	if !buildsRecorded {
+		add(domain.OutcomeInconclusive, "", msgNoBuild)
 	}
 	if in.Retried {
 		add(domain.OutcomeInconclusive, "", msgRetried)
@@ -161,7 +202,7 @@ func Compute(in Input) domain.ScenarioResult {
 	}
 
 	res.Outcome = domain.OutcomePassed
-	for _, rule := range outcomeOrder {
+	for _, rule := range outcomeOrder() {
 		if len(byRule[rule]) > 0 && res.Outcome == domain.OutcomePassed {
 			res.Outcome = rule
 		}
