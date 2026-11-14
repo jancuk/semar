@@ -1,33 +1,17 @@
 package scenario
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 
-	yaml "go.yaml.in/yaml/v4"
-
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/yamlfile"
 )
 
 func Parse(data []byte, name string) (domain.Scenario, error) {
 	var s domain.Scenario
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&s); err != nil {
-		if errors.Is(err, io.EOF) {
-			return domain.Scenario{}, fmt.Errorf("%s: the file is empty", name)
-		}
-		return domain.Scenario{}, decodeError(name, err)
-	}
-	var extra yaml.Node
-	switch err := dec.Decode(&extra); {
-	case err == nil:
-		return domain.Scenario{}, fmt.Errorf("%s: the file holds more than one YAML document", name)
-	case !errors.Is(err, io.EOF):
-		return domain.Scenario{}, decodeError(name, err)
+	if err := yamlfile.Decode(data, name, &s); err != nil {
+		return domain.Scenario{}, err
 	}
 	for i := range s.Steps {
 		for j := range s.Steps[i].Expect {
@@ -42,18 +26,6 @@ func Parse(data []byte, name string) (domain.Scenario, error) {
 		}
 	}
 	return s, nil
-}
-
-func decodeError(name string, err error) error {
-	var les *yaml.LoadErrors
-	if !errors.As(err, &les) {
-		return fmt.Errorf("%s: %w", name, err)
-	}
-	errs := make([]error, len(les.Errors))
-	for i, le := range les.Errors {
-		errs[i] = fmt.Errorf("%s:%d: %s", name, le.Mark.Line, le.Message)
-	}
-	return errors.Join(errs...)
 }
 
 func Load(path string) (domain.Scenario, error) {

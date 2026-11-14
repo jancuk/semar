@@ -1,0 +1,26 @@
+version: 1
+environments:
+  uat:
+    kind: test
+    hosts: [api.uat.example.com]
+    methods: [GET, POST]
+    effects:
+      mode: test_data
+      deny:
+        - {method: DELETE, path: /v1/**}
+      reads:
+        - {method: POST, path: /v1/search}
+    services:
+      - name: api
+        baseUrl: https://api.other.example.com
+        build:
+          probe: http
+          url: https://api.uat.example.com/version
+          commit: $.commit
+authProfiles:
+  uat-user:
+    session: {header: Authorization, value: "Bearer {{secret.TOKEN}}"}
+    secrets: {TOKEN: "env:SEMAR_UAT_TOKEN"}
+redact:
+  jsonPaths: [$.password]
+  headers: [Authorization]
