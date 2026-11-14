@@ -17,7 +17,7 @@ func (b Body) MarshalJSON() ([]byte, error) {
 	switch {
 	case len(b) == 0:
 		return []byte("null"), nil
-	case json.Valid(b):
+	case json.Valid(b) && utf8.Valid(b):
 		return json.Marshal(struct {
 			JSON json.RawMessage `json:"json"`
 		}{json.RawMessage(b)})

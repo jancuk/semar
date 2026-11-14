@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/jancuk/semar/internal/domain"
 )
@@ -60,6 +61,59 @@ func TestBodyRoundTrip(t *testing.T) {
 				if !bytes.Equal(back, c.in) {
 					t.Fatalf("back = %q, want %q", back, c.in)
 				}
+			}
+		})
+	}
+}
+
+func TestBodyJSONWithInvalidUTF8StoresAsBase64(t *testing.T) {
+	in := []byte("{\"a\":\"\xff\"}")
+	got, err := json.Marshal(domain.Body(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.Valid(got) {
+		t.Fatalf("marshalled output is not valid UTF-8: %q", got)
+	}
+	if !strings.HasPrefix(string(got), `{"base64":`) {
+		t.Fatalf("marshal = %s, want base64 form", got)
+	}
+	var back domain.Body
+	if err := json.Unmarshal(got, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(back, in) {
+		t.Fatalf("back = %q, want %q", back, in)
+	}
+}
+
+func TestBodyEdgeFormsKeepWorking(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+		back string
+	}{
+		{"null literal", `null`, `{"json":null}`, `null`},
+		{"json string", `"x"`, `{"json":"x"}`, `"x"`},
+		{"json number", `42`, `{"json":42}`, `42`},
+		{"only spaces", `   `, `{"text":"   "}`, `   `},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := json.Marshal(domain.Body(c.in))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != c.want {
+				t.Fatalf("marshal = %s, want %s", got, c.want)
+			}
+			var back domain.Body
+			if err := json.Unmarshal(got, &back); err != nil {
+				t.Fatal(err)
+			}
+			if string(back) != c.back {
+				t.Fatalf("back = %q, want %q", back, c.back)
 			}
 		})
 	}
