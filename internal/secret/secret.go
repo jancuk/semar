@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -61,4 +62,26 @@ func (e *Env) Loaded() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return append([]string{}, e.loaded...)
+}
+
+var placeholder = regexp.MustCompile(`\{\{secret\.([^{}]*)\}\}`)
+
+// Expand replaces each {{secret.NAME}} in text with values[NAME]. Its errors name
+// the placeholder and never hold a value.
+func Expand(text string, values map[string]string) (string, error) {
+	if strings.Contains(placeholder.ReplaceAllString(text, ""), "{{secret.") {
+		return "", errors.New("a {{secret.NAME}} placeholder is not closed")
+	}
+	var missing []string
+	out := placeholder.ReplaceAllStringFunc(text, func(m string) string {
+		v, ok := values[placeholder.FindStringSubmatch(m)[1]]
+		if !ok {
+			missing = append(missing, m)
+		}
+		return v
+	})
+	if len(missing) > 0 {
+		return "", fmt.Errorf("%s names no secret of the auth profile", strings.Join(missing, ", "))
+	}
+	return out, nil
 }

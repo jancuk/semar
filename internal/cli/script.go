@@ -1,0 +1,76 @@
+package cli
+
+import (
+	"fmt"
+	"io"
+
+	"github.com/spf13/cobra"
+
+	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/evidence"
+	"github.com/jancuk/semar/internal/script"
+)
+
+func newScriptCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "script",
+		Short: "Manage the scripts that replay scenarios",
+	}
+	var dir string
+	add := &cobra.Command{
+		Use:   "add <file>",
+		Short: "Check a script against its scenario and store it",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return addScript(cmd.OutOrStdout(), cmd.ErrOrStderr(), dir, args[0])
+		},
+	}
+	addDirFlag(add, &dir)
+	cmd.AddCommand(add)
+	return cmd
+}
+
+// addScript binds a script that carries no hash to its scenario's current expected results.
+func addScript(stdout, stderr io.Writer, repo, file string) error {
+	s, err := script.Load(file)
+	if err != nil {
+		return err
+	}
+	sc, err := loadScenario(repo, s.Scenario)
+	if err != nil {
+		return err
+	}
+	want := domain.ExpectHash(sc)
+	var problems []string
+	switch s.ExpectHash {
+	case "":
+		s.ExpectHash = want
+	case want:
+	default:
+		problems = append(problems, fmt.Sprintf("its expectation hash %s differs from %s, the hash of the expected results of scenario %s now", s.ExpectHash, want, sc.ID))
+	}
+	for _, p := range script.Validate(sc, s) {
+		if p.Step != "" {
+			problems = append(problems, fmt.Sprintf("step %s: %s", p.Step, p.Message))
+		} else {
+			problems = append(problems, p.Message)
+		}
+	}
+	if len(problems) > 0 {
+		fmt.Fprintf(stderr, "semar: script %s does not fit scenario %s, and nothing was stored:\n", file, sc.ID)
+		for _, p := range problems {
+			fmt.Fprintf(stderr, "  - %s\n", p)
+		}
+		return exitError{ExitError}
+	}
+
+	store, err := evidence.Open(semarDir(repo))
+	if err != nil {
+		return err
+	}
+	if err := store.PutScript(s); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "stored the script of scenario %s for expectation hash %s\n", sc.ID, s.ExpectHash)
+	return nil
+}

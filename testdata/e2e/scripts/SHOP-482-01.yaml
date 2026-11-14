@@ -1,0 +1,13 @@
+apiVersion: semar/v1
+kind: Script
+scenario: SHOP-482-01
+expectHash: "8e44c6f1b96eebc0d6553cbdff28198a8fd28bbff9730ae2dcd094ac449ad121"
+authoredBy: { instance: hand, model: none, harness: none }
+steps:
+  - step: create-order
+    request: { service: orders, method: POST, path: /v1/orders, json: { amount: 100000 } }
+    captures: [{ name: order_id, jsonpath: "$.data.id" }]
+  - step: refund-too-much
+    request: { service: orders, method: POST, path: "/v1/orders/{{order_id}}/refunds", json: { amount: 150000 } }
+  - step: order-unchanged
+    request: { service: orders, method: GET, path: "/v1/orders/{{order_id}}" }

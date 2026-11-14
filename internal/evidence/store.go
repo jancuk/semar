@@ -189,6 +189,23 @@ func (s *Store) LoadRun(id domain.RunID) (domain.Run, []domain.Activity, error) 
 	return run, acts, nil
 }
 
+// Activity returns the activity of a complete or an interrupted run in Seq order.
+// An interrupted run's activity is not covered by the hashes of a run.json.
+func (s *Store) Activity(id domain.RunID) ([]domain.Activity, error) {
+	dir, err := s.runDir(id)
+	if err != nil {
+		return nil, fmt.Errorf("load activity: %w", err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return nil, fmt.Errorf("run %s was not found in %s: %w", id, filepath.Dir(dir), err)
+	}
+	acts, err := readActivity(filepath.Join(dir, activityFile))
+	if err != nil {
+		return nil, fmt.Errorf("run %s: %w", id, err)
+	}
+	return acts, nil
+}
+
 // readRunFile reads and checks run.json only, and returns the run directory too.
 func (s *Store) readRunFile(id domain.RunID) (domain.Run, string, error) {
 	dir, err := s.runDir(id)

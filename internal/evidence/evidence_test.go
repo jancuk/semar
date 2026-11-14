@@ -208,6 +208,36 @@ func TestInterruptedRun(t *testing.T) {
 	}
 }
 
+func TestActivityOfAnInterruptedRun(t *testing.T) {
+	s := openStore(t)
+	r, err := s.NewRun("r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range []int{2, 1} {
+		if err := r.AppendActivity(activity(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	acts, err := s.Activity("r1")
+	if err != nil || len(acts) != 2 || acts[0].Seq != 1 || acts[1].Seq != 2 {
+		t.Fatalf("activity = %+v, %v", acts, err)
+	}
+
+	if _, err := s.NewRun("r2"); err != nil {
+		t.Fatal(err)
+	}
+	if acts, err := s.Activity("r2"); err != nil || len(acts) != 0 {
+		t.Errorf("a run with no action: activity = %+v, %v", acts, err)
+	}
+	if _, err := s.Activity("nope"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("missing run err = %v, want fs.ErrNotExist", err)
+	}
+	if _, err := s.Activity("../r1"); err == nil {
+		t.Error("an ID that leaves the store is accepted")
+	}
+}
+
 func TestVerify(t *testing.T) {
 	tests := []struct {
 		name   string

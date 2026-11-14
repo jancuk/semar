@@ -294,3 +294,24 @@ func FuzzEval(f *testing.F) {
 		}
 	})
 }
+
+func TestDescribeMatchesEval(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{"status: 422", "status 422"},
+		{"{jsonpath: $.error.code, equals: REFUND_EXCEEDS_TOTAL}", "$.error.code equals REFUND_EXCEEDS_TOTAL"},
+		{"{header: Content-Type, contains: json}", "header Content-Type contains json"},
+		{"{status: 200, jsonpath: $.a, equals: 1}", "malformed check: it must name exactly one of status, jsonpath, or header"},
+	}
+	for _, c := range cases {
+		t.Run(c.src, func(t *testing.T) {
+			ch := yamlCheck(t, c.src)
+			got := check.Describe(ch)
+			if got != c.want {
+				t.Fatalf("Describe = %q, want %q", got, c.want)
+			}
+			if res := check.Eval(ch, ok(200, `{}`)); res.Expected != "" && res.Expected != got {
+				t.Errorf("Eval expected %q, Describe %q", res.Expected, got)
+			}
+		})
+	}
+}

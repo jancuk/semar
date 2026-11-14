@@ -1,0 +1,19 @@
+version: 1
+environments:
+  local:
+    kind: test
+    hosts: ["127.0.0.1:9"]
+    methods: [GET, POST]
+    effects:
+      mode: test_data
+    services:
+      - name: orders
+        baseUrl: http://127.0.0.1:9
+        build:
+          probe: http
+          url: http://127.0.0.1:9/version
+          commit: $.commit
+authProfiles:
+  support-agent:
+    session: {header: Authorization, value: "Bearer {{secret.TOKEN}}"}
+    secrets: {TOKEN: "env:SEMAR_SAMPLE_TOKEN"}

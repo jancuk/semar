@@ -63,6 +63,15 @@ func Eval(c domain.Check, a domain.Action) (res Result) {
 	return res
 }
 
+// Describe is the expected value of a check as Eval reports it, or why the check is malformed.
+func Describe(c domain.Check) string {
+	ops := operators(c)
+	if problem := malformed(c, ops); problem != "" {
+		return "malformed check: " + problem
+	}
+	return short(describe(c, ops))
+}
+
 func malformed(c domain.Check, ops []string) string {
 	kinds := 0
 	if c.Status != nil {

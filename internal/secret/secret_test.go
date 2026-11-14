@@ -111,3 +111,34 @@ func TestEnvConcurrent(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestExpand(t *testing.T) {
+	values := map[string]string{"TOKEN": "s3cret-value", "USER": "alice"}
+	cases := []struct {
+		name, text, want, errText string
+	}{
+		{"one placeholder", "Bearer {{secret.TOKEN}}", "Bearer s3cret-value", ""},
+		{"two placeholders", "{{secret.USER}}:{{secret.TOKEN}}", "alice:s3cret-value", ""},
+		{"no placeholder", "Basic abc", "Basic abc", ""},
+		{"unknown name", "Bearer {{secret.NOPE}}", "", "{{secret.NOPE}}"},
+		{"empty name", "Bearer {{secret.}}", "", "{{secret.}}"},
+		{"not closed", "Bearer {{secret.TOKEN", "", "{{secret."},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := secret.Expand(c.text, values)
+			if c.errText == "" {
+				if err != nil || got != c.want {
+					t.Fatalf("got %q, %v", got, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.errText) {
+				t.Fatalf("err = %v, want one that names %q", err, c.errText)
+			}
+			if strings.Contains(err.Error(), "s3cret-value") || got != "" {
+				t.Fatal("an error must not hold a value")
+			}
+		})
+	}
+}
