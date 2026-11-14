@@ -87,7 +87,7 @@ func compile(list string, in []config.OpPattern) ([]pattern, error) {
 		if !doublestar.ValidatePattern(op.Path) {
 			return nil, fmt.Errorf("effects.%s[%d]: path pattern %q does not compile", list, i, op.Path)
 		}
-		out[i] = pattern{method: strings.ToUpper(op.Method), path: op.Path, folded: fold(op.Path)}
+		out[i] = pattern{method: strings.ToUpper(op.Method), path: op.Path, folded: trimSlash(fold(op.Path))}
 	}
 	return out, nil
 }
@@ -139,6 +139,7 @@ func matches(list []pattern, method string, u *url.URL, generous bool) bool {
 		return false
 	}
 	folded := fold(u.Path)
+	trimmed := trimSlash(folded)
 	for _, pt := range list {
 		if pt.method != method {
 			continue
@@ -146,7 +147,7 @@ func matches(list []pattern, method string, u *url.URL, generous bool) bool {
 		var ok bool
 		var err error
 		if generous {
-			ok, err = doublestar.Match(pt.folded, folded)
+			ok, err = matchEither(pt.folded, folded, trimmed)
 		} else {
 			ok, err = doublestar.Match(pt.path, u.Path)
 		}
@@ -163,7 +164,25 @@ func matches(list []pattern, method string, u *url.URL, generous bool) bool {
 	return false
 }
 
-// fold lower-cases a path, drops one trailing slash and the ;parameters of every segment.
+// matchEither tries the pattern against the folded path with its trailing slash
+// kept and with it removed, so "/v1/x/*" still covers "/v1/x/" and "/v1/x"
+// still covers "/v1/x/". A match error is returned as is.
+func matchEither(pattern, kept, trimmed string) (bool, error) {
+	ok, err := doublestar.Match(pattern, kept)
+	if err != nil || ok || kept == trimmed {
+		return ok, err
+	}
+	return doublestar.Match(pattern, trimmed)
+}
+
+func trimSlash(path string) string {
+	if len(path) > 1 {
+		return strings.TrimSuffix(path, "/")
+	}
+	return path
+}
+
+// fold lower-cases a path and drops the ;parameters of every segment. It keeps the trailing slash.
 func fold(path string) string {
 	path = strings.ToLower(path)
 	segs := strings.Split(path, "/")
@@ -172,11 +191,7 @@ func fold(path string) string {
 			segs[i] = sg[:k]
 		}
 	}
-	path = strings.Join(segs, "/")
-	if len(path) > 1 {
-		path = strings.TrimSuffix(path, "/")
-	}
-	return path
+	return strings.Join(segs, "/")
 }
 
 // pathIsNormal reports whether the path can be matched as written. A dot

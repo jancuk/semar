@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bmatcuk/doublestar/v4"
+
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/effects"
 )
@@ -287,3 +289,95 @@ func FuzzAdmit(f *testing.F) {
 		t.Fatalf("admitted host %q (from %q) matches no entry of the hosts list", want, raw)
 	})
 }
+
+func slashEnv(deny, once string) config.Environment {
+	e := env("test_data")
+	e.Effects.Deny = []config.OpPattern{{Method: "POST", Path: deny}}
+	e.Effects.Once = []config.OpPattern{{Method: "POST", Path: once}}
+	return e
+}
+
+func TestAdmitDenyTrailingSlashForms(t *testing.T) {
+	const h = "https://api.uat.example.com"
+	cases := []struct{ name, deny, url, want string }{
+		{"star slash", "/v1/payouts/*", h + "/v1/payouts/", "denied"},
+		{"star child", "/v1/payouts/*", h + "/v1/payouts/7", "denied"},
+		{"star upper child slash", "/v1/payouts/*", h + "/v1/Payouts/7/", "denied"},
+		{"exact slash", "/v1/payouts", h + "/v1/payouts/", "denied"},
+		{"exact", "/v1/payouts", h + "/v1/payouts", "denied"},
+		{"globstar slash", "/v1/payouts/**", h + "/v1/payouts/", "denied"},
+		{"globstar deep", "/v1/payouts/**", h + "/v1/payouts/7/send", "denied"},
+		{"globstar deep slash", "/v1/payouts/**", h + "/v1/payouts/7/send/", "denied"},
+		{"uncovered path admitted", "/v1/payouts/*", h + "/v1/orders/", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p, err := effects.New(slashEnv(c.deny, "/v1/unused"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = p.Admit(req(t, "POST", c.url))
+			if c.want == "" {
+				if err != nil {
+					t.Fatalf("Admit = %v, want nil", err)
+				}
+				return
+			}
+			var ref *effects.Refusal
+			if !errors.As(err, &ref) || string(ref.Kind) != c.want {
+				t.Fatalf("Admit = %v, want %s", err, c.want)
+			}
+		})
+	}
+}
+
+func TestOnceTrailingSlashForms(t *testing.T) {
+	p, err := effects.New(slashEnv("/v1/unused", "/v1/x/*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []string{"https://api.uat.example.com/v1/x/", "https://api.uat.example.com/v1/x/9"} {
+		if !p.Once(req(t, "POST", u)) {
+			t.Fatalf("Once(%s) = false, want true", u)
+		}
+	}
+}
+
+// Generous matching must never admit what plain matching refused.
+func TestDenyNeverLooserThanPlainMatch(t *testing.T) {
+	patterns := []string{
+		"/v1/payouts",
+		"/v1/payouts/*",
+		"/v1/payouts/**",
+		"/v1/*/send",
+		"/V1/Refunds",
+		"/v1/refunds/",
+		"/v1/a/*/b/",
+	}
+	for _, pat := range patterns {
+		p, err := effects.New(slashEnv(pat, "/v1/unused"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		base := strings.NewReplacer("**", "7/send", "*", "7").Replace(pat)
+		empty := strings.NewReplacer("**", "", "*", "").Replace(pat)
+		trimmed := strings.TrimSuffix(base, "/")
+		for _, path := range []string{
+			base, base + "/", trimmed, trimmed + "/", strings.ToUpper(base), strings.ToUpper(trimmed) + "/",
+			withParam(trimmed), empty, strings.TrimSuffix(empty, "/"), strings.ToUpper(empty),
+		} {
+			ok, err := doublestar.Match(pat, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !ok {
+				continue
+			}
+			if err := p.Admit(req(t, "POST", "https://api.uat.example.com"+path)); err == nil {
+				t.Errorf("pattern %q matches plain path %q but Admit admitted it", pat, path)
+			}
+		}
+	}
+}
+
+func withParam(path string) string { return path + ";x=1" }
