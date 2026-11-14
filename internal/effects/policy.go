@@ -40,7 +40,7 @@ type Refusal struct {
 
 func (r *Refusal) Error() string { return strings.ToLower(string(r.Kind) + ": " + r.Detail) }
 
-type pattern struct{ method, path string }
+type pattern struct{ method, path, folded string }
 
 type Policy struct {
 	hosts    []string
@@ -63,6 +63,11 @@ func New(env config.Environment) (*Policy, error) {
 	for _, m := range env.Methods {
 		p.methods = append(p.methods, strings.ToUpper(m))
 	}
+	for i, h := range env.Hosts {
+		if err := hostrule.CheckEntry(h); err != nil {
+			return nil, fmt.Errorf("hosts[%d]: %w", i, err)
+		}
+	}
 	var err error
 	if p.deny, err = compile("deny", env.Effects.Deny); err != nil {
 		return nil, err
@@ -82,7 +87,7 @@ func compile(list string, in []config.OpPattern) ([]pattern, error) {
 		if !doublestar.ValidatePattern(op.Path) {
 			return nil, fmt.Errorf("effects.%s[%d]: path pattern %q does not compile", list, i, op.Path)
 		}
-		out[i] = pattern{method: strings.ToUpper(op.Method), path: op.Path}
+		out[i] = pattern{method: strings.ToUpper(op.Method), path: op.Path, folded: fold(op.Path)}
 	}
 	return out, nil
 }
@@ -92,14 +97,14 @@ func (p *Policy) Classify(r Request) Class {
 	if method == "GET" || method == "HEAD" {
 		return Read
 	}
-	if matches(p.reads, method, r.URL) {
+	if matches(p.reads, method, r.URL, false) {
 		return Read
 	}
 	return Write
 }
 
 func (p *Policy) Once(r Request) bool {
-	return matches(p.once, strings.ToUpper(r.Method), r.URL)
+	return matches(p.once, strings.ToUpper(r.Method), r.URL, true)
 }
 
 // Admit returns nil when the request may be sent, or a *Refusal. The order is
@@ -115,7 +120,7 @@ func (p *Policy) Admit(r Request) error {
 	if !pathIsNormal(r.URL) {
 		return &Refusal{Denied, "the path is not normal: it holds a dot segment, an empty segment, or an encoded slash"}
 	}
-	if matches(p.deny, method, r.URL) {
+	if matches(p.deny, method, r.URL, true) {
 		return &Refusal{Denied, fmt.Sprintf("%s %s matches the deny list", method, r.URL.Path)}
 	}
 	if p.readOnly && p.Classify(r) == Write {
@@ -124,19 +129,54 @@ func (p *Policy) Admit(r Request) error {
 	return nil
 }
 
-func matches(list []pattern, method string, u *url.URL) bool {
+// matches reports whether a pattern in list holds for the request. A deny or
+// once pattern (generous) is matched against the folded path, so a trailing
+// slash, a capital letter, or a ;parameter cannot slip past it. A reads
+// pattern relaxes a write, so it is matched against the path exactly as written.
+// A pattern that errors fails closed: it matches for deny and once, and not for reads.
+func matches(list []pattern, method string, u *url.URL, generous bool) bool {
 	if u == nil || !pathIsNormal(u) {
 		return false
 	}
+	folded := fold(u.Path)
 	for _, pt := range list {
 		if pt.method != method {
 			continue
 		}
-		if ok, err := doublestar.Match(pt.path, u.Path); err == nil && ok {
+		var ok bool
+		var err error
+		if generous {
+			ok, err = doublestar.Match(pt.folded, folded)
+		} else {
+			ok, err = doublestar.Match(pt.path, u.Path)
+		}
+		if err != nil {
+			if generous {
+				return true
+			}
+			continue
+		}
+		if ok {
 			return true
 		}
 	}
 	return false
+}
+
+// fold lower-cases a path, drops one trailing slash and the ;parameters of every segment.
+func fold(path string) string {
+	path = strings.ToLower(path)
+	segs := strings.Split(path, "/")
+	for i, sg := range segs {
+		if k := strings.IndexByte(sg, ';'); k >= 0 {
+			segs[i] = sg[:k]
+		}
+	}
+	path = strings.Join(segs, "/")
+	if len(path) > 1 {
+		path = strings.TrimSuffix(path, "/")
+	}
+	return path
 }
 
 // pathIsNormal reports whether the path can be matched as written. A dot

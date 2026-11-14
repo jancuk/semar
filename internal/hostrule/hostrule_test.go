@@ -7,8 +7,29 @@ import (
 	"github.com/jancuk/semar/internal/hostrule"
 )
 
+func TestCheckEntry(t *testing.T) {
+	cases := []struct {
+		entry   string
+		wantErr bool
+	}{
+		{"api.uat.example.com", false},
+		{"api.uat.example.com:8443", false},
+		{"[::1]:9000", false},
+		{"::2", false},
+		{"api.uat.example.com:", true},
+		{"[::1]:", true},
+	}
+	for _, c := range cases {
+		t.Run(c.entry, func(t *testing.T) {
+			if err := hostrule.CheckEntry(c.entry); (err != nil) != c.wantErr {
+				t.Fatalf("CheckEntry(%q) = %v, wantErr %v", c.entry, err, c.wantErr)
+			}
+		})
+	}
+}
+
 func TestAllowed(t *testing.T) {
-	hosts := []string{"api.uat.example.com", "127.0.0.1:8080", "[::1]:9000", "::2", "Mixed.Example.COM."}
+	hosts := []string{"api.uat.example.com", "127.0.0.1:8080", "[::1]:9000", "::2", "Mixed.Example.COM.", "caf\u00e9.example.com", "\u212A.uat.example.com"}
 	cases := []struct {
 		name, url string
 		want      bool
@@ -34,6 +55,9 @@ func TestAllowed(t *testing.T) {
 		{"no scheme", "//api.uat.example.com/", false},
 		{"opaque", "https:api.uat.example.com", false},
 		{"empty host", "https:///x", false},
+		{"dotted capital I", "https://ap\u0130.uat.example.com/x", false},
+		{"kelvin sign", "https://\u212A.uat.example.com/x", false},
+		{"non-ascii entry never matches", "https://caf\u00e9.example.com/x", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

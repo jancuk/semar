@@ -99,6 +99,7 @@ func TestLoadValidation(t *testing.T) {
 		{"version missing", "environments: {}\n", "version must be 1"},
 		{"version 2", "version: 2\n", "version must be 1"},
 		{"no hosts", envHead + "    methods: [GET]\n    effects: {mode: read_only}\n", "hosts needs at least one entry"},
+		{"host entry colon without port", envHead + "    hosts: [\"api.uat.example.com:\"]\n    methods: [GET]\n    effects: {mode: read_only}\n", "api.uat.example.com:"},
 		{"no methods", envHead + "    hosts: [h]\n    effects: {mode: read_only}\n", "methods needs at least one entry"},
 		{"bad mode", envHead + "    hosts: [h]\n    methods: [GET]\n    effects: {mode: write}\n", "effects.mode is required: test_data or read_only"},
 		{"service no name", envHead + ok + "    services:\n      - {baseUrl: \"https://api.uat.example.com\"}\n", "name is required"},

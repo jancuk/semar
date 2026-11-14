@@ -2,6 +2,7 @@
 package hostrule
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 )
@@ -24,15 +25,45 @@ func Allowed(u *url.URL, hosts []string) bool {
 	}
 	for _, entry := range hosts {
 		eh, ep := splitEntry(entry)
-		if eh == host && (ep == "" && port == defaultPort(u.Scheme) || ep == port) {
+		if eh != "" && eh == host && (ep == "" && port == defaultPort(u.Scheme) || ep == port) {
 			return true
 		}
 	}
 	return false
 }
 
+// normalize lower-cases ASCII letters only and removes one trailing dot. A host
+// with a byte above 0x7F gives "", which matches nothing: Unicode folding turns
+// U+0130 and U+212A into i and k, which would admit a host the list does not name.
 func normalize(host string) string {
-	return strings.TrimSuffix(strings.ToLower(host), ".")
+	b := make([]byte, len(host))
+	for i := 0; i < len(host); i++ {
+		c := host[i]
+		if c > 0x7f {
+			return ""
+		}
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		b[i] = c
+	}
+	return strings.TrimSuffix(string(b), ".")
+}
+
+// CheckEntry reports a hosts entry that cannot be matched as written: one with a
+// colon and an empty port, such as "api.uat.example.com:".
+func CheckEntry(entry string) error {
+	entry = strings.TrimSpace(entry)
+	if strings.HasPrefix(entry, "[") {
+		if _, tail, found := strings.Cut(entry, "]"); found && tail == ":" {
+			return fmt.Errorf("host entry %q ends with a colon and no port", entry)
+		}
+		return nil
+	}
+	if strings.Count(entry, ":") == 1 && strings.HasSuffix(entry, ":") {
+		return fmt.Errorf("host entry %q ends with a colon and no port", entry)
+	}
+	return nil
 }
 
 func defaultPort(scheme string) string {

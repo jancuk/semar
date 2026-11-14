@@ -16,7 +16,7 @@ func env(mode string) config.Environment {
 		Methods: []string{"GET", "POST", "DELETE"},
 		Effects: config.Effects{
 			Mode:  mode,
-			Deny:  []config.OpPattern{{Method: "POST", Path: "/v1/payouts/**"}},
+			Deny:  []config.OpPattern{{Method: "POST", Path: "/v1/payouts/**"}, {Method: "POST", Path: "/v1/payouts"}, {Method: "POST", Path: "/V1/Refunds/"}},
 			Once:  []config.OpPattern{{Method: "POST", Path: "/v1/vouchers/*/redeem"}},
 			Reads: []config.OpPattern{{Method: "POST", Path: "/v1/search"}},
 		},
@@ -59,6 +59,14 @@ func TestAdmit(t *testing.T) {
 		{"encoded slash upper", "test_data", "POST", h + "/v1/orders%2F1", "denied"},
 		{"encoded dot dot", "test_data", "POST", h + "/v1/orders/%2e%2e/payouts/7/send", "denied"},
 		{"double slash", "test_data", "POST", h + "/v1//payouts/7/send", "denied"},
+		{"deny trailing slash", "test_data", "POST", h + "/v1/payouts/", "denied"},
+		{"deny pattern upper case and trailing slash", "test_data", "POST", h + "/v1/refunds", "denied"},
+		{"deny upper case", "test_data", "POST", h + "/v1/Payouts/7/send", "denied"},
+		{"deny segment parameter", "test_data", "POST", h + "/v1/payouts;x=1/7/send", "denied"},
+		{"deny parameter on last segment", "test_data", "POST", h + "/v1/payouts/7;x=1", "denied"},
+		{"read only search trailing slash", "read_only", "POST", h + "/v1/search/", "read_only"},
+		{"read only search upper case", "read_only", "POST", h + "/v1/Search", "read_only"},
+		{"non-ascii host dotted I", "test_data", "GET", "https://ap\u0130.uat.example.com/v1/orders", "host_not_allowed"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -151,6 +159,8 @@ func TestClassify(t *testing.T) {
 		{"delete", "DELETE", h + "/v1/orders/1", effects.Write},
 		{"patch", "PATCH", h + "/v1/orders/1", effects.Write},
 		{"search with dot dot", "POST", h + "/v1/x/../search", effects.Write},
+		{"reads pattern trailing slash", "POST", h + "/v1/search/", effects.Write},
+		{"reads pattern upper case", "POST", h + "/v1/Search", effects.Write},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -177,6 +187,9 @@ func TestOnce(t *testing.T) {
 		{"wrong path", "POST", h + "/v1/vouchers/9", false},
 		{"deeper path", "POST", h + "/v1/vouchers/9/x/redeem", false},
 		{"not normal path", "POST", h + "/v1/vouchers/../vouchers/9/redeem", false},
+		{"trailing slash", "POST", h + "/v1/vouchers/9/redeem/", true},
+		{"upper case", "POST", h + "/v1/Vouchers/9/Redeem", true},
+		{"segment parameter", "POST", h + "/v1/vouchers;x=1/9/redeem;y=2", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -200,6 +213,7 @@ func TestNew(t *testing.T) {
 		{"bad once", func(e *config.Environment) {
 			e.Effects.Once = append(e.Effects.Once, config.OpPattern{Method: "POST", Path: "/a/[x"})
 		}, "once[1]"},
+		{"host entry with colon and no port", func(e *config.Environment) { e.Hosts = []string{"ok.example.com", "api.uat.example.com:"} }, "api.uat.example.com:"},
 		{"bad reads", func(e *config.Environment) { e.Effects.Reads = []config.OpPattern{{Method: "POST", Path: "[x"}} }, "reads[0]"},
 	}
 	for _, c := range cases {
@@ -228,12 +242,14 @@ func FuzzAdmit(f *testing.F) {
 		{"GET", "https://api.uat.example.com%2eevil.example/"},
 		{"GET", "https://api.uat.example.com\\@evil.example/"},
 		{"POST", "https://api.uat.example.com/v1/payouts%2f7"},
+		{"GET", "https://ap\u0130.uat.example.com/v1/orders"},
+		{"GET", "https://\u212A.uat.example.com/v1/orders"},
 		{"", ""},
 	} {
 		f.Add(s.method, s.url)
 	}
 	e := env("test_data")
-	e.Hosts = []string{"api.uat.example.com", "127.0.0.1:8080"}
+	e.Hosts = []string{"api.uat.example.com", "127.0.0.1:8080", "k.uat.example.com"}
 	p, err := effects.New(e)
 	if err != nil {
 		f.Fatal(err)
@@ -249,16 +265,25 @@ func FuzzAdmit(f *testing.F) {
 		if u.Scheme != "http" && u.Scheme != "https" {
 			t.Fatalf("admitted scheme %q in %q", u.Scheme, raw)
 		}
-		host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
-		port := u.Port()
-		if port == "" {
-			port = map[string]string{"http": "80", "https": "443"}[u.Scheme]
+		host := u.Hostname()
+		var lower []byte
+		for i := 0; i < len(host); i++ {
+			b := host[i]
+			if b > 0x7f {
+				t.Fatalf("admitted a host with a non-ASCII byte: %q from %q", host, raw)
+			}
+			if b >= 'A' && b <= 'Z' {
+				b += 'a' - 'A'
+			}
+			lower = append(lower, b)
 		}
-		switch {
-		case host == "api.uat.example.com" && (port == "80" && u.Scheme == "http" || port == "443" && u.Scheme == "https"):
-		case host == "127.0.0.1" && port == "8080":
-		default:
-			t.Fatalf("admitted host %q port %q from %q", host, port, raw)
+		want := strings.TrimSuffix(string(lower), ".")
+		for _, entry := range e.Hosts {
+			entryHost, _, _ := strings.Cut(entry, ":")
+			if entryHost == want {
+				return
+			}
 		}
+		t.Fatalf("admitted host %q (from %q) matches no entry of the hosts list", want, raw)
 	})
 }

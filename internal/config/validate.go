@@ -52,6 +52,11 @@ func validateEnvironment(name string, e Environment, add func(string, ...any)) {
 	if len(e.Hosts) == 0 {
 		add("%s.hosts needs at least one entry", p)
 	}
+	for i, h := range e.Hosts {
+		if err := hostrule.CheckEntry(h); err != nil {
+			add("%s.hosts[%d]: %v", p, i, err)
+		}
+	}
 	if len(e.Methods) == 0 {
 		add("%s.methods needs at least one entry", p)
 	}
