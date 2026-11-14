@@ -146,14 +146,15 @@ type flightKey struct{}
 // those are in Result.Action. It returns an error for an unknown service, a
 // recorder failure, or a context that was cancelled before or during the call.
 func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
+	base, known := e.o.Services[c.Service]
+	method := strings.ToUpper(c.Method)
+	label := describe(method, c.PathTemplate, base)
 	if err := ctx.Err(); err != nil {
-		return Result{}, fmt.Errorf("api %s %s: %w", c.Method, c.Path, err)
+		return Result{}, fmt.Errorf("api %s: %w", label, err)
 	}
-	base, ok := e.o.Services[c.Service]
-	if !ok {
+	if !known {
 		return Result{}, fmt.Errorf("api: unknown service %q", c.Service)
 	}
-	method := strings.ToUpper(c.Method)
 	a := domain.Action{
 		Surface: domain.SurfaceAPI,
 		Op:      "request",
@@ -169,31 +170,31 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 	u, err := joinURL(base, c.Path, c.Query)
 	if err != nil {
 		a.Err = err.Error()
-		return e.record(ctx, a, nil, missing)
+		return e.record(ctx, label, a, nil, missing)
 	}
 	a.Request.URL = u.String()
 
 	preq := effects.Request{Method: method, URL: u}
 	if err := e.o.Policy.Admit(preq); err != nil {
-		a.Refused = err.Error()
-		return e.record(ctx, a, nil, missing)
+		a.Refused = refusalText(err, label)
+		return e.record(ctx, label, a, nil, missing)
 	}
 	write := e.o.Policy.Classify(preq) == effects.Write
 	if write && c.Use.Pass == "" {
 		a.Refused = refusedNoUseCase
-		return e.record(ctx, a, nil, missing)
+		return e.record(ctx, label, a, nil, missing)
 	}
 
 	var session [2]string
 	if c.AuthProfile != "" {
 		if e.o.Session == nil {
 			a.Err = "sign-in failed: the engine has no session source"
-			return e.record(ctx, a, nil, missing)
+			return e.record(ctx, label, a, nil, missing)
 		}
 		name, value, err := e.o.Session(ctx, c.AuthProfile)
 		if err != nil {
 			a.Err = "sign-in failed: " + err.Error()
-			return e.record(ctx, a, nil, missing)
+			return e.record(ctx, label, a, nil, missing)
 		}
 		session = [2]string{name, value}
 	}
@@ -208,8 +209,8 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 	})
 	req, err := http.NewRequestWithContext(reqCtx, method, u.String(), reqBody)
 	if err != nil {
-		a.Err = err.Error()
-		return e.record(ctx, a, nil, missing)
+		a.Err = "the request could not be built"
+		return e.record(ctx, label, a, nil, missing)
 	}
 	req.Header = e.headers(ctx, a.TraceID, c, session)
 	a.Request.Headers = req.Header.Clone()
@@ -219,7 +220,7 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 
 	if !e.take() {
 		a.Refused = refusedBudget
-		return e.record(ctx, a, nil, missing)
+		return e.record(ctx, label, a, nil, missing)
 	}
 
 	start := e.o.Clock()
@@ -227,10 +228,10 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 	// whatever the error, so its effect is unknown.
 	resp, err := e.client.Do(req)
 	if err != nil {
-		a.Err = err.Error()
+		a.Err = transportText(err, u, label)
 		a.EffectUnknown = write && f.gotConn.Load()
 		a.DurationMS = e.o.Clock().Sub(start).Milliseconds()
-		return e.record(ctx, a, nil, missing)
+		return e.record(ctx, label, a, nil, missing)
 	}
 	body, truncated, readErr := readBody(resp.Body, e.o.MaxBody)
 	_ = resp.Body.Close()
@@ -249,14 +250,15 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 		a.EffectUnknown = write && f.gotConn.Load()
 	}
 	if a.Refused != "" || a.Err != "" || truncated {
-		return e.record(ctx, a, nil, missing)
+		return e.record(ctx, label, a, nil, missing)
 	}
 	captured, missing := capture(body, c.Captures)
-	return e.record(ctx, a, captured, missing)
+	return e.record(ctx, label, a, captured, missing)
 }
 
 // record ends every path through Do that does not return early with an error.
-func (e *Engine) record(ctx context.Context, a domain.Action, captured map[string]string, missing []string) (Result, error) {
+// label names the request in an error. It never holds the rendered path, the query, or a value.
+func (e *Engine) record(ctx context.Context, label string, a domain.Action, captured map[string]string, missing []string) (Result, error) {
 	if captured == nil {
 		captured = map[string]string{}
 	}
@@ -265,11 +267,11 @@ func (e *Engine) record(ctx context.Context, a domain.Action, captured map[strin
 	}
 	stored, err := e.o.Recorder.Record(a)
 	if err != nil {
-		return Result{}, fmt.Errorf("api %s %s: %w", a.Request.Method, a.Request.URL, err)
+		return Result{}, fmt.Errorf("api %s: %w", label, err)
 	}
 	res := Result{Action: stored, Captured: captured, Missing: missing}
 	if err := ctx.Err(); err != nil {
-		return res, fmt.Errorf("api %s %s: %w", stored.Request.Method, stored.Request.URL, err)
+		return res, fmt.Errorf("api %s: %w", label, err)
 	}
 	return res, nil
 }
@@ -293,9 +295,9 @@ func (e *Engine) checkRedirect(req *http.Request, via []*http.Request) error {
 	if err := e.o.Policy.Admit(target); err != nil {
 		var r *effects.Refusal
 		if errors.As(err, &r) && r.Kind == effects.HostNotAllowed {
-			f.refused = "redirect to a host that is not allowed: " + err.Error()
+			f.refused = "redirect to a host that is not allowed: " + refusalText(err, redirectLabel(req))
 		} else {
-			f.refused = "redirect refused: " + err.Error()
+			f.refused = "redirect refused: " + refusalText(err, redirectLabel(req))
 		}
 		return http.ErrUseLastResponse
 	}
@@ -359,19 +361,78 @@ func (e *Engine) headers(ctx context.Context, traceID string, c Call, session [2
 	return h
 }
 
+// describe names a request by its method and the step's path template, or by the host of the
+// service when the call has no template. A template holds {{variables}} and not their values.
+func describe(method, template, base string) string {
+	if template != "" {
+		return method + " " + template
+	}
+	if u, err := url.Parse(base); err == nil && u.Host != "" {
+		return method + " " + u.Host
+	}
+	return method + " (the service)"
+}
+
+func redirectLabel(req *http.Request) string {
+	return strings.ToUpper(req.Method) + " " + req.URL.Host
+}
+
+// refusalText keeps the kind and the fixed reason of a policy refusal. The policy
+// quotes the path of the request in some of its reasons, and the path can hold a value.
+func refusalText(err error, label string) string {
+	var r *effects.Refusal
+	if !errors.As(err, &r) {
+		return "the effects policy refused " + label
+	}
+	switch r.Kind {
+	case effects.HostNotAllowed:
+		return r.Error()
+	case effects.ReadOnly:
+		return string(r.Kind) + ": " + strings.ToLower(label) + " writes, and the environment is read only"
+	case effects.MethodNotAllowed:
+		return string(r.Kind) + ": the method of " + strings.ToLower(label) + " is not in the environment methods"
+	default:
+		return string(r.Kind) + ": " + strings.ToLower(label) + " is not allowed: its path is not normal or it matches the deny list"
+	}
+}
+
+// transportText is the error of net/http without the URL that it quotes. The URL holds the
+// rendered path and the query.
+func transportText(err error, u *url.URL, label string) string {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		inner := ue.Err
+		for {
+			var nested *url.Error
+			if !errors.As(inner, &nested) {
+				break
+			}
+			inner = nested.Err
+		}
+		err = fmt.Errorf("%s: %w", ue.Op, inner)
+	}
+	text := err.Error()
+	for _, raw := range []string{u.String(), u.RequestURI(), u.RawQuery} {
+		if raw != "" {
+			text = strings.ReplaceAll(text, raw, label)
+		}
+	}
+	return text
+}
+
 // joinURL keeps the path prefix of the base URL. The path is parsed so that
 // its escaping reaches the policy and the server as written.
 func joinURL(base, path string, query map[string]string) (*url.URL, error) {
 	b, err := url.Parse(base)
 	if err != nil {
-		return nil, fmt.Errorf("service base url: %w", err)
+		return nil, errors.New("the service base url does not parse")
 	}
 	p, err := url.Parse(path)
 	if err != nil {
-		return nil, fmt.Errorf("request path %q: %w", path, err)
+		return nil, errors.New("request path does not parse")
 	}
 	if p.Scheme != "" || p.Host != "" || p.User != nil || p.RawQuery != "" || p.Fragment != "" || p.Opaque != "" {
-		return nil, fmt.Errorf("request path %q must be a path only", path)
+		return nil, errors.New("request path must be a path only")
 	}
 	u := *b
 	if p.Path != "" {

@@ -176,7 +176,7 @@ func (r *Runner) confirmation(sc domain.Scenario, run *replayed) func(domain.Exp
 }
 
 // replay sends the steps in order and never sends one twice. It stops at the first
-// step that was refused, failed, has no response, or captured no value: a later
+// step that has no request in the script, was refused, failed, has no response, or captured no value: a later
 // step then has no action. A response with any status lets the scenario go on.
 func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (replayed, error) {
 	run := replayed{steps: map[domain.StepID]verdict.StepEvidence{}}
@@ -211,14 +211,16 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (replayed, erro
 	}
 	vars := map[string]string{}
 	var doErr error
+	interrupted := false
 	for i, step := range sc.Steps {
 		ss, ok := bound[step.ID]
 		if !ok || ss.Request == nil {
-			continue
+			note(step.ID, fmt.Sprintf("step %s has no request in the script, so the later steps were not sent", step.ID))
+			break
 		}
 		call, err := buildCall(sc, step, ss, vars)
 		if err != nil {
-			note(step.ID, fmt.Sprintf("step %s could not be sent: the request could not be built: %v", step.ID, err))
+			note(step.ID, fmt.Sprintf("step %s could not be sent: the request could not be built", step.ID))
 			break
 		}
 		res, err := r.d.Engine.Do(ctx, call)
@@ -226,8 +228,10 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (replayed, erro
 			run.steps[step.ID] = evaluate(step, res.Action)
 		}
 		if err != nil {
-			if ctx.Err() == nil {
-				note(step.ID, fmt.Sprintf("step %s could not be sent: %v", step.ID, err))
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				interrupted = true
+			} else {
+				note(step.ID, fmt.Sprintf("step %s could not be sent or recorded", step.ID))
 				doErr = fmt.Errorf("replay %s step %s: %w", sc.ID, step.ID, err)
 			}
 			break
@@ -243,8 +247,11 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (replayed, erro
 		}
 		maps.Copy(vars, res.Captured)
 	}
-	if ctx.Err() != nil && len(run.steps) == 0 {
+	switch {
+	case ctx.Err() != nil && len(run.steps) == 0:
 		run.notRun = reasonInterrupted
+	case interrupted:
+		note("", reasonInterrupted)
 	}
 	return run, doErr
 }

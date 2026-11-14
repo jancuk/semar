@@ -53,6 +53,8 @@ type rigOptions struct {
 	delay    time.Duration
 	buildURL string                          // default: the sample application's /version
 	wrap     func(http.Handler) http.Handler // wraps the sample application
+	sink     func(recorder.Sink) recorder.Sink
+	redact   config.Redact
 }
 
 func newRig(t *testing.T, o rigOptions) *rig {
@@ -85,7 +87,7 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	red, err := redact.New(config.Redact{}, func() []string { return []string{token} }, key)
+	red, err := redact.New(o.redact, func() []string { return []string{token} }, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,9 +103,13 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	classify := func(method string, u *url.URL) effects.Class {
 		return pol.Classify(effects.Request{Method: method, URL: u})
 	}
+	var sink recorder.Sink = run
+	if o.sink != nil {
+		sink = o.sink(run)
+	}
 	eng := api.New(api.Options{
 		Policy:   pol,
-		Recorder: recorder.New(run, red, classify, runID),
+		Recorder: recorder.New(sink, red, classify, runID),
 		Services: map[string]string{"orders": srv.URL},
 		Session: func(context.Context, string) (string, string, error) {
 			return "Authorization", "Bearer " + token, nil
@@ -233,7 +239,7 @@ func (r *rig) storedAction(t *testing.T, id domain.ScenarioID, step domain.StepI
 
 func hasReason(res domain.ScenarioResult, text string) bool {
 	return slices.ContainsFunc(res.Reasons, func(r domain.Reason) bool {
-		return strings.Contains(r.Text, text) || strings.Contains(string(r.Step), text)
+		return strings.Contains(r.Text, text)
 	})
 }
 
@@ -257,11 +263,16 @@ func TestReplay(t *testing.T) {
 		confirm bool
 		want    domain.Outcome
 		reason  string
-		check   func(t *testing.T, app *sampleapp.App)
+		check   func(t *testing.T, app *sampleapp.App, res domain.ScenarioResult)
 	}{
-		{name: "correct service", mode: "test_data", confirm: true, want: domain.OutcomePassed},
+		{name: "correct service", mode: "test_data", confirm: true, want: domain.OutcomePassed,
+			check: func(t *testing.T, _ *sampleapp.App, res domain.ScenarioResult) {
+				if len(res.Reasons) != 0 {
+					t.Errorf("a passed result has reasons: %+v", res.Reasons)
+				}
+			}},
 		{name: "refund above the total is accepted", defects: []sampleapp.Defect{sampleapp.RefundOverTotal}, mode: "test_data", confirm: true,
-			want: domain.OutcomeFailed, reason: "refund-too-much"},
+			want: domain.OutcomeFailed, reason: "step refund-too-much: expected status 422, observed status 201 (source ticket)"},
 		{name: "refund answers 500", defects: []sampleapp.Defect{sampleapp.RefundServerError}, mode: "test_data", confirm: true,
 			want: domain.OutcomeFailed, reason: "no server error"},
 		{name: "nobody confirmed the diff result", mode: "test_data", confirm: false,
@@ -270,16 +281,16 @@ func TestReplay(t *testing.T) {
 			want: domain.OutcomeStale, reason: "the build changed during the run"},
 		{name: "read-only environment", mode: "read_only", confirm: true,
 			want: domain.OutcomeBlocked, reason: "the environment does not allow a step",
-			check: func(t *testing.T, app *sampleapp.App) {
+			check: func(t *testing.T, app *sampleapp.App, _ domain.ScenarioResult) {
 				if n := app.Requests("POST", "/v1/"); n != 0 {
 					t.Fatalf("%d writes reached the service", n)
 				}
 			}},
 		// The sample application delays only a refund it accepts, so the refund above the total must be accepted to be slow.
 		{name: "write times out", defects: []sampleapp.Defect{sampleapp.SlowRefund, sampleapp.RefundOverTotal}, mode: "test_data",
-			timeout: 300 * time.Millisecond, delay: time.Minute, confirm: true,
+			timeout: 2 * time.Second, delay: time.Minute, confirm: true,
 			want: domain.OutcomeInconclusive, reason: "a write timed out and its effect is unknown",
-			check: func(t *testing.T, app *sampleapp.App) { // Review Focus 4
+			check: func(t *testing.T, app *sampleapp.App, _ domain.ScenarioResult) { // Review Focus 4
 				if n := app.Requests("POST", "/v1/orders/o-1/refunds"); n != 1 {
 					t.Fatalf("the refund was sent %d times", n)
 				}
@@ -302,7 +313,7 @@ func TestReplay(t *testing.T) {
 				t.Errorf("builds start %v end %v, want one each", start, end)
 			}
 			if tc.check != nil {
-				tc.check(t, r.app)
+				tc.check(t, r.app, results[0])
 			}
 		})
 	}
@@ -574,5 +585,180 @@ func TestScenariosDoNotShareData(t *testing.T) { // Q2
 	second := r.storedAction(t, two.ID, "order-unchanged").Request.URL
 	if first == second {
 		t.Fatalf("both readbacks read %s", first)
+	}
+}
+
+func TestStepWithNoRequestStopsTheScenario(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(s *domain.Script)
+	}{
+		{"the script leaves the step out", func(s *domain.Script) { s.Steps = s.Steps[1:] }},
+		{"the script binds the step with no request", func(s *domain.Script) {
+			s.Steps[0].Request, s.Steps[0].Captures = nil, nil
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRig(t, rigOptions{})
+			sc := loadScenario(t)
+			s := loadScript(t)
+			tc.mutate(&s)
+			s.Steps[len(s.Steps)-2].Request.Path = "/v1/orders/o-1/refunds"
+			s.Steps[len(s.Steps)-1].Request.Path = "/v1/orders/o-1"
+			if problems := script.Validate(sc, s); len(problems) > 0 {
+				t.Fatalf("the script has problems: %v", problems)
+			}
+			r.putScript(t, s)
+			r.confirmAll(t, sc)
+			results, _, _ := r.run(t, sc)
+			if results[0].Outcome == domain.OutcomePassed {
+				t.Errorf("outcome = passed; reasons %+v", results[0].Reasons)
+			}
+			if !hasReason(results[0], "step create-order has no request in the script, so the later steps were not sent") {
+				t.Errorf("no reason names the step; reasons %+v", results[0].Reasons)
+			}
+			if n := r.app.Requests("POST", ""); n != 0 {
+				t.Errorf("%d POST requests reached the service, want 0", n)
+			}
+			if n := r.app.Requests("", "/v1/"); n != 0 {
+				t.Errorf("%d later steps were sent", n)
+			}
+		})
+	}
+}
+
+// failingSink fails the nth action it is asked to write, after it has run before.
+type failingSink struct {
+	recorder.Sink
+	n      int
+	before func()
+	calls  int
+}
+
+func (f *failingSink) WriteAction(a domain.Action) (string, error) {
+	f.calls++
+	if f.calls == f.n {
+		if f.before != nil {
+			f.before()
+		}
+		return "", errors.New("disk full")
+	}
+	return f.Sink.WriteAction(a)
+}
+
+const capturedID = "ID7x9Qk2"
+
+// returnsCapturedID answers the order the setup step creates with a known id.
+func returnsCapturedID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/v1/orders" {
+			_, _ = w.Write([]byte(`{"data":{"id":"` + capturedID + `"}}`))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func TestRecorderFailureKeepsCapturedValuesOutOfReasonsAndErrors(t *testing.T) {
+	r := newRig(t, rigOptions{
+		wrap: returnsCapturedID,
+		sink: func(s recorder.Sink) recorder.Sink { return &failingSink{Sink: s, n: 2} },
+	})
+	sc := loadScenario(t)
+	s := loadScript(t)
+	s.Steps[1].Request.Query = map[string]string{"order": "{{order_id}}"}
+	r.putScript(t, s)
+	r.confirmAll(t, sc)
+	results, _, _, err := replay.New(r.deps).Run(t.Context(), []domain.Scenario{sc})
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("err = %v, want the recorder's error", err)
+	}
+	if strings.Contains(err.Error(), capturedID) {
+		t.Errorf("the returned error holds the captured value: %v", err)
+	}
+	if !hasReason(results[0], "step refund-too-much could not be sent or recorded") {
+		t.Errorf("no reason says the step could not be sent or recorded: %+v", results[0].Reasons)
+	}
+	for _, reason := range results[0].Reasons {
+		if strings.Contains(reason.Text, capturedID) {
+			t.Errorf("a reason holds the captured value: %q", reason.Text)
+		}
+	}
+	if n := r.app.Requests("GET", "/v1/orders/"); n != 0 {
+		t.Errorf("the readback was sent %d times", n)
+	}
+}
+
+func TestRecorderFailureDuringACancellationIsNotDropped(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	r := newRig(t, rigOptions{
+		sink: func(s recorder.Sink) recorder.Sink { return &failingSink{Sink: s, n: 2, before: cancel} },
+	})
+	sc := loadScenario(t)
+	r.putScript(t, loadScript(t))
+	r.confirmAll(t, sc)
+	results, _, _, err := replay.New(r.deps).Run(ctx, []domain.Scenario{sc})
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("err = %v, want the recorder's error as well as the cancellation", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want the context's error", err)
+	}
+	if !hasReason(results[0], "step refund-too-much could not be sent or recorded") {
+		t.Errorf("the recorder failure left no reason: %+v", results[0].Reasons)
+	}
+}
+
+func TestScenarioCutOffBetweenStepsIsInterrupted(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	r := newRig(t, rigOptions{
+		wrap: func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				next.ServeHTTP(w, req)
+				if req.Method == "POST" && req.URL.Path == "/v1/orders" {
+					cancel()
+				}
+			})
+		},
+	})
+	sc := loadScenario(t)
+	r.putScript(t, loadScript(t))
+	r.confirmAll(t, sc)
+	results, _, _, err := replay.New(r.deps).Run(ctx, []domain.Scenario{sc})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the context's error", err)
+	}
+	if results[0].Outcome == domain.OutcomePassed {
+		t.Errorf("outcome = passed; reasons %+v", results[0].Reasons)
+	}
+	if !hasReason(results[0], "the run was interrupted") {
+		t.Errorf("no reason says the run was interrupted: %+v", results[0].Reasons)
+	}
+	if n := r.app.Requests("POST", "/v1/orders/"); n != 0 {
+		t.Errorf("the refund was sent %d times after the cancellation", n)
+	}
+}
+
+func TestChecksReadTheRedactedAction(t *testing.T) {
+	r := newRig(t, rigOptions{redact: config.Redact{JSONPaths: []string{"$.data.refunded_total"}}})
+	sc := loadScenario(t)
+	r.putScript(t, loadScript(t))
+	r.confirmAll(t, sc)
+	results, _, _ := r.run(t, sc)
+	if results[0].Outcome == domain.OutcomePassed {
+		t.Fatalf("outcome = passed; the check read the raw value: %+v", results[0].Reasons)
+	}
+	idx := slices.IndexFunc(results[0].Checks, func(c domain.CheckResult) bool { return c.Step == "order-unchanged" && c.Index == 0 })
+	if idx < 0 {
+		t.Fatalf("no result for the check on the masked value: %+v", results[0].Checks)
+	}
+	if got := results[0].Checks[idx].State; got != domain.CheckNotEvaluated {
+		t.Errorf("state = %s, want %s", got, domain.CheckNotEvaluated)
+	}
+	if body := string(r.storedAction(t, sc.ID, "order-unchanged").Response.Body); strings.Contains(body, `"refunded_total":0`) {
+		t.Errorf("the stored body holds the value: %s", body)
 	}
 }
