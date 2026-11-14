@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/hostrule"
 )
 
 var sources = []domain.Source{
@@ -57,39 +58,31 @@ func validateEnvironment(name string, e Environment, add func(string, ...any)) {
 	if e.Effects.Mode != "test_data" && e.Effects.Mode != "read_only" {
 		add("%s.effects.mode is required: test_data or read_only", p)
 	}
-	hosts := make([]string, len(e.Hosts))
-	for i, h := range e.Hosts {
-		hosts[i] = strings.ToLower(h)
-	}
 	for i, s := range e.Services {
 		sp := fmt.Sprintf("%s.services[%d]", p, i)
 		if s.Name == "" {
 			add("%s.name is required", sp)
 		}
-		host, ok := originHost(s.BaseURL)
+		u, err := url.Parse(s.BaseURL)
 		switch {
-		case !ok:
+		case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "":
 			add("%s.baseUrl must be an absolute http or https URL, got %q", sp, s.BaseURL)
-		case !slices.Contains(hosts, host):
-			add("%s: baseUrl host %s is not in hosts", sp, host)
+		case !hostrule.Allowed(u, e.Hosts):
+			add("%s: baseUrl host %s is not in hosts", sp, originHost(u))
 		}
 	}
 }
 
-// originHost returns host[:port] the way a browser compares origins: lower
-// case, with the default port of the scheme dropped.
-func originHost(raw string) (string, bool) {
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
-		return "", false
-	}
+// originHost returns host[:port] for an error message, with the default port
+// of the scheme dropped.
+func originHost(u *url.URL) string {
 	host := strings.ToLower(u.Hostname())
 	if strings.Contains(host, ":") {
 		host = "[" + host + "]"
 	}
 	port := u.Port()
 	if port == "" || (u.Scheme == "http" && port == "80") || (u.Scheme == "https" && port == "443") {
-		return host, true
+		return host
 	}
-	return host + ":" + port, true
+	return host + ":" + port
 }

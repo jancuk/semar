@@ -5,6 +5,7 @@ go 1.26.0
 toolchain go1.27.4
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/spf13/cobra v1.10.2
 	github.com/theory/jsonpath v0.12.3
 	go.yaml.in/yaml/v4 v4.0.0
