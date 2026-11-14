@@ -1,0 +1,4 @@
+bin/
+.semar/runs/
+.semar/store/
+.semar/semar.local.yaml
