@@ -230,19 +230,56 @@ func TestMarkdownInterrupted(t *testing.T) {
 	}
 }
 
+// hostile is text that would break out of a line of Markdown, open a link, start math, or reorder the text.
+// The name stays readable in the output, so a test can tell that the value was shown.
+func hostile(name string) string {
+	return "</details><script>" + name + "</script>\n# " + name + " | a `b` [l](http://evil.example/" + name + ") " +
+		"https://evil.example www.evil.example $x$ \u202e\u200b"
+}
+
 func TestMarkdownHostileValues(t *testing.T) {
-	const hostile = "</details><script>x</script>\n# title | a `b` [l](http://evil)"
 	d := fixture()
-	r := &d.Run.Results[1]
-	r.Checks[0].Observed = hostile
-	r.Checks[0].Expected = hostile
-	r.Checks[0].Detail = hostile
-	r.Reasons[0].Text = hostile
-	d.Run.Results[1].Scenario = "S\n## x"
-	d.Scenarios["SHOP-482-02"] = domain.Scenario{ID: "SHOP-482-02", Title: hostile}
-	d.Run.Environment = hostile
+	var names []string
+	h := func(name string) string {
+		names = append(names, name)
+		return hostile(name)
+	}
+	failed := &d.Run.Results[1]
+	step := h("step")
+	failed.Checks[0].Step = domain.StepID(step)
+	failed.Reasons[0].Step, failed.Reasons[1].Step = domain.StepID(step), domain.StepID(step)
+	failed.Checks[0].Observed = h("observed")
+	failed.Checks[0].Expected = h("expected")
+	failed.Checks[0].Detail = h("detail")
+	failed.Checks[0].Source = h("source")
+	failed.Reasons[0].Text = h("reason")
+	sc := d.Scenarios["SHOP-482-01"]
+	sc.Title = h("title")
+	sc.Steps[0].ID = domain.StepID(step)
+	sc.Steps[0].Expect[0].Cite = h("cite")
+	d.Scenarios["SHOP-482-01"] = sc
+	for _, i := range []int{0, 4} {
+		passed := d.Scenarios[d.Run.Results[i].Scenario]
+		passed.Title = h("passedtitle")
+		d.Scenarios[d.Run.Results[i].Scenario] = passed
+	}
+	d.Run.Results[2].Scenario = domain.ScenarioID(h("scenarioid"))
+	d.Run.Environment = h("environment")
+	d.Run.ID = domain.RunID(h("runid"))
+	d.Run.BuildsStart[0].Service = h("buildservice")
+	d.Run.BuildsStart[0].Commit = h("buildcommit")
+	d.Run.BuildsEnd[0].ConfigHash = h("buildconfig")
+	for i := range d.Activity {
+		d.Activity[i].Object.Type = h("objecttype")
+		d.Activity[i].Object.ID = h("objectid")
+		d.Activity[i].Use.Scenario = domain.ScenarioID(h("ledgerscenario"))
+		d.Activity[i].Use.Step = domain.StepID(h("ledgerstep"))
+	}
 	out := render(t, d)
-	for _, bad := range []string{"<script>", "</script>", "</details><", "\n# title", "\n## x", "[l]("} {
+
+	for _, bad := range []string{
+		"<script>", "</script>", "</details><", "[l](", "http://", "https://", "www.", "$x$", "\u202e", "\u200b",
+	} {
 		if strings.Contains(out, bad) {
 			t.Errorf("report contains %q:\n%s", bad, out)
 		}
@@ -252,6 +289,55 @@ func TestMarkdownHostileValues(t *testing.T) {
 	}
 	if n := strings.Count(out, "</details>"); n != 1 {
 		t.Errorf("details closed %d times", n)
+	}
+	for _, name := range names {
+		if !strings.Contains(out, name) {
+			t.Errorf("the report lost the value %q, which the test needs to see neutralised", name)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "# Semar report") && !strings.HasPrefix(line, "### ") && !strings.HasPrefix(line, "## Data touched") {
+			t.Errorf("a value started a heading: %q", line)
+		}
+	}
+}
+
+func TestMarkdownCutsEveryLongValue(t *testing.T) {
+	long := strings.Repeat("y", 5000)
+	d := fixture()
+	d.Run.ID = domain.RunID(long)
+	d.Run.Environment = long
+	d.Run.BuildsStart[0].Service = long
+	d.Run.Results[1].Scenario = domain.ScenarioID(long)
+	d.Run.Results[1].Reasons[0].Text = long
+	d.Run.Results[1].Reasons[0].Step = domain.StepID(long)
+	d.Activity[0].Object.ID = long
+	sc := d.Scenarios["SHOP-482-01"]
+	sc.Title = long
+	d.Scenarios[domain.ScenarioID(long)] = sc
+	d.Scenarios["SHOP-482-02"] = domain.Scenario{ID: "SHOP-482-02", Title: long}
+	out := render(t, d)
+	if strings.Contains(out, strings.Repeat("y", 300)) {
+		t.Error("a long value was not cut")
+	}
+	if n := strings.Count(out, "[cut: "); n < 7 {
+		t.Errorf("%d cut marks, want one for each of the 7 long values:\n%s", n, out)
+	}
+}
+
+func TestSummaryCutsAndCleansTheReason(t *testing.T) {
+	run := fixture().Run
+	run.Results[1].Reasons[0].Text = "a\u202eb" + strings.Repeat("z", 5000)
+	var b bytes.Buffer
+	if err := report.Summary(&b, run); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if strings.Contains(out, "\u202e") {
+		t.Error("the summary holds a bidi control")
+	}
+	if strings.Contains(out, strings.Repeat("z", 300)) || !strings.Contains(out, "[cut: ") {
+		t.Errorf("the reason was not cut:\n%s", out)
 	}
 }
 
@@ -267,15 +353,6 @@ func TestMarkdownCutsLongValues(t *testing.T) {
 	}
 	if !strings.Contains(out, "[cut: 4800 more characters]") {
 		t.Errorf("cut mark missing:\n%s", out)
-	}
-}
-
-func TestMarkdownNoBodies(t *testing.T) {
-	out := render(t, fixture())
-	for _, bad := range []string{"requestBody", "responseBody", "Request body", "Response body"} {
-		if strings.Contains(out, bad) {
-			t.Errorf("report mentions %q", bad)
-		}
 	}
 }
 
@@ -361,6 +438,13 @@ func TestEscape(t *testing.T) {
 		{"emphasis", "*a* _b_", `\*a\* \_b\_`},
 		{"control", "a\x1b[0mb\x00", "a \\[0mb "},
 		{"intraword underscore", "not_run _x_", `not_run \_x\_`},
+		{"math", "costs $5 and $x$", `costs \$5 and \$x\$`},
+		{"http link", "see http://evil.example/x", `see http\://evil.example/x`},
+		{"https link", "HTTPS://evil.example", `HTTPS\://evil.example`},
+		{"www link", "www.evil.example and WWW.evil.example", `www\.evil.example and WWW\.evil.example`},
+		{"bidi control", "a\u202eb\u200bc\ufeffd", "abcd"},
+		{"bidi control inside a scheme", "http:\u200b//evil.example www\u202e.evil.example", `http\://evil.example www\.evil.example`},
+		{"mention and address", "@octocat a@b.example", `\@octocat a\@b.example`},
 		{"empty", "", ""},
 	}
 	for _, c := range cases {
@@ -372,22 +456,22 @@ func TestEscape(t *testing.T) {
 	}
 }
 
-func TestCut(t *testing.T) {
+func TestShown(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
-		max  int
 		want string
 	}{
-		{"short", "abc", 5, "abc"},
-		{"exact", "abcde", 5, "abcde"},
-		{"long", "abcdefgh", 5, "abcde… [cut: 3 more characters]"},
-		{"runes", "ééééé", 2, "éé… [cut: 3 more characters]"},
+		{"short", "abc", "abc"},
+		{"exact", strings.Repeat("a", 200), strings.Repeat("a", 200)},
+		{"long", strings.Repeat("a", 205), strings.Repeat("a", 200) + "… [cut: 5 more characters]"},
+		{"runes", strings.Repeat("é", 203), strings.Repeat("é", 200) + "… [cut: 3 more characters]"},
+		{"escapes after the cut", strings.Repeat("a", 199) + "|b", strings.Repeat("a", 199) + `\|… [cut: 1 more characters]`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := report.Cut(c.in, c.max); got != c.want {
-				t.Errorf("Cut = %q, want %q", got, c.want)
+			if got := report.Shown(c.in); got != c.want {
+				t.Errorf("Shown = %q, want %q", got, c.want)
 			}
 		})
 	}

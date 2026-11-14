@@ -59,8 +59,8 @@ func Markdown(w io.Writer, d Data) error {
 func buildView(d Data) markdownView {
 	run := d.Run
 	v := markdownView{
-		RunID:       Escape(string(run.ID)),
-		Environment: Escape(run.Environment),
+		RunID:       shown(string(run.ID)),
+		Environment: shown(run.Environment),
 		Started:     utc(run.StartedAt),
 		Ended:       utc(run.EndedAt),
 		BuildsStart: builds(run.BuildsStart),
@@ -70,16 +70,16 @@ func buildView(d Data) markdownView {
 	}
 	for _, r := range ordered(run.Results) {
 		sv := scenarioView{
-			ID:      Escape(string(r.Scenario)),
-			Title:   Escape(d.Scenarios[r.Scenario].Title),
-			Outcome: Escape(string(r.Outcome)),
+			ID:      shown(string(r.Scenario)),
+			Title:   shown(d.Scenarios[r.Scenario].Title),
+			Outcome: shown(string(r.Outcome)),
 		}
 		if r.Outcome == domain.OutcomePassed {
 			v.Passed = append(v.Passed, sv)
 			continue
 		}
 		for _, reason := range r.Reasons {
-			sv.Reasons = append(sv.Reasons, reasonView{Text: shown(reason.Text), Step: Escape(string(reason.Step))})
+			sv.Reasons = append(sv.Reasons, reasonView{Text: shown(reason.Text), Step: shown(string(reason.Step))})
 		}
 		for _, c := range r.Checks {
 			if c.State == domain.CheckTrue {
@@ -97,10 +97,10 @@ func buildView(d Data) markdownView {
 
 func checkViewOf(c domain.CheckResult, s domain.Scenario) checkView {
 	cv := checkView{
-		Label:    Escape(checkLabel(c)),
-		State:    Escape(string(c.State)),
+		Label:    shown(checkLabel(c)),
+		State:    shown(string(c.State)),
 		Expected: valueOrEmpty(c.Expected),
-		Source:   Escape(c.Source),
+		Source:   shown(c.Source),
 		Observed: valueOrEmpty(c.Observed),
 		Detail:   shown(c.Detail),
 	}
@@ -132,10 +132,10 @@ func ledgerViewOf(row activity.LedgerRow) ledgerView {
 		status = "cleaned up"
 	}
 	return ledgerView{
-		Verb:     Escape(string(row.Verb)),
-		Object:   Escape(row.Object.Type + " " + row.Object.ID),
-		Scenario: Escape(string(row.Use.Scenario)),
-		Step:     Escape(string(row.Use.Step)),
+		Verb:     shown(string(row.Verb)),
+		Object:   shown(row.Object.Type + " " + row.Object.ID),
+		Scenario: shown(string(row.Use.Scenario)),
+		Step:     shown(string(row.Use.Step)),
 		Status:   status,
 	}
 }
@@ -146,7 +146,7 @@ func builds(bs []domain.BuildRef) string {
 	}
 	parts := make([]string, len(bs))
 	for i, b := range bs {
-		parts[i] = Escape(fmt.Sprintf("%s %s config %s", b.Service, b.Commit, b.ConfigHash))
+		parts[i] = shown(fmt.Sprintf("%s %s config %s", b.Service, b.Commit, b.ConfigHash))
 	}
 	return strings.Join(parts, "; ")
 }

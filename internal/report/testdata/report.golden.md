@@ -36,10 +36,10 @@ Outcome: **inconclusive**
 - Reason: a check could not be evaluated (step list)
 
 - Check list, check 1: not_evaluated
-  - Expected: $.items count 3
+  - Expected: \$.items count 3
   - Source: baseline
   - Observed: (empty)
-  - Detail: path $.items not found
+  - Detail: path \$.items not found
 
 Reproduce: semar run --scenario SHOP-482-02
 

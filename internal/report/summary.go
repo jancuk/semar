@@ -92,7 +92,11 @@ func Summary(w io.Writer, run domain.Run) error {
 		line := plain(string(r.Scenario)) + "\t" + plain(string(r.Outcome))
 		switch {
 		case len(r.Reasons) > 0:
-			line += "\t" + plain(r.Reasons[0].Text)
+			head, more := cut(r.Reasons[0].Text, maxShown)
+			line += "\t" + plain(head)
+			if more > 0 {
+				line += cutMark(more)
+			}
 		case r.Outcome != domain.OutcomePassed:
 			line += "\tno reason recorded"
 		}
@@ -107,9 +111,13 @@ func Summary(w io.Writer, run domain.Run) error {
 	return err
 }
 
-// plain keeps text on one line and drops control characters, so a service cannot inject a terminal sequence.
+// plain keeps text on one line and drops control and format characters, so a service cannot
+// inject a terminal sequence or reorder the text with a bidi control.
 func plain(s string) string {
 	return strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
 		if unicode.IsControl(r) || r == ' ' || r == ' ' {
 			return ' '
 		}

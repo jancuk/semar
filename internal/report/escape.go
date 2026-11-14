@@ -8,10 +8,19 @@ import (
 
 const maxShown = 200
 
-// Escape makes text from a service or a scenario file safe inside one line of Markdown.
-func Escape(s string) string {
+// escape makes text from a service or a scenario file safe inside one line of Markdown.
+// Format characters (category Cf, such as the bidi controls and the zero-width space) are
+// dropped first, so that they cannot hide a scheme or a marker from the rules below.
+// A colon after a scheme and the dot of "www." are escaped so that no renderer makes a link
+// of them, and "$" and "@" are escaped so that no renderer makes math or a mention of them.
+func escape(s string) string {
 	var b strings.Builder
-	rs := []rune(s)
+	rs := make([]rune, 0, len(s))
+	for _, r := range s {
+		if !unicode.Is(unicode.Cf, r) {
+			rs = append(rs, r)
+		}
+	}
 	for i := 0; i < len(rs); i++ {
 		r := rs[i]
 		switch {
@@ -23,11 +32,15 @@ func Escape(s string) string {
 			b.WriteString("&amp;")
 		case r == '_' && i > 0 && i+1 < len(rs) && isWordRune(rs[i-1]) && isWordRune(rs[i+1]):
 			b.WriteRune(r)
-		case strings.ContainsRune("\\`*_[]|~#", r):
+		case strings.ContainsRune("\\`*_[]|~#$@", r):
 			b.WriteByte('\\')
 			b.WriteRune(r)
+		case r == ':' && i+2 < len(rs) && rs[i+1] == '/' && rs[i+2] == '/':
+			b.WriteString(`\:`)
+		case r == '.' && i >= 3 && strings.EqualFold(string(rs[i-3:i]), "www"):
+			b.WriteString(`\.`)
 		case r == '\r' && i+1 < len(rs) && rs[i+1] == '\n':
-		case r == '\n' || r == '\r' || r == ' ' || r == ' ':
+		case r == '\n' || r == '\r' || r == '\u2028' || r == '\u2029':
 			b.WriteString("↵")
 		case unicode.IsControl(r):
 			b.WriteByte(' ')
@@ -38,15 +51,7 @@ func Escape(s string) string {
 	return b.String()
 }
 
-// Cut keeps the first max characters of s and marks the cut.
-func Cut(s string, max int) string {
-	head, more := cut(s, max)
-	if more == 0 {
-		return head
-	}
-	return head + cutMark(more)
-}
-
+// cut keeps the first max characters of s and says how many it left out.
 func cut(s string, max int) (string, int) {
 	rs := []rune(s)
 	if len(rs) <= max {
@@ -59,10 +64,10 @@ func cutMark(more int) string {
 	return fmt.Sprintf("… [cut: %d more characters]", more)
 }
 
-// shown escapes a value and cuts it. The cut happens before the escape, so the mark stays readable.
+// shown cuts a value and escapes it. The cut happens before the escape, so the mark stays readable.
 func shown(s string) string {
 	head, more := cut(s, maxShown)
-	out := Escape(head)
+	out := escape(head)
 	if more > 0 {
 		out += cutMark(more)
 	}
