@@ -38,7 +38,8 @@ func (s *scrubber) body(b []byte) []byte {
 
 // jsonOnce replaces the values at the configured JSONPaths, redacts the inside
 // of every string, keys included, and turns a number or literal that holds a
-// secret into a marker string. A last pass over the whole text catches a
+// secret, and a number that a pattern matches, into a marker string. true,
+// false, and null are left to secrets only, so a loose pattern cannot hide them. A last pass over the whole text catches a
 // secret that crosses a string's quotes or hides in its escapes; the caller
 // checks that the result is still JSON. It reports false for a duplicate key
 // when JSONPaths are configured: the paths were resolved on a tree where the
@@ -58,7 +59,7 @@ func (s *scrubber) jsonOnce(t string) (string, bool) {
 	}
 	for _, tok := range sc.scalars {
 		lit := t[tok.start:tok.end]
-		if len(s.secretSpans(sourceView(lit))) > 0 {
+		if len(s.secretSpans(sourceView(lit))) > 0 || isNumber(lit) && len(s.patternSpans(sourceView(lit))) > 0 {
 			edits = append(edits, edit{tok.start, tok.end, `"` + s.r.Marker(lit) + `"`})
 		}
 	}
@@ -157,6 +158,9 @@ func applyEdits(t string, edits []edit) string {
 	b.WriteString(t[pos:])
 	return b.String()
 }
+
+// isNumber reports whether a scalar token of a valid document is a number, not true, false, or null.
+func isNumber(lit string) bool { return lit[0] == '-' || lit[0] >= '0' && lit[0] <= '9' }
 
 type token struct{ start, end int }
 

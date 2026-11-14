@@ -1,12 +1,16 @@
 package redact_test
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -153,6 +157,9 @@ func FuzzNoSecretSurvives(f *testing.F) {
 	f.Add(`{"`, `":1}`, "s3cret-value", uint8(5), uint8(0))
 	f.Add("%", "%4", "hunter2-token", uint8(6), uint8(1))
 	f.Add(`{"id":1700000`, `,"n":[1,2]}`, "123456", uint8(0), uint8(0))
+	f.Add(`{"otp":`, `}`, "9876543210", uint8(0), uint8(0))
+	f.Add(`[1,-`, `.5e3,2]`, "9876543210", uint8(0), uint8(0))
+	f.Add(`{"n":12`, `34}`, "9876543210", uint8(0), uint8(0))
 	f.Fuzz(func(t *testing.T, a, b, secret string, enc, where uint8) {
 		if len(secret) < 6 || strings.ContainsAny(secret, "\x00") {
 			t.Skip()
@@ -200,6 +207,64 @@ func FuzzNoSecretSurvives(f *testing.F) {
 			if out := r.Action(in); !reflect.DeepEqual(out, in) {
 				t.Fatalf("text without a secret changed\nin:  %+v\nout: %+v", in, out)
 			}
+		}
+	})
+}
+
+// numberTokens returns the text of every number in a valid JSON document.
+func numberTokens(t *testing.T, body []byte) []string {
+	t.Helper()
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	var out []string
+	for {
+		tok, err := dec.Token()
+		if errors.Is(err, io.EOF) {
+			return out
+		}
+		if err != nil {
+			t.Fatalf("output %q is not JSON: %v", body, err)
+		}
+		if n, ok := tok.(json.Number); ok {
+			out = append(out, string(n))
+		}
+	}
+}
+
+// No match of a configured pattern and no loaded secret survives in a JSON number, and a
+// number that holds neither stays as it was.
+func FuzzPatternOnJSONNumbers(f *testing.F) {
+	f.Add(`{"pan": 4111111111111111}`, "9876543210")
+	f.Add(`[1, 4111111111111111.5e3, {"k": -4111111111111111}]`, "9876543210")
+	f.Add(`{"4111111111111111": 9876543210}`, "9876543210")
+	f.Add(`{"otp": 98765432109, "n": 1.5}`, "98765432109")
+	f.Add(`{"a": 123, "b": [1e5, -0.25]}`, "1234567890")
+	pan := regexp.MustCompile(`\d{16}`)
+	f.Fuzz(func(t *testing.T, body, secret string) {
+		if !json.Valid([]byte(body)) || len(secret) < 9 || strings.Trim(secret, "0123456789") != "" {
+			t.Skip()
+		}
+		r, err := redact.New(config.Redact{Patterns: []string{pan.String()}}, func() []string { return []string{secret} }, testKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := r.Action(domain.Action{Response: &domain.HTTPResponse{Body: []byte(body)}})
+		if !json.Valid(out.Response.Body) {
+			t.Fatalf("valid JSON %q became invalid: %q", body, out.Response.Body)
+		}
+		for _, n := range numberTokens(t, out.Response.Body) {
+			if pan.MatchString(n) || strings.Contains(n, secret) {
+				t.Fatalf("number %s survived in %q", n, out.Response.Body)
+			}
+		}
+		in := numberTokens(t, []byte(body))
+		if !strings.ContainsAny(body, `"\`) && !pan.MatchString(body) && !strings.Contains(body, secret) {
+			if got := numberTokens(t, out.Response.Body); !reflect.DeepEqual(got, in) {
+				t.Fatalf("numbers %v that hold no secret became %v", in, got)
+			}
+		}
+		if again := r.Action(out); !reflect.DeepEqual(again, out) {
+			t.Fatalf("second pass changed %q to %q", out.Response.Body, again.Response.Body)
 		}
 	})
 }

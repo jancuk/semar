@@ -509,3 +509,42 @@ func TestHasMarker(t *testing.T) {
 		})
 	}
 }
+
+func TestPatternsOnJSONNumbers(t *testing.T) {
+	const pan = "4111111111111111"
+	r, err := redact.New(config.Redact{Patterns: []string{`\d{16}`}}, func() []string { return []string{numberSecret} }, testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := func(s string) string { return `"` + r.Marker(s) + `"` }
+	cases := []struct{ name, body, want string }{
+		{"number", `{"pan": 4111111111111111}`, `{"pan": ` + q(pan) + `}`},
+		{"number in an array", `{"cards":[1,4111111111111111,2]}`, `{"cards":[1,` + q(pan) + `,2]}`},
+		{"number in a nested object", `{"a":{"b":[{"pan":4111111111111111,"n":7}]}}`, `{"a":{"b":[{"pan":` + q(pan) + `,"n":7}]}}`},
+		{"top level number", pan, q(pan)},
+		{"negative number", `{"x":-4111111111111111}`, `{"x":` + q("-"+pan) + `}`},
+		{"float", `{"x":4111111111111111.25}`, `{"x":` + q(pan+".25") + `}`},
+		{"exponent", `{"x":4111111111111111e-3}`, `{"x":` + q(pan+"e-3") + `}`},
+		{"longer number", `{"x":94111111111111111}`, `{"x":` + q("9"+pan) + `}`},
+		{"pattern in a key", `{"4111111111111111":1}`, `{"` + r.Marker(pan) + `":1}`},
+		{"pattern in a string", `{"pan":"4111111111111111"}`, `{"pan":"` + r.Marker(pan) + `"}`},
+		{"numeric secret", `{"otp": 123456}`, `{"otp": ` + q(numberSecret) + `}`},
+		{"numeric secret in an array", `[1, 123456, 2]`, `[1, ` + q(numberSecret) + `, 2]`},
+		{"numbers that do not match stay", "{\"a\": 411111111111111, \"f\": 1.5e3,\n \"z\": -0.0, \"b\": [true, false, null], \"e\": 1E+2}", "{\"a\": 411111111111111, \"f\": 1.5e3,\n \"z\": -0.0, \"b\": [true, false, null], \"e\": 1E+2}"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := r.Action(domain.Action{Response: &domain.HTTPResponse{Body: []byte(c.body)}})
+			got := string(out.Response.Body)
+			if got != c.want {
+				t.Errorf("got  %s\nwant %s", got, c.want)
+			}
+			if !json.Valid(out.Response.Body) {
+				t.Errorf("body is no longer JSON: %s", got)
+			}
+			if again := r.Action(out); !reflect.DeepEqual(again, out) {
+				t.Errorf("second pass changed the body to %s", again.Response.Body)
+			}
+		})
+	}
+}
