@@ -150,6 +150,12 @@ func TestValidate(t *testing.T) {
 		{"percent and two hex digits before a variable", func(_ *domain.Scenario, s *domain.Script) {
 			s.Steps[1].Request.Path = "/v1/orders/%2f{{order_id}}/refunds"
 		}, "holds an encoded slash or backslash"},
+		{"raw backslash in a path", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Path = `/v1\orders`
+		}, "holds a backslash"},
+		{"encoded percent sign in a path", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[1].Request.Path = "/v1/orders/%25{{order_id}}/refunds"
+		}, "holds an encoded percent sign"},
 		{"spaced variable in a path", func(_ *domain.Scenario, s *domain.Script) {
 			s.Steps[1].Request.Path = "/v1/orders/{{ order_id }}/refunds"
 		}, "malformed variable"},
@@ -302,6 +308,11 @@ func TestRender(t *testing.T) {
 		{name: "encoded slash from a lone percent", vars: map[string]string{"x": "2f"}, req: domain.APIRequest{Path: "/v1/orders/%{{x}}"}, wantErr: "/v1/orders/%"},
 		{name: "encoded backslash upper case", vars: map[string]string{"x": "5C"}, req: domain.APIRequest{Path: "/v1/orders/%{{x}}"}, wantErr: "/v1/orders/%"},
 		{name: "encoded double dot from percent", vars: map[string]string{"x": "2e"}, req: domain.APIRequest{Path: "/v1/%{{x}}%2e"}, wantErr: "/v1/%"},
+		{name: "raw backslash in the template", vars: base, req: domain.APIRequest{Path: `/v1\{{order_id}}`}, wantErr: "holds a backslash"},
+		{name: "raw backslash as a whole segment", vars: base, req: domain.APIRequest{Path: `/v1/\/{{order_id}}`}, wantErr: "holds a backslash"},
+		{name: "encoded percent then an encoded dot", vars: map[string]string{"x": "2e"}, req: domain.APIRequest{Path: "/v1/%25{{x}}"}, wantErr: "holds an encoded percent sign"},
+		{name: "encoded percent alone", vars: base, req: domain.APIRequest{Path: "/v1/100%25/{{order_id}}"}, wantErr: "holds an encoded percent sign"},
+		{name: "other escapes are kept", vars: base, req: domain.APIRequest{Path: "/v1/a%20b/{{order_id}}"}, want: domain.APIRequest{Path: "/v1/a%20b/81234"}},
 		{name: "dot segment in the template", vars: base, req: domain.APIRequest{Path: "/v1/../{{order_id}}"}, wantErr: "/v1/../"},
 		{name: "empty segment in the template", vars: base, req: domain.APIRequest{Path: "/v1//{{order_id}}"}, wantErr: "/v1//"},
 		{name: "question mark in the template", vars: base, req: domain.APIRequest{Path: "/v1/x?{{order_id}}"}, wantErr: "/v1/x?"},

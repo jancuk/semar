@@ -66,6 +66,8 @@ func FuzzRender(f *testing.F) {
 	f.Add("{{{id}}", "0", "{", "0")
 	f.Add("/v1/orders/%2{{id}}", "x", "e", "")
 	f.Add("/v1/orders/%{{id}}", "x", "2f", "")
+	f.Add("/v1/%25{{id}}", "x", "2e", "")
+	f.Add(`/v1\{{id}}`, "x", "1", "")
 	f.Fuzz(func(t *testing.T, path, name, value, other string) {
 		req := domain.APIRequest{
 			Path:    path,
@@ -79,6 +81,9 @@ func FuzzRender(f *testing.F) {
 		}
 		if strings.Contains(got.Path, "{{") {
 			t.Fatalf("rendered path %q holds {{", got.Path)
+		}
+		if strings.Contains(got.Path, `\`) || strings.Contains(got.Path, "%25") {
+			t.Fatalf("template %q rendered as %q with a backslash or an encoded percent sign", path, got.Path)
 		}
 		if strings.Count(got.Path, "/") != strings.Count(path, "/") {
 			t.Fatalf("template %q rendered as %q with another number of segments", path, got.Path)

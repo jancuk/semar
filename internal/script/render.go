@@ -101,8 +101,9 @@ func isUnreserved(r rune) bool {
 }
 
 // checkPath reports why a request path cannot be sent as it is: no leading slash, a "?" or "#",
-// an empty segment other than after the last slash, a "." or ".." segment also after percent-decoding,
-// or an encoded slash or backslash.
+// a backslash, an empty segment other than after the last slash, a "." or ".." segment also after
+// percent-decoding, an encoded slash or backslash, or an encoded percent sign. A backslash is sent
+// as %5C, and %25 decodes to a "%" that can start a dot or a slash on a server that decodes twice.
 func checkPath(p string) error {
 	if !strings.HasPrefix(p, "/") {
 		return fmt.Errorf("path %q must start with /", p)
@@ -112,6 +113,12 @@ func checkPath(p string) error {
 	}
 	if strings.Contains(p, "#") {
 		return fmt.Errorf("path %q holds #", p)
+	}
+	if strings.Contains(p, `\`) {
+		return fmt.Errorf("path %q holds a backslash", p)
+	}
+	if strings.Contains(p, "%25") {
+		return fmt.Errorf("path %q holds an encoded percent sign", p)
 	}
 	body := p[1:]
 	if body == "" {
