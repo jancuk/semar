@@ -1,5 +1,9 @@
 VERSION ?= dev
 
+# Tools started with "go run pkg@version" pick their own toolchain, which can be older than
+# the standard library they must read. Pin every go command to the toolchain line of go.mod.
+export GOTOOLCHAIN := $(shell awk '/^toolchain /{print $$2}' go.mod)
+
 .PHONY: build test check
 
 build:
