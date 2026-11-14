@@ -82,6 +82,9 @@ func IsMarker(s string) bool {
 	return loc != nil && loc[0] == 0 && loc[1] == len(s)
 }
 
+// HasMarker reports whether s holds at least one marker anywhere.
+func HasMarker(s string) bool { return markerRE.MatchString(s) }
+
 // Action returns a deep copy of a with every secret removed.
 func (r *Redactor) Action(a domain.Action) domain.Action {
 	s := r.newScrubber()

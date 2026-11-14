@@ -3,8 +3,11 @@
 package check
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math/big"
 	"reflect"
 	"strconv"
 	"strings"
@@ -19,6 +22,7 @@ import (
 const (
 	noResponse    = "no response was recorded"
 	redactedValue = "the value is redacted"
+	notExact      = "a number cannot be compared exactly"
 	maxText       = 200
 )
 
@@ -82,6 +86,7 @@ func malformed(c domain.Check, ops []string) string {
 }
 
 func operators(c domain.Check) []string {
+	// equals: null cannot be written: an operand that decodes to nil reads as no operator.
 	var ops []string
 	add := func(set bool, name string) {
 		if set {
@@ -148,8 +153,8 @@ func evalJSONPath(res *Result, c domain.Check, op string, resp *domain.HTTPRespo
 		notEvaluated(res, "the response body was cut at the size limit")
 		return
 	}
-	var doc any
-	if err := json.Unmarshal(resp.Body, &doc); err != nil {
+	doc, err := decodeNumbers(resp.Body)
+	if err != nil {
 		notEvaluated(res, "the response body is not JSON")
 		return
 	}
@@ -169,7 +174,7 @@ func evalJSONPath(res *Result, c domain.Check, op string, resp *domain.HTTPRespo
 	if !ok {
 		return
 	}
-	if isRedacted(value) {
+	if hasMarker(value) {
 		notEvaluated(res, redactedValue)
 		return
 	}
@@ -181,20 +186,34 @@ func evalJSONPath(res *Result, c domain.Check, op string, resp *domain.HTTPRespo
 			notEvaluated(res, "the expected value cannot be compared: "+err.Error())
 			return
 		}
+		if !exact(value) || !exact(want) {
+			notEvaluated(res, notExact)
+			return
+		}
 		res.State = state(equalJSON(value, want) == (op == "equals"))
 	case "contains":
 		evalContains(res, c.Contains, value)
 	case "greater", "less":
-		n, isNumber := value.(float64)
+		n, isNumber := value.(json.Number)
 		if !isNumber {
 			res.State = domain.CheckFalse
 			res.Detail = op + " needs a number, got " + typeName(value)
 			return
 		}
+		bound := c.Greater
+		if op == "less" {
+			bound = c.Less
+		}
+		got, errGot := ratOf(n)
+		want, errWant := ratOf(json.Number(strconv.FormatFloat(*bound, 'g', -1, 64)))
+		if errGot != nil || errWant != nil {
+			notEvaluated(res, notExact)
+			return
+		}
 		if op == "greater" {
-			res.State = state(n > *c.Greater)
+			res.State = state(got.Cmp(want) > 0)
 		} else {
-			res.State = state(n < *c.Less)
+			res.State = state(got.Cmp(want) < 0)
 		}
 	case "equalsPath":
 		evalEqualsPath(res, c, value, doc)
@@ -224,6 +243,10 @@ func evalContains(res *Result, expected, value any) {
 			notEvaluated(res, "the expected value cannot be compared: "+err.Error())
 			return
 		}
+		if !exact(v) || !exact(want) {
+			notEvaluated(res, notExact)
+			return
+		}
 		found := false
 		for _, e := range v {
 			if equalJSON(e, want) {
@@ -249,7 +272,7 @@ func evalEqualsPath(res *Result, c domain.Check, first, doc any) {
 		return
 	}
 	res.Observed = short(text(first) + " vs " + text(second))
-	if isRedacted(second) {
+	if hasMarker(second) {
 		notEvaluated(res, redactedValue)
 		return
 	}
@@ -257,6 +280,10 @@ func evalEqualsPath(res *Result, c domain.Check, first, doc any) {
 	b, errB := normalise(second)
 	if errA != nil || errB != nil {
 		notEvaluated(res, "the values cannot be compared")
+		return
+	}
+	if !exact(a) || !exact(b) {
+		notEvaluated(res, notExact)
 		return
 	}
 	res.State = state(equalJSON(a, b))
@@ -313,13 +340,15 @@ func evalHeader(res *Result, c domain.Check, op string, resp *domain.HTTPRespons
 	matched, redacted := false, false
 	for _, v := range values {
 		switch {
-		case redact.IsMarker(v):
+		case redact.HasMarker(v):
 			redacted = true
 		case op == "contains" && strings.Contains(v, want), op != "contains" && v == want:
 			matched = true
 		}
 	}
 	switch {
+	case op == "notEquals" && redacted:
+		notEvaluated(res, redactedValue)
 	case matched:
 		res.State = state(op != "notEquals")
 	case redacted:
@@ -329,9 +358,26 @@ func evalHeader(res *Result, c domain.Check, op string, resp *domain.HTTPRespons
 	}
 }
 
-func isRedacted(v any) bool {
-	s, ok := v.(string)
-	return ok && redact.IsMarker(s)
+// hasMarker reports whether a value, or anything inside it, holds a redaction
+// marker.
+func hasMarker(v any) bool {
+	switch x := v.(type) {
+	case string:
+		return redact.HasMarker(x)
+	case []any:
+		for _, e := range x {
+			if hasMarker(e) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, e := range x {
+			if hasMarker(e) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func notEvaluated(res *Result, detail string) {
@@ -346,28 +392,100 @@ func state(ok bool) domain.CheckState {
 	return domain.CheckFalse
 }
 
-// normalise passes a value through encoding/json, so a YAML int and a decoded
-// JSON number both become float64, and a map or slice becomes the shape the
-// response body decodes to.
+// decodeNumbers decodes one JSON document and keeps every number as its exact
+// text.
+func decodeNumbers(raw []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var out any
+	if err := dec.Decode(&out); err != nil {
+		return nil, err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("data after the JSON value")
+	}
+	return out, nil
+}
+
+// normalise passes a value through encoding/json, so a YAML int or float
+// becomes its exact decimal text and a map or slice becomes the shape the
+// response body decodes to. A float that is not finite fails here.
 func normalise(v any) (any, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
 	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return decodeNumbers(raw)
 }
 
-func equalJSON(a, b any) bool {
-	af, aIsNumber := a.(float64)
-	bf, bIsNumber := b.(float64)
-	if aIsNumber && bIsNumber {
-		return af == bf
+func ratOf(n json.Number) (*big.Rat, error) {
+	r, ok := new(big.Rat).SetString(string(n))
+	if !ok {
+		return nil, fmt.Errorf("bad number %q", string(n))
 	}
-	return reflect.DeepEqual(a, b)
+	return r, nil
+}
+
+// exact reports whether every number in v can be turned into an exact decimal.
+func exact(v any) bool {
+	switch x := v.(type) {
+	case json.Number:
+		_, err := ratOf(x)
+		return err == nil
+	case []any:
+		for _, e := range x {
+			if !exact(e) {
+				return false
+			}
+		}
+	case map[string]any:
+		for _, e := range x {
+			if !exact(e) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// equalJSON compares two values from decodeNumbers. Numbers compare as exact
+// decimals, and a number never equals a string. Call exact first.
+func equalJSON(a, b any) bool {
+	switch x := a.(type) {
+	case json.Number:
+		y, ok := b.(json.Number)
+		if !ok {
+			return false
+		}
+		rx, errX := ratOf(x)
+		ry, errY := ratOf(y)
+		return errX == nil && errY == nil && rx.Cmp(ry) == 0
+	case []any:
+		y, ok := b.([]any)
+		if !ok || len(x) != len(y) {
+			return false
+		}
+		for i := range x {
+			if !equalJSON(x[i], y[i]) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		y, ok := b.(map[string]any)
+		if !ok || len(x) != len(y) {
+			return false
+		}
+		for k, xv := range x {
+			yv, ok := y[k]
+			if !ok || !equalJSON(xv, yv) {
+				return false
+			}
+		}
+		return true
+	default:
+		return reflect.DeepEqual(a, b)
+	}
 }
 
 func typeName(v any) string {
@@ -376,7 +494,7 @@ func typeName(v any) string {
 		return "null"
 	case string:
 		return "string"
-	case float64, int, int64, uint64:
+	case json.Number, float64, int, int64, uint64:
 		return "number"
 	case bool:
 		return "boolean"

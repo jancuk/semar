@@ -484,3 +484,28 @@ func TestMarker(t *testing.T) {
 		})
 	}
 }
+
+func TestHasMarker(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"exactly a marker", "[redacted:ab12cd34]", true},
+		{"marker inside text", "token [redacted:ab12cd34] expired", true},
+		{"marker at the end", "x=[redacted:ab12cd34]", true},
+		{"two markers", "[redacted:ab12cd34][redacted:00000000]", true},
+		{"plain text", "paid in full", false},
+		{"empty", "", false},
+		{"the word redacted", "[redacted]", false},
+		{"short hash", "[redacted:ab12]", false},
+		{"upper-case hash", "[redacted:AB12CD34]", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := redact.HasMarker(tc.in); got != tc.want {
+				t.Errorf("HasMarker(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
