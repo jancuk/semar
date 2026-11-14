@@ -72,6 +72,16 @@ func TestValidate(t *testing.T) {
 		{"person from a file", func(s *domain.Scenario) { s.Steps[1].Expect[0].Source = "person" }, scenario.FromFile, "", ""},
 		{"ticket with no cite", func(s *domain.Scenario) { s.Steps[1].Expect[0].Cite = "" }, scenario.FromFile, "cite is required for the source ticket", "steps[1].expect[0].cite"},
 		{"check value that cannot be encoded", func(s *domain.Scenario) { s.Steps[2].Expect[0].Check.Equals = math.NaN() }, scenario.FromFile, "cannot be encoded", "steps[2].expect[0].check"},
+		{"greater that is NaN", func(s *domain.Scenario) {
+			c := &s.Steps[2].Expect[0].Check
+			n := math.NaN()
+			c.Equals, c.Greater = nil, &n
+		}, scenario.FromFile, "greater must be a finite number", "steps[2].expect[0].check"},
+		{"less that is infinite", func(s *domain.Scenario) {
+			c := &s.Steps[2].Expect[0].Check
+			n := math.Inf(1)
+			c.Equals, c.Less = nil, &n
+		}, scenario.FromFile, "less must be a finite number", "steps[2].expect[0].check"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -101,5 +111,13 @@ func TestValidateReturnsEveryProblem(t *testing.T) {
 	s.Surface = "ios"
 	if got := len(scenario.Validate(s, scenario.FromFile)); got != 3 {
 		t.Fatalf("want 3 problems, got %d", got)
+	}
+}
+
+func TestParseRejectsSecondDocument(t *testing.T) {
+	data := []byte("apiVersion: semar/v1\nkind: Scenario\nid: A-1\nsteps:\n  - id: s\n---\nid: A-2\n")
+	_, err := scenario.Parse(data, "multi.yaml")
+	if err == nil || !strings.Contains(err.Error(), "multi.yaml") || !strings.Contains(err.Error(), "more than one") {
+		t.Fatalf("want an error that names multi.yaml and says more than one document, got %v", err)
 	}
 }

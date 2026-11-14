@@ -3,6 +3,7 @@ package scenario
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 
 	"github.com/theory/jsonpath"
@@ -124,6 +125,15 @@ func validateExpectation(path string, e domain.Expectation, origin Origin) []Pro
 		}
 		if ops != 1 {
 			add(cp, "a jsonpath or header check needs exactly one operator")
+		}
+	}
+
+	for _, b := range []struct {
+		name string
+		val  *float64
+	}{{"greater", c.Greater}, {"less", c.Less}} {
+		if b.val != nil && (math.IsNaN(*b.val) || math.IsInf(*b.val, 0)) {
+			add(cp, "%s must be a finite number", b.name)
 		}
 	}
 

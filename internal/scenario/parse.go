@@ -22,6 +22,13 @@ func Parse(data []byte, name string) (domain.Scenario, error) {
 		}
 		return domain.Scenario{}, decodeError(name, err)
 	}
+	var extra yaml.Node
+	switch err := dec.Decode(&extra); {
+	case err == nil:
+		return domain.Scenario{}, fmt.Errorf("%s: the file holds more than one YAML document", name)
+	case !errors.Is(err, io.EOF):
+		return domain.Scenario{}, decodeError(name, err)
+	}
 	for i := range s.Steps {
 		for j := range s.Steps[i].Expect {
 			c := &s.Steps[i].Expect[j].Check
