@@ -13,23 +13,34 @@ import (
 // back equal as JSON, with insignificant whitespace compacted.
 type Body []byte
 
+// MarshalJSON does not escape <, >, and &, so a stored body stays readable.
 func (b Body) MarshalJSON() ([]byte, error) {
 	switch {
 	case len(b) == 0:
 		return []byte("null"), nil
 	case json.Valid(b) && utf8.Valid(b):
-		return json.Marshal(struct {
+		return marshalUnescaped(struct {
 			JSON json.RawMessage `json:"json"`
 		}{json.RawMessage(b)})
 	case utf8.Valid(b):
-		return json.Marshal(struct {
+		return marshalUnescaped(struct {
 			Text string `json:"text"`
 		}{string(b)})
 	default:
-		return json.Marshal(struct {
+		return marshalUnescaped(struct {
 			Base64 string `json:"base64"`
 		}{base64.StdEncoding.EncodeToString(b)})
 	}
+}
+
+func marshalUnescaped(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte{'\n'}), nil
 }
 
 func (b *Body) UnmarshalJSON(data []byte) error {
