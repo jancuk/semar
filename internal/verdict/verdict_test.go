@@ -745,6 +745,10 @@ func FuzzCompute(f *testing.F) {
 					ev.Action.Response = &domain.HTTPResponse{Status: 200}
 				}
 			}
+			if ev.Action != nil {
+				// The step names s1..s3 are not in setupSteps, so the generator sets the pass itself.
+				ev.Action.Use.Pass = passOf(setup)
+			}
 			if mode == modeOK && borrow && previous != nil {
 				// This step holds the action of the step before it.
 				a := *previous
