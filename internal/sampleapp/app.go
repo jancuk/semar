@@ -37,7 +37,7 @@ const (
 	defaultCommit = "9f3c2ab"
 	changedCommit = "c0ffee1"
 	maxBody       = 64 << 10
-	// Keeps refunded_total from overflowing int64 when RefundOverTotal lets it grow past amount.
+	// Bounds a single order or refund amount; it only delays int64 overflow once RefundOverTotal lets refunded_total grow.
 	maxAmount = 1 << 53
 )
 
@@ -215,7 +215,8 @@ func (a *App) readOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.on(RedirectAway) {
-		http.Redirect(w, r, a.redirectTo, http.StatusFound)
+		w.Header().Set("Location", a.redirectTo)
+		w.WriteHeader(http.StatusFound)
 		return
 	}
 	a.mu.Lock()

@@ -3,6 +3,7 @@ package sampleapp_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -53,30 +54,35 @@ func newRig(t *testing.T, o sampleapp.Options) *rig {
 	return &rig{t: t, app: app, server: srv, client: client}
 }
 
+// do must be called on the test goroutine: it ends the test on a transport error.
 func (g *rig) do(method, path, token, body string) reply {
 	g.t.Helper()
-	return g.doCtx(context.Background(), method, path, token, body)
-}
-
-func (g *rig) doCtx(ctx context.Context, method, path, token, body string) reply {
-	g.t.Helper()
-	req, err := http.NewRequestWithContext(ctx, method, g.server.URL+path, strings.NewReader(body))
+	got, err := g.send(method, path, token, body)
 	if err != nil {
 		g.t.Fatal(err)
+	}
+	return got
+}
+
+// send is safe on any goroutine and returns the transport error instead of ending the test.
+func (g *rig) send(method, path, token, body string) (reply, error) {
+	req, err := http.NewRequest(method, g.server.URL+path, strings.NewReader(body))
+	if err != nil {
+		return reply{}, err
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := g.client.Do(req)
 	if err != nil {
-		g.t.Fatalf("%s %s: %v", method, path, err)
+		return reply{}, fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		g.t.Fatal(err)
+		return reply{}, err
 	}
-	return reply{status: resp.StatusCode, location: resp.Header.Get("Location"), body: string(b)}
+	return reply{status: resp.StatusCode, location: resp.Header.Get("Location"), body: string(b)}, nil
 }
 
 func (g *rig) createOrder(token string, amount int) reply {
@@ -219,6 +225,18 @@ func TestDefects(t *testing.T) {
 		}
 	})
 
+	t.Run("RedirectAway sends a relative target as given", func(t *testing.T) {
+		g := newRig(t, sampleapp.Options{
+			Defects:    map[sampleapp.Defect]bool{sampleapp.RedirectAway: true},
+			RedirectTo: "elsewhere",
+		})
+		g.createOrder(alice, 100)
+		got := g.do("GET", "/v1/orders/o-1", alice, "")
+		if got.status != 302 || got.location != "elsewhere" {
+			t.Fatalf("read = %d, Location %q, want 302 and %q", got.status, got.location, "elsewhere")
+		}
+	})
+
 	t.Run("OtherUserReads lets a non-owner read but not refund", func(t *testing.T) {
 		g := newRig(t, sampleapp.Options{Defects: map[sampleapp.Defect]bool{sampleapp.OtherUserReads: true}})
 		g.createOrder(alice, 100)
@@ -231,39 +249,25 @@ func TestDefects(t *testing.T) {
 	})
 }
 
-func TestSlowRefundIsAppliedBeforeTheAnswer(t *testing.T) {
+func TestSlowRefundAnswersNoEarlierThanItsDelay(t *testing.T) {
+	const delay = 50 * time.Millisecond
 	g := newRig(t, sampleapp.Options{
 		Defects: map[sampleapp.Defect]bool{sampleapp.SlowRefund: true},
-		Delay:   300 * time.Millisecond,
+		Delay:   delay,
 	})
 	g.createOrder(alice, 100000)
 
-	answered := make(chan reply, 1)
-	go func() { answered <- g.do("POST", "/v1/orders/o-1/refunds", alice, `{"amount":25000}`) }()
-
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		v := g.do("GET", "/v1/orders/o-1", alice, "").field(t, "data", "refunded_total")
-		if v == float64(25000) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("refund never applied, refunded_total = %v", v)
-		}
-		time.Sleep(5 * time.Millisecond)
+	start := time.Now()
+	got := g.do("POST", "/v1/orders/o-1/refunds", alice, `{"amount":25000}`)
+	elapsed := time.Since(start)
+	if got.status != 201 || got.body != `{"data":{"id":"r-1","amount":25000,"order_id":"o-1"}}` {
+		t.Fatalf("refund = %d %s", got.status, got.body)
 	}
-	select {
-	case got := <-answered:
-		t.Fatalf("the refund answered (%d) before its delay passed", got.status)
-	default:
+	if elapsed < delay {
+		t.Fatalf("refund answered after %v, want at least %v", elapsed, delay)
 	}
-	select {
-	case got := <-answered:
-		if got.status != 201 {
-			t.Fatalf("refund = %d %s", got.status, got.body)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("refund never answered")
+	if v := g.do("GET", "/v1/orders/o-1", alice, "").field(t, "data", "refunded_total"); v != float64(25000) {
+		t.Fatalf("refunded_total = %v", v)
 	}
 }
 
@@ -372,7 +376,12 @@ func TestConcurrentCreatesAndRefunds(t *testing.T) {
 			defer wg.Done()
 			slots <- struct{}{}
 			defer func() { <-slots }()
-			if got := g.createOrder(alice, orders*refundsPer*refundAmount); got.status != 201 {
+			got, err := g.send("POST", "/v1/orders", alice, `{"amount":`+itoa(orders*refundsPer*refundAmount)+`}`)
+			if err != nil {
+				t.Errorf("create: %v", err)
+				return
+			}
+			if got.status != 201 {
 				t.Errorf("create = %d", got.status)
 			}
 		}()
@@ -387,7 +396,12 @@ func TestConcurrentCreatesAndRefunds(t *testing.T) {
 				defer wg.Done()
 				slots <- struct{}{}
 				defer func() { <-slots }()
-				if got := g.do("POST", "/v1/orders/"+id+"/refunds", alice, `{"amount":100}`); got.status != 201 {
+				got, err := g.send("POST", "/v1/orders/"+id+"/refunds", alice, `{"amount":100}`)
+				if err != nil {
+					t.Errorf("refund on %s: %v", id, err)
+					return
+				}
+				if got.status != 201 {
 					t.Errorf("refund on %s = %d", id, got.status)
 				}
 			}()
@@ -408,5 +422,48 @@ func TestConcurrentCreatesAndRefunds(t *testing.T) {
 	}
 	if got := g.app.Requests("POST", "/v1/orders"); got != orders+orders*refundsPer {
 		t.Errorf("POST count = %d", got)
+	}
+}
+
+func TestRefundIDsCountAcrossOrders(t *testing.T) {
+	g := newRig(t, sampleapp.Options{})
+	g.createOrder(alice, 100)
+	g.createOrder(alice, 100)
+	for i, order := range []string{"o-1", "o-2"} {
+		want := "r-" + itoa(i+1)
+		got := g.do("POST", "/v1/orders/"+order+"/refunds", alice, `{"amount":1}`)
+		if got.status != 201 || got.field(t, "data", "id") != want || got.field(t, "data", "order_id") != order {
+			t.Fatalf("refund on %s = %d %s, want id %s", order, got.status, got.body, want)
+		}
+	}
+}
+
+func TestRefundErrorPrecedence(t *testing.T) {
+	g := newRig(t, sampleapp.Options{})
+	g.createOrder(alice, 100)
+	tests := []struct {
+		name, path string
+		want       int
+	}{
+		{"unknown order beats forbidden and bad body", "/v1/orders/o-99/refunds", 404},
+		{"forbidden beats bad body", "/v1/orders/o-1/refunds", 403},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := g.do("POST", tc.path, bob, `not json`); got.status != tc.want {
+				t.Fatalf("status = %d, want %d (body %s)", got.status, tc.want, got.body)
+			}
+		})
+	}
+}
+
+func TestEmptyTokensMeansNoTokenIsValid(t *testing.T) {
+	empty := newRig(t, sampleapp.Options{Tokens: map[string]string{}})
+	if got := empty.createOrder(alice, 10); got.status != 401 {
+		t.Fatalf("empty Tokens, tok-alice = %d, want 401", got.status)
+	}
+	nilMap := newRig(t, sampleapp.Options{})
+	if got := nilMap.createOrder(alice, 10); got.status != 201 {
+		t.Fatalf("nil Tokens, tok-alice = %d, want 201", got.status)
 	}
 }
