@@ -25,6 +25,9 @@ func Ledger(entries []domain.Activity) []LedgerRow {
 		case domain.VerbCreate, domain.VerbUpdate:
 			rows = append(rows, LedgerRow{Verb: e.Verb, Object: *e.Object, Use: e.Use})
 		case domain.VerbDelete:
+			if e.Object.ID == "" {
+				continue
+			}
 			for i := range rows {
 				if rows[i].Verb == domain.VerbCreate && rows[i].Object == *e.Object {
 					rows[i].CleanedUp = true

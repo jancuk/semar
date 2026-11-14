@@ -1,8 +1,10 @@
 package activity
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/jancuk/semar/internal/domain"
@@ -15,10 +17,9 @@ type Filter struct {
 }
 
 func Timeline(w io.Writer, entries []domain.Activity, f Filter) error {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "#\tTime\tPass\tScenario\tAction\tTarget\tResult\tWhy"); err != nil {
-		return err
-	}
+	var buf bytes.Buffer
+	tw := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "#\tTime\tPass\tScenario\tAction\tTarget\tResult\tWhy\t")
 	for _, e := range entries {
 		if !f.keeps(e) {
 			continue
@@ -27,15 +28,17 @@ func Timeline(w io.Writer, entries []domain.Activity, f Filter) error {
 		if scenario == "" {
 			scenario = "-"
 		}
-		line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\t%s\t%s", e.Seq, e.At.UTC().Format("15.04.05"), e.Use.Pass, scenario, e.Verb, e.Target, e.Result)
-		if e.Why != "" {
-			line += "\t" + e.Why
-		}
-		if _, err := fmt.Fprintln(tw, line); err != nil {
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t\n", e.Seq, e.At.UTC().Format("15.04.05"), e.Use.Pass, scenario, e.Verb, e.Target, e.Result, e.Why)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	for _, line := range strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n") {
+		if _, err := fmt.Fprintln(w, strings.TrimRight(line, " ")); err != nil {
 			return err
 		}
 	}
-	return tw.Flush()
+	return nil
 }
 
 func (f Filter) keeps(e domain.Activity) bool {

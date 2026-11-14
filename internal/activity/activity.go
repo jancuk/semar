@@ -65,7 +65,7 @@ func resultOf(a domain.Action) string {
 
 func pathOf(raw string) string {
 	if u, err := url.Parse(raw); err == nil {
-		return u.Path
+		return u.EscapedPath()
 	}
 	path, _, _ := strings.Cut(raw, "?")
 	return path
@@ -87,9 +87,11 @@ func objectOf(a domain.Action, class effects.Class, template, realPath string) *
 	}
 	obj := &domain.ObjectRef{Type: singular(segs[last])}
 	if last+1 < len(segs) && isParam(segs[last+1]) {
+		// The template lines up with the end of the real path; a service
+		// base URL may put extra segments in front.
 		real := strings.Split(strings.Trim(realPath, "/"), "/")
-		if len(real) == len(segs) {
-			obj.ID = real[last+1]
+		if offset := len(real) - len(segs); offset >= 0 {
+			obj.ID = real[offset+last+1]
 		}
 		return obj
 	}
@@ -113,11 +115,16 @@ func sortedKeys(m map[string]string) []string {
 	return keys
 }
 
-// singular removes one final s. A word that ends in "sses" loses "es", so
-// "addresses" gives "address".
+// singular applies the rules in order: "ies" gives "y", "sses" loses "es",
+// "ss" is unchanged, a final "s" is dropped. It is naive: "status" gives "statu".
 func singular(word string) string {
-	if strings.HasSuffix(word, "sses") {
+	switch {
+	case strings.HasSuffix(word, "ies"):
+		return strings.TrimSuffix(word, "ies") + "y"
+	case strings.HasSuffix(word, "sses"):
 		return strings.TrimSuffix(word, "es")
+	case strings.HasSuffix(word, "ss"):
+		return word
 	}
 	return strings.TrimSuffix(word, "s")
 }

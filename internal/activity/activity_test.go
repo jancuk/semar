@@ -5,6 +5,8 @@ import (
 	"flag"
 	"os"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +51,24 @@ func TestFromAction(t *testing.T) {
 			effects.Read, "read", "GET /v1/orders", nil, "200"},
 		{"refused", domain.Action{Request: req("DELETE", "/v1/orders/{id}", "https://t.example/v1/orders/1"), Refused: "denied: matches the deny list"},
 			effects.Write, "delete", "DELETE /v1/orders/1", nil, "refused: denied: matches the deny list"},
+		{"prefix of one segment", domain.Action{Request: req("GET", "/v1/orders/{id}", "https://t/api/v1/orders/9"), Response: resp(200)},
+			effects.Read, "read", "GET /api/v1/orders/9", &domain.ObjectRef{Type: "order", ID: "9"}, "200"},
+		{"prefix of two segments", domain.Action{Request: req("GET", "/v1/orders/{id}", "https://t/api/internal/v1/orders/9"), Response: resp(200)},
+			effects.Read, "read", "GET /api/internal/v1/orders/9", &domain.ObjectRef{Type: "order", ID: "9"}, "200"},
+		{"real path with trailing slash", domain.Action{Request: req("GET", "/v1/orders/{id}", "https://t/v1/orders/9/"), Response: resp(200)},
+			effects.Read, "read", "GET /v1/orders/9/", &domain.ObjectRef{Type: "order", ID: "9"}, "200"},
+		{"real path shorter than template", domain.Action{Request: req("GET", "/v1/orders/{id}", "https://t/orders"), Response: resp(200)},
+			effects.Read, "read", "GET /orders", &domain.ObjectRef{Type: "order"}, "200"},
+		{"target keeps percent-encoding", domain.Action{Request: req("GET", "/v1/files/{id}", "https://t/v1/files/a%2Fb"), Response: resp(200)},
+			effects.Read, "read", "GET /v1/files/a%2Fb", &domain.ObjectRef{Type: "file", ID: "a%2Fb"}, "200"},
+		{"template with trailing slash", domain.Action{Request: req("GET", "/v1/orders/{id}/", "https://t/v1/orders/9/"), Response: resp(200)},
+			effects.Read, "read", "GET /v1/orders/9/", &domain.ObjectRef{Type: "order", ID: "9"}, "200"},
+		{"put on two parameters", domain.Action{Request: req("PUT", "/v1/orders/{id}/items/{item}", "https://t/api/v1/orders/9/items/3"), Response: resp(200)},
+			effects.Write, "update", "PUT /api/v1/orders/9/items/3", &domain.ObjectRef{Type: "item", ID: "3"}, "200"},
+		{"update answered 404 keeps its object", domain.Action{Request: req("PATCH", "/v1/orders/{id}", "https://t/v1/orders/9"), Response: resp(404)},
+			effects.Write, "update", "PATCH /v1/orders/9", &domain.ObjectRef{Type: "order", ID: "9"}, "404"},
+		{"template of one parameter has no object", domain.Action{Request: req("GET", "/{id}", "https://t/9"), Response: resp(200)},
+			effects.Read, "read", "GET /9", nil, "200"},
 		{"transport error", domain.Action{Request: req("POST", "/v1/orders", "https://t.example/v1/orders"), Err: "connection reset", Captures: map[string]string{"a": "1"}},
 			effects.Write, "create", "POST /v1/orders", nil, "error: connection reset"},
 	}
@@ -64,6 +84,30 @@ func TestFromAction(t *testing.T) {
 			}
 			if got.Seq != 7 || got.Evidence != "actions/a-0007.json" {
 				t.Errorf("seq %d evidence %q not carried over", got.Seq, got.Evidence)
+			}
+		})
+	}
+}
+
+func TestObjectType(t *testing.T) {
+	cases := []struct{ word, want string }{
+		{"categories", "category"},
+		{"addresses", "address"},
+		{"class", "class"},
+		{"orders", "order"},
+		{"search", "search"},
+		// Known limit: "status" is not a plural, but the rules give "statu".
+		{"status", "statu"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.word, func(t *testing.T) {
+			a := domain.Action{
+				Request:  &domain.HTTPRequest{Method: "POST", PathTemplate: "/v1/" + tc.word, URL: "https://t/v1/" + tc.word},
+				Response: &domain.HTTPResponse{Status: 201},
+			}
+			got := activity.FromAction(a, effects.Write, "")
+			if got.Object == nil || got.Object.Type != tc.want {
+				t.Errorf("object = %+v, want type %q", got.Object, tc.want)
 			}
 		})
 	}
@@ -101,6 +145,25 @@ func TestLedger(t *testing.T) {
 		{"delete of another type does not clean up", []domain.Activity{
 			entry(domain.VerbCreate, "order", "1", "201"),
 			entry(domain.VerbDelete, "address", "1", "204"),
+		}, []activity.LedgerRow{{Verb: domain.VerbCreate, Object: domain.ObjectRef{Type: "order", ID: "1"}}}},
+		{"update answered 404 is absent", []domain.Activity{
+			entry(domain.VerbUpdate, "order", "9", "404"),
+		}, nil},
+		{"two creates of one object, one delete", []domain.Activity{
+			entry(domain.VerbCreate, "order", "1", "201"),
+			entry(domain.VerbCreate, "order", "1", "201"),
+			entry(domain.VerbDelete, "order", "1", "204"),
+		}, []activity.LedgerRow{
+			{Verb: domain.VerbCreate, Object: domain.ObjectRef{Type: "order", ID: "1"}, CleanedUp: true},
+			{Verb: domain.VerbCreate, Object: domain.ObjectRef{Type: "order", ID: "1"}, CleanedUp: true},
+		}},
+		{"empty ID is never cleaned up", []domain.Activity{
+			entry(domain.VerbCreate, "order", "", "201"),
+			entry(domain.VerbDelete, "order", "", "204"),
+		}, []activity.LedgerRow{{Verb: domain.VerbCreate, Object: domain.ObjectRef{Type: "order"}}}},
+		{"delete with empty ID cleans up nothing", []domain.Activity{
+			entry(domain.VerbCreate, "order", "1", "201"),
+			entry(domain.VerbDelete, "order", "", "204"),
 		}, []activity.LedgerRow{{Verb: domain.VerbCreate, Object: domain.ObjectRef{Type: "order", ID: "1"}}}},
 	}
 	for _, tc := range cases {
@@ -147,6 +210,49 @@ func TestTimeline(t *testing.T) {
 	}
 }
 
+func TestTimelineAlignment(t *testing.T) {
+	at := time.Date(2026, 11, 14, 10, 6, 5, 0, time.UTC)
+	mk := func(seq int, target, result, why string) domain.Activity {
+		return domain.Activity{Seq: seq, At: at, Use: domain.UseCase{Pass: domain.PassScenario, Scenario: "S-1"}, Verb: domain.VerbRead, Target: target, Result: result, Why: why}
+	}
+	entries := []domain.Activity{
+		mk(1, "GET /a", "R-ok", ""),
+		mk(2, "GET /a/much/longer/target", "R-ok", "first why"),
+		mk(3, "GET /b", "R-a-longer-result", "second why"),
+	}
+	var buf bytes.Buffer
+	if err := activity.Timeline(&buf, entries, activity.Filter{}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	for _, l := range lines {
+		if l != strings.TrimRight(l, " \t") {
+			t.Errorf("line ends in whitespace: %q", l)
+		}
+	}
+	if len(lines) != 4 {
+		t.Fatalf("got %d lines, want 4:\n%s", len(lines), buf.String())
+	}
+	t.Run("result column", func(t *testing.T) {
+		pos := []int{strings.Index(lines[1], "R-ok"), strings.Index(lines[2], "R-ok"), strings.Index(lines[3], "R-a-longer-result"), strings.Index(lines[0], "Result")}
+		for _, p := range pos {
+			if p < 0 || p != pos[0] {
+				t.Errorf("Result column starts at %v, want one position:\n%s", pos, buf.String())
+				break
+			}
+		}
+	})
+	t.Run("why column", func(t *testing.T) {
+		pos := []int{strings.Index(lines[2], "first why"), strings.Index(lines[3], "second why"), strings.Index(lines[0], "Why")}
+		for _, p := range pos {
+			if p < 0 || p != pos[0] {
+				t.Errorf("Why column starts at %v, want one position:\n%s", pos, buf.String())
+				break
+			}
+		}
+	})
+}
+
 func TestTimelineFilter(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -169,7 +275,7 @@ func TestTimelineFilter(t *testing.T) {
 				t.Fatalf("got %d rows, want %d:\n%s", len(lines)-1, len(tc.want), buf.String())
 			}
 			for i, seq := range tc.want {
-				if f := bytes.Fields(lines[i+1]); string(f[0]) != string(rune('0'+seq)) {
+				if f := bytes.Fields(lines[i+1]); string(f[0]) != strconv.Itoa(seq) {
 					t.Errorf("row %d starts with %s, want %d", i, f[0], seq)
 				}
 			}
