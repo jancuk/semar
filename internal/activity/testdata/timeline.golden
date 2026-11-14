@@ -1,0 +1,7 @@
+#  Time      Pass      Scenario  Action  Target              Result  Why
+1  10.06.06  setup     -         create  POST /v1/users      201     seed a user
+2  10.06.07  scenario  S-1       read    GET /v1/orders      200
+3  10.06.08  scenario  S-1       create  POST /v1/orders     201  place an order
+4  10.06.09  scenario  S-2       update  PATCH /v1/orders/9  422
+5  10.06.10  explore   S-2       read    GET /v1/orders/9    refused: denied
+6  10.06.11  cleanup   -         delete  DELETE /v1/users/3  204  remove the user
