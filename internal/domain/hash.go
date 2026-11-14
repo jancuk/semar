@@ -58,14 +58,8 @@ func ExpectHash(s Scenario) Hash {
 			hs.Hint = &hashedHint{Method: st.Hint.Method, Path: st.Hint.Path}
 		}
 		for _, e := range st.Expect {
-			c := e.Check
 			hs.Expect = append(hs.Expect, hashedExpectation{
-				Check: hashedCheck{
-					Status: c.Status, JSONPath: c.JSONPath, Header: c.Header,
-					Equals: c.Equals, NotEquals: c.NotEquals, Contains: c.Contains,
-					Exists: c.Exists, Greater: c.Greater, Less: c.Less, Count: c.Count,
-					EqualsPath: c.EqualsPath,
-				},
+				Check:  hashedCheck(e.Check),
 				Source: e.Source,
 				Cite:   e.Cite,
 			})
