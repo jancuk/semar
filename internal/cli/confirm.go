@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -49,6 +50,7 @@ func confirmScenario(ctx context.Context, stdout, stderr io.Writer, o options, f
 		return err
 	}
 	var needed []string
+	var sources []domain.Source
 	for _, st := range sc.Steps {
 		for _, e := range st.Expect {
 			if !confirm.Needs(e.Source, cfg.Policy.Trust.Confirm) {
@@ -59,6 +61,7 @@ func confirmScenario(ctx context.Context, stdout, stderr io.Writer, o options, f
 				line += ", cite: " + e.Cite
 			}
 			needed = append(needed, line+")")
+			sources = append(sources, e.Source)
 		}
 	}
 	if len(needed) == 0 {
@@ -96,6 +99,7 @@ func confirmScenario(ctx context.Context, stdout, stderr io.Writer, o options, f
 		User:       name,
 		Identity:   localIdentity,
 		At:         o.Clock().UTC(),
+		Sources:    slices.Compact(slices.Sorted(slices.Values(sources))),
 	}
 	if err := confirm.NewLocal(store.Root()).Put(rec); err != nil {
 		return err

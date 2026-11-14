@@ -191,16 +191,22 @@ func (r *rig) putScript(t *testing.T, s domain.Script) {
 func (r *rig) confirmAll(t *testing.T, scs ...domain.Scenario) {
 	t.Helper()
 	for _, sc := range scs {
-		err := r.confirm.Put(confirm.Record{
-			Scenario:   sc.ID,
-			ExpectHash: domain.ExpectHash(sc),
-			User:       "tester",
-			Identity:   "local, unverified identity",
-			At:         time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC),
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
+		r.confirmSources(t, sc, domain.SourceDiff, domain.SourceBaseline)
+	}
+}
+
+func (r *rig) confirmSources(t *testing.T, sc domain.Scenario, sources ...domain.Source) {
+	t.Helper()
+	err := r.confirm.Put(confirm.Record{
+		Scenario:   sc.ID,
+		ExpectHash: domain.ExpectHash(sc),
+		User:       "tester",
+		Identity:   "local, unverified identity",
+		At:         time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC),
+		Sources:    sources,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -761,4 +767,52 @@ func TestChecksReadTheRedactedAction(t *testing.T) {
 	if body := string(r.storedAction(t, sc.ID, "order-unchanged").Response.Body); strings.Contains(body, `"refunded_total":0`) {
 		t.Errorf("the stored body holds the value: %s", body)
 	}
+}
+
+// withBaseline adds an expectation of the baseline source, so that the hash changes too.
+func withBaseline(sc domain.Scenario) domain.Scenario {
+	steps := slices.Clone(sc.Steps)
+	last := steps[len(steps)-1]
+	last.Expect = append(slices.Clone(last.Expect), domain.Expectation{
+		Check:  domain.Check{Status: new(200)},
+		Source: domain.SourceBaseline,
+	})
+	steps[len(steps)-1] = last
+	sc.Steps = steps
+	return sc
+}
+
+func TestAConfirmationCoversOnlyTheSourcesItNames(t *testing.T) {
+	sc := withBaseline(loadScenario(t))
+	s := loadScript(t)
+	s.ExpectHash = domain.ExpectHash(sc)
+
+	t.Run("a source confirmed under a narrower trust list is not confirmed", func(t *testing.T) {
+		r := newRig(t, rigOptions{})
+		r.deps.Trust = []domain.Source{domain.SourceDiff}
+		r.putScript(t, s)
+		r.confirmSources(t, sc, domain.SourceDiff)
+		if res, _, _ := r.run(t, sc); res[0].Outcome != domain.OutcomePassed {
+			t.Fatalf("the narrow trust run = %s, reasons %+v", res[0].Outcome, res[0].Reasons)
+		}
+
+		r.deps.Trust = []domain.Source{domain.SourceDiff, domain.SourceBaseline}
+		res, _, _ := r.run(t, sc)
+		expect(t, res[0], domain.OutcomeInconclusive, "an expected result is not confirmed")
+	})
+
+	t.Run("a record without sources confirms nothing", func(t *testing.T) {
+		r := newRig(t, rigOptions{})
+		r.putScript(t, s)
+		dir := filepath.Join(r.store.Root(), "store", "confirmations", string(sc.ID), string(domain.ExpectHash(sc)))
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		old := `{"schema": 1, "scenario": "` + string(sc.ID) + `", "expectHash": "` + string(domain.ExpectHash(sc)) + `", "user": "old", "identity": "local, unverified identity", "at": "2026-11-14T10:00:00Z"}`
+		if err := os.WriteFile(filepath.Join(dir, "old.json"), []byte(old), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		res, _, _ := r.run(t, sc)
+		expect(t, res[0], domain.OutcomeInconclusive, "an expected result is not confirmed")
+	})
 }

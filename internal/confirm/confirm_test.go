@@ -3,6 +3,7 @@ package confirm_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -41,7 +42,7 @@ func TestNeeds(t *testing.T) {
 var _ confirm.Store = (*confirm.Local)(nil)
 
 func rec(user string, at time.Time) confirm.Record {
-	return confirm.Record{Scenario: "refund", ExpectHash: "abc123", User: user, Identity: "local, unverified identity", At: at}
+	return confirm.Record{Scenario: "refund", ExpectHash: "abc123", User: user, Identity: "local, unverified identity", At: at, Sources: []domain.Source{domain.SourceDiff}}
 }
 
 func TestPutAndGet(t *testing.T) {
@@ -194,5 +195,55 @@ func TestConcurrentPutsKeepOneRecord(t *testing.T) {
 		if err != nil || !again.At.Equal(first.At) {
 			t.Fatalf("record changed from %v to %v (%v)", first.At, again.At, err)
 		}
+	}
+}
+
+func TestPutRefusesARecordWithNoSource(t *testing.T) {
+	l := confirm.NewLocal(t.TempDir())
+	r := rec("alice", time.Now())
+	r.Sources = nil
+	if err := l.Put(r); err == nil {
+		t.Fatal("Put accepted a record with no source")
+	}
+	if _, ok, _ := l.Get("refund", "abc123"); ok {
+		t.Error("a record without a source was stored")
+	}
+}
+
+func TestPutSortsAndDeduplicatesSources(t *testing.T) {
+	root := t.TempDir()
+	l := confirm.NewLocal(root)
+	r := rec("alice", time.Now())
+	r.Sources = []domain.Source{domain.SourceDiff, domain.SourceBaseline, domain.SourceDiff}
+	if err := l.Put(r); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := l.Get("refund", "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []domain.Source{domain.SourceBaseline, domain.SourceDiff}
+	if !slices.Equal(got.Sources, want) {
+		t.Errorf("Sources = %v, want %v", got.Sources, want)
+	}
+}
+
+func TestGetUnitesTheSourcesOfEveryUser(t *testing.T) {
+	l := confirm.NewLocal(t.TempDir())
+	t0 := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
+	a := rec("alice", t0)
+	b := rec("bob", t0.Add(time.Hour))
+	b.Sources = []domain.Source{domain.SourceBaseline}
+	for _, r := range []confirm.Record{a, b} {
+		if err := l.Put(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _, err := l.Get("refund", "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []domain.Source{domain.SourceBaseline, domain.SourceDiff}; !slices.Equal(got.Sources, want) || got.User != "alice" {
+		t.Errorf("record = %+v, want the sources %v of alice and bob", got, want)
 	}
 }

@@ -28,6 +28,9 @@ type Record struct {
 	User       string            `json:"user"`
 	Identity   string            `json:"identity"` // "local, unverified identity" in this plan. FR-11
 	At         time.Time         `json:"at"`
+	// Sources are the sources of the expectations the person saw, sorted and without duplicates.
+	// A record without any (one from an older build) confirms nothing.
+	Sources []domain.Source `json:"sources"`
 }
 
 type Store interface {
@@ -73,7 +76,12 @@ func fileName(user string) string {
 }
 
 // Put keeps the first confirmation of a user: a later one for the same user changes nothing.
+// A record that names no source confirms nothing, so Put refuses it.
 func (l *Local) Put(r Record) error {
+	r.Sources = slices.Compact(slices.Sorted(slices.Values(r.Sources)))
+	if len(r.Sources) == 0 {
+		return errors.New("store confirmation: the record names no source")
+	}
 	dir, err := l.dir(r.Scenario, r.ExpectHash)
 	if err != nil {
 		return fmt.Errorf("store confirmation: %w", err)
@@ -90,7 +98,8 @@ func (l *Local) Put(r Record) error {
 	return nil
 }
 
-// Get returns the earliest confirmation of the scenario and hash.
+// Get returns the earliest confirmation of the scenario and hash. Its Sources are
+// those of every user's confirmation, because each user's record counts.
 func (l *Local) Get(id domain.ScenarioID, h domain.Hash) (Record, bool, error) {
 	dir, err := l.dir(id, h)
 	if err != nil {
@@ -104,6 +113,7 @@ func (l *Local) Get(id domain.ScenarioID, h domain.Hash) (Record, bool, error) {
 		return Record{}, false, fmt.Errorf("read confirmations in %s: %w", dir, err)
 	}
 	var best Record
+	var sources []domain.Source
 	found := false
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
@@ -117,10 +127,12 @@ func (l *Local) Get(id domain.ScenarioID, h domain.Hash) (Record, bool, error) {
 		if r.Scenario != id || r.ExpectHash != h {
 			return Record{}, false, fmt.Errorf("confirmation %s is for scenario %q and hash %q, want %q and %q", p, r.Scenario, r.ExpectHash, id, h)
 		}
+		sources = append(sources, r.Sources...)
 		if !found || r.At.Before(best.At) {
 			best, found = r, true
 		}
 	}
+	best.Sources = slices.Compact(slices.Sorted(slices.Values(sources)))
 	return best, found, nil
 }
 

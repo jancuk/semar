@@ -161,18 +161,21 @@ func (r *Runner) probe(ctx context.Context) (builds []domain.BuildRef, failed []
 	return builds, failed
 }
 
-// confirmation reads the store once per scenario. A store that cannot be read confirms nothing.
+// confirmation reads the store once per scenario. An expectation counts as confirmed when its
+// source needs no person, or when a record names its source. A store that cannot be read confirms nothing.
 func (r *Runner) confirmation(sc domain.Scenario, run *replayed) func(domain.Expectation) bool {
 	needs := func(e domain.Expectation) bool { return confirm.Needs(e.Source, r.d.Trust) }
-	found := false
+	var sources []domain.Source
 	if r.d.Confirm != nil && slices.ContainsFunc(sc.Steps, func(st domain.Step) bool { return slices.ContainsFunc(st.Expect, needs) }) {
-		var err error
-		if _, found, err = r.d.Confirm.Get(sc.ID, domain.ExpectHash(sc)); err != nil {
-			found = false
+		rec, found, err := r.d.Confirm.Get(sc.ID, domain.ExpectHash(sc))
+		switch {
+		case err != nil:
 			run.notes = append(run.notes, domain.Reason{Rule: domain.OutcomeInconclusive, Text: "the confirmations could not be read: " + err.Error()})
+		case found:
+			sources = rec.Sources
 		}
 	}
-	return func(e domain.Expectation) bool { return !needs(e) || found }
+	return func(e domain.Expectation) bool { return !needs(e) || slices.Contains(sources, e.Source) }
 }
 
 // replay sends the steps in order and never sends one twice. It stops at the first
