@@ -2,6 +2,7 @@
 package confirm
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/jancuk/semar/internal/atomicfile"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/idcheck"
 )
 
 const schema = 1
@@ -44,23 +46,13 @@ type Local struct{ root string }
 
 func NewLocal(root string) *Local { return &Local{root: root} }
 
-var (
-	idPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-	userCleaner = regexp.MustCompile(`[^A-Za-z0-9._-]`)
-)
-
-func checkID(kind, id string) error {
-	if !idPattern.MatchString(id) {
-		return fmt.Errorf("invalid %s %q: use letters, digits, dot, underscore, or hyphen, starting with a letter or digit", kind, id)
-	}
-	return nil
-}
+var userCleaner = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 
 func (l *Local) dir(id domain.ScenarioID, h domain.Hash) (string, error) {
-	if err := checkID("scenario ID", string(id)); err != nil {
+	if err := idcheck.Check("scenario ID", string(id)); err != nil {
 		return "", err
 	}
-	if err := checkID("expectation hash", string(h)); err != nil {
+	if err := idcheck.Check("expectation hash", string(h)); err != nil {
 		return "", err
 	}
 	rel := filepath.Join("store", "confirmations", string(id), string(h))
@@ -87,13 +79,15 @@ func (l *Local) Put(r Record) error {
 		return fmt.Errorf("store confirmation: %w", err)
 	}
 	p := filepath.Join(dir, fileName(r.User))
-	if _, err := os.Stat(p); err == nil {
-		return nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("store confirmation %s: %w", p, err)
-	}
 	r.Schema = schema
-	return atomicfile.WriteJSON(p, r)
+	data, err := atomicfile.EncodeJSON(r)
+	if err != nil {
+		return fmt.Errorf("encode confirmation %s: %w", p, err)
+	}
+	if err := atomicfile.WriteNew(p, data); err != nil && !errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("store confirmation: %w", err)
+	}
+	return nil
 }
 
 // Get returns the earliest confirmation of the scenario and hash.
@@ -136,7 +130,7 @@ func read(p string) (Record, error) {
 		return Record{}, fmt.Errorf("read confirmation %s: %w", p, err)
 	}
 	var r Record
-	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&r); err != nil {
 		return Record{}, fmt.Errorf("parse confirmation %s: %w", p, err)

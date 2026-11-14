@@ -2,6 +2,7 @@
 package build
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/theory/jsonpath"
@@ -85,9 +85,15 @@ func (h *HTTP) Probe(ctx context.Context, service string) (domain.BuildRef, erro
 		return domain.BuildRef{}, fmt.Errorf("build probe for service %q: the response is larger than %d bytes", service, maxBody)
 	}
 	var doc any
-	dec := json.NewDecoder(strings.NewReader(string(body)))
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
-	if err := dec.Decode(&doc); err != nil {
+	err = dec.Decode(&doc)
+	if err == nil {
+		if _, tail := dec.Token(); !errors.Is(tail, io.EOF) {
+			err = errors.New("data after the JSON value")
+		}
+	}
+	if err != nil {
 		return domain.BuildRef{}, fmt.Errorf("build probe for service %q: the response is not JSON (%v), body %s", service, err, quote(body))
 	}
 	nodes := path.Select(doc)

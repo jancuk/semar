@@ -118,8 +118,18 @@ func TestProbeErrorHoldsNoLongBody(t *testing.T) {
 }
 
 func TestProbeReadsAtMost64KiB(t *testing.T) {
+	// valid JSON larger than 64 KiB with the commit near the end: without the cap it would be read in full
 	big := `{"pad":"` + strings.Repeat("a", 70<<10) + `","commit":"late"}`
 	srv := serve(t, 200, big)
+	p := build.NewHTTP([]config.Service{svc("orders", srv.URL, "$.commit")}, srv.Client())
+	_, err := p.Probe(t.Context(), "orders")
+	if err == nil || !strings.Contains(err.Error(), "orders") || !strings.Contains(err.Error(), "larger") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestProbeRefusesTrailingData(t *testing.T) {
+	srv := serve(t, 200, `{"commit":"x"} junk`)
 	p := build.NewHTTP([]config.Service{svc("orders", srv.URL, "$.commit")}, srv.Client())
 	if _, err := p.Probe(t.Context(), "orders"); err == nil || !strings.Contains(err.Error(), "orders") {
 		t.Errorf("err = %v", err)

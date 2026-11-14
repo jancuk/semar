@@ -155,3 +155,16 @@ func TestActionWithNonJSONBodies(t *testing.T) {
 		t.Fatalf("round trip differs:\n in %+v\nout %+v", in, out)
 	}
 }
+
+func TestBodyMarshalKeepsHTMLCharactersWithAnUnescapingEncoder(t *testing.T) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(domain.Body(`{"q":"a<b&c>d"}`)); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"json":{"q":"a<b&c>d"}}` + "\n"
+	if buf.String() != want {
+		t.Errorf("got %s, want %s", buf.String(), want)
+	}
+}

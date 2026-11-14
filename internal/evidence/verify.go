@@ -13,14 +13,11 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 )
 
-// Verify compares the run directory with the hashes in run.json. Each entry is a
+// Verify reads only run.json and the files on disk, so a file that no longer parses is reported, not an error.
+// It compares the run directory with the hashes in run.json. Each entry is a
 // relative path and a reason: "changed", "missing", "not listed in run.json", or "not a regular file".
 func (s *Store) Verify(id domain.RunID) (changed []string, err error) {
-	run, _, err := s.LoadRun(id)
-	if err != nil {
-		return nil, err
-	}
-	dir, err := s.runDir(id)
+	run, dir, err := s.readRunFile(id)
 	if err != nil {
 		return nil, err
 	}

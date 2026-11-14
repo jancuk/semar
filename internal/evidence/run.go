@@ -12,6 +12,7 @@ import (
 
 	"github.com/jancuk/semar/internal/atomicfile"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/idcheck"
 )
 
 // Run is one run directory that is being written. It is safe for concurrent use.
@@ -39,18 +40,35 @@ func (s *Store) NewRun(id domain.RunID) (*Run, error) {
 
 var errClosed = errors.New("the run is closed")
 
+// runScope is the exchanges directory of an action with no scenario. An ID cannot start
+// with an underscore, so it never collides with a scenario.
+const runScope = "_run"
+
 // WriteAction stores the action under exchanges/<scenario>/<seq>-<step>.json and returns that path.
+// Without a step the name is <seq>.json, and without a scenario the directory is _run.
 func (r *Run) WriteAction(a domain.Action) (string, error) {
-	if err := checkID("scenario ID", string(a.Use.Scenario)); err != nil {
-		return "", fmt.Errorf("store action %s: %w", a.ID, err)
+	if a.Use.Scenario != "" {
+		if err := idcheck.Check("scenario ID", string(a.Use.Scenario)); err != nil {
+			return "", fmt.Errorf("store action %s: %w", a.ID, err)
+		}
 	}
-	if err := checkID("step ID", string(a.Use.Step)); err != nil {
-		return "", fmt.Errorf("store action %s: %w", a.ID, err)
+	if a.Use.Step != "" {
+		if err := idcheck.Check("step ID", string(a.Use.Step)); err != nil {
+			return "", fmt.Errorf("store action %s: %w", a.ID, err)
+		}
 	}
 	if a.Seq < 1 {
 		return "", fmt.Errorf("store action %s: seq %d is not positive", a.ID, a.Seq)
 	}
-	rel := fmt.Sprintf("exchanges/%s/%04d-%s.json", a.Use.Scenario, a.Seq, a.Use.Step)
+	dir := string(a.Use.Scenario)
+	if dir == "" {
+		dir = runScope
+	}
+	name := fmt.Sprintf("%04d", a.Seq)
+	if a.Use.Step != "" {
+		name += "-" + string(a.Use.Step)
+	}
+	rel := "exchanges/" + dir + "/" + name + ".json"
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
@@ -97,7 +115,7 @@ func (r *Run) WriteFile(rel string, data []byte) error {
 		return fmt.Errorf("write %s: the name is reserved", rel)
 	}
 	for _, seg := range strings.Split(rel, "/") {
-		if err := checkID("path segment", seg); err != nil {
+		if err := idcheck.Check("path segment", seg); err != nil {
 			return fmt.Errorf("write %q: %w", rel, err)
 		}
 	}
@@ -123,7 +141,6 @@ func (r *Run) Close(run domain.Run) error {
 	if run.ID != "" && run.ID != r.id {
 		return fmt.Errorf("close run %s: the record is for run %s", r.id, run.ID)
 	}
-	r.closed = true
 	if r.activity != nil {
 		syncErr := r.activity.Sync()
 		closeErr := r.activity.Close()
@@ -142,7 +159,12 @@ func (r *Run) Close(run domain.Run) error {
 	run.Schema = schema
 	run.ID = r.id
 	run.Files = files
-	return atomicfile.WriteJSON(filepath.Join(r.dir, runFile), run)
+	if err := atomicfile.WriteJSON(filepath.Join(r.dir, runFile), run); err != nil {
+		return err
+	}
+	// closed only once run.json is in place, so a failed Close can be retried
+	r.closed = true
+	return nil
 }
 
 // compactLine is one JSON object and a newline, with <, >, and & as they are.

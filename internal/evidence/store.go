@@ -2,6 +2,7 @@
 package evidence
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -11,7 +12,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -19,6 +19,7 @@ import (
 
 	"github.com/jancuk/semar/internal/atomicfile"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/script"
 )
 
@@ -32,8 +33,6 @@ const (
 	schema        = 1
 )
 
-var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-
 // Store's root is <repository>/.semar.
 type Store struct{ root string }
 
@@ -41,21 +40,19 @@ func Open(root string) (*Store, error) {
 	if root == "" {
 		return nil, errors.New("open evidence store: the root is empty")
 	}
-	if err := os.MkdirAll(root, atomicfile.DirMode); err != nil {
-		return nil, fmt.Errorf("open evidence store %s: %w", root, err)
+	for _, dir := range []string{root, filepath.Join(root, "runs"), filepath.Join(root, "store")} {
+		if err := os.MkdirAll(dir, atomicfile.DirMode); err != nil {
+			return nil, fmt.Errorf("open evidence store %s: %w", root, err)
+		}
+		// MkdirAll leaves the mode of a directory that exists, so set it
+		if err := os.Chmod(dir, atomicfile.DirMode); err != nil {
+			return nil, fmt.Errorf("open evidence store %s: %w", root, err)
+		}
 	}
 	return &Store{root: root}, nil
 }
 
 func (s *Store) Root() string { return s.root }
-
-// checkID makes sure a value is safe to use as one path segment.
-func checkID(kind, id string) error {
-	if !idPattern.MatchString(id) || id == "." || id == ".." {
-		return fmt.Errorf("invalid %s %q: use letters, digits, dot, underscore, or hyphen, starting with a letter or digit", kind, id)
-	}
-	return nil
-}
 
 // join builds a path under base from relative parts and refuses anything that could leave it.
 func join(base string, parts ...string) (string, error) {
@@ -67,17 +64,17 @@ func join(base string, parts ...string) (string, error) {
 }
 
 func (s *Store) runDir(id domain.RunID) (string, error) {
-	if err := checkID("run ID", string(id)); err != nil {
+	if err := idcheck.Check("run ID", string(id)); err != nil {
 		return "", err
 	}
 	return join(s.root, "runs", string(id))
 }
 
 func (s *Store) scriptPath(id domain.ScenarioID, h domain.Hash) (string, error) {
-	if err := checkID("scenario ID", string(id)); err != nil {
+	if err := idcheck.Check("scenario ID", string(id)); err != nil {
 		return "", err
 	}
-	if err := checkID("expectation hash", string(h)); err != nil {
+	if err := idcheck.Check("expectation hash", string(h)); err != nil {
 		return "", err
 	}
 	return join(s.root, "store", "scripts", string(id), string(h)+".yaml")
@@ -137,8 +134,9 @@ func (s *Store) RedactKey() ([]byte, error) {
 	if _, err := io.ReadFull(rand.Reader, fresh); err != nil {
 		return nil, fmt.Errorf("generate redaction key: %w", err)
 	}
-	if err := createExclusive(p, fresh); err != nil {
-		return nil, err
+	// a concurrent creator that won leaves a whole key, which is read below
+	if err := atomicfile.WriteNew(p, fresh); err != nil && !errors.Is(err, fs.ErrExist) {
+		return nil, fmt.Errorf("create redaction key: %w", err)
 	}
 	return readKey(p)
 }
@@ -157,38 +155,6 @@ func readKey(p string) ([]byte, error) {
 	return key, nil
 }
 
-// createExclusive publishes the key with a hard link, so a concurrent creator wins whole or not at all.
-func createExclusive(p string, data []byte) error {
-	dir := filepath.Dir(p)
-	if err := os.MkdirAll(dir, atomicfile.DirMode); err != nil {
-		return fmt.Errorf("create directory %s: %w", dir, err)
-	}
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create redaction key %s: %w", p, err)
-	}
-	defer os.Remove(tmp.Name())
-	if err := tmp.Chmod(atomicfile.FileMode); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("create redaction key %s: %w", p, err)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("create redaction key %s: %w", p, err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("create redaction key %s: %w", p, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("create redaction key %s: %w", p, err)
-	}
-	if err := os.Link(tmp.Name(), p); err != nil && !errors.Is(err, fs.ErrExist) {
-		return fmt.Errorf("create redaction key %s: %w", p, err)
-	}
-	return nil
-}
-
 // Runs lists complete and interrupted runs, newest first by directory name.
 func (s *Store) Runs() ([]domain.RunID, error) {
 	dir := filepath.Join(s.root, "runs")
@@ -201,7 +167,7 @@ func (s *Store) Runs() ([]domain.RunID, error) {
 	}
 	var ids []domain.RunID
 	for _, e := range entries {
-		if e.IsDir() && checkID("run ID", e.Name()) == nil {
+		if e.IsDir() && idcheck.Check("run ID", e.Name()) == nil {
 			ids = append(ids, domain.RunID(e.Name()))
 		}
 	}
@@ -210,28 +176,11 @@ func (s *Store) Runs() ([]domain.RunID, error) {
 }
 
 // LoadRun returns the run and its activity in Seq order. A directory with no run.json
-// gives an error that wraps ErrInterrupted.
+// gives an error that wraps ErrInterrupted, and a missing directory one that wraps fs.ErrNotExist.
 func (s *Store) LoadRun(id domain.RunID) (domain.Run, []domain.Activity, error) {
-	dir, err := s.runDir(id)
+	run, dir, err := s.readRunFile(id)
 	if err != nil {
-		return domain.Run{}, nil, fmt.Errorf("load run: %w", err)
-	}
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		return domain.Run{}, nil, fmt.Errorf("run %s was not found in %s", id, filepath.Dir(dir))
-	}
-	data, err := os.ReadFile(filepath.Join(dir, runFile))
-	if errors.Is(err, fs.ErrNotExist) {
-		return domain.Run{}, nil, fmt.Errorf("run %s: %w", id, ErrInterrupted)
-	}
-	if err != nil {
-		return domain.Run{}, nil, fmt.Errorf("read %s of run %s: %w", runFile, id, err)
-	}
-	var run domain.Run
-	if err := decodeStrict(data, &run); err != nil {
-		return domain.Run{}, nil, fmt.Errorf("parse %s of run %s: %w", runFile, id, err)
-	}
-	if run.Schema != schema {
-		return domain.Run{}, nil, fmt.Errorf("%s of run %s has schema %d, want %d", runFile, id, run.Schema, schema)
+		return domain.Run{}, nil, err
 	}
 	acts, err := readActivity(filepath.Join(dir, activityFile))
 	if err != nil {
@@ -240,8 +189,41 @@ func (s *Store) LoadRun(id domain.RunID) (domain.Run, []domain.Activity, error) 
 	return run, acts, nil
 }
 
+// readRunFile reads and checks run.json only, and returns the run directory too.
+func (s *Store) readRunFile(id domain.RunID) (domain.Run, string, error) {
+	dir, err := s.runDir(id)
+	if err != nil {
+		return domain.Run{}, "", fmt.Errorf("load run: %w", err)
+	}
+	info, err := os.Stat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return domain.Run{}, "", fmt.Errorf("run %s was not found in %s: %w", id, filepath.Dir(dir), err)
+	}
+	if err != nil {
+		return domain.Run{}, "", fmt.Errorf("load run %s: %w", id, err)
+	}
+	if !info.IsDir() {
+		return domain.Run{}, "", fmt.Errorf("run %s: %s is not a directory", id, dir)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, runFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return domain.Run{}, "", fmt.Errorf("run %s: %w", id, ErrInterrupted)
+	}
+	if err != nil {
+		return domain.Run{}, "", fmt.Errorf("read %s of run %s: %w", runFile, id, err)
+	}
+	var run domain.Run
+	if err := decodeStrict(data, &run); err != nil {
+		return domain.Run{}, "", fmt.Errorf("parse %s of run %s: %w", runFile, id, err)
+	}
+	if run.Schema != schema {
+		return domain.Run{}, "", fmt.Errorf("%s of run %s has schema %d, want %d", runFile, id, run.Schema, schema)
+	}
+	return run, dir, nil
+}
+
 func decodeStrict(data []byte, v any) error {
-	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
 }

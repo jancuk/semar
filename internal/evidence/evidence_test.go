@@ -394,11 +394,13 @@ func TestUnsafeIDs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := r.WriteAction(action(1, id, "step")); err == nil {
-				t.Error("WriteAction accepted the scenario ID")
-			}
-			if _, err := r.WriteAction(action(1, "scenario", id)); err == nil {
-				t.Error("WriteAction accepted the step ID")
+			if id != "" { // an empty scenario or step is a valid action
+				if _, err := r.WriteAction(action(1, id, "step")); err == nil {
+					t.Error("WriteAction accepted the scenario ID")
+				}
+				if _, err := r.WriteAction(action(1, "scenario", id)); err == nil {
+					t.Error("WriteAction accepted the step ID")
+				}
 			}
 			if err := r.WriteFile(id, []byte("x")); err == nil && name != "slash" {
 				t.Error("WriteFile accepted it")

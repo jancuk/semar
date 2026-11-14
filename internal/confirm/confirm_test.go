@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -155,5 +156,43 @@ func TestGetRejectsACorruptRecord(t *testing.T) {
 	}
 	if _, _, err := l.Get("refund", "abc123"); err == nil {
 		t.Error("corrupt record accepted")
+	}
+}
+
+func TestConcurrentPutsKeepOneRecord(t *testing.T) {
+	t0 := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
+	for range 50 {
+		l := confirm.NewLocal(t.TempDir())
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		errs := make(chan error, 2)
+		for _, at := range []time.Time{t0, t0.Add(time.Hour)} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				errs <- l.Put(rec("alice", at))
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		first, _, err := l.Get("refund", "abc123")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// whichever put won, a later Put must not replace it
+		if err := l.Put(rec("alice", t0.Add(2*time.Hour))); err != nil {
+			t.Fatal(err)
+		}
+		again, _, err := l.Get("refund", "abc123")
+		if err != nil || !again.At.Equal(first.At) {
+			t.Fatalf("record changed from %v to %v (%v)", first.At, again.At, err)
+		}
 	}
 }
