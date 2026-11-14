@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Semar: after you deploy to UAT</title>
+<style>
+	:root {
+		--bg: #f6f5f1; --card: #ffffff; --ink: #1d1c1a; --muted: #66625a; --line: #d9d5cb; --term: #1b1b19; --term-ink: #e9e6de;
+		--you: #1f5b99; --you-bg: #e1edf9;
+		--code: #2f6f5e; --code-bg: #e3f1ec;
+		--agent: #8a4b12; --agent-bg: #f8ead8;
+		--fast: #5a3fa0; --fast-bg: #ebe5f8;
+		--link: #6b6558; --link-bg: #eceae3;
+		--stop: #a3312b; --stop-bg: #fbe6e4;
+	}
+	@media (prefers-color-scheme: dark) {
+		:root {
+			--bg: #161614; --card: #201f1c; --ink: #edeae3; --muted: #a39e93; --line: #3a3833; --term: #0e0e0d; --term-ink: #dedbd3;
+			--you: #8fc0f2; --you-bg: #1b2c3f;
+			--code: #7fd0b8; --code-bg: #1d332d;
+			--agent: #f0b577; --agent-bg: #3a2a18;
+			--fast: #b9a6f2; --fast-bg: #2a2440;
+			--link: #c2bcae; --link-bg: #2d2b27;
+			--stop: #f29a93; --stop-bg: #3d1f1d;
+		}
+	}
+	* { box-sizing: border-box; }
+	body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+	main { max-width: 880px; margin: 0 auto; padding: 28px 16px 56px; }
+	h1 { font-size: 26px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -0.01em; }
+	h2 { font-size: 18px; margin: 40px 0 6px; }
+	p.lead { color: var(--muted); margin: 0 0 20px; max-width: 64ch; }
+	p.sub { color: var(--muted); margin: 0 0 14px; max-width: 64ch; }
+	.chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+	.you { color: var(--you); background: var(--you-bg); }
+	.code { color: var(--code); background: var(--code-bg); }
+	.agent { color: var(--agent); background: var(--agent-bg); }
+	.fast { color: var(--fast); background: var(--fast-bg); }
+	.link { color: var(--link); background: var(--link-bg); }
+	.stop { color: var(--stop); background: var(--stop-bg); }
+	.legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
+
+	.ready { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+	.group { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+	.group h3 { margin: 0 0 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+	.group ul { margin: 0; padding: 0; list-style: none; }
+	.group li { padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
+	.group li:first-child { border-top: 0; padding-top: 0; }
+	.group li b { font-weight: 600; }
+	.group li span { display: block; color: var(--muted); font-size: 13px; }
+
+	ol.flow { list-style: none; margin: 0; padding: 0; }
+	ol.flow > li { position: relative; padding: 0 0 14px 46px; }
+	ol.flow > li::before { content: ""; position: absolute; left: 16px; top: 34px; bottom: -2px; width: 2px; background: var(--line); }
+	ol.flow > li:last-child::before { display: none; }
+	.num { position: absolute; left: 0; top: 2px; width: 34px; height: 34px; border-radius: 50%; background: var(--card); border: 2px solid var(--line); display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+	li.me .num { border-color: var(--you); color: var(--you); }
+	.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+	li.me .card { border-color: var(--you); }
+	.card h3 { margin: 0 0 4px; font-size: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+	.card p { margin: 0; color: var(--muted); }
+	.needs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+	.gate { margin-top: 8px; padding: 7px 10px; border-radius: 8px; font-size: 13.5px; background: var(--stop-bg); color: var(--stop); }
+	pre { margin: 10px 0 0; padding: 12px 14px; border-radius: 8px; background: var(--term); color: var(--term-ink); font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-x: auto; white-space: pre; }
+	pre .p { color: #8fd0b8; } pre .f { color: #f29a93; } pre .w { color: #f0c27a; } pre .d { color: #9a968c; }
+	.or { margin-top: 8px; font-size: 13.5px; color: var(--muted); }
+	.or code, p code, li code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--link-bg); padding: 1px 5px; border-radius: 4px; }
+
+	.trust { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+	.trust .group li { font-size: 13.5px; }
+	table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-size: 14px; margin-top: 10px; }
+	th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+	th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+	tr:last-child td { border-bottom: 0; }
+	.scroll { overflow-x: auto; }
+	footer { margin-top: 28px; color: var(--muted); font-size: 13px; }
+	@media (max-width: 700px) { .ready, .trust { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+	<h1>After you deploy to UAT</h1>
+	<p class="lead">One developer, one ticket, from "the build is on UAT" to "ready for sign-off". This page shows what must be ready, the command you type, what runs at each step, and how you check the result. Planned design, not built. Draft of 14 November 2026.</p>
+
+	<h2>1. What must be ready</h2>
+	<p class="sub">You set this up once per repository. <code>semar doctor</code> checks every item and says which surfaces the setup is ready for.</p>
+	<div class="ready">
+		<div class="group">
+			<h3>On your machine <span class="chip stop">Always</span></h3>
+			<ul>
+				<li><b>The Semar binary</b><span>Starts its own background daemon and its MCP server.</span></li>
+				<li><b>An agent harness, signed in</b><span>Claude Code or Codex CLI. One is enough.</span></li>
+				<li><b>Configuration and feature map</b><span><code>.semar/semar.yaml</code> and <code>.semar/map.yaml</code>, in the repository.</span></li>
+				<li><b>Read access to the git repositories</b><span>Every repository a ticket can touch.</span></li>
+			</ul>
+		</div>
+		<div class="group">
+			<h3>Models <span class="chip agent">2 needed, 3 optional</span></h3>
+			<ul>
+				<li><b>Planner</b><span>An agent on a strong model: Claude Code or Codex CLI. Needed.</span></li>
+				<li><b>Tester</b><span>An agent: the same, or DeepSeek through Claude Code. Needed.</span></li>
+				<li><b>Second reader</b><span>An agent from another vendor. Optional.</span></li>
+				<li><b>Pilot and screener</b><span>TypeSafe's fast model, with a TypeSafe key. Optional. Semar is slower without them.</span></li>
+			</ul>
+		</div>
+		<div class="group">
+			<h3>Connections <span class="chip link">Own adapter or MCP server</span></h3>
+			<ul>
+				<li><b>Jira</b><span>Read tickets, post one result comment. A token, or an Atlassian MCP server. Needed.</span></li>
+				<li><b>Grafana</b><span>Read logs and traces. A read-only token, or a Grafana MCP server. Recommended.</span></li>
+				<li><b>Data stores</b><span>Read-only accounts for PostgreSQL, MySQL, or Elasticsearch. Optional.</span></li>
+				<li><b>TestRail, documents, other MCP servers</b><span>Earlier testing and team knowledge. Optional. Every MCP tool is denied until you list it.</span></li>
+			</ul>
+		</div>
+		<div class="group">
+			<h3>UAT <span class="chip stop">Always</span></h3>
+			<ul>
+				<li><b>Hosts and a build probe per service</b><span>So Semar can tell which build is running.</span></li>
+				<li><b>What tests may change, and a deny list</b><span>For example: never a real payment, never a real SMS.</span></li>
+				<li><b>Test accounts and the OTP source</b><span>A second account and a lower role make the access checks possible.</span></li>
+				<li><b>Per surface</b><span>Web: Chrome and one <code>semar login</code>. Android: an emulator and the UAT build of the app.</span></li>
+			</ul>
+		</div>
+	</div>
+
+	<h2>2. Your path, step by step</h2>
+	<p class="sub">Blue steps are yours. Everything else runs without you.</p>
+	<div class="legend">
+		<span class="chip you">You or another person</span>
+		<span class="chip code">Code, no model</span>
+		<span class="chip agent">Agent</span>
+		<span class="chip fast">Fast decision model</span>
+		<span class="chip link">Connection it needs</span>
+	</div>
+
+	<ol class="flow">
+		<li class="me"><span class="num">A</span><div class="card">
+			<h3>You merge and deploy to UAT <span class="chip you">You</span></h3>
+			<p>As you do today. The merge request names its ticket, for example SHOP-482.</p>
+		</div></li>
+		<li class="me"><span class="num">B</span><div class="card">
+			<h3>You type one command <span class="chip you">You</span></h3>
+			<pre><span class="d">$</span> semar verify --ticket SHOP-482</pre>
+			<div class="or">Or <code>semar verify --new</code> to let Semar find every ticket with new commits on UAT. Or ask your own agent, with the Semar plugin. Or type nothing: in pipeline mode the job starts when the deploy finishes.</div>
+		</div></li>
+		<li><span class="num">1</span><div class="card">
+			<h3>Intake <span class="chip code">Code</span></h3>
+			<p>Finds the ticket, links it to its merge requests and commits, and compares with everything else that changed on UAT.</p>
+			<div class="needs"><span class="chip link">Jira</span><span class="chip link">Git repositories</span></div>
+			<div class="gate">No ticket, or no code change that anyone declared: stops here.</div>
+		</div></li>
+		<li><span class="num">2</span><div class="card">
+			<h3>Risk and depth <span class="chip code">Code</span></h3>
+			<p>Sets low, standard, or high from what changed. A payment or sign-in change gets more scenarios and every security probe.</p>
+			<div class="needs"><span class="chip link">Risk paths in the configuration</span><span class="chip fast">Screener, optional</span></div>
+		</div></li>
+		<li><span class="num">3</span><div class="card">
+			<h3>Plan <span class="chip agent">Planner</span></h3>
+			<p>Reads the ticket, the deployed code, and what was tested before. Writes the scenarios, the access checks, and the security plan. Code then checks every cited line, path, and ticket sentence.</p>
+			<div class="needs"><span class="chip agent">Claude Code or Codex CLI</span><span class="chip link">Feature map</span><span class="chip link">TestRail, documents, MCP knowledge tools</span><span class="chip agent">Second reader, optional</span></div>
+		</div></li>
+		<li><span class="num">4</span><div class="card">
+			<h3>Entry check <span class="chip code">Code</span></h3>
+			<p>The merge is in the running build and was not reverted. The accounts are signed in. A few stored scenarios replay to show that UAT is healthy.</p>
+			<div class="needs"><span class="chip link">Build probes</span><span class="chip link">Test accounts, OTP source</span></div>
+			<div class="gate">Not deployed, UAT unhealthy, or sign-in expired: blocked, and no model has been called.</div>
+		</div></li>
+		<li><span class="num">5</span><div class="card">
+			<h3>Test session <span class="chip agent">Tester</span> <span class="chip fast">Pilot</span></h3>
+			<p>The agent tests like a QA engineer: it works through each scenario, explores around the change, and tests security. Semar types every secret itself and records every action.</p>
+			<div class="needs"><span class="chip agent">Claude Code, Codex CLI, or DeepSeek</span><span class="chip fast">TypeSafe Jev, for pages and screens</span><span class="chip link">Semar's own MCP server</span><span class="chip link">UAT hosts</span><span class="chip link">Chrome profile, emulator</span></div>
+		</div></li>
+		<li><span class="num">6</span><div class="card">
+			<h3>Independent check <span class="chip code">Code</span></h3>
+			<p>Replays each script with no AI. Reads logs and traces for this run. Reads the data stores where a check needs them. Computes each result.</p>
+			<div class="needs"><span class="chip link">Grafana</span><span class="chip link">Read-only data store accounts</span></div>
+		</div></li>
+		<li><span class="num">7</span><div class="card">
+			<h3>Triage and report <span class="chip code">Code</span> <span class="chip fast">Screener</span></h3>
+			<p>A likely cause and a defect draft for each failure. Then the report, the activity log, the data left on UAT, and one readiness line.</p>
+			<div class="needs"><span class="chip link">Evidence store</span><span class="chip link">Jira comment</span></div>
+			<pre>Result     SHOP-482  <span class="p">3 passed</span>, <span class="f">1 failed</span>, <span class="w">2 inconclusive</span> (waiting for an answer)
+                     <span class="f">1 confirmed security finding</span>, 2 suspected
+Data       3 orders created, 2 cleaned up, 1 still on UAT (order 81240)
+Ready      SHOP-482  <span class="f">not ready for sign-off</span>: 1 failed, 1 finding, 2 questions
+Report     .semar/runs/r-20261114-0042/report.md</pre>
+		</div></li>
+		<li class="me"><span class="num">C</span><div class="card">
+			<h3>A reviewer answers the questions <span class="chip you">Not the author</span></h3>
+			<p>Only expected results that came from the code alone are asked, as yes or no. Semar then recomputes the result from the stored evidence. It does not test again.</p>
+			<pre><span class="d">SHOP-482, scenario 2</span>
+A refund equal to the order total is still accepted. Yes or no?
+<span class="d">Source: refund.go:42. The ticket does not say.</span></pre>
+		</div></li>
+		<li class="me"><span class="num">D</span><div class="card">
+			<h3>You fix what failed, and Semar tests again <span class="chip you">You</span> <span class="chip code">Code</span></h3>
+			<p>Each failure has a defect draft with the steps that ran. After your fix is on UAT, the same command replays the stored scripts with no AI.</p>
+			<pre><span class="d">$</span> semar defect SHOP-482-01      <span class="d"># steps, expected, actual, evidence</span>
+<span class="d">$</span> semar run --scenario SHOP-482-01   <span class="d"># reproduce it, no AI</span>
+<span class="d">$</span> semar verify --ticket SHOP-482     <span class="d"># after the fix is deployed</span></pre>
+		</div></li>
+		<li class="me"><span class="num">E</span><div class="card">
+			<h3>The release owner signs off <span class="chip you">Release owner</span></h3>
+			<p>When every ticket reads "ready for sign-off". The sign-off names its builds and stops applying when UAT changes.</p>
+			<pre>SHOP-482  <span class="p">ready for sign-off</span>   6 passed, security testing: no confirmed finding</pre>
+		</div></li>
+	</ol>
+
+	<h2>3. How you gain confidence in the result</h2>
+	<p class="sub">A green line from an AI tool deserves doubt. These are the checks you can make yourself.</p>
+	<div class="trust">
+		<div class="group">
+			<h3>One result</h3>
+			<ul>
+				<li><b>The source</b><span>Each expected result names where it came from: the ticket, a test case, a person, or the code.</span></li>
+				<li><b>The evidence</b><span>The recorded request and response, or the screenshot. The agent's words are never evidence.</span></li>
+				<li><b>The judge</b><span>Code computes the result. The agent cannot pass its own work.</span></li>
+				<li><b>The replay</b><span>The script runs again with no AI and must give the same result.</span></li>
+			</ul>
+		</div>
+		<div class="group">
+			<h3>One ticket</h3>
+			<ul>
+				<li><b>Two coverage tables</b><span>Each criterion of the ticket and each changed piece of code, with its scenarios or "none".</span></li>
+				<li><b>The second-look list</b><span>Uncovered changes, overlaps, and changes the ticket does not mention.</span></li>
+				<li><b>The activity log</b><span>Every action, and every record created, changed, or deleted on UAT.</span></li>
+				<li><b>The readiness line</b><span>What is open, and what was not tested.</span></li>
+			</ul>
+		</div>
+		<div class="group">
+			<h3>The tool itself</h3>
+			<ul>
+				<li><b>Shadow first</b><span>Run beside your current testing and compare, before anyone relies on it.</span></li>
+				<li><b>Mark a wrong result</b><span>False passes and false failures are counted per feature.</span></li>
+				<li><b>A random sample</b><span>Each release, code picks a few passes for a person to open.</span></li>
+				<li><b>Seeded defects</b><span>Each Semar release is run against an application with known defects.</span></li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="scroll">
+	<table>
+		<tr><th>Stage</th><th>Semar's result is</th><th>Your current testing</th><th>Move on when</th></tr>
+		<tr><td>1. Shadow</td><td>Advice</td><td>Continues for every ticket</td><td>30 tickets compared, no false pass, at most 1 false failure in 10</td></tr>
+		<tr><td>2. Assist</td><td>The first check, sampled by a person</td><td>High-risk tickets only</td><td>Two releases with no false pass</td></tr>
+		<tr><td>3. Rely</td><td>The check of record for low and standard risk</td><td>A person reviews high-risk evidence</td><td>A false pass sends the feature back to stage 2</td></tr>
+	</table>
+	</div>
+
+	<footer>A pass does not mean the requirement was understood, that untested behaviour works, or that the system is secure. Details: USER_SCENARIOS.md, WORKFLOW.md, TRD.md.</footer>
+</main>
+</body>
+</html>

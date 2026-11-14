@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Semar test workflow</title>
+<style>
+	:root {
+		--bg: #f6f5f1; --card: #ffffff; --ink: #1d1c1a; --muted: #66625a; --line: #d9d5cb;
+		--code: #2f6f5e; --code-bg: #e3f1ec;
+		--agent: #8a4b12; --agent-bg: #f8ead8;
+		--fast: #5a3fa0; --fast-bg: #ebe5f8;
+		--people: #1f5b99; --people-bg: #e1edf9;
+		--stop: #a3312b; --stop-bg: #fbe6e4;
+	}
+	@media (prefers-color-scheme: dark) {
+		:root {
+			--bg: #161614; --card: #201f1c; --ink: #edeae3; --muted: #a39e93; --line: #3a3833;
+			--code: #7fd0b8; --code-bg: #1d332d;
+			--agent: #f0b577; --agent-bg: #3a2a18;
+			--fast: #b9a6f2; --fast-bg: #2a2440;
+			--people: #8fc0f2; --people-bg: #1b2c3f;
+			--stop: #f29a93; --stop-bg: #3d1f1d;
+		}
+	}
+	* { box-sizing: border-box; }
+	body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+	main { max-width: 860px; margin: 0 auto; padding: 28px 16px 56px; }
+	h1 { font-size: 26px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -0.01em; }
+	h2 { font-size: 17px; margin: 36px 0 12px; }
+	p.lead { color: var(--muted); margin: 0 0 20px; max-width: 62ch; }
+	.legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; }
+	.chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+	.code { color: var(--code); background: var(--code-bg); }
+	.agent { color: var(--agent); background: var(--agent-bg); }
+	.fast { color: var(--fast); background: var(--fast-bg); }
+	.people { color: var(--people); background: var(--people-bg); }
+	.stop { color: var(--stop); background: var(--stop-bg); }
+	ol.flow { list-style: none; margin: 0; padding: 0; }
+	ol.flow > li { position: relative; padding: 0 0 14px 46px; }
+	ol.flow > li::before { content: ""; position: absolute; left: 16px; top: 34px; bottom: -2px; width: 2px; background: var(--line); }
+	ol.flow > li:last-child::before { display: none; }
+	.num { position: absolute; left: 0; top: 2px; width: 34px; height: 34px; border-radius: 50%; background: var(--card); border: 2px solid var(--line); display: grid; place-items: center; font-weight: 700; font-size: 14px; }
+	.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+	.card h3 { margin: 0 0 4px; font-size: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+	.card p { margin: 0; color: var(--muted); }
+	.card p.out { margin-top: 6px; color: var(--ink); font-size: 14px; }
+	.card p.out b { font-weight: 600; }
+	.gate { margin-top: 8px; padding: 7px 10px; border-radius: 8px; font-size: 13.5px; background: var(--stop-bg); color: var(--stop); }
+	.loop { margin-top: 8px; padding: 7px 10px; border-radius: 8px; font-size: 13.5px; border: 1px dashed var(--line); color: var(--muted); }
+	.passes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+	.pass { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13.5px; }
+	.pass b { display: block; font-size: 14px; }
+	.pass span { color: var(--muted); }
+	table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-size: 14px; }
+	th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+	th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+	tr:last-child td { border-bottom: 0; }
+	.scroll { overflow-x: auto; }
+	footer { margin-top: 28px; color: var(--muted); font-size: 13px; }
+	@media (max-width: 620px) { .passes { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+	<h1>Semar test workflow</h1>
+	<p class="lead">One ticket, from "deployed on UAT" to "ready for sign-off". The agent tests like a QA engineer. Code checks the result without the agent. Planned design, not built. Draft of 14 November 2026.</p>
+
+	<div class="legend">
+		<span class="chip code">Code, no model</span>
+		<span class="chip agent">Agent: planner or tester</span>
+		<span class="chip fast">Fast decision model</span>
+		<span class="chip people">People</span>
+		<span class="chip stop">Stops here</span>
+	</div>
+
+	<ol class="flow">
+		<li><span class="num">1</span><div class="card">
+			<h3>Intake <span class="chip code">Code</span></h3>
+			<p>Link each ticket to its merge requests, commits, and changed pieces. Compare with everything that changed on UAT.</p>
+			<p class="out"><b>Out:</b> the change set of each ticket, and the build view.</p>
+			<div class="gate">A change with no ticket, or a ticket with no declared change, stops here.</div>
+		</div></li>
+		<li><span class="num">2</span><div class="card">
+			<h3>Risk and depth <span class="chip code">Code</span> <span class="chip fast">Screener</span></h3>
+			<p>Set a risk level from the paths, the kinds of change, and overlaps. The level sets the number of scenarios, the explore time, and the security level.</p>
+			<p class="out"><b>Out:</b> low, standard, or high. The planner can raise it and cannot lower it.</p>
+		</div></li>
+		<li><span class="num">3</span><div class="card">
+			<h3>Plan <span class="chip agent">Planner</span> <span class="chip code">Code validates</span></h3>
+			<p>Read the ticket, the deployed code, the feature map, and earlier testing. Design functional scenarios, access checks, and the security plan with the feature's "must never" rules.</p>
+			<p class="out"><b>Out:</b> the test plan, with coverage of the ticket's criteria and of the changed code. An optional second reader from another vendor proposes missing cases.</p>
+		</div></li>
+		<li><span class="num">4</span><div class="card">
+			<h3>Confirm intent <span class="chip people">Reviewer, not the author</span></h3>
+			<p>Answer yes or no questions about expected results that came only from the code, and about proposed rules.</p>
+			<div class="loop">Nothing waits for the answers. An open question keeps a scenario inconclusive until it is answered.</div>
+		</div></li>
+		<li><span class="num">5</span><div class="card">
+			<h3>Entry check <span class="chip code">Code</span></h3>
+			<p>The change is in the running build on every replica and was not reverted. The accounts are signed in. A few stored scenarios replay as a health check.</p>
+			<div class="gate">UAT unhealthy, not deployed, or sign-in expired: blocked, and no model is called.</div>
+		</div></li>
+		<li><span class="num">6</span><div class="card">
+			<h3>Test session <span class="chip agent">Tester</span> <span class="chip fast">Pilot</span></h3>
+			<p>The agent works as a QA engineer through Semar's tools. Every action is recorded in the activity log.</p>
+			<div class="passes">
+				<div class="pass"><b>Scenarios</b><span>Each planned scenario, by hand, on the API, the web, and Android.</span></div>
+				<div class="pass"><b>Explore</b><span>A time-boxed session around the change.</span></div>
+				<div class="pass"><b>Security</b><span>Code sends variations of recorded requests. The tester probes business rules.</span></div>
+			</div>
+			<p class="out"><b>Out:</b> recorded actions, a script per scenario, findings, and QA notes.</p>
+		</div></li>
+		<li><span class="num">7</span><div class="card">
+			<h3>Independent check <span class="chip code">Code</span></h3>
+			<p>Replay each script with no model. Read logs and traces in Grafana. Read the data stores, read-only. Compute each outcome. Confirm a security finding only when the recorded actions meet its condition.</p>
+			<p class="out"><b>Out:</b> passed, failed, blocked, inconclusive, not run, or stale, with every reason.</p>
+		</div></li>
+		<li><span class="num">8</span><div class="card">
+			<h3>Triage <span class="chip fast">Screener</span> <span class="chip people">Developer or lead</span></h3>
+			<p>A likely cause for each failure, duplicate findings merged, and a defect draft with steps to reproduce. A person decides each suspected finding.</p>
+		</div></li>
+		<li><span class="num">9</span><div class="card">
+			<h3>Report and readiness <span class="chip code">Code</span></h3>
+			<p>Publish the report, the activity log, the list of data touched on UAT, and one comment on the Jira ticket. Compute the readiness line from the exit criteria.</p>
+			<p class="out"><b>Out:</b> "ready for sign-off" or "not ready", with every open item.</p>
+		</div></li>
+		<li><span class="num">10</span><div class="card">
+			<h3>Fix and re-test <span class="chip people">Developer</span> <span class="chip code">Code</span></h3>
+			<p>The developer fixes and deploys. The stored scripts replay on the new build with no model.</p>
+			<div class="loop">Back to step 5. The agent is called only when a script no longer fits.</div>
+		</div></li>
+		<li><span class="num">11</span><div class="card">
+			<h3>Release <span class="chip code">Code</span> <span class="chip people">Release owner</span></h3>
+			<p>A regression run replays the suite. A person signs off. The sign-off stops applying when UAT changes. The roll-up shows every ticket of the release.</p>
+		</div></li>
+		<li><span class="num">12</span><div class="card">
+			<h3>Learn <span class="chip code">Code</span> <span class="chip people">Approves</span></h3>
+			<p>Scenarios and fixed security findings join the regression suite. Confirmed "must never" rules stay with their feature. Notes and map changes need a person's approval.</p>
+		</div></li>
+	</ol>
+
+	<h2>Which model does which job</h2>
+	<div class="scroll">
+	<table>
+		<tr><th>Role</th><th>Job</th><th>Fits</th><th>Without it</th></tr>
+		<tr><td><span class="chip agent">Planner</span></td><td>Reads the ticket and the code, writes the plan</td><td>Claude Code (Anthropic) or Codex CLI (OpenAI)</td><td>Required</td></tr>
+		<tr><td><span class="chip agent">Tester</span></td><td>Scenarios, exploring, business-rule probes</td><td>The same, or DeepSeek at lower cost</td><td>Required</td></tr>
+		<tr><td><span class="chip agent">Second reader</span></td><td>Proposes scenarios the plan missed</td><td>A different vendor than the planner</td><td>Skipped</td></tr>
+		<tr><td><span class="chip fast">Pilot</span></td><td>Picks the next click or tap for a sub-goal</td><td>TypeSafe Jev</td><td>The tester acts step by step</td></tr>
+		<tr><td><span class="chip fast">Screener</span></td><td>Ranks odd responses, suggests a likely cause, merges findings</td><td>TypeSafe Jev</td><td>Code rules and the tester</td></tr>
+	</table>
+	</div>
+
+	<h2>Rules that hold in every step</h2>
+	<div class="scroll">
+	<table>
+		<tr><td>The agent decides what to try. Code computes every outcome.</td></tr>
+		<tr><td>A fast model gives hints and rankings. It never sets an outcome.</td></tr>
+		<tr><td>Changes to UAT go through the application, as a test account. Data stores are read-only.</td></tr>
+		<tr><td>The agent never sees a password, a token, or an OTP.</td></tr>
+		<tr><td>Every action is in the activity log, written by the recorder.</td></tr>
+		<tr><td>The report says what was tested and what was not. It never says "secure".</td></tr>
+	</table>
+	</div>
+
+	<footer>Details: WORKFLOW.md for the phases, TRD.md for each mechanism, PRD.md for the requirements.</footer>
+</main>
+</body>
+</html>
