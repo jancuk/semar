@@ -1,0 +1,54 @@
+# Semar report {{ .RunID }}
+
+{{ if .Interrupted -}}
+> This run did not finish: no end time was recorded. Scenarios without a result are missing from this report.
+
+{{ end -}}
+{{ if .Environment }}- Environment: {{ .Environment }}
+{{ end -}}
+- Started: {{ .Started }}
+- Ended: {{ .Ended }}
+- Builds at the start: {{ .BuildsStart }}
+- Builds at the end: {{ .BuildsEnd }}
+- Outcomes: {{ .Counts }}
+
+{{ if not .Attention }}{{ if not .Passed }}No scenario has a result in this run.
+
+{{ end }}{{ end -}}
+{{ range .Attention -}}
+### {{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}
+
+Outcome: **{{ .Outcome }}**
+
+{{ range .Reasons -}}
+- Reason: {{ .Text }}{{ if .Step }} (step {{ .Step }}){{ end }}
+{{ end }}
+{{ range .Checks -}}
+- Check {{ .Label }}: {{ .State }}
+  - Expected: {{ .Expected }}
+  - Source: {{ .Source }}{{ if .Cite }}, cite: {{ .Cite }}{{ end }}
+  - Observed: {{ .Observed }}
+{{ if .Detail }}  - Detail: {{ .Detail }}
+{{ end }}{{ end }}{{ if .Checks }}
+{{ end }}Reproduce: semar run --scenario {{ .ID }}
+
+{{ end -}}
+{{ if .Passed -}}
+<details>
+<summary>Passed ({{ len .Passed }})</summary>
+
+{{ range .Passed -}}
+- {{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}
+{{ end }}
+</details>
+
+{{ end -}}
+## Data touched on UAT
+
+{{ if .Ledger -}}
+{{ range .Ledger -}}
+- {{ .Verb }} {{ .Object }}{{ if .Scenario }}, by {{ .Scenario }}{{ if .Step }} step {{ .Step }}{{ end }}{{ end }}: {{ .Status }}
+{{ end -}}
+{{ else -}}
+Nothing was written in the test environment.
+{{ end -}}

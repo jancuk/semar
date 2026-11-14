@@ -1,0 +1,6 @@
+SHOP-482-01  failed        refund-too-much: expected 422, got 201
+SHOP-482-03  blocked       setup step failed: order was not created
+SHOP-482-02  inconclusive  a check could not be evaluated
+SHOP-482-04  passed
+SHOP-482-05  passed
+failed 1, blocked 1, inconclusive 1, stale 0, not_run 0, passed 2
