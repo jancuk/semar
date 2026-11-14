@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"encoding/json"
 	"time"
 )
 
@@ -67,13 +66,13 @@ type HTTPRequest struct {
 	URL          string              `json:"url"`
 	PathTemplate string              `json:"pathTemplate"`
 	Headers      map[string][]string `json:"headers"`
-	Body         json.RawMessage     `json:"body,omitempty"`
+	Body         Body                `json:"body,omitempty"`
 }
 
 type HTTPResponse struct {
 	Status    int                 `json:"status"`
 	Headers   map[string][]string `json:"headers"`
-	Body      []byte              `json:"body,omitempty"`
+	Body      Body                `json:"body,omitempty"`
 	Truncated bool                `json:"truncated,omitempty"`
 }
 

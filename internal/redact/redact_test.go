@@ -42,7 +42,7 @@ func sampleAction() domain.Action {
 				"X-Api-Key":           {"k"},
 				"Accept":              {"application/json"},
 			},
-			Body: json.RawMessage(`{"password":"s3cret-value","n":1}`),
+			Body: domain.Body(`{"password":"s3cret-value","n":1}`),
 		},
 		Response: &domain.HTTPResponse{
 			Headers: map[string][]string{"Set-Cookie": {"sid=1"}, "Location": {"/next?t=s3cret%2Dvalue"}},
