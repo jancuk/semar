@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -41,15 +42,35 @@ func Open(root string) (*Store, error) {
 		return nil, errors.New("open evidence store: the root is empty")
 	}
 	for _, dir := range []string{root, filepath.Join(root, "runs"), filepath.Join(root, "store")} {
-		if err := os.MkdirAll(dir, atomicfile.DirMode); err != nil {
-			return nil, fmt.Errorf("open evidence store %s: %w", root, err)
-		}
-		// MkdirAll leaves the mode of a directory that exists, so set it
-		if err := os.Chmod(dir, atomicfile.DirMode); err != nil {
+		if err := ensureDir(dir); err != nil {
 			return nil, fmt.Errorf("open evidence store %s: %w", root, err)
 		}
 	}
 	return &Store{root: root}, nil
+}
+
+// ensureDir creates dir, or accepts it only when it is a real directory, and sets its mode.
+// A repository can commit a link here, and following it would write evidence elsewhere
+// and change the mode of the link's target.
+func ensureDir(dir string) error {
+	info, err := os.Lstat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		if err := os.MkdirAll(dir, atomicfile.DirMode); err != nil {
+			return err
+		}
+		info, err = os.Lstat(dir)
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symbolic link, and Semar keeps evidence only in a real directory: replace it with a directory", dir)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory: remove it so that Semar can create the directory", dir)
+	}
+	// MkdirAll leaves the mode of a directory that exists, so set it
+	return os.Chmod(dir, atomicfile.DirMode)
 }
 
 func (s *Store) Root() string { return s.root }
@@ -141,18 +162,56 @@ func (s *Store) RedactKey() ([]byte, error) {
 	return readKey(p)
 }
 
+// readKey refuses a key file that is a link, is not a regular file, or that others can read.
+// It never repairs one: a key that others could read is no longer secret.
 func readKey(p string) ([]byte, error) {
-	key, err := os.ReadFile(p)
+	info, err := os.Lstat(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, err
-		}
+		return nil, fmt.Errorf("read redaction key %s: %w", p, err)
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return nil, fmt.Errorf("redaction key %s is a symbolic link: %s", p, deleteKeyHint)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("redaction key %s is not a regular file: %s", p, deleteKeyHint)
+	}
+	if !ownerOnly(info.Mode()) {
+		return nil, fmt.Errorf("redaction key %s has mode %04o, want 0600, so others could read it: %s", p, info.Mode().Perm(), deleteKeyHint)
+	}
+	if info.Size() != redactKeySize {
+		return nil, fmt.Errorf("redaction key %s holds %d bytes, want %d: %s", p, info.Size(), redactKeySize, deleteKeyHint)
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, fmt.Errorf("read redaction key %s: %w", p, err)
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("read redaction key %s: %w", p, err)
+	}
+	if !os.SameFile(info, opened) {
+		return nil, fmt.Errorf("redaction key %s changed while it was read", p)
+	}
+	key, err := io.ReadAll(io.LimitReader(f, redactKeySize+1))
+	if err != nil {
 		return nil, fmt.Errorf("read redaction key %s: %w", p, err)
 	}
 	if len(key) != redactKeySize {
-		return nil, fmt.Errorf("redaction key %s holds %d bytes, want %d", p, len(key), redactKeySize)
+		return nil, fmt.Errorf("redaction key %s holds %d bytes, want %d: %s", p, len(key), redactKeySize, deleteKeyHint)
 	}
 	return key, nil
+}
+
+const deleteKeyHint = "delete it, and Semar makes a new key on the next run"
+
+// ownerOnly reports whether only the owner can read and write a file of this mode.
+// Windows has no permission bits for the group and others, so there it is always true.
+func ownerOnly(m fs.FileMode) bool {
+	return runtime.GOOS == "windows" || m.Perm() == atomicfile.FileMode
 }
 
 // Runs lists complete and interrupted runs, newest first by directory name.
