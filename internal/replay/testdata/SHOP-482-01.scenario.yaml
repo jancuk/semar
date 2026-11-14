@@ -1,0 +1,30 @@
+apiVersion: semar/v1
+kind: Scenario
+id: SHOP-482-01
+title: Refund above the order total is rejected
+ticket: SHOP-482
+intent: >
+  Before: a refund larger than the order total was accepted.
+  Now: the API rejects it with 422 and leaves the order unchanged.
+surface: api
+authProfile: support-agent
+steps:
+  - id: create-order
+    setup: true
+    action: Create a paid order for 100000
+    hint: { method: POST, path: /v1/orders }
+  - id: refund-too-much
+    action: Request a refund of 150000 for that order
+    hint: { method: POST, path: "/v1/orders/{id}/refunds" }
+    expect:
+      - check: { status: 422 }
+        source: ticket
+        cite: "SHOP-482: a refund above the order total must be rejected"
+      - { check: { jsonpath: "$.error.code", equals: REFUND_EXCEEDS_TOTAL }, source: diff }
+  - id: order-unchanged
+    action: Read the order again
+    hint: { method: GET, path: "/v1/orders/{id}" }
+    expect:
+      - check: { jsonpath: "$.data.refunded_total", equals: 0 }
+        source: ticket
+        cite: "SHOP-482: the order must stay unchanged"
