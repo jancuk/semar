@@ -3,10 +3,12 @@ package cli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -56,11 +58,11 @@ func confirmScenario(ctx context.Context, stdout, stderr io.Writer, o options, f
 			if !confirm.Needs(e.Source, cfg.Policy.Trust.Confirm) {
 				continue
 			}
-			line := fmt.Sprintf("step %s: %s (source %s", st.ID, check.Describe(e.Check), e.Source)
+			line := fmt.Sprintf("step %s: %s (source %s", st.ID, check.DescribeFull(e.Check), e.Source)
 			if e.Cite != "" {
 				line += ", cite: " + e.Cite
 			}
-			needed = append(needed, line+")")
+			needed = append(needed, terminalSafe(line+")"))
 			sources = append(sources, e.Source)
 		}
 	}
@@ -88,6 +90,9 @@ func confirmScenario(ctx context.Context, stdout, stderr io.Writer, o options, f
 	name, err := o.User()
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(name) == "" {
+		return errors.New("the confirmer has no name; set git config user.name")
 	}
 	store, err := evidence.Open(semarDir(f.dir))
 	if err != nil {
@@ -122,4 +127,25 @@ func readAnswer(ctx context.Context, in io.Reader) string {
 	case <-ctx.Done():
 		return ""
 	}
+}
+
+// terminalSafe makes text from a scenario file safe to print for a person who is about to confirm it.
+// Format characters (category Cf, such as the bidi controls) are removed, because they reorder or hide text.
+// A control character other than newline and tab, and the line and paragraph separators, show as an escape such as \x1b.
+func terminalSafe(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case unicode.Is(unicode.Cf, r):
+		case r == '\n' || r == '\t':
+			b.WriteRune(r)
+		case r == '\u2028' || r == '\u2029':
+			fmt.Fprintf(&b, `\u%04x`, r)
+		case unicode.IsControl(r):
+			fmt.Fprintf(&b, `\x%02x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

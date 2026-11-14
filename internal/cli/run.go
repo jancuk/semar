@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"path/filepath"
 	"slices"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -97,16 +99,25 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 	for _, sc := range scenarios {
 		byID[sc.ID] = sc
 	}
-	var md bytes.Buffer
-	if err := report.Markdown(&md, report.Data{Run: record, Scenarios: byID, Activity: acts}); err != nil {
-		return err
+	writeReport := func(rec domain.Run) error {
+		var md bytes.Buffer
+		if err := report.Markdown(&md, report.Data{Run: rec, Scenarios: byID, Activity: acts}); err != nil {
+			return err
+		}
+		return r.run.WriteFile(reportFile, md.Bytes())
 	}
-	if err := r.run.WriteFile(reportFile, md.Bytes()); err != nil {
+	if err := writeReport(record); err != nil {
 		return err
 	}
 	// An interrupted run keeps no run.json, so that it loads as interrupted.
 	if !interrupted {
 		if err := r.run.Close(record); err != nil {
+			// The report above says the run finished. Without a run.json it did not, so say so.
+			unfinished := record
+			unfinished.EndedAt = time.Time{}
+			if werr := writeReport(unfinished); werr != nil {
+				return errors.Join(err, fmt.Errorf("rewrite %s as unfinished: %w", reportFile, werr))
+			}
 			return err
 		}
 	}
@@ -162,6 +173,8 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 	if err != nil {
 		return nil, err
 	}
+	// A session value is a secret even when it has no placeholder, so the redactor gets every one.
+	known := sessionSecrets(sessions)
 
 	store, err := evidence.Open(semarDir(repo))
 	if err != nil {
@@ -171,7 +184,7 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 	if err != nil {
 		return nil, err
 	}
-	red, err := redact.New(cfg.Redact, secrets.Loaded, key)
+	red, err := redact.New(cfg.Redact, func() []string { return append(secrets.Loaded(), known...) }, key)
 	if err != nil {
 		return nil, fmt.Errorf("semar.yaml: %w", err)
 	}
@@ -228,6 +241,20 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 }
 
 type session struct{ header, value string }
+
+// sessionSecrets lists what the redactor must hide of each session value: the whole value and, when it
+// has a scheme such as "Bearer ", the part after the first space, so that a response that echoes only the token is hidden too.
+func sessionSecrets(sessions map[string]session) []string {
+	var out []string
+	for _, name := range slices.Sorted(maps.Keys(sessions)) {
+		v := sessions[name].value
+		out = append(out, v)
+		if _, rest, ok := strings.Cut(v, " "); ok {
+			out = append(out, rest)
+		}
+	}
+	return slices.DeleteFunc(out, func(v string) bool { return v == "" })
+}
 
 // loadSessions resolves every secret of each auth profile the scenarios use, so the
 // redactor knows all of them. Its errors name a reference, never a value.

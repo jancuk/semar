@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -22,7 +23,7 @@ func newScriptCommand() *cobra.Command {
 		Short: "Check a script against its scenario and store it",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return addScript(cmd.OutOrStdout(), cmd.ErrOrStderr(), dir, args[0])
+			return addScript(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), dir, args[0])
 		},
 	}
 	addDirFlag(add, &dir)
@@ -31,7 +32,10 @@ func newScriptCommand() *cobra.Command {
 }
 
 // addScript binds a script that carries no hash to its scenario's current expected results.
-func addScript(stdout, stderr io.Writer, repo, file string) error {
+func addScript(ctx context.Context, stdout, stderr io.Writer, repo, file string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("script add: %w", err)
+	}
 	s, err := script.Load(file)
 	if err != nil {
 		return err

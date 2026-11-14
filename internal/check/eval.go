@@ -64,12 +64,18 @@ func Eval(c domain.Check, a domain.Action) (res Result) {
 }
 
 // Describe is the expected value of a check as Eval reports it, or why the check is malformed.
+// It cuts a long value; DescribeFull does not.
 func Describe(c domain.Check) string {
+	return short(DescribeFull(c))
+}
+
+// DescribeFull is Describe without the cut, for a person who must see the whole value before confirming it.
+func DescribeFull(c domain.Check) string {
 	ops := operators(c)
 	if problem := malformed(c, ops); problem != "" {
 		return "malformed check: " + problem
 	}
-	return short(describe(c, ops))
+	return describe(c, ops)
 }
 
 func malformed(c domain.Check, ops []string) string {

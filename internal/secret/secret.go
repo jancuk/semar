@@ -66,11 +66,23 @@ func (e *Env) Loaded() []string {
 
 var placeholder = regexp.MustCompile(`\{\{secret\.([^{}]*)\}\}`)
 
-// Expand replaces each {{secret.NAME}} in text with values[NAME]. Its errors name
-// the placeholder and never hold a value.
+// maxQuoted bounds the configuration text an error quotes.
+const maxQuoted = 40
+
+// Expand replaces each {{secret.NAME}} in text with values[NAME]. Text that only looks like
+// a placeholder, such as {{ secret.NAME }} or {{Secret.NAME}}, is refused instead of being
+// sent as written. Its errors quote configuration text and never hold a value.
 func Expand(text string, values map[string]string) (string, error) {
-	if strings.Contains(placeholder.ReplaceAllString(text, ""), "{{secret.") {
-		return "", errors.New("a {{secret.NAME}} placeholder is not closed")
+	if rest := placeholder.ReplaceAllString(text, ""); strings.Contains(rest, "{{") {
+		_, stray, _ := strings.Cut(rest, "{{")
+		stray = "{{" + stray
+		if end := strings.Index(stray, "}}"); end >= 0 {
+			stray = stray[:end+2]
+		}
+		if r := []rune(stray); len(r) > maxQuoted {
+			stray = string(r[:maxQuoted]) + "..."
+		}
+		return "", fmt.Errorf("%s is not a placeholder: write {{secret.NAME}}, with that exact spelling and no spaces", stray)
 	}
 	var missing []string
 	out := placeholder.ReplaceAllStringFunc(text, func(m string) string {
@@ -81,7 +93,7 @@ func Expand(text string, values map[string]string) (string, error) {
 		return v
 	})
 	if len(missing) > 0 {
-		return "", fmt.Errorf("%s names no secret of the auth profile", strings.Join(missing, ", "))
+		return "", fmt.Errorf("%s names no secret of the auth profile; the accepted form is {{secret.NAME}}", strings.Join(missing, ", "))
 	}
 	return out, nil
 }

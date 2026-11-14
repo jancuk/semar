@@ -51,6 +51,9 @@ func TestEnvResolve(t *testing.T) {
 			if strings.Contains(err.Error(), "s3cret-value") || got != "" {
 				t.Fatal("an error must not hold a value")
 			}
+			if strings.HasPrefix(c.errText, "{{") && !strings.Contains(err.Error(), "{{secret.NAME}}") {
+				t.Errorf("err = %v, want it to show the accepted form {{secret.NAME}}", err)
+			}
 		})
 	}
 }
@@ -113,7 +116,7 @@ func TestEnvConcurrent(t *testing.T) {
 }
 
 func TestExpand(t *testing.T) {
-	values := map[string]string{"TOKEN": "s3cret-value", "USER": "alice"}
+	values := map[string]string{"TOKEN": "s3cret-value", "USER": "alice", "BRACES": "a{{b"}
 	cases := []struct {
 		name, text, want, errText string
 	}{
@@ -123,6 +126,11 @@ func TestExpand(t *testing.T) {
 		{"unknown name", "Bearer {{secret.NOPE}}", "", "{{secret.NOPE}}"},
 		{"empty name", "Bearer {{secret.}}", "", "{{secret.}}"},
 		{"not closed", "Bearer {{secret.TOKEN", "", "{{secret."},
+		{"spaces inside", "Bearer {{ secret.TOKEN }}", "", "{{ secret.TOKEN }}"},
+		{"wrong case", "Bearer {{Secret.TOKEN}}", "", "{{Secret.TOKEN}}"},
+		{"another word", "Bearer {{token}}", "", "{{token}}"},
+		{"a later stray one", "{{secret.USER}} {{ secret.TOKEN }}", "", "{{ secret.TOKEN }}"},
+		{"a value holding braces is not text", "{{secret.BRACES}}", "a{{b", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -138,6 +146,9 @@ func TestExpand(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), "s3cret-value") || got != "" {
 				t.Fatal("an error must not hold a value")
+			}
+			if strings.HasPrefix(c.errText, "{{") && !strings.Contains(err.Error(), "{{secret.NAME}}") {
+				t.Errorf("err = %v, want it to show the accepted form {{secret.NAME}}", err)
 			}
 		})
 	}

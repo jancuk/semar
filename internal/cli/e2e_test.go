@@ -3,6 +3,8 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -40,6 +43,8 @@ type repoOptions struct {
 	app     sampleapp.Options
 	wrap    func(http.Handler) http.Handler
 	offline bool // keep the committed address, where nothing listens
+	// session replaces the session value of the auth profile in semar.yaml.
+	session string
 }
 
 func newRepo(t *testing.T, o repoOptions) *repo {
@@ -56,6 +61,11 @@ func newRepo(t *testing.T, o repoOptions) *repo {
 		User:  func() (string, error) { return "tester", nil },
 		Stdin: strings.NewReader(""),
 	}
+	if o.session != "" {
+		r.rewriteConfig(t, func(s string) string {
+			return strings.Replace(s, `"Bearer {{secret.TOKEN}}"`, `"`+o.session+`"`, 1)
+		})
+	}
 	if o.offline {
 		return r
 	}
@@ -71,15 +81,24 @@ func newRepo(t *testing.T, o repoOptions) *repo {
 	if err != nil {
 		t.Fatal(err)
 	}
+	r.rewriteConfig(t, func(s string) string { return strings.ReplaceAll(s, "127.0.0.1:9", u.Host) })
+	return r
+}
+
+func (r *repo) rewriteConfig(t *testing.T, change func(string) string) {
+	t.Helper()
 	cfg := filepath.Join(r.dir, ".semar", "semar.yaml")
 	data, err := os.ReadFile(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cfg, []byte(strings.ReplaceAll(string(data), "127.0.0.1:9", u.Host)), 0o600); err != nil {
+	changed := change(string(data))
+	if changed == string(data) {
+		t.Fatal("the change to semar.yaml did not apply")
+	}
+	if err := os.WriteFile(cfg, []byte(changed), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return r
 }
 
 // copyTree copies the committed files and leaves out what a manual run may have written.
@@ -177,6 +196,69 @@ func exists(t *testing.T, p string) bool {
 	return err == nil
 }
 
+// forms are the ways a secret can reach a file or a stream: as written, in base64 (both
+// alphabets, with and without padding), and percent-encoded.
+func forms(secret string) []string {
+	b := []byte(secret)
+	return []string{
+		secret,
+		base64.StdEncoding.EncodeToString(b),
+		base64.RawStdEncoding.EncodeToString(b),
+		base64.URLEncoding.EncodeToString(b),
+		base64.RawURLEncoding.EncodeToString(b),
+		url.QueryEscape(secret),
+		url.PathEscape(secret),
+	}
+}
+
+// assertNoSecret fails when any file under .semar, except the listed ones below it, or any output
+// stream so far holds a secret in any of its forms. The scan needs a repo that ran something to be meaningful.
+func (r *repo) assertNoSecret(t *testing.T, secrets []string, skip ...string) {
+	t.Helper()
+	var needles []string
+	for _, s := range secrets {
+		needles = append(needles, forms(s)...)
+	}
+	root := r.path(".semar")
+	files := 0
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		if slices.Contains(skip, filepath.ToSlash(rel)) {
+			return nil
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		files++
+		for _, n := range needles {
+			if bytes.Contains(data, []byte(n)) {
+				t.Errorf("%s holds a secret as %q", p, n)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if files == 0 {
+		t.Error("the scan found no file under .semar")
+	}
+	for _, out := range r.output {
+		for _, n := range needles {
+			if strings.Contains(out, n) {
+				t.Errorf("an output stream holds a secret as %q:\n%s", n, out)
+			}
+		}
+	}
+}
+
 func contains(t *testing.T, what, got string, want ...string) {
 	t.Helper()
 	for _, w := range want {
@@ -223,29 +305,7 @@ func TestRunEndToEnd(t *testing.T) {
 	contains(t, "the refund line", lines[2], "create", "/refunds", "422")
 
 	// Review Focus: no secret reaches the disk or the terminal.
-	for _, root := range []string{r.path(".semar", "runs"), r.path(".semar", "store")} {
-		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return err
-			}
-			data, err := os.ReadFile(p)
-			if err != nil {
-				return err
-			}
-			if bytes.Contains(data, []byte(token)) {
-				t.Errorf("%s holds the session token", p)
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, out := range r.output {
-		if strings.Contains(out, token) {
-			t.Errorf("the output holds the session token:\n%s", out)
-		}
-	}
+	r.assertNoSecret(t, []string{token})
 }
 
 func TestRunFindsTheSeededDefect(t *testing.T) {
@@ -261,6 +321,7 @@ func TestRunFindsTheSeededDefect(t *testing.T) {
 	contains(t, "report.md", string(report),
 		"refund-too-much", "expected status 422", "observed status 201", "source ticket",
 		"Source: ticket, cite: SHOP-482: a refund above the order total must be rejected")
+	r.assertNoSecret(t, []string{token})
 }
 
 func TestRunWithNoScenario(t *testing.T) {
@@ -303,6 +364,7 @@ func TestRunWithNoScenario(t *testing.T) {
 func TestInterruptedRunIsVisible(t *testing.T) { // Review Focus 4
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	var refunds atomic.Int64
 	// The sample application delays only a refund it accepts, so the refund above the total must be accepted to be slow.
 	r := newRepo(t, repoOptions{
 		app: sampleapp.Options{
@@ -313,6 +375,7 @@ func TestInterruptedRunIsVisible(t *testing.T) { // Review Focus 4
 		wrap: func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				if strings.HasSuffix(req.URL.Path, "/refunds") {
+					refunds.Add(1) // counted before cancel, so that no scheduler can make the test read 0
 					cancel()
 				}
 				next.ServeHTTP(w, req)
@@ -337,10 +400,11 @@ func TestInterruptedRunIsVisible(t *testing.T) { // Review Focus 4
 	contains(t, "report.md", string(report), "This run did not finish")
 
 	act := r.must(t, cli.ExitOK, "activity", "latest")
-	contains(t, "activity", act.stdout, "the run was interrupted", "/refunds")
-	if n := r.app.Requests("POST", "/v1/orders/o-1/refunds"); n != 1 {
+	contains(t, "activity", act.stdout, "the run did not finish (it was interrupted or stopped by an error)", "/refunds")
+	if n := refunds.Load(); n != 1 {
 		t.Errorf("the refund was sent %d times, want 1", n)
 	}
+	r.assertNoSecret(t, []string{token})
 }
 
 func TestScriptAddRefusesAScriptThatDoesNotFit(t *testing.T) {
@@ -510,4 +574,192 @@ func TestActivityFilters(t *testing.T) {
 			r.must(t, cli.ExitError, args...)
 		})
 	}
+}
+
+func TestRepeatedScenarioRunsOnce(t *testing.T) {
+	r := newRepo(t, repoOptions{})
+	r.addScriptAndConfirm(t)
+
+	res := r.must(t, cli.ExitOK, "run", "--scenario", scenarioID, "--scenario", scenarioID)
+	if n := strings.Count(res.stdout, scenarioID+" "); n != 1 {
+		t.Errorf("the summary names the scenario %d times, want 1:\n%s", n, res.stdout)
+	}
+	data, err := os.ReadFile(filepath.Join(r.latestRun(t), "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var run domain.Run
+	if err := json.Unmarshal(data, &run); err != nil {
+		t.Fatal(err)
+	}
+	if len(run.Results) != 1 {
+		t.Errorf("run.json has %d results, want 1", len(run.Results))
+	}
+	if n := r.app.Requests("POST", "/v1/orders"); n != 2 { // the order and the refund
+		t.Errorf("%d writes reached the service, want 2", n)
+	}
+}
+
+func TestACloseThatFailsLeavesAReportThatSaysSo(t *testing.T) {
+	var r *repo
+	// A directory where run.json must go makes the close fail, as a full disk would.
+	failClose := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if err := os.MkdirAll(r.path(".semar", "runs", "r-test-0001", "run.json"), 0o700); err != nil {
+				t.Error(err)
+			}
+			next.ServeHTTP(w, req)
+		})
+	}
+	r = newRepo(t, repoOptions{wrap: failClose})
+	r.addScriptAndConfirm(t)
+
+	res := r.must(t, cli.ExitError, "run", "--scenario", scenarioID)
+	if strings.Contains(res.stdout, "passed") {
+		t.Errorf("the summary of a run that did not close says passed:\n%s", res.stdout)
+	}
+	report, err := os.ReadFile(filepath.Join(r.latestRun(t), "report.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, "report.md", string(report), "This run did not finish")
+	if strings.Contains(string(report), "Outcomes: 1 passed") {
+		t.Errorf("report.md of a run that did not close says it passed:\n%s", report)
+	}
+	r.assertNoSecret(t, []string{token})
+}
+
+func TestASessionValueWrittenInThePlaceIsRedacted(t *testing.T) {
+	const literal = "hardcoded-literal-9f3"
+	r := newRepo(t, repoOptions{
+		session: "Bearer " + literal,
+		// The service echoes the header in full and the token alone, in the body and in a header.
+		wrap: func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.URL.Path == "/version" {
+					next.ServeHTTP(w, req)
+					return
+				}
+				auth := req.Header.Get("Authorization")
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Echo", auth)
+				_ = json.NewEncoder(w).Encode(map[string]any{"echo": auth, "token": strings.TrimPrefix(auth, "Bearer ")})
+			})
+		},
+	})
+	r.addScriptAndConfirm(t)
+
+	r.must(t, cli.ExitUndecided, "run", "--scenario", scenarioID)
+	if dir := r.latestRun(t); !exists(t, filepath.Join(dir, "exchanges", scenarioID)) {
+		t.Fatal("the run recorded no exchange, so the scan below proves nothing")
+	}
+	r.assertNoSecret(t, []string{literal, "Bearer " + literal}, "semar.yaml")
+}
+
+func TestConfirmListsTheWholeOperandAndNothingHostile(t *testing.T) {
+	r := newRepo(t, repoOptions{offline: true})
+	scenarioFile := r.path(".semar", "scenarios", "SHOP-482", scenarioID+".yaml")
+	head, tail := strings.Repeat("A", 150), strings.Repeat("C", 150)
+	data, err := os.ReadFile(scenarioFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(string(data), "equals: REFUND_EXCEEDS_TOTAL", `equals: "`+head+`\u001b[31m\u202eB\u200b\t`+tail+`"`, 1)
+	if changed == string(data) {
+		t.Fatal("the change did not apply")
+	}
+	if err := os.WriteFile(scenarioFile, []byte(changed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.must(t, cli.ExitOK, "confirm", scenarioID, "--yes")
+	contains(t, "the listing", res.stdout, head+`\x1b[31mB`+"\t"+tail)
+	for _, hostile := range []string{"\x1b", "\u202e", "\u200b"} {
+		if strings.Contains(res.stdout, hostile) {
+			t.Errorf("the listing holds the character %+q", hostile)
+		}
+	}
+}
+
+func TestConfirmRefusesAnEmptyName(t *testing.T) {
+	for _, name := range []string{"", "  "} {
+		t.Run(fmt.Sprintf("%q", name), func(t *testing.T) {
+			r := newRepo(t, repoOptions{offline: true})
+			r.opts.User = func() (string, error) { return name, nil }
+			res := r.must(t, cli.ExitError, "confirm", scenarioID, "--yes")
+			contains(t, "stderr", res.stderr, "the confirmer has no name; set git config user.name")
+			if exists(t, r.path(".semar", "store")) {
+				t.Error("something was stored")
+			}
+		})
+	}
+}
+
+func TestScenarioFilesOtherThanRegularYAMLAreNotSkipped(t *testing.T) {
+	dir := func(r *repo) string { return r.path(".semar", "scenarios", "SHOP-482") }
+
+	t.Run("a symlinked scenario is an error that names it", func(t *testing.T) {
+		for _, ext := range []string{".yaml", ".yml"} {
+			r := newRepo(t, repoOptions{offline: true})
+			link := filepath.Join(dir(r), "LINK-1"+ext)
+			if err := os.Symlink(filepath.Join(dir(r), scenarioID+".yaml"), link); err != nil {
+				t.Skipf("no symlinks here: %v", err)
+			}
+			for _, args := range [][]string{{"run", "--all"}, {"confirm", scenarioID, "--yes"}} {
+				res := r.must(t, cli.ExitError, args...)
+				contains(t, "stderr", res.stderr, link)
+			}
+		}
+	})
+
+	t.Run("a .yml scenario is loaded like a .yaml one", func(t *testing.T) {
+		r := newRepo(t, repoOptions{offline: true})
+		if err := os.Rename(filepath.Join(dir(r), scenarioID+".yaml"), filepath.Join(dir(r), scenarioID+".yml")); err != nil {
+			t.Fatal(err)
+		}
+		res := r.must(t, cli.ExitOK, "confirm", scenarioID, "--yes")
+		contains(t, "stdout", res.stdout, "confirmed scenario "+scenarioID)
+	})
+
+	t.Run("the same ID in .yaml and .yml is a duplicate", func(t *testing.T) {
+		r := newRepo(t, repoOptions{offline: true})
+		yaml, yml := filepath.Join(dir(r), scenarioID+".yaml"), filepath.Join(dir(r), scenarioID+".yml")
+		data, err := os.ReadFile(yaml)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(yml, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		res := r.must(t, cli.ExitError, "run", "--all")
+		contains(t, "stderr", res.stderr, yaml, yml, "more than one file")
+	})
+}
+
+func TestCommandsStopWhenTheirContextIsDone(t *testing.T) {
+	r := newRepo(t, repoOptions{})
+	r.addScriptAndConfirm(t)
+	r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	t.Run("activity", func(t *testing.T) {
+		res := r.semar(t, ctx, "activity", "latest")
+		if res.code != cli.ExitError {
+			t.Errorf("exit %d, want %d; stdout %q", res.code, cli.ExitError, res.stdout)
+		}
+		contains(t, "stderr", res.stderr, "context canceled")
+	})
+
+	t.Run("script add", func(t *testing.T) {
+		fresh := newRepo(t, repoOptions{offline: true})
+		res := fresh.semar(t, ctx, "script", "add", fresh.scriptFile())
+		if res.code != cli.ExitError {
+			t.Errorf("exit %d, want %d; stdout %q", res.code, cli.ExitError, res.stdout)
+		}
+		if exists(t, fresh.path(".semar", "store")) {
+			t.Error("a script was stored")
+		}
+	})
 }

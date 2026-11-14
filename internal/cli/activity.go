@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -33,7 +34,7 @@ func newActivityCommand() *cobra.Command {
 		Short: "Print what a run did, in order",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return printActivity(cmd.OutOrStdout(), f, args[0])
+			return printActivity(cmd.Context(), cmd.OutOrStdout(), f, args[0])
 		},
 	}
 	cmd.Flags().BoolVar(&f.writes, "writes", false, "show only the actions that create, update, or delete")
@@ -43,7 +44,7 @@ func newActivityCommand() *cobra.Command {
 	return cmd
 }
 
-func printActivity(stdout io.Writer, f activityFlags, arg string) error {
+func printActivity(ctx context.Context, stdout io.Writer, f activityFlags, arg string) error {
 	filter := activity.Filter{WritesOnly: f.writes, Scenario: domain.ScenarioID(f.scenario), Pass: domain.Pass(f.pass)}
 	if f.scenario != "" {
 		if err := idcheck.Check("scenario ID", f.scenario); err != nil {
@@ -52,6 +53,9 @@ func printActivity(stdout io.Writer, f activityFlags, arg string) error {
 	}
 	if f.pass != "" && !slices.Contains(passes, filter.Pass) {
 		return fmt.Errorf("unknown pass %q: use setup, scenario, explore, security, or cleanup", f.pass)
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("activity: %w", err)
 	}
 	if err := requireSemarDir(f.dir); err != nil {
 		return err
@@ -81,7 +85,7 @@ func printActivity(stdout io.Writer, f activityFlags, arg string) error {
 		return err
 	}
 	if interrupted {
-		fmt.Fprintf(stdout, "run %s: the run was interrupted, so this activity may be incomplete and no hash covers it\n", id)
+		fmt.Fprintf(stdout, "run %s: the run did not finish (it was interrupted or stopped by an error), so this activity may be incomplete and no hash covers it\n", id)
 	}
 	return activity.Timeline(stdout, acts, filter)
 }

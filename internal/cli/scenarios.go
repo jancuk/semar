@@ -18,7 +18,8 @@ func semarDir(repo string) string { return filepath.Join(repo, ".semar") }
 
 func scenariosDir(repo string) string { return filepath.Join(semarDir(repo), "scenarios") }
 
-// scenarioFiles maps each scenario ID to its files: .semar/scenarios/**/<id>.yaml.
+// scenarioFiles maps each scenario ID to its files: .semar/scenarios/**/<id>.yaml or <id>.yml.
+// A .yaml or .yml entry that is not a regular file, such as a symlink, is an error and not skipped.
 func scenarioFiles(repo string) (map[domain.ScenarioID][]string, error) {
 	dir := scenariosDir(repo)
 	files := map[domain.ScenarioID][]string{}
@@ -26,10 +27,15 @@ func scenarioFiles(repo string) (map[domain.ScenarioID][]string, error) {
 		if err != nil {
 			return err
 		}
-		if d.Type().IsRegular() && filepath.Ext(p) == ".yaml" {
-			id := domain.ScenarioID(strings.TrimSuffix(d.Name(), ".yaml"))
-			files[id] = append(files[id], p)
+		ext := filepath.Ext(p)
+		if d.IsDir() || (ext != ".yaml" && ext != ".yml") {
+			return nil
 		}
+		if !d.Type().IsRegular() {
+			return fmt.Errorf("%s is not a regular file (%s), and a scenario file must be one", p, d.Type())
+		}
+		id := domain.ScenarioID(strings.TrimSuffix(d.Name(), ext))
+		files[id] = append(files[id], p)
 		return nil
 	})
 	if errors.Is(err, fs.ErrNotExist) {
@@ -50,7 +56,7 @@ func loadScenario(repo string, id domain.ScenarioID) (domain.Scenario, error) {
 		return domain.Scenario{}, err
 	}
 	if len(files[id]) == 0 {
-		return domain.Scenario{}, fmt.Errorf("scenario %s was not found: no file %s.yaml in %s", id, id, scenariosDir(repo))
+		return domain.Scenario{}, fmt.Errorf("scenario %s was not found: no file %s.yaml or %s.yml in %s", id, id, id, scenariosDir(repo))
 	}
 	return readScenario(id, files[id])
 }
