@@ -86,3 +86,14 @@ func TestExpectHash(t *testing.T) {
 		}
 	}
 }
+
+func TestExpectHashEncodingFailureGivesEmptyHash(t *testing.T) {
+	if got := domain.ExpectHash(base()); len(got) != 64 {
+		t.Fatalf("base hash length = %d, want 64", len(got))
+	}
+	s := base()
+	s.Steps[1].Expect[1].Check.Equals = make(chan int)
+	if got := domain.ExpectHash(s); got != "" {
+		t.Fatalf("ExpectHash with unencodable check = %q, want empty", got)
+	}
+}

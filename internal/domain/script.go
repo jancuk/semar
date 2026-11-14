@@ -10,9 +10,9 @@ type Script struct {
 }
 
 type ProviderRef struct {
-	Instance string `yaml:"instance"`
-	Model    string `yaml:"model"`
-	Harness  string `yaml:"harness"`
+	Instance string `yaml:"instance" json:"instance"`
+	Model    string `yaml:"model" json:"model"`
+	Harness  string `yaml:"harness" json:"harness"`
 }
 
 type ScriptStep struct {

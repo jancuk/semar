@@ -36,9 +36,9 @@ const (
 )
 
 type UseCase struct {
-	Pass     Pass
-	Scenario ScenarioID
-	Step     StepID
+	Pass     Pass       `json:"pass"`
+	Scenario ScenarioID `json:"scenario"`
+	Step     StepID     `json:"step"`
 }
 
 type Action struct {
@@ -92,4 +92,7 @@ type Activity struct {
 	Evidence string     `json:"evidence"` // path of the action file, relative to the run directory
 }
 
-type ObjectRef struct{ Type, ID string }
+type ObjectRef struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}

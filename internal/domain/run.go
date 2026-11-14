@@ -2,7 +2,11 @@ package domain
 
 import "time"
 
-type BuildRef struct{ Service, Commit, ConfigHash string }
+type BuildRef struct {
+	Service    string `json:"service"`
+	Commit     string `json:"commit"`
+	ConfigHash string `json:"configHash"`
+}
 
 type Reason struct {
 	Rule Outcome `json:"rule"` // which rule matched
