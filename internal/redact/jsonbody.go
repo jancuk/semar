@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/theory/jsonpath/spec"
 )
@@ -20,7 +21,10 @@ func (s *scrubber) body(b []byte) []byte {
 	}
 	cur := string(b)
 	for range maxRounds {
-		next := s.jsonOnce(cur)
+		next, ok := s.jsonOnce(cur)
+		if !ok {
+			break
+		}
 		if next == cur {
 			return []byte(cur)
 		}
@@ -32,13 +36,19 @@ func (s *scrubber) body(b []byte) []byte {
 	return []byte(`"` + s.r.Marker(string(b)) + `"`)
 }
 
-// jsonOnce replaces the values at the configured JSONPaths and redacts the
-// inside of every string, keys included. A last pass over the whole text
-// catches a secret that crosses a string's quotes or hides in its escapes; the
-// caller checks that the result is still JSON.
-func (s *scrubber) jsonOnce(t string) string {
-	sc := &jsonScanner{t: t}
+// jsonOnce replaces the values at the configured JSONPaths, redacts the inside
+// of every string, keys included, and turns a number or literal that holds a
+// secret into a marker string. A last pass over the whole text catches a
+// secret that crosses a string's quotes or hides in its escapes; the caller
+// checks that the result is still JSON. It reports false for a duplicate key
+// when JSONPaths are configured: the paths were resolved on a tree where the
+// last key wins, so a value under an earlier one could escape them.
+func (s *scrubber) jsonOnce(t string) (string, bool) {
+	sc := &jsonScanner{t: t, dupCheck: len(s.r.paths) > 0}
 	sc.value(s.selected(t))
+	if sc.dup {
+		return "", false
+	}
 	edits := sc.edits
 	for _, str := range sc.strings {
 		inner := t[str.start:str.end]
@@ -46,7 +56,13 @@ func (s *scrubber) jsonOnce(t string) string {
 			edits = append(edits, edit{str.start, str.end, out})
 		}
 	}
-	return s.redact(applyEdits(t, edits), sourceView, false)
+	for _, tok := range sc.scalars {
+		lit := t[tok.start:tok.end]
+		if len(s.secretSpans(sourceView(lit))) > 0 {
+			edits = append(edits, edit{tok.start, tok.end, `"` + s.r.Marker(lit) + `"`})
+		}
+	}
+	return s.redact(applyEdits(t, edits), sourceView, false), true
 }
 
 // A pathTrie holds the normalized paths that the configured JSONPaths select,
@@ -119,10 +135,10 @@ type edit struct {
 	text       string
 }
 
-// applyEdits keeps the outermost of nested edits, so a value at a JSONPath
-// wins over the strings inside it.
+// applyEdits keeps the outermost of nested edits, and the first of two on the
+// same span, so a value at a JSONPath wins over the strings inside it.
 func applyEdits(t string, edits []edit) string {
-	sort.Slice(edits, func(i, j int) bool {
+	sort.SliceStable(edits, func(i, j int) bool {
 		if edits[i].start != edits[j].start {
 			return edits[i].start < edits[j].start
 		}
@@ -145,12 +161,17 @@ func applyEdits(t string, edits []edit) string {
 type token struct{ start, end int }
 
 // jsonScanner reads a document that json.Valid accepted. It records the inside
-// of every string, keys included, and an edit for every selected value.
+// of every string, keys included, every number and literal, and an edit for
+// every selected value. With dupCheck set, it reports a key that repeats in
+// one object.
 type jsonScanner struct {
-	t       string
-	pos     int
-	strings []token
-	edits   []edit
+	t        string
+	pos      int
+	strings  []token
+	scalars  []token
+	edits    []edit
+	dupCheck bool
+	dup      bool
 }
 
 func (sc *jsonScanner) value(sel *pathTrie) {
@@ -159,13 +180,22 @@ func (sc *jsonScanner) value(sel *pathTrie) {
 	switch sc.t[sc.pos] {
 	case '{':
 		sc.pos++
+		var seen map[string]bool
 		for i := 0; !sc.end('}', i); i++ {
 			key := sc.str()
 			var child *pathTrie
-			if sel != nil && len(sel.names) > 0 {
-				var name string
-				_ = json.Unmarshal([]byte(sc.t[key.start-1:key.end+1]), &name) // decoded as the tree's keys are
-				child = sel.names[name]
+			if sc.dupCheck || sel != nil && len(sel.names) > 0 {
+				name := keyName(sc.t[key.start:key.end])
+				if sel != nil {
+					child = sel.names[name]
+				}
+				if sc.dupCheck {
+					if seen == nil {
+						seen = map[string]bool{}
+					}
+					sc.dup = sc.dup || seen[name]
+					seen[name] = true
+				}
 			}
 			sc.space()
 			sc.pos++
@@ -186,6 +216,7 @@ func (sc *jsonScanner) value(sel *pathTrie) {
 		for sc.pos < len(sc.t) && !strings.ContainsRune(",]} \t\r\n", rune(sc.t[sc.pos])) {
 			sc.pos++
 		}
+		sc.scalars = append(sc.scalars, token{start, sc.pos})
 	}
 	if sel != nil && sel.replacement != "" {
 		sc.edits = append(sc.edits, edit{start, sc.pos, sel.replacement})
@@ -220,6 +251,17 @@ func (sc *jsonScanner) str() token {
 	sc.pos++
 	sc.strings = append(sc.strings, tok)
 	return tok
+}
+
+// keyName decodes the inside of a key as encoding/json does for the tree the
+// paths are resolved on, invalid UTF-8 included.
+func keyName(inner string) string {
+	if !strings.Contains(inner, `\`) && utf8.ValidString(inner) {
+		return inner
+	}
+	var name string
+	_ = json.Unmarshal([]byte(`"`+inner+`"`), &name) // the scanner only passes the inside of a valid string
+	return name
 }
 
 func (sc *jsonScanner) space() {

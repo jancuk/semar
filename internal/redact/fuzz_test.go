@@ -152,6 +152,7 @@ func FuzzNoSecretSurvives(f *testing.F) {
 	f.Add("q=", "+%2", "p@ss word/+=1", uint8(1), uint8(3))
 	f.Add(`{"`, `":1}`, "s3cret-value", uint8(5), uint8(0))
 	f.Add("%", "%4", "hunter2-token", uint8(6), uint8(1))
+	f.Add(`{"id":1700000`, `,"n":[1,2]}`, "123456", uint8(0), uint8(0))
 	f.Fuzz(func(t *testing.T, a, b, secret string, enc, where uint8) {
 		if len(secret) < 6 || strings.ContainsAny(secret, "\x00") {
 			t.Skip()
@@ -181,6 +182,18 @@ func FuzzNoSecretSurvives(f *testing.F) {
 		}
 		if in.Response != nil && json.Valid(in.Response.Body) && !json.Valid(out.Response.Body) {
 			t.Fatalf("valid JSON %q became invalid: %q", in.Response.Body, out.Response.Body)
+		}
+		// Without a quote or a backslash, no form can cross a string's quotes or
+		// an escape, so the secret is redacted inside the string.
+		if !strings.ContainsAny(secret, `"\`) && !strings.ContainsAny(text, `"\`) {
+			body := `{"k":"` + text + `"}`
+			if json.Valid([]byte(body)) {
+				out := r.Action(domain.Action{Response: &domain.HTTPResponse{Body: []byte(body)}})
+				var s string
+				if json.Unmarshal(out.Response.Body, &s) == nil && redact.IsMarker(s) {
+					t.Fatalf("a secret in a JSON string replaced the whole body %q: %q", body, out.Response.Body)
+				}
+			}
 		}
 		if clean := a + b; !mayNeedRedaction(clean, secret) {
 			in := place(where, clean)

@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"net/url"
 	"regexp"
 	"slices"
@@ -100,10 +101,7 @@ func (r *Redactor) Action(a domain.Action) domain.Action {
 		out.Response = &resp
 	}
 	if a.Captures != nil {
-		out.Captures = make(map[string]string, len(a.Captures))
-		for k, v := range a.Captures {
-			out.Captures[k] = s.text(v)
-		}
+		out.Captures = capturesOf(s, a.Captures)
 	}
 	out.Err = s.text(a.Err)
 	out.Refused = s.text(a.Refused)
@@ -116,7 +114,9 @@ func (r *Redactor) headersOf(s *scrubber, in map[string][]string) map[string][]s
 		return nil
 	}
 	out := make(map[string][]string, len(in))
-	for name, values := range in {
+	// Sorted, so that values whose names collide after redaction keep one order.
+	for _, name := range slices.Sorted(maps.Keys(in)) {
+		values := in[name]
 		vs := make([]string, len(values))
 		for i, v := range values {
 			switch {
@@ -128,7 +128,26 @@ func (r *Redactor) headersOf(s *scrubber, in map[string][]string) map[string][]s
 				vs[i] = s.text(v)
 			}
 		}
-		out[name] = vs
+		redacted := s.text(name)
+		if prev, ok := out[redacted]; ok {
+			vs = append(prev, vs...)
+		}
+		out[redacted] = vs
+	}
+	return out
+}
+
+// capturesOf joins the values of keys that collide after redaction, as HTTP
+// joins repeated fields, so that no captured value is dropped.
+func capturesOf(s *scrubber, in map[string]string) map[string]string {
+	joined := make(map[string][]string, len(in))
+	for _, k := range slices.Sorted(maps.Keys(in)) {
+		redacted := s.text(k)
+		joined[redacted] = append(joined[redacted], in[k])
+	}
+	out := make(map[string]string, len(joined))
+	for k, vs := range joined {
+		out[k] = s.text(strings.Join(vs, ", "))
 	}
 	return out
 }

@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	secretValue = "s3cret-value"
-	otherSecret = "p@ss word/+=1"
+	secretValue  = "s3cret-value"
+	otherSecret  = "p@ss word/+=1"
+	numberSecret = "123456"
 )
 
 var testKey = []byte("0123456789abcdef0123456789abcdef")
@@ -156,11 +157,12 @@ func TestActionIdempotent(t *testing.T) {
 // TestOnlySecretSpanChanges covers rulings A and B: only the source bytes that
 // encode a secret change, whatever else the string holds.
 func TestOnlySecretSpanChanges(t *testing.T) {
-	r, err := redact.New(config.Redact{}, func() []string { return []string{secretValue, otherSecret} }, testKey)
+	r, err := redact.New(config.Redact{}, func() []string { return []string{secretValue, otherSecret, numberSecret} }, testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	m, m2 := r.Marker(secretValue), r.Marker(otherSecret)
+	q := func(s string) string { return `"` + r.Marker(s) + `"` }
 	errField := func(s string) domain.Action { return domain.Action{Err: s} }
 	errOf := func(a domain.Action) string { return a.Err }
 	location := func(s string) domain.Action {
@@ -190,6 +192,12 @@ func TestOnlySecretSpanChanges(t *testing.T) {
 		{"double encoded", errField, errOf, "x=s3cret%252Dvalue&y=%2", "x=" + m + "&y=%2"},
 		{"json escape", body, bodyOf, `{"a": "s3cret-value\n", "b" : 1}`, `{"a": "` + m + `\n", "b" : 1}`},
 		{"json layout kept", body, bodyOf, "{\n  \"z\": \"s3cret-value\",\n  \"a\": [1, 2]\n}", "{\n  \"z\": \"" + m + "\",\n  \"a\": [1, 2]\n}"},
+		{"secret inside a json number", body, bodyOf,
+			`{"id":1700000123456,"name":"keep me","items":[1,2,3]}`,
+			`{"id":` + q("1700000123456") + `,"name":"keep me","items":[1,2,3]}`},
+		{"json number is the secret", body, bodyOf, `{"pin":123456}`, `{"pin":` + q("123456") + `}`},
+		{"json number with sign and exponent", body, bodyOf, "[ -123456.5e+3 ,true,null]", "[ " + q("-123456.5e+3") + " ,true,null]"},
+		{"secret inside a number outside json", errField, errOf, "id 1700000123456", "id 1700000" + r.Marker(numberSecret)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -327,6 +335,116 @@ func TestJSONBodiesStayValid(t *testing.T) {
 			}
 			if strings.Contains(string(out.Response.Body), secretValue) || strings.Contains(string(out.Response.Body), `","b":"x`) {
 				t.Errorf("secret survived: %s", out.Response.Body)
+			}
+		})
+	}
+}
+
+// TestWholeBodyFallback lists every known case in which a JSON body is replaced
+// by one marker, and shows that ordinary bodies are edited in place instead.
+func TestWholeBodyFallback(t *testing.T) {
+	const crossing, escapeShaped = `1,"abc`, "nxxxxx"
+	r0, err := redact.New(config.Redact{}, func() []string { return nil }, testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, q := r0.Marker, func(s string) string { return `"` + r0.Marker(s) + `"` }
+	cases := []struct {
+		name, body, path string
+		whole            bool
+		want             string
+	}{
+		{name: "duplicate key with a JSONPath", body: `{"data":{"national_id":"3201"},"data":{}}`, path: "$.data.national_id", whole: true},
+		{name: "duplicate key deep inside, with a JSONPath", body: `{"a":[{"k":1,"k":2}]}`, path: "$.zzz", whole: true},
+		{name: "keys that become duplicates, with a JSONPath", body: `{"s3cret-value":1,"s3cret%2Dvalue":2}`, path: "$.zzz", whole: true},
+		{name: "secret crosses the JSON structure", body: `[1,"abc"]`, whole: true},
+		{name: "secret only in raw escape text", body: `{"a":"\nxxxxx"}`, whole: true},
+
+		{name: "duplicate key without a JSONPath", body: `{"k":"s3cret-value","k":2}`, want: `{"k":"` + m(secretValue) + `","k":2}`},
+		{name: "secret in a string", body: `{"a":"x s3cret-value y","n":1}`, want: `{"a":"x ` + m(secretValue) + ` y","n":1}`},
+		{name: "secret in a key", body: `{"s3cret-value":{"b":true}}`, want: `{"` + m(secretValue) + `":{"b":true}}`},
+		{name: "secret in a number", body: `{"id":1700000123456,"name":"keep me","items":[1,2,3]}`, want: `{"id":` + q("1700000123456") + `,"name":"keep me","items":[1,2,3]}`},
+		{name: "secret in a nested array", body: `{"a":[[1,"s3cret-value"],[123456,null]]}`, want: `{"a":[[1,"` + m(secretValue) + `"],[` + q(numberSecret) + `,null]]}`},
+		{name: "number at a JSONPath that holds a secret", body: `{"pin":123456,"n":7}`, path: "$.pin", want: `{"pin":` + q(numberSecret) + `,"n":7}`},
+		{name: "distinct keys with a JSONPath", body: `{"data":{"national_id":"3201","note":"s3cret-value"}}`, path: "$.data.national_id", want: `{"data":{"national_id":` + q("3201") + `,"note":"` + m(secretValue) + `"}}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := config.Redact{}
+			if c.path != "" {
+				cfg.JSONPaths = []string{c.path}
+			}
+			r, err := redact.New(cfg, func() []string { return []string{secretValue, numberSecret, crossing, escapeShaped} }, testKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			whole := q(c.body)
+			got := string(r.Action(domain.Action{Response: &domain.HTTPResponse{Body: []byte(c.body)}}).Response.Body)
+			switch {
+			case c.whole && got != whole:
+				t.Errorf("got %s, want the whole body replaced: %s", got, whole)
+			case !c.whole && got == whole:
+				t.Errorf("the whole body was replaced: %s", got)
+			case !c.whole && got != c.want:
+				t.Errorf("got  %s\nwant %s", got, c.want)
+			}
+		})
+	}
+}
+
+func TestNamesRedacted(t *testing.T) {
+	r := newRedactor(t, config.Redact{})
+	m := r.Marker(secretValue)
+	cases := []struct {
+		name string
+		in   domain.Action
+		want domain.Action
+	}{
+		{
+			name: "request header name",
+			in:   domain.Action{Request: &domain.HTTPRequest{Headers: map[string][]string{"X-s3cret-value": {"v"}, "Accept": {"a"}}}},
+			want: domain.Action{Request: &domain.HTTPRequest{Headers: map[string][]string{"X-" + m: {"v"}, "Accept": {"a"}}}},
+		},
+		{
+			name: "response header name, encoded",
+			in:   domain.Action{Response: &domain.HTTPResponse{Headers: map[string][]string{"X-s3cret%2Dvalue-Id": {"1"}}}},
+			want: domain.Action{Response: &domain.HTTPResponse{Headers: map[string][]string{"X-" + m + "-Id": {"1"}}}},
+		},
+		{
+			name: "header names that collide keep every value",
+			in: domain.Action{Request: &domain.HTTPRequest{Headers: map[string][]string{
+				"X-s3cret-value":   {"b", "c"},
+				"X-s3cret%2Dvalue": {"a"},
+				"X-" + m:           {"d s3cret-value"},
+			}}},
+			want: domain.Action{Request: &domain.HTTPRequest{Headers: map[string][]string{"X-" + m: {"d " + m, "a", "b", "c"}}}},
+		},
+		{
+			name: "empty header values stay empty, not nil",
+			in:   domain.Action{Request: &domain.HTTPRequest{Headers: map[string][]string{"X-s3cret-value": {}}}},
+			want: domain.Action{Request: &domain.HTTPRequest{Headers: map[string][]string{"X-" + m: {}}}},
+		},
+		{
+			name: "capture key",
+			in:   domain.Action{Captures: map[string]string{"tok-s3cret-value": "v", "plain": "x"}},
+			want: domain.Action{Captures: map[string]string{"tok-" + m: "v", "plain": "x"}},
+		},
+		{
+			name: "capture keys that collide keep every value",
+			in:   domain.Action{Captures: map[string]string{"s3cret-value": "b", "s3cret%2Dvalue": "a"}},
+			want: domain.Action{Captures: map[string]string{m: "a, b"}},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := r.Action(c.in)
+			if !reflect.DeepEqual(out, c.want) {
+				a, _ := json.Marshal(out)
+				b, _ := json.Marshal(c.want)
+				t.Errorf("got  %s\nwant %s", a, b)
+			}
+			if again := r.Action(out); !reflect.DeepEqual(again, out) {
+				t.Errorf("second pass changed the action")
 			}
 		})
 	}
