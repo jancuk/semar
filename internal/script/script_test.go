@@ -81,6 +81,12 @@ func TestParseJSONBodyIsEncodable(t *testing.T) {
 	}
 }
 
+// withoutHint removes the hint of the first step and keeps the script's hash in step with the scenario.
+func withoutHint(sc *domain.Scenario, s *domain.Script) {
+	sc.Steps[0].Hint = nil
+	s.ExpectHash = domain.ExpectHash(*sc)
+}
+
 func TestValidate(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -128,6 +134,59 @@ func TestValidate(t *testing.T) {
 		{"capture without name", func(_ *domain.Scenario, s *domain.Script) { s.Steps[0].Captures[0].Name = "" }, "a capture has no name"},
 		{"capture with bad name", func(_ *domain.Scenario, s *domain.Script) { s.Steps[0].Captures[0].Name = "a b" }, "capture name a b is not a valid variable name"},
 		{"capture with bad jsonpath", func(_ *domain.Scenario, s *domain.Script) { s.Steps[0].Captures[0].JSONPath = "$.[" }, "jsonpath does not parse"},
+		{"percent before a variable", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[1].Request.Path = "/v1/orders/%{{order_id}}/refunds"
+		}, "a variable directly follows a percent sign"},
+		{"percent and a hex digit before a variable", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[1].Request.Path = "/v1/orders/%2{{order_id}}/refunds"
+		}, "a variable directly follows a percent sign"},
+		{"percent and an upper case hex digit before a variable", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[1].Request.Path = "/v1/orders/%F{{order_id}}/refunds"
+		}, "a variable directly follows a percent sign"},
+		{"percent and two hex digits before a variable", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[1].Request.Path = "/v1/orders/%2f{{order_id}}/refunds"
+		}, "holds an encoded slash or backslash"},
+		{"spaced variable in a path", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[1].Request.Path = "/v1/orders/{{ order_id }}/refunds"
+		}, "malformed variable"},
+		{"open brace pair in a path", func(_ *domain.Scenario, s *domain.Script) { s.Steps[1].Request.Path = "/v1/orders/{{/refunds" }, "malformed variable"},
+		{"dotted variable in a query", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Query = map[string]string{"a": "{{a.b}}"}
+		}, "malformed variable"},
+		{"malformed variable in a header", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Headers = map[string]string{"A": "{{ x }}"}
+		}, "malformed variable"},
+		{"malformed variable in a json string", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.JSON = map[string]any{"a": []any{map[string]any{"b": "{{"}}}
+		}, "malformed variable"},
+		{"capture with no request", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[2].Request = nil
+			s.Steps[2].Captures = []domain.Capture{{Name: "later", JSONPath: "$.id"}}
+		}, "a capture needs a request"},
+		{"dot segment without a hint", func(sc *domain.Scenario, s *domain.Script) {
+			withoutHint(sc, s)
+			s.Steps[0].Request.Path = "/v1/../orders"
+		}, "holds a dot segment"},
+		{"encoded dot segment without a hint", func(sc *domain.Scenario, s *domain.Script) {
+			withoutHint(sc, s)
+			s.Steps[0].Request.Path = "/v1/%2e%2E/orders"
+		}, "holds a dot segment"},
+		{"empty segment without a hint", func(sc *domain.Scenario, s *domain.Script) {
+			withoutHint(sc, s)
+			s.Steps[0].Request.Path = "/v1//orders"
+		}, "holds an empty segment"},
+		{"question mark without a hint", func(sc *domain.Scenario, s *domain.Script) {
+			withoutHint(sc, s)
+			s.Steps[0].Request.Path = "/v1/orders?a=1"
+		}, "holds ?"},
+		{"fragment without a hint", func(sc *domain.Scenario, s *domain.Script) {
+			withoutHint(sc, s)
+			s.Steps[0].Request.Path = "/v1/orders#a"
+		}, "holds #"},
+		{"trailing slash without a hint", func(sc *domain.Scenario, s *domain.Script) {
+			withoutHint(sc, s)
+			s.Steps[0].Request.Path = "/v1/orders/"
+		}, ""},
 		{"duplicate capture across steps", func(_ *domain.Scenario, s *domain.Script) {
 			s.Steps[1].Captures = []domain.Capture{{Name: "order_id", JSONPath: "$.id"}}
 		}, "capture order_id is defined more than once"},
@@ -204,15 +263,17 @@ func TestMatchPath(t *testing.T) {
 }
 
 func TestRender(t *testing.T) {
-	vars := map[string]string{"order_id": "81234", "amount": "150000", "token": "abc"}
+	base := map[string]string{"order_id": "81234", "amount": "150000", "token": "abc"}
 	cases := []struct {
 		name    string
+		vars    map[string]string
 		req     domain.APIRequest
 		want    domain.APIRequest
 		wantErr string
 	}{
 		{
 			name: "path query header and json",
+			vars: base,
 			req: domain.APIRequest{
 				Service: "orders", Method: "POST", Path: "/v1/orders/{{order_id}}/refunds",
 				Query:   map[string]string{"a": "{{order_id}}", "b": "plain"},
@@ -226,21 +287,34 @@ func TestRender(t *testing.T) {
 				JSON:    map[string]any{"amount": "150000", "list": []any{"x-81234", 1.0, nil}, "nested": map[string]any{"id": "81234"}},
 			},
 		},
-		{name: "no variables", req: domain.APIRequest{Path: "/v1/orders"}, want: domain.APIRequest{Path: "/v1/orders"}},
-		{name: "unknown variable in path", req: domain.APIRequest{Path: "/v1/{{nope}}"}, wantErr: "nope"},
-		{name: "unknown variable in query", req: domain.APIRequest{Path: "/x", Query: map[string]string{"a": "{{nope}}"}}, wantErr: "nope"},
-		{name: "unknown variable in header", req: domain.APIRequest{Path: "/x", Headers: map[string]string{"a": "{{nope}}"}}, wantErr: "nope"},
-		{name: "unknown variable in deep json", req: domain.APIRequest{Path: "/x", JSON: map[string]any{"a": []any{map[string]any{"b": "{{nope}}"}}}}, wantErr: "nope"},
-		{name: "unclosed variable", req: domain.APIRequest{Path: "/v1/{{order_id"}, wantErr: "malformed"},
-		{name: "slash in path value", req: domain.APIRequest{Path: "/v1/orders/{{x}}"}, wantErr: "x"},
+		{name: "no variables", vars: base, req: domain.APIRequest{Path: "/v1/orders"}, want: domain.APIRequest{Path: "/v1/orders"}},
+		{name: "unknown variable in path", vars: base, req: domain.APIRequest{Path: "/v1/{{nope}}"}, wantErr: "nope"},
+		{name: "unknown variable in query", vars: base, req: domain.APIRequest{Path: "/x", Query: map[string]string{"a": "{{nope}}"}}, wantErr: "nope"},
+		{name: "unknown variable in header", vars: base, req: domain.APIRequest{Path: "/x", Headers: map[string]string{"a": "{{nope}}"}}, wantErr: "nope"},
+		{name: "unknown variable in deep json", vars: base, req: domain.APIRequest{Path: "/x", JSON: map[string]any{"a": []any{map[string]any{"b": "{{nope}}"}}}}, wantErr: "nope"},
+		{name: "unclosed variable", vars: base, req: domain.APIRequest{Path: "/v1/{{order_id"}, wantErr: "malformed"},
+		{name: "slash in path value", vars: map[string]string{"x": "1/refunds"}, req: domain.APIRequest{Path: "/v1/orders/{{x}}"}, wantErr: "x"},
+		{name: "encoded dot from a split percent", vars: map[string]string{"x": "e"}, req: domain.APIRequest{Path: "/v1/orders/%2{{x}}"}, wantErr: "/v1/orders/%2"},
+		{name: "encoded slash from a lone percent", vars: map[string]string{"x": "2f"}, req: domain.APIRequest{Path: "/v1/orders/%{{x}}"}, wantErr: "/v1/orders/%"},
+		{name: "encoded backslash upper case", vars: map[string]string{"x": "5C"}, req: domain.APIRequest{Path: "/v1/orders/%{{x}}"}, wantErr: "/v1/orders/%"},
+		{name: "encoded double dot from percent", vars: map[string]string{"x": "2e"}, req: domain.APIRequest{Path: "/v1/%{{x}}%2e"}, wantErr: "/v1/%"},
+		{name: "dot segment in the template", vars: base, req: domain.APIRequest{Path: "/v1/../{{order_id}}"}, wantErr: "/v1/../"},
+		{name: "empty segment in the template", vars: base, req: domain.APIRequest{Path: "/v1//{{order_id}}"}, wantErr: "/v1//"},
+		{name: "question mark in the template", vars: base, req: domain.APIRequest{Path: "/v1/x?{{order_id}}"}, wantErr: "/v1/x?"},
+		{name: "fragment in the template", vars: base, req: domain.APIRequest{Path: "/v1/x#{{order_id}}"}, wantErr: "/v1/x#"},
+		{name: "path without slash", vars: base, req: domain.APIRequest{Path: "v1/{{order_id}}"}, wantErr: "v1/"},
+		{name: "trailing slash is kept", vars: base, req: domain.APIRequest{Path: "/v1/{{order_id}}/"}, want: domain.APIRequest{Path: "/v1/81234/"}},
+		{name: "value with dots and tilde", vars: map[string]string{"x": "a..b.c_d-e~f"}, req: domain.APIRequest{Path: "/v1/{{x}}"}, want: domain.APIRequest{Path: "/v1/a..b.c_d-e~f"}},
+		{name: "header with a tab", vars: map[string]string{"x": "a\tb"}, req: domain.APIRequest{Path: "/x", Headers: map[string]string{"A": "{{x}}"}}, wantErr: "x"},
+		{name: "header with a nul", vars: map[string]string{"x": "a\x00b"}, req: domain.APIRequest{Path: "/x", Headers: map[string]string{"A": "{{x}}"}}, wantErr: "x"},
+		{name: "header with a del", vars: map[string]string{"x": "a\x7fb"}, req: domain.APIRequest{Path: "/x", Headers: map[string]string{"A": "{{x}}"}}, wantErr: "x"},
+		{name: "spaced variable", vars: base, req: domain.APIRequest{Path: "/x/{{ order_id }}"}, wantErr: "malformed"},
+		{name: "dotted variable", vars: base, req: domain.APIRequest{Path: "/x", Query: map[string]string{"a": "{{a.b}}"}}, wantErr: "malformed"},
+		{name: "variable starting with underscore", vars: map[string]string{"_a": "1"}, req: domain.APIRequest{Path: "/x/{{_a}}"}, wantErr: "malformed"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			v := vars
-			if c.name == "slash in path value" {
-				v = map[string]string{"x": "1/refunds"}
-			}
-			got, err := script.Render(c.req, v)
+			got, err := script.Render(c.req, c.vars)
 			if c.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), c.wantErr) {
 					t.Fatalf("got error %v, want %q", err, c.wantErr)
@@ -258,7 +332,7 @@ func TestRender(t *testing.T) {
 }
 
 func TestRenderPathValueIsOneSegment(t *testing.T) {
-	for _, val := range []string{"1/refunds", "1?x=2", "1#frag", "..", "a..b", ".", "", "1%2f2", `1\2`, "{{other}}", "{", "a\nb"} {
+	for _, val := range []string{"1/refunds", "1?x=2", "1#frag", "..", ".", "", "1%2f2", `1\2`, "{{other}}", "{", "a\nb", "a b", "caf\u00e9", "a+b", "a:b", "a;b", "%", "a%2eb", "e\u0301"} {
 		t.Run(val, func(t *testing.T) {
 			_, err := script.Render(domain.APIRequest{Path: "/v1/orders/{{id}}"}, map[string]string{"id": val, "other": "x"})
 			if err == nil {
@@ -266,6 +340,17 @@ func TestRenderPathValueIsOneSegment(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "id") {
 				t.Fatalf("error %q does not name the variable", err)
+			}
+		})
+	}
+}
+
+func TestRenderPathValueErrorDoesNotPrintTheValue(t *testing.T) {
+	for _, val := range []string{"secret/value", "secret value", "s3cr3t%2f"} {
+		t.Run(val, func(t *testing.T) {
+			_, err := script.Render(domain.APIRequest{Path: "/v1/orders/{{id}}"}, map[string]string{"id": val})
+			if err == nil || !strings.Contains(err.Error(), "id") || strings.Contains(err.Error(), "secret") {
+				t.Fatalf("got %v", err)
 			}
 		})
 	}

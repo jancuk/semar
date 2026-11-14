@@ -66,6 +66,9 @@ func Validate(sc domain.Scenario, s domain.Script) []Problem {
 		}
 		bound[ss.Step] = true
 
+		if ss.Request == nil && len(ss.Captures) > 0 {
+			add(ss.Step, "a capture needs a request")
+		}
 		if ss.Request != nil {
 			var hint *domain.RequestHint
 			if known {
@@ -128,6 +131,18 @@ func validateRequest(ss domain.ScriptStep, hint *domain.RequestHint, hasEarlierC
 	}
 	if len(r.Path) == 0 || r.Path[0] != '/' {
 		add("path %s must start with /", r.Path)
+	} else if err := checkPath(r.Path); err != nil {
+		add("%v", err)
+	}
+	if percentBeforeVariable.MatchString(r.Path) {
+		add("in path %s a variable directly follows a percent sign and could finish an escape", r.Path)
+	}
+	reported := map[string]bool{}
+	for _, tpl := range templateStrings(*r) {
+		if err := checkPlaceholders(tpl); err != nil && !reported[tpl] {
+			reported[tpl] = true
+			add("%v", err)
+		}
 	}
 
 	names := variables(*r)

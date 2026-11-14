@@ -2,15 +2,17 @@ package script
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/jancuk/semar/internal/domain"
 )
 
 var (
-	variablePattern = regexp.MustCompile(`\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}`)
-	namePattern     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	variablePattern = regexp.MustCompile(`\{\{([A-Za-z][A-Za-z0-9_]*)\}\}`)
+	namePattern     = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 )
 
 // Render returns a copy of req with every {{name}} replaced in the path, the query values,
@@ -21,6 +23,9 @@ func Render(req domain.APIRequest, vars map[string]string) (domain.APIRequest, e
 	out := req
 	var err error
 	if out.Path, err = substitute(req.Path, vars, checkPathValue); err != nil {
+		return domain.APIRequest{}, fmt.Errorf("path: %w", err)
+	}
+	if err = checkRenderedPath(req.Path, out.Path); err != nil {
 		return domain.APIRequest{}, fmt.Errorf("path: %w", err)
 	}
 	if out.Query, err = renderMap(req.Query, vars, nil); err != nil {
@@ -36,8 +41,8 @@ func Render(req domain.APIRequest, vars map[string]string) (domain.APIRequest, e
 }
 
 func substitute(tpl string, vars map[string]string, check func(name, val string) error) (string, error) {
-	if strings.Contains(variablePattern.ReplaceAllString(tpl, ""), "{{") {
-		return "", fmt.Errorf("malformed variable in %q", tpl)
+	if err := checkPlaceholders(tpl); err != nil {
+		return "", err
 	}
 	var err error
 	out := variablePattern.ReplaceAllStringFunc(tpl, func(m string) string {
@@ -60,19 +65,30 @@ func substitute(tpl string, vars map[string]string, check func(name, val string)
 	return out, nil
 }
 
+// checkPlaceholders is the one rule for a malformed variable, used by Render and Validate:
+// after every well-formed {{name}} is removed, no "{{" may remain.
+func checkPlaceholders(tpl string) error {
+	if strings.Contains(variablePattern.ReplaceAllString(tpl, ""), "{{") {
+		return fmt.Errorf("malformed variable in %q", tpl)
+	}
+	return nil
+}
+
+// percentBeforeVariable matches a variable that directly follows a % or a % and one hex digit,
+// where the value could finish a percent escape.
+var percentBeforeVariable = regexp.MustCompile(`%[0-9A-Fa-f]?\{\{`)
+
+// checkPathValue allows only the unreserved characters of RFC 3986, and never "." or "..".
+// The error names the variable and does not print the value.
 func checkPathValue(name, val string) error {
 	reason := ""
 	switch {
 	case val == "":
 		reason = "it is empty"
-	case val == "." || strings.Contains(val, ".."):
-		reason = "it holds a dot segment"
-	case strings.ContainsAny(val, "/\\?#%"):
-		reason = "it holds one of / \\ ? # %"
-	case strings.ContainsAny(val, "{}"):
-		reason = "it holds a brace"
-	case strings.IndexFunc(val, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0:
-		reason = "it holds a control character"
+	case val == "." || val == "..":
+		reason = "it is a dot segment"
+	case strings.IndexFunc(val, func(r rune) bool { return !isUnreserved(r) }) >= 0:
+		reason = "it holds a character other than a letter, a digit, - . _ ~"
 	}
 	if reason != "" {
 		return fmt.Errorf("variable %s cannot be used in a path: %s", name, reason)
@@ -80,9 +96,65 @@ func checkPathValue(name, val string) error {
 	return nil
 }
 
+func isUnreserved(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '.' || r == '_' || r == '~'
+}
+
+// checkPath reports why a request path cannot be sent as it is: no leading slash, a "?" or "#",
+// an empty segment other than after the last slash, a "." or ".." segment also after percent-decoding,
+// or an encoded slash or backslash.
+func checkPath(p string) error {
+	if !strings.HasPrefix(p, "/") {
+		return fmt.Errorf("path %q must start with /", p)
+	}
+	if strings.Contains(p, "?") {
+		return fmt.Errorf("path %q holds ?", p)
+	}
+	if strings.Contains(p, "#") {
+		return fmt.Errorf("path %q holds #", p)
+	}
+	body := p[1:]
+	if body == "" {
+		return nil
+	}
+	segs := strings.Split(body, "/")
+	for i, seg := range segs {
+		if seg == "" {
+			if i == len(segs)-1 && i > 0 {
+				continue
+			}
+			return fmt.Errorf("path %q holds an empty segment", p)
+		}
+		lower := strings.ToLower(seg)
+		if strings.Contains(lower, "%2f") || strings.Contains(lower, "%5c") {
+			return fmt.Errorf("path %q holds an encoded slash or backslash", p)
+		}
+		decoded, err := url.PathUnescape(seg)
+		if err != nil {
+			decoded = strings.ReplaceAll(lower, "%2e", ".")
+		}
+		if decoded == "." || decoded == ".." {
+			return fmt.Errorf("path %q holds a dot segment", p)
+		}
+	}
+	return nil
+}
+
+// checkRenderedPath applies checkPath to the result of a substitution and requires
+// that it has as many segments as the template.
+func checkRenderedPath(tpl, rendered string) error {
+	if err := checkPath(rendered); err != nil {
+		return fmt.Errorf("%w (template %q)", err, tpl)
+	}
+	if strings.Count(rendered, "/") != strings.Count(tpl, "/") {
+		return fmt.Errorf("path %q has a different number of segments than %q", rendered, tpl)
+	}
+	return nil
+}
+
 func checkHeaderValue(name, val string) error {
-	if strings.ContainsAny(val, "\r\n") {
-		return fmt.Errorf("variable %s cannot be used in a header: it holds a line break", name)
+	if strings.IndexFunc(val, unicode.IsControl) >= 0 {
+		return fmt.Errorf("variable %s cannot be used in a header: it holds a control character", name)
 	}
 	return nil
 }
@@ -131,26 +203,21 @@ func renderJSON(v any, vars map[string]string) (any, error) {
 	}
 }
 
-// variables lists the names used in a request, in no particular order.
-func variables(req domain.APIRequest) []string {
-	var names []string
-	add := func(s string) {
-		for _, m := range variablePattern.FindAllStringSubmatch(s, -1) {
-			names = append(names, m[1])
-		}
-	}
-	add(req.Path)
+// templateStrings lists every string of a request in which a {{variable}} is replaced:
+// the path, the query values, the header values, and the string values of the JSON body.
+func templateStrings(req domain.APIRequest) []string {
+	out := []string{req.Path}
 	for _, v := range req.Query {
-		add(v)
+		out = append(out, v)
 	}
 	for _, v := range req.Headers {
-		add(v)
+		out = append(out, v)
 	}
 	var walk func(any)
 	walk = func(v any) {
 		switch x := v.(type) {
 		case string:
-			add(x)
+			out = append(out, x)
 		case map[string]any:
 			for _, e := range x {
 				walk(e)
@@ -162,5 +229,16 @@ func variables(req domain.APIRequest) []string {
 		}
 	}
 	walk(req.JSON)
+	return out
+}
+
+// variables lists the names used in a request, in no particular order.
+func variables(req domain.APIRequest) []string {
+	var names []string
+	for _, s := range templateStrings(req) {
+		for _, m := range variablePattern.FindAllStringSubmatch(s, -1) {
+			names = append(names, m[1])
+		}
+	}
 	return names
 }

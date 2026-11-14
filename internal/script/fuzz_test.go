@@ -1,6 +1,7 @@
 package script_test
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 
@@ -63,6 +64,8 @@ func FuzzRender(f *testing.F) {
 	f.Add("/{{{{id}}}}", "id", "{{id}}", "}}")
 	f.Add("/{{a}}", "a", "x/y", "")
 	f.Add("{{{id}}", "0", "{", "0")
+	f.Add("/v1/orders/%2{{id}}", "x", "e", "")
+	f.Add("/v1/orders/%{{id}}", "x", "2f", "")
 	f.Fuzz(func(t *testing.T, path, name, value, other string) {
 		req := domain.APIRequest{
 			Path:    path,
@@ -76,6 +79,18 @@ func FuzzRender(f *testing.F) {
 		}
 		if strings.Contains(got.Path, "{{") {
 			t.Fatalf("rendered path %q holds {{", got.Path)
+		}
+		if strings.Count(got.Path, "/") != strings.Count(path, "/") {
+			t.Fatalf("template %q rendered as %q with another number of segments", path, got.Path)
+		}
+		for _, seg := range strings.Split(got.Path, "/") {
+			dec, derr := url.PathUnescape(seg)
+			if derr != nil {
+				dec = strings.ReplaceAll(strings.ToLower(seg), "%2e", ".")
+			}
+			if dec == "." || dec == ".." {
+				t.Fatalf("template %q rendered as %q with a dot segment", path, got.Path)
+			}
 		}
 	})
 }
