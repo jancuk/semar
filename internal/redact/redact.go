@@ -96,6 +96,7 @@ func (r *Redactor) Action(a domain.Action) domain.Action {
 	}
 	if a.Response != nil {
 		resp := *a.Response
+		resp.URL = s.text(resp.URL)
 		resp.Headers = r.headersOf(s, resp.Headers)
 		resp.Body = s.body(resp.Body)
 		out.Response = &resp

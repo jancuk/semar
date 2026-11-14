@@ -2,9 +2,11 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -95,6 +97,7 @@ func (s *server) host(t *testing.T) string {
 type setup struct {
 	mode    string
 	secrets []string
+	env     func(*config.Environment)
 	options func(*api.Options)
 }
 
@@ -104,11 +107,15 @@ func newEngine(t *testing.T, srv *server, st setup) (*api.Engine, *fakeSink) {
 	if mode == "" {
 		mode = "test_data"
 	}
-	pol, err := effects.New(config.Environment{
+	env := config.Environment{
 		Hosts:   []string{srv.host(t)},
 		Methods: []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"},
 		Effects: config.Effects{Mode: mode},
-	})
+	}
+	if st.env != nil {
+		st.env(&env)
+	}
+	pol, err := effects.New(env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,6 +172,42 @@ func ok(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
 func hang(r *http.Request) {
 	_, _ = io.Copy(io.Discard, r.Body)
 	<-r.Context().Done()
+}
+
+// hangUp reads the request and closes the connection without an answer.
+func hangUp(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	_, _ = io.Copy(io.Discard, r.Body)
+	conn, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		t.Errorf("hijack: %v", err)
+		return
+	}
+	_ = conn.Close()
+}
+
+// pathCounter counts the requests that reach each path.
+type pathCounter struct {
+	mu   sync.Mutex
+	hits map[string]int
+}
+
+func (p *pathCounter) add(path string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.hits == nil {
+		p.hits = map[string]int{}
+	}
+	p.hits[path]++
+}
+
+func (p *pathCounter) get(path string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.hits[path]
+}
+
+func allowHost(hosts ...string) func(*config.Environment) {
+	return func(env *config.Environment) { env.Hosts = append(env.Hosts, hosts...) }
 }
 
 func TestHeaders(t *testing.T) {
@@ -572,5 +615,381 @@ func TestDefaultIDs(t *testing.T) {
 	}
 	if !strings.HasPrefix(seen, "00-"+res.Action.TraceID+"-") {
 		t.Errorf("TraceID %q is not the one sent in %q", res.Action.TraceID, seen)
+	}
+}
+
+const writeNotFollowed = "redirect refused: a write is not followed"
+
+func TestRedirectedWrite(t *testing.T) {
+	cases := []struct {
+		name        string
+		call        api.Call
+		redirect    func(w http.ResponseWriter, r *http.Request)
+		wantHits    map[string]int
+		wantRefused string
+		wantStatus  int
+		wantURL     string
+	}{
+		{
+			name: "a read that redirects to a write",
+			call: func() api.Call {
+				c := post("/v1/search", `{}`)
+				c.Use = domain.UseCase{}
+				return c
+			}(),
+			redirect: func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/v1/orders", http.StatusTemporaryRedirect)
+			},
+			wantHits:    map[string]int{"/v1/search": 1, "/v1/orders": 0},
+			wantRefused: writeNotFollowed,
+			wantStatus:  http.StatusTemporaryRedirect,
+		},
+		{
+			name: "a write that redirects to its own URL",
+			call: post("/v1/orders", `{}`),
+			redirect: func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, r.URL.Path, http.StatusTemporaryRedirect)
+			},
+			wantHits:    map[string]int{"/v1/orders": 1},
+			wantRefused: writeNotFollowed,
+			wantStatus:  http.StatusTemporaryRedirect,
+		},
+		{
+			name: "a write that a 302 turns into a read",
+			call: post("/v1/orders", `{}`),
+			redirect: func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/v1/done", http.StatusFound)
+			},
+			wantHits:   map[string]int{"/v1/orders": 1, "/v1/done": 1},
+			wantStatus: http.StatusOK,
+			wantURL:    "/v1/done",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var paths pathCounter
+			srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+				paths.add(r.URL.Path)
+				_, _ = io.Copy(io.Discard, r.Body)
+				if r.URL.Path == "/v1/done" {
+					if r.Method != http.MethodGet {
+						t.Errorf("/v1/done got %s, want GET", r.Method)
+					}
+					return
+				}
+				tc.redirect(w, r)
+			})
+			e, sink := newEngine(t, srv, setup{env: func(env *config.Environment) {
+				env.Effects.Reads = []config.OpPattern{{Method: "POST", Path: "/v1/search"}}
+			}})
+			res := do(t, e, tc.call)
+			for path, want := range tc.wantHits {
+				if got := paths.get(path); got != want {
+					t.Errorf("%s got %d requests, want %d", path, got, want)
+				}
+			}
+			if res.Action.Refused != tc.wantRefused {
+				t.Errorf("Refused = %q, want %q", res.Action.Refused, tc.wantRefused)
+			}
+			if res.Action.EffectUnknown {
+				t.Error("EffectUnknown = true, want false")
+			}
+			if res.Action.Response == nil || res.Action.Response.Status != tc.wantStatus {
+				t.Fatalf("Response = %+v, want status %d", res.Action.Response, tc.wantStatus)
+			}
+			if wantURL := tc.wantURL; wantURL != "" {
+				wantURL = srv.URL + wantURL
+				if res.Action.Response.URL != wantURL {
+					t.Errorf("Response.URL = %q, want %q", res.Action.Response.URL, wantURL)
+				}
+			}
+			if sink.count() != 1 {
+				t.Errorf("recorded %d actions, want 1", sink.count())
+			}
+		})
+	}
+}
+
+func TestRedirectToADeniedPath(t *testing.T) {
+	var paths pathCounter
+	srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+		paths.add(r.URL.Path)
+		http.Redirect(w, r, "/v1/admin/users", http.StatusFound)
+	})
+	e, sink := newEngine(t, srv, setup{env: func(env *config.Environment) {
+		env.Effects.Deny = []config.OpPattern{{Method: "GET", Path: "/v1/admin/**"}}
+	}})
+	res := do(t, e, get("/v1/orders"))
+	if !strings.HasPrefix(res.Action.Refused, "redirect refused: denied") {
+		t.Errorf("Refused = %q, want a denied redirect", res.Action.Refused)
+	}
+	if n := paths.get("/v1/admin/users"); n != 0 {
+		t.Errorf("the denied path got %d requests, want 0", n)
+	}
+	if res.Action.Response == nil || res.Action.Response.Status != http.StatusFound {
+		t.Errorf("Response = %+v, want the 302", res.Action.Response)
+	}
+	if sink.count() != 1 {
+		t.Errorf("recorded %d actions, want 1", sink.count())
+	}
+}
+
+func TestResponseURL(t *testing.T) {
+	other := newServer(t, ok)
+	cases := []struct {
+		name    string
+		path    string
+		wantURL string
+	}{
+		{"no redirect", "/v1/new", ""},
+		{"redirect followed", "/v1/old", "/v1/new"},
+		{"followed, then refused", "/v1/away", "/v1/old2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/v1/old":
+					http.Redirect(w, r, "/v1/new", http.StatusFound)
+				case "/v1/away":
+					http.Redirect(w, r, "/v1/old2", http.StatusFound)
+				case "/v1/old2":
+					http.Redirect(w, r, other.URL+"/x", http.StatusFound)
+				}
+			})
+			e, _ := newEngine(t, srv, setup{})
+			res := do(t, e, get(tc.path))
+			want := tc.wantURL
+			if want != "" {
+				want = srv.URL + want
+			}
+			if res.Action.Response == nil || res.Action.Response.URL != want {
+				t.Errorf("Response = %+v, want URL %q", res.Action.Response, want)
+			}
+		})
+	}
+}
+
+func TestSessionStaysOnItsHost(t *testing.T) {
+	var landed atomic.Value
+	land := func(w http.ResponseWriter, r *http.Request) { landed.Store(r.Header.Values("X-Session")) }
+	other := newServer(t, land)
+	cases := []struct {
+		name   string
+		target func(self *server) string
+		want   []string
+	}{
+		{"to another allowed host", func(*server) string { return other.URL + "/v1/landing" }, nil},
+		{"on the same host", func(self *server) string { return self.URL + "/v1/landing" }, []string{"s-value-123"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			landed.Store([]string{"not reached"})
+			var first []string
+			var srv *server
+			srv = newServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/landing" {
+					land(w, r)
+					return
+				}
+				first = r.Header.Values("X-Session")
+				http.Redirect(w, r, tc.target(srv), http.StatusFound)
+			})
+			e, _ := newEngine(t, srv, setup{
+				env: allowHost(other.host(t)),
+				options: func(o *api.Options) {
+					o.Session = func(context.Context, string) (string, string, error) { return "X-Session", "s-value-123", nil }
+				},
+			})
+			c := get("/v1/orders")
+			c.AuthProfile = "staff"
+			res := do(t, e, c)
+			if res.Action.Refused != "" || res.Action.Err != "" {
+				t.Fatalf("Refused %q Err %q, want the redirect followed", res.Action.Refused, res.Action.Err)
+			}
+			if fmt.Sprint(first) != "[s-value-123]" {
+				t.Errorf("first host saw X-Session %q, want [s-value-123]", first)
+			}
+			if got := landed.Load().([]string); fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Errorf("redirect target saw X-Session %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSessionValueIsNotStored(t *testing.T) {
+	red, err := redact.New(config.Redact{}, nil, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const placeholder = "[session of staff]"
+	cases := []struct {
+		header, value string
+		wantStored    string
+	}{
+		{"X-Session", "s-value-123", placeholder},
+		// Authorization is always redacted, so what is stored is the marker of the placeholder.
+		{"Authorization", "Bearer tok-abc", red.Marker(placeholder)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.header, func(t *testing.T) {
+			var seen []string
+			srv := newServer(t, func(w http.ResponseWriter, r *http.Request) { seen = r.Header.Values(tc.header) })
+			e, sink := newEngine(t, srv, setup{options: func(o *api.Options) {
+				o.Session = func(context.Context, string) (string, string, error) { return tc.header, tc.value, nil }
+			}})
+			c := get("/v1/orders")
+			c.AuthProfile = "staff"
+			res := do(t, e, c)
+			if fmt.Sprint(seen) != fmt.Sprint([]string{tc.value}) {
+				t.Errorf("server saw %s = %q, want [%q]", tc.header, seen, tc.value)
+			}
+			for name, a := range map[string]domain.Action{"stored": sink.last(t), "returned": res.Action} {
+				if got := a.Request.Headers[tc.header]; fmt.Sprint(got) != fmt.Sprint([]string{tc.wantStored}) {
+					t.Errorf("%s %s = %q, want [%q]", name, tc.header, got, tc.wantStored)
+				}
+				raw, err := json.Marshal(a)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(string(raw), tc.value) || strings.Contains(string(raw), red.Marker(tc.value)) {
+					t.Errorf("%s action holds the session value: %s", name, raw)
+				}
+			}
+		})
+	}
+}
+
+func TestUncertainWrite(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedAddr := l.Addr().String()
+	_ = l.Close()
+
+	cases := []struct {
+		name              string
+		call              api.Call
+		closedPort        bool
+		wantHits          int64
+		wantEffectUnknown bool
+	}{
+		{"a write the server hangs up on", post("/v1/orders", `{}`), false, 1, true},
+		{"a read the server hangs up on", get("/v1/orders"), false, 1, false},
+		{"a write to a closed port", post("/v1/orders", `{}`), true, 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newServer(t, func(w http.ResponseWriter, r *http.Request) { hangUp(t, w, r) })
+			st := setup{}
+			if tc.closedPort {
+				st.env = allowHost(closedAddr)
+				st.options = func(o *api.Options) { o.Services = map[string]string{"orders": "http://" + closedAddr} }
+			}
+			e, sink := newEngine(t, srv, st)
+			res := do(t, e, tc.call)
+			if res.Action.EffectUnknown != tc.wantEffectUnknown {
+				t.Errorf("EffectUnknown = %v, want %v (Err %q)", res.Action.EffectUnknown, tc.wantEffectUnknown, res.Action.Err)
+			}
+			if res.Action.Err == "" {
+				t.Error("Err is empty, want the transport error")
+			}
+			if n := srv.hits.Load(); n != tc.wantHits {
+				t.Errorf("server hits = %d, want %d", n, tc.wantHits)
+			}
+			if sink.count() != 1 {
+				t.Errorf("recorded %d actions, want 1", sink.count())
+			}
+		})
+	}
+}
+
+// TestNoRetry guards the default transport: net/http resends a GET whose
+// reused connection fails, and that second copy must never be sent.
+func TestNoRetry(t *testing.T) {
+	var hangUps atomic.Int64
+	srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/first" {
+			return
+		}
+		hangUps.Add(1)
+		hangUp(t, w, r)
+	})
+	e, _ := newEngine(t, srv, setup{})
+	do(t, e, get("/v1/first"))
+	res := do(t, e, get("/v1/orders"))
+	if res.Action.Err == "" {
+		t.Error("Err is empty, want the transport error")
+	}
+	if n := hangUps.Load(); n != 1 {
+		t.Errorf("the closing handler got %d requests, want exactly 1", n)
+	}
+}
+
+func TestRedirectAndBodyErrorsAreBothKept(t *testing.T) {
+	srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "/v1/again")
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusFound)
+		_, _ = io.WriteString(w, "short body")
+	})
+	e, _ := newEngine(t, srv, setup{})
+	res := do(t, e, get("/v1/orders"))
+	for _, want := range []string{"stopped after 5 redirects", "read response body"} {
+		if !strings.Contains(res.Action.Err, want) {
+			t.Errorf("Err = %q, want it to hold %q", res.Action.Err, want)
+		}
+	}
+}
+
+func TestCallerContentTypeWins(t *testing.T) {
+	var seen []string
+	srv := newServer(t, func(w http.ResponseWriter, r *http.Request) { seen = r.Header.Values("Content-Type") })
+	e, _ := newEngine(t, srv, setup{})
+	c := post("/v1/orders", `{}`)
+	c.Headers = map[string]string{"content-type": "application/merge-patch+json"}
+	do(t, e, c)
+	if fmt.Sprint(seen) != "[application/merge-patch+json]" {
+		t.Errorf("server saw Content-Type %q, want [application/merge-patch+json]", seen)
+	}
+}
+
+func TestNoSessionSource(t *testing.T) {
+	srv := newServer(t, ok)
+	e, sink := newEngine(t, srv, setup{options: func(o *api.Options) { o.Session = nil }})
+	c := get("/v1/orders")
+	c.AuthProfile = "staff"
+	res := do(t, e, c)
+	if !strings.Contains(res.Action.Err, "the engine has no session source") {
+		t.Errorf("Err = %q, want it to say the engine has no session source", res.Action.Err)
+	}
+	if n := srv.hits.Load(); n != 0 {
+		t.Errorf("server hits = %d, want 0", n)
+	}
+	if sink.count() != 1 {
+		t.Errorf("recorded %d actions, want 1", sink.count())
+	}
+}
+
+func TestMalformedPath(t *testing.T) {
+	for _, path := range []string{"/v1/%zz", "//evil.example/x", "http://evil.example/x", "/v1/x?a=1", "/v1/x#f"} {
+		t.Run(path, func(t *testing.T) {
+			srv := newServer(t, ok)
+			e, sink := newEngine(t, srv, setup{env: allowHost("evil.example")})
+			res := do(t, e, get(path))
+			if !strings.HasPrefix(res.Action.Err, "request path") {
+				t.Errorf("Err = %q, want a request path error", res.Action.Err)
+			}
+			if res.Action.Response != nil {
+				t.Errorf("Response = %+v, want nil", res.Action.Response)
+			}
+			if n := srv.hits.Load(); n != 0 {
+				t.Errorf("server hits = %d, want 0", n)
+			}
+			if sink.count() != 1 {
+				t.Errorf("recorded %d actions, want 1", sink.count())
+			}
+		})
 	}
 }

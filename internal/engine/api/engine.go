@@ -14,13 +14,14 @@ import (
 	"io"
 	"log/slog"
 	"maps"
-	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/theory/jsonpath"
@@ -36,8 +37,9 @@ const (
 	defaultBudget  = 200
 	maxRedirects   = 5
 
-	refusedNoUseCase = "a write must belong to a scenario step, an exploration, or a probe"
-	refusedBudget    = "request budget reached"
+	refusedNoUseCase       = "a write must belong to a scenario step, an exploration, or a probe"
+	refusedBudget          = "request budget reached"
+	refusedRedirectedWrite = "redirect refused: a write is not followed"
 )
 
 type Options struct {
@@ -127,11 +129,15 @@ func randomHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// flight holds what CheckRedirect learns about one call. CheckRedirect runs in
-// the goroutine that called client.Do, so it needs no lock.
+// flight holds what one call needs and learns while it is sent. CheckRedirect
+// runs in the goroutine that called client.Do, but the transport may report a
+// connection from another one.
 type flight struct {
-	refused string
-	err     string
+	session  string // canonical name of the session header, or empty
+	followed int
+	refused  string
+	err      string
+	gotConn  atomic.Bool
 }
 
 type flightKey struct{}
@@ -181,7 +187,7 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 	var session [2]string
 	if c.AuthProfile != "" {
 		if e.o.Session == nil {
-			a.Err = "sign-in failed: no session source"
+			a.Err = "sign-in failed: the engine has no session source"
 			return e.record(ctx, a, nil, missing)
 		}
 		name, value, err := e.o.Session(ctx, c.AuthProfile)
@@ -196,14 +202,20 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 	if len(c.JSON) > 0 {
 		reqBody = bytes.NewReader(c.JSON)
 	}
-	f := &flight{}
-	req, err := http.NewRequestWithContext(context.WithValue(ctx, flightKey{}, f), method, u.String(), reqBody)
+	f := &flight{session: http.CanonicalHeaderKey(session[0])}
+	reqCtx := httptrace.WithClientTrace(context.WithValue(ctx, flightKey{}, f), &httptrace.ClientTrace{
+		GotConn: func(httptrace.GotConnInfo) { f.gotConn.Store(true) },
+	})
+	req, err := http.NewRequestWithContext(reqCtx, method, u.String(), reqBody)
 	if err != nil {
 		a.Err = err.Error()
 		return e.record(ctx, a, nil, missing)
 	}
 	req.Header = e.headers(ctx, a.TraceID, c, session)
 	a.Request.Headers = req.Header.Clone()
+	if f.session != "" {
+		a.Request.Headers[f.session] = []string{"[session of " + c.AuthProfile + "]"}
+	}
 
 	if !e.take() {
 		a.Refused = refusedBudget
@@ -211,10 +223,12 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 	}
 
 	start := e.o.Clock()
+	// Once a connection is obtained, the server may have acted on a write
+	// whatever the error, so its effect is unknown.
 	resp, err := e.client.Do(req)
 	if err != nil {
 		a.Err = err.Error()
-		a.EffectUnknown = write && (isTimeout(err) || ctx.Err() != nil)
+		a.EffectUnknown = write && f.gotConn.Load()
 		a.DurationMS = e.o.Clock().Sub(start).Milliseconds()
 		return e.record(ctx, a, nil, missing)
 	}
@@ -222,10 +236,17 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 	_ = resp.Body.Close()
 	a.DurationMS = e.o.Clock().Sub(start).Milliseconds()
 	a.Response = &domain.HTTPResponse{Status: resp.StatusCode, Headers: resp.Header.Clone(), Body: domain.Body(body), Truncated: truncated}
+	if final := resp.Request.URL.String(); f.followed > 0 && final != a.Request.URL {
+		a.Response.URL = final
+	}
 	a.Refused, a.Err = f.refused, f.err
 	if readErr != nil {
-		a.Err = "read response body: " + readErr.Error()
-		a.EffectUnknown = write && (isTimeout(readErr) || ctx.Err() != nil)
+		msg := "read response body: " + readErr.Error()
+		if a.Err != "" {
+			msg = a.Err + "; " + msg
+		}
+		a.Err = msg
+		a.EffectUnknown = write && f.gotConn.Load()
 	}
 	if a.Refused != "" || a.Err != "" || truncated {
 		return e.record(ctx, a, nil, missing)
@@ -262,7 +283,14 @@ func (e *Engine) checkRedirect(req *http.Request, via []*http.Request) error {
 		f.err = fmt.Sprintf("stopped after %d redirects", maxRedirects)
 		return http.ErrUseLastResponse
 	}
-	if err := e.o.Policy.Admit(effects.Request{Method: req.Method, URL: req.URL}); err != nil {
+	// A write is sent only from a call that a person or a scenario made, never
+	// because a server asked for it.
+	target := effects.Request{Method: req.Method, URL: req.URL}
+	if e.o.Policy.Classify(target) == effects.Write {
+		f.refused = refusedRedirectedWrite
+		return http.ErrUseLastResponse
+	}
+	if err := e.o.Policy.Admit(target); err != nil {
 		var r *effects.Refusal
 		if errors.As(err, &r) && r.Kind == effects.HostNotAllowed {
 			f.refused = "redirect to a host that is not allowed: " + err.Error()
@@ -275,11 +303,29 @@ func (e *Engine) checkRedirect(req *http.Request, via []*http.Request) error {
 		f.refused = refusedBudget
 		return http.ErrUseLastResponse
 	}
+	if f.session != "" && !sameHost(via[0].URL, req.URL) {
+		req.Header.Del(f.session)
+	}
+	f.followed++
 	return nil
 }
 
-// take reserves one request of the budget. A reserved request is counted as
-// sent even when the transport then fails, because it may have reached the server.
+// sameHost compares host and port. A URL without a port has its scheme's default.
+func sameHost(a, b *url.URL) bool {
+	return strings.EqualFold(a.Hostname(), b.Hostname()) && portOf(a) == portOf(b)
+}
+
+func portOf(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if strings.EqualFold(u.Scheme, "https") {
+		return "443"
+	}
+	return "80"
+}
+
+// take counts a request as soon as the engine starts to send it, so a dial failure also uses a slot: over-counting is the safe direction.
 func (e *Engine) take() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -348,11 +394,6 @@ func readBody(r io.Reader, limit int64) (body []byte, truncated bool, err error)
 		return body[:limit], true, err
 	}
 	return body, false, err
-}
-
-func isTimeout(err error) bool {
-	var ne net.Error
-	return errors.As(err, &ne) && ne.Timeout() || errors.Is(err, context.DeadlineExceeded)
 }
 
 func captureNames(caps []domain.Capture) []string {

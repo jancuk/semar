@@ -54,7 +54,7 @@ type Action struct {
 	Captures      map[string]string `json:"captures,omitempty"`
 	Refused       string            `json:"refused,omitempty"`       // why policy refused it. No request was sent
 	Err           string            `json:"error,omitempty"`         // transport error
-	EffectUnknown bool              `json:"effectUnknown,omitempty"` // a write that timed out
+	EffectUnknown bool              `json:"effectUnknown,omitempty"` // a write that failed after it may have reached the server
 	TraceID       string            `json:"traceId"`
 	At            time.Time         `json:"at"`
 	DurationMS    int64             `json:"durationMs"`
@@ -70,6 +70,7 @@ type HTTPRequest struct {
 }
 
 type HTTPResponse struct {
+	URL       string              `json:"url,omitempty"` // set only when redirects were followed to another URL
 	Status    int                 `json:"status"`
 	Headers   map[string][]string `json:"headers"`
 	Body      Body                `json:"body,omitempty"`

@@ -45,6 +45,7 @@ func sampleAction() domain.Action {
 			Body: domain.Body(`{"password":"s3cret-value","n":1}`),
 		},
 		Response: &domain.HTTPResponse{
+			URL:     "https://api.uat.example.com/v1/y?token=s3cret%2Dvalue",
 			Headers: map[string][]string{"Set-Cookie": {"sid=1"}, "Location": {"/next?t=s3cret%2Dvalue"}},
 			Body:    []byte(`{"data":{"national_id":"3201","note":"abc","jwt":"eyJhbGciOi.eyJzdWIiOi.c2ln","b64":"czNjcmV0LXZhbHVl"}}`),
 		},
@@ -79,6 +80,7 @@ func TestAction(t *testing.T) {
 	m := r.Marker(secretValue)
 	strs := []struct{ name, got, want string }{
 		{"URL", out.Request.URL, "https://api.uat.example.com/v1/x?token=" + m},
+		{"response URL", out.Response.URL, "https://api.uat.example.com/v1/y?token=" + m},
 		{"PathTemplate", out.Request.PathTemplate, "/v1/{" + m + "}"},
 		{"Location", out.Response.Headers["Location"][0], "/next?t=" + m},
 		{"Err", out.Err, "dial failed for " + m},
