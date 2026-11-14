@@ -75,6 +75,9 @@ func Compute(in Input) domain.ScenarioResult {
 		add(domain.OutcomeStale, "", msgBuildChanged)
 	}
 
+	if in.Scenario.ID == "" {
+		add(domain.OutcomeInconclusive, "", fmt.Sprintf("%s: the scenario has no ID", msgMismatch))
+	}
 	expectations := 0
 	seen := map[domain.StepID]bool{}
 	usedActions := map[domain.ActionID]bool{}
@@ -102,6 +105,9 @@ func Compute(in Input) domain.ScenarioResult {
 			}
 			if a.Use.Scenario != in.Scenario.ID || a.Use.Step != step.ID {
 				add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("%s: action %s was recorded for step %q of scenario %q, not for step %s of scenario %s", msgMismatch, a.ID, a.Use.Step, a.Use.Scenario, step.ID, in.Scenario.ID))
+			}
+			if need := passFor(step); a.Use.Pass != need {
+				add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("%s: action %s was recorded in pass %q, but step %s needs pass %q", msgMismatch, a.ID, a.Use.Pass, step.ID, need))
 			}
 		}
 		refused := a != nil && a.Refused != ""
@@ -229,6 +235,14 @@ func Compute(in Input) domain.ScenarioResult {
 		res.Reasons = append(res.Reasons, byRule[rule]...)
 	}
 	return res
+}
+
+// passFor is the only pass whose actions count as evidence for the step.
+func passFor(step domain.Step) domain.Pass {
+	if step.Setup {
+		return domain.PassSetup
+	}
+	return domain.PassScenario
 }
 
 func setupFailure(a *domain.Action) string {

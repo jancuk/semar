@@ -12,9 +12,19 @@ import (
 
 func intp(n int) *int { return &n }
 
-// use is the use case an action of the given step carries.
+// setupSteps names the steps the fixtures declare with Setup: true.
+var setupSteps = map[string]bool{"create-order": true, "setup": true}
+
+func passOf(setup bool) domain.Pass {
+	if setup {
+		return domain.PassSetup
+	}
+	return domain.PassScenario
+}
+
+// use is the use case an action of the given step carries, recorded in the pass the step needs.
 func use(scenarioID, step string) domain.UseCase {
-	return domain.UseCase{Pass: domain.PassScenario, Scenario: domain.ScenarioID(scenarioID), Step: domain.StepID(step)}
+	return domain.UseCase{Pass: passOf(setupSteps[step]), Scenario: domain.ScenarioID(scenarioID), Step: domain.StepID(step)}
 }
 
 func ok(scenarioID, step, id string) *domain.Action {
@@ -307,6 +317,21 @@ func emptyStepID(in *verdict.Input) {
 	in.Scenario.Steps = append(in.Scenario.Steps, domain.Step{ID: ""})
 }
 
+func actionPass(id domain.StepID, p domain.Pass) mod {
+	return actionOf(id, func(a *domain.Action) { a.Use.Pass = p })
+}
+
+// noScenarioID gives the scenario an empty ID, and every action the same empty scenario in its use case.
+func noScenarioID(in *verdict.Input) {
+	in.Scenario.ID = ""
+	for id, ev := range in.Steps {
+		a := *ev.Action
+		a.Use.Scenario = ""
+		ev.Action = &a
+		in.Steps[id] = ev
+	}
+}
+
 func buildsWith(service, commit string) mod {
 	return func(in *verdict.Input) {
 		in.BuildsStart = []domain.BuildRef{{Service: service, Commit: commit, ConfigHash: "c1"}}
@@ -369,6 +394,13 @@ func TestCompute(t *testing.T) {
 		{"refund holds the action of verify", refundHoldsVerifyAction, domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario"}},
 		{"action use case names another step", with(pass, actionOf("create-order", func(a *domain.Action) { a.Use.Step = "refund-too-much" })), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: action a1"}},
 		{"action use case names another scenario", with(pass, actionOf("create-order", func(a *domain.Action) { a.Use.Scenario = "other" })), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: action a1"}},
+		{"non-setup step, action recorded in the explore pass", with(pass, actionPass("order-unchanged", domain.PassExplore)), domain.OutcomeInconclusive, []string{`the recorded evidence does not match the scenario: action a3 was recorded in pass "explore", but step order-unchanged needs pass "scenario"`}},
+		{"non-setup step, action recorded in the security pass", with(pass, actionPass("order-unchanged", domain.PassSecurity)), domain.OutcomeInconclusive, []string{`the recorded evidence does not match the scenario: action a3 was recorded in pass "security", but step order-unchanged needs pass "scenario"`}},
+		{"non-setup step, action recorded in the cleanup pass", with(pass, actionPass("order-unchanged", domain.PassCleanup)), domain.OutcomeInconclusive, []string{`the recorded evidence does not match the scenario: action a3 was recorded in pass "cleanup"`}},
+		{"non-setup step, action recorded in the setup pass", with(pass, actionPass("order-unchanged", domain.PassSetup)), domain.OutcomeInconclusive, []string{`the recorded evidence does not match the scenario: action a3 was recorded in pass "setup", but step order-unchanged needs pass "scenario"`}},
+		{"non-setup step, action with an empty pass", with(pass, actionPass("order-unchanged", "")), domain.OutcomeInconclusive, []string{`the recorded evidence does not match the scenario: action a3 was recorded in pass "", but step order-unchanged needs pass "scenario"`}},
+		{"setup step, action recorded in the scenario pass", with(pass, actionPass("create-order", domain.PassScenario)), domain.OutcomeInconclusive, []string{`the recorded evidence does not match the scenario: action a1 was recorded in pass "scenario", but step create-order needs pass "setup"`}},
+		{"scenario with an empty id", with(pass, noScenarioID), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: the scenario has no ID"}},
 		{"a new action value repeats an action id", with(pass, actionOf("order-unchanged", func(a *domain.Action) { a.ID = "a2" })), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: action a2"}},
 		{"action with an empty id", with(pass, actionOf("order-unchanged", func(a *domain.Action) { a.ID = "" })), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: step order-unchanged"}},
 		{"status 0 on a non-setup step", failedOnly(&domain.Action{ID: "a1", Use: use("one", "only"), Response: &domain.HTTPResponse{}}), domain.OutcomeInconclusive, []string{"step only failed: no response was recorded"}},
@@ -414,6 +446,32 @@ func TestCompute(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestComputeEmptyScenarioIDIsReportedOnce(t *testing.T) {
+	got := verdict.Compute(with(pass, noScenarioID)())
+	n := 0
+	for _, r := range got.Reasons {
+		if strings.Contains(r.Text, "the scenario has no ID") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("the empty scenario ID is reported %d times, want once: %+v", n, got.Reasons)
+	}
+}
+
+func TestComputeWrongPassIsReportedOnce(t *testing.T) {
+	got := verdict.Compute(with(pass, actionPass("order-unchanged", domain.PassExplore))())
+	n := 0
+	for _, r := range got.Reasons {
+		if strings.Contains(r.Text, "action a3") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("the action is named in %d reasons, want one: %+v", n, got.Reasons)
 	}
 }
 
@@ -668,6 +726,7 @@ func FuzzCompute(f *testing.F) {
 			truncate := next()%16 == 0
 			owner := next() % 32 // 30: the use case names another step, 31: another scenario
 			borrow := next()%16 == 0
+			wrongPass := next() % 32 // 0..6: a wrong pass
 			emptyInvariants := next()%16 == 0
 			step := domain.Step{ID: id, Setup: setup}
 			ev := verdict.StepEvidence{}
@@ -699,6 +758,11 @@ func FuzzCompute(f *testing.F) {
 			if ev.Action != nil && owner == 31 {
 				ev.Action.Use.Scenario = "other"
 				noPassReason = "an action names another scenario"
+			}
+			if ev.Action != nil && wrongPass <= 6 {
+				wrong := []domain.Pass{domain.PassExplore, domain.PassSecurity, domain.PassCleanup, "", passOf(!setup), passOf(!setup), "other"}[wrongPass]
+				ev.Action.Use.Pass = wrong
+				noPassReason = "an action was recorded in another pass than its step needs"
 			}
 			previous = ev.Action
 			if ev.Action != nil && unknownEffect {
