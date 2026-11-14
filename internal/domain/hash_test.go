@@ -97,3 +97,11 @@ func TestExpectHashEncodingFailureGivesEmptyHash(t *testing.T) {
 		t.Fatalf("ExpectHash with unencodable check = %q, want empty", got)
 	}
 }
+
+// The value must change only on purpose: a change lapses every stored confirmation and script.
+func TestExpectHashGolden(t *testing.T) {
+	const want = "a4550ee759d58595b8bcfa7c062711787affe3c3c5065653cf0a574e9a183a26"
+	if got := domain.ExpectHash(base()); string(got) != want {
+		t.Fatalf("ExpectHash(base()) = %s, want %s", got, want)
+	}
+}

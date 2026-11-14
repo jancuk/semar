@@ -6,17 +6,44 @@ import (
 	"encoding/json"
 )
 
+// The hashed shape is private and has fixed keys. A field is encoded only when set,
+// so adding an optional field to Check later does not change any stored hash.
+type hashedHint struct {
+	Method string `json:"method"`
+	Path   string `json:"path"`
+}
+
+type hashedCheck struct {
+	Status     *int     `json:"status,omitempty"`
+	JSONPath   string   `json:"jsonpath,omitempty"`
+	Header     string   `json:"header,omitempty"`
+	Equals     any      `json:"equals,omitempty"`
+	NotEquals  any      `json:"notEquals,omitempty"`
+	Contains   any      `json:"contains,omitempty"`
+	Exists     *bool    `json:"exists,omitempty"`
+	Greater    *float64 `json:"greater,omitempty"`
+	Less       *float64 `json:"less,omitempty"`
+	Count      *int     `json:"count,omitempty"`
+	EqualsPath string   `json:"equalsPath,omitempty"`
+}
+
+type hashedExpectation struct {
+	Check  hashedCheck `json:"check"`
+	Source Source      `json:"source"`
+	Cite   string      `json:"cite,omitempty"`
+}
+
 type hashedStep struct {
-	ID     StepID
-	Setup  bool
-	Hint   *RequestHint
-	Expect []Expectation
+	ID     StepID              `json:"id"`
+	Setup  bool                `json:"setup,omitempty"`
+	Hint   *hashedHint         `json:"hint,omitempty"`
+	Expect []hashedExpectation `json:"expect,omitempty"`
 }
 
 type hashedScenario struct {
-	Intent      string
-	AuthProfile string
-	Steps       []hashedStep
+	Intent      string       `json:"intent"`
+	AuthProfile string       `json:"authProfile"`
+	Steps       []hashedStep `json:"steps"`
 }
 
 // ExpectHash covers what a person confirmed. Title and a step's Action text are left out
@@ -26,7 +53,24 @@ type hashedScenario struct {
 func ExpectHash(s Scenario) Hash {
 	h := hashedScenario{Intent: s.Intent, AuthProfile: s.AuthProfile, Steps: make([]hashedStep, len(s.Steps))}
 	for i, st := range s.Steps {
-		h.Steps[i] = hashedStep{ID: st.ID, Setup: st.Setup, Hint: st.Hint, Expect: st.Expect}
+		hs := hashedStep{ID: st.ID, Setup: st.Setup}
+		if st.Hint != nil {
+			hs.Hint = &hashedHint{Method: st.Hint.Method, Path: st.Hint.Path}
+		}
+		for _, e := range st.Expect {
+			c := e.Check
+			hs.Expect = append(hs.Expect, hashedExpectation{
+				Check: hashedCheck{
+					Status: c.Status, JSONPath: c.JSONPath, Header: c.Header,
+					Equals: c.Equals, NotEquals: c.NotEquals, Contains: c.Contains,
+					Exists: c.Exists, Greater: c.Greater, Less: c.Less, Count: c.Count,
+					EqualsPath: c.EqualsPath,
+				},
+				Source: e.Source,
+				Cite:   e.Cite,
+			})
+		}
+		h.Steps[i] = hs
 	}
 	b, err := json.Marshal(h)
 	if err != nil {
