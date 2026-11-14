@@ -70,14 +70,19 @@ func Compute(in Input) domain.ScenarioResult {
 	for _, text := range in.Blocked {
 		add(domain.OutcomeBlocked, "", text)
 	}
-	buildsRecorded := len(in.BuildsStart) > 0 && len(in.BuildsEnd) > 0
+	buildsRecorded := buildsHold(in.BuildsStart) && buildsHold(in.BuildsEnd)
 	if buildsRecorded && buildsDiffer(in.BuildsStart, in.BuildsEnd) {
 		add(domain.OutcomeStale, "", msgBuildChanged)
 	}
 
 	expectations := 0
 	seen := map[domain.StepID]bool{}
+	usedActions := map[domain.ActionID]bool{}
 	for _, step := range in.Scenario.Steps {
+		if step.ID == "" {
+			add(domain.OutcomeInconclusive, "", fmt.Sprintf("%s: a step of the scenario has no ID", msgMismatch))
+			continue
+		}
 		if seen[step.ID] {
 			add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("%s: step %s appears more than once in the scenario", msgMismatch, step.ID))
 			continue
@@ -86,10 +91,21 @@ func Compute(in Input) domain.ScenarioResult {
 		ev := in.Steps[step.ID]
 		a := ev.Action
 		if a != nil {
-			res.Actions = append(res.Actions, a.ID)
+			switch {
+			case a.ID == "":
+				add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("%s: step %s has an action without an ID", msgMismatch, step.ID))
+			case usedActions[a.ID]:
+				add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("%s: action %s of step %s was already used by an earlier step", msgMismatch, a.ID, step.ID))
+			default:
+				usedActions[a.ID] = true
+				res.Actions = append(res.Actions, a.ID)
+			}
+			if a.Use.Scenario != in.Scenario.ID || a.Use.Step != step.ID {
+				add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("%s: action %s was recorded for step %q of scenario %q, not for step %s of scenario %s", msgMismatch, a.ID, a.Use.Step, a.Use.Scenario, step.ID, in.Scenario.ID))
+			}
 		}
 		refused := a != nil && a.Refused != ""
-		noResponse := !step.Setup && !refused && a != nil && (a.Err != "" || a.Response == nil)
+		noResponse := !step.Setup && !refused && a != nil && (a.Err != "" || !hasResponse(a))
 		if len(ev.Checks) > len(step.Expect) {
 			add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("%s: step %s has %d check results for %d expectations", msgMismatch, step.ID, len(ev.Checks), len(step.Expect)))
 		}
@@ -167,6 +183,10 @@ func Compute(in Input) domain.ScenarioResult {
 			}
 		}
 
+		if hasResponse(a) && !refused && len(ev.Invariants) == 0 {
+			add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("the invariants of step %s were not evaluated", step.ID))
+		}
+
 		if a == nil && !step.Setup {
 			add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("step %s has no recorded result", step.ID))
 		}
@@ -217,12 +237,27 @@ func setupFailure(a *domain.Action) string {
 		return "has no recorded result"
 	case a.Err != "":
 		return "failed: " + a.Err
-	case a.Response == nil:
+	case !hasResponse(a):
 		return "has no response"
 	case a.Response.Status >= 400:
 		return fmt.Sprintf("answered %d", a.Response.Status)
 	}
 	return ""
+}
+
+// hasResponse: a status under 100 is not an HTTP response, for instance 0 from an empty stored object.
+func hasResponse(a *domain.Action) bool {
+	return a != nil && a.Response != nil && a.Response.Status >= 100
+}
+
+// buildsHold reports whether the list names at least one build, and every build has a service and a commit.
+func buildsHold(builds []domain.BuildRef) bool {
+	for _, b := range builds {
+		if b.Service == "" || b.Commit == "" {
+			return false
+		}
+	}
+	return len(builds) > 0
 }
 
 func buildsDiffer(start, end []domain.BuildRef) bool {

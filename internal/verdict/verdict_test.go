@@ -12,8 +12,17 @@ import (
 
 func intp(n int) *int { return &n }
 
-func ok(id string) *domain.Action {
-	return &domain.Action{ID: domain.ActionID(id), Response: &domain.HTTPResponse{Status: 200}}
+// use is the use case an action of the given step carries.
+func use(scenarioID, step string) domain.UseCase {
+	return domain.UseCase{Pass: domain.PassScenario, Scenario: domain.ScenarioID(scenarioID), Step: domain.StepID(step)}
+}
+
+func ok(scenarioID, step, id string) *domain.Action {
+	return &domain.Action{ID: domain.ActionID(id), Use: use(scenarioID, step), Response: &domain.HTTPResponse{Status: 200}}
+}
+
+func invOK() []check.Result {
+	return []check.Result{{State: domain.CheckTrue, Expected: "no server error", Observed: "status 200"}}
 }
 
 func trueResult() check.Result {
@@ -36,15 +45,13 @@ func scenario() domain.Scenario {
 }
 
 func pass() verdict.Input {
-	inv := func() []check.Result {
-		return []check.Result{{State: domain.CheckTrue, Expected: "no server error", Observed: "status 200"}}
-	}
+	inv := invOK
 	return verdict.Input{
 		Scenario: scenario(),
 		Steps: map[domain.StepID]verdict.StepEvidence{
-			"create-order":    {Action: ok("a1"), Invariants: inv()},
-			"refund-too-much": {Action: ok("a2"), Checks: []check.Result{trueResult(), trueResult()}, Invariants: inv()},
-			"order-unchanged": {Action: ok("a3"), Checks: []check.Result{trueResult()}, Invariants: inv()},
+			"create-order":    {Action: ok("refunds", "create-order", "a1"), Invariants: inv()},
+			"refund-too-much": {Action: ok("refunds", "refund-too-much", "a2"), Checks: []check.Result{trueResult(), trueResult()}, Invariants: inv()},
+			"order-unchanged": {Action: ok("refunds", "order-unchanged", "a3"), Checks: []check.Result{trueResult()}, Invariants: inv()},
 		},
 		Confirmed:   func(domain.Expectation) bool { return true },
 		BuildsStart: []domain.BuildRef{{Service: "orders", Commit: "bbbbbbb", ConfigHash: "c1"}},
@@ -94,13 +101,13 @@ func configChanged(in *verdict.Input) {
 
 func setupStatus(status int) mod {
 	return change("create-order", func(ev *verdict.StepEvidence) {
-		ev.Action = &domain.Action{ID: "a1", Response: &domain.HTTPResponse{Status: status}}
+		ev.Action = &domain.Action{ID: "a1", Use: use("refunds", "create-order"), Response: &domain.HTTPResponse{Status: status}}
 	})
 }
 
 func setupRefused(why string) mod {
 	return change("create-order", func(ev *verdict.StepEvidence) {
-		ev.Action = &domain.Action{ID: "a1", Refused: why}
+		ev.Action = &domain.Action{ID: "a1", Use: use("refunds", "create-order"), Refused: why}
 	})
 }
 
@@ -108,13 +115,13 @@ func setupMissing(in *verdict.Input) { delete(in.Steps, "create-order") }
 
 func setupTransportError(in *verdict.Input) {
 	ev := in.Steps["create-order"]
-	ev.Action = &domain.Action{ID: "a1", Err: "connection reset"}
+	ev.Action = &domain.Action{ID: "a1", Use: use("refunds", "create-order"), Err: "connection reset"}
 	in.Steps["create-order"] = ev
 }
 
 func stepRefused(id domain.StepID, why string) mod {
 	return change(id, func(ev *verdict.StepEvidence) {
-		ev.Action = &domain.Action{ID: "a9", Refused: why}
+		ev.Action = &domain.Action{ID: "a9", Use: use("refunds", string(id)), Refused: why}
 		for i := range ev.Checks {
 			ev.Checks[i] = check.Result{State: domain.CheckNotEvaluated, Detail: "no response was recorded"}
 		}
@@ -184,7 +191,7 @@ func shortChecks(in *verdict.Input) {
 }
 
 func unknownStepInMap(in *verdict.Input) {
-	in.Steps["ghost"] = verdict.StepEvidence{Action: ok("zz"), Checks: []check.Result{trueResult()}}
+	in.Steps["ghost"] = verdict.StepEvidence{Action: ok("refunds", "ghost", "zz"), Checks: []check.Result{trueResult()}}
 }
 
 func longChecks(in *verdict.Input) {
@@ -197,7 +204,7 @@ func singleStep() verdict.Input {
 	return verdict.Input{
 		Scenario: domain.Scenario{ID: "one", Steps: []domain.Step{{ID: "only", Expect: []domain.Expectation{expectation("only/0")}}}},
 		Steps: map[domain.StepID]verdict.StepEvidence{
-			"only": {Action: ok("a1"), Checks: []check.Result{trueResult()}},
+			"only": {Action: ok("one", "only", "a1"), Checks: []check.Result{trueResult()}, Invariants: invOK()},
 		},
 		Confirmed:   func(domain.Expectation) bool { return true },
 		BuildsStart: []domain.BuildRef{{Service: "orders", Commit: "bbbbbbb", ConfigHash: "c1"}},
@@ -215,8 +222,8 @@ func writeNeverRan() verdict.Input {
 			{ID: "verify", Expect: []domain.Expectation{expectation("verify/0")}},
 		}},
 		Steps: map[domain.StepID]verdict.StepEvidence{
-			"setup":  {Action: ok("a1")},
-			"verify": {Action: ok("a3"), Checks: []check.Result{trueResult()}},
+			"setup":  {Action: ok("write", "setup", "a1"), Invariants: invOK()},
+			"verify": {Action: ok("write", "verify", "a3"), Checks: []check.Result{trueResult()}, Invariants: invOK()},
 		},
 		Confirmed:   func(domain.Expectation) bool { return true },
 		BuildsStart: []domain.BuildRef{{Service: "orders", Commit: "bbbbbbb", ConfigHash: "c1"}},
@@ -232,7 +239,7 @@ func refundAction(a *domain.Action) mod {
 func failedOnly(a *domain.Action) func() verdict.Input {
 	return func() verdict.Input {
 		in := singleStep()
-		in.Steps["only"] = verdict.StepEvidence{Action: a, Checks: []check.Result{trueResult()}}
+		in.Steps["only"] = verdict.StepEvidence{Action: a, Checks: []check.Result{trueResult()}, Invariants: invOK()}
 		return in
 	}
 }
@@ -266,6 +273,44 @@ func noBuilds(start, end bool) mod {
 		if end {
 			in.BuildsEnd = nil
 		}
+	}
+}
+
+func noInvariants(id domain.StepID) mod {
+	return change(id, func(ev *verdict.StepEvidence) { ev.Invariants = nil })
+}
+
+// actionOf replaces the action of a step; the mutate function changes a copy.
+func actionOf(id domain.StepID, f func(*domain.Action)) mod {
+	return change(id, func(ev *verdict.StepEvidence) {
+		a := *ev.Action
+		f(&a)
+		ev.Action = &a
+	})
+}
+
+// refundHoldsVerifyAction: the write under test never ran; its evidence holds the action of the verifying read.
+func refundHoldsVerifyAction() verdict.Input {
+	in := writeNeverRan()
+	a := *in.Steps["verify"].Action
+	in.Steps["refund"] = verdict.StepEvidence{Action: &a, Invariants: invOK()}
+	return in
+}
+
+func refundRan500NoInvariants() verdict.Input {
+	in := writeNeverRan()
+	in.Steps["refund"] = verdict.StepEvidence{Action: &domain.Action{ID: "a2", Use: use("write", "refund"), Response: &domain.HTTPResponse{Status: 500}}}
+	return in
+}
+
+func emptyStepID(in *verdict.Input) {
+	in.Scenario.Steps = append(in.Scenario.Steps, domain.Step{ID: ""})
+}
+
+func buildsWith(service, commit string) mod {
+	return func(in *verdict.Input) {
+		in.BuildsStart = []domain.BuildRef{{Service: service, Commit: commit, ConfigHash: "c1"}}
+		in.BuildsEnd = []domain.BuildRef{{Service: service, Commit: commit, ConfigHash: "c1"}}
 	}
 }
 
@@ -312,15 +357,29 @@ func TestCompute(t *testing.T) {
 		{"unknown step in the map", with(pass, unknownStepInMap), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: the evidence holds step ghost"}},
 		{"duplicate step id", with(pass, duplicateStep), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: step order-unchanged"}},
 		{"write step never ran", writeNeverRan, domain.OutcomeInconclusive, []string{"step refund has no recorded result"}},
-		{"write step has a transport error", with(writeNeverRan, refundAction(&domain.Action{ID: "a2", Err: "connection reset"})), domain.OutcomeInconclusive, []string{"step refund failed: connection reset"}},
-		{"write step has no response and no error", with(writeNeverRan, refundAction(&domain.Action{ID: "a2"})), domain.OutcomeInconclusive, []string{"step refund failed: no response was recorded"}},
-		{"transport error with a check recorded as true", failedOnly(&domain.Action{ID: "a1", Err: "timeout"}), domain.OutcomeInconclusive, []string{"step only failed: timeout"}},
-		{"no response with a check recorded as true", failedOnly(&domain.Action{ID: "a1"}), domain.OutcomeInconclusive, []string{"step only failed: no response was recorded"}},
+		{"write step has a transport error", with(writeNeverRan, refundAction(&domain.Action{ID: "a2", Use: use("write", "refund"), Err: "connection reset"})), domain.OutcomeInconclusive, []string{"step refund failed: connection reset"}},
+		{"write step has no response and no error", with(writeNeverRan, refundAction(&domain.Action{ID: "a2", Use: use("write", "refund")})), domain.OutcomeInconclusive, []string{"step refund failed: no response was recorded"}},
+		{"transport error with a check recorded as true", failedOnly(&domain.Action{ID: "a1", Use: use("one", "only"), Err: "timeout"}), domain.OutcomeInconclusive, []string{"step only failed: timeout"}},
+		{"no response with a check recorded as true", failedOnly(&domain.Action{ID: "a1", Use: use("one", "only")}), domain.OutcomeInconclusive, []string{"step only failed: no response was recorded"}},
 		{"expectations only on a setup step", setupOnlyExpectations, domain.OutcomeInconclusive, []string{"the scenario has no check besides the invariants"}},
 		{"invariant false on a setup step", with(pass, invariant("create-order", domain.CheckFalse)), domain.OutcomeBlocked, []string{"setup failed: create-order no server error was not met"}},
 		{"no build recorded at all", with(pass, noBuilds(true, true)), domain.OutcomeInconclusive, []string{"no build was recorded"}},
 		{"only the start build recorded", with(pass, noBuilds(false, true)), domain.OutcomeInconclusive, []string{"no build was recorded"}},
 		{"only the end build recorded", with(pass, noBuilds(true, false)), domain.OutcomeInconclusive, []string{"no build was recorded"}},
+		{"refund holds the action of verify", refundHoldsVerifyAction, domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario"}},
+		{"action use case names another step", with(pass, actionOf("create-order", func(a *domain.Action) { a.Use.Step = "refund-too-much" })), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: action a1"}},
+		{"action use case names another scenario", with(pass, actionOf("create-order", func(a *domain.Action) { a.Use.Scenario = "other" })), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: action a1"}},
+		{"a new action value repeats an action id", with(pass, actionOf("order-unchanged", func(a *domain.Action) { a.ID = "a2" })), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: action a2"}},
+		{"action with an empty id", with(pass, actionOf("order-unchanged", func(a *domain.Action) { a.ID = "" })), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario: step order-unchanged"}},
+		{"status 0 on a non-setup step", failedOnly(&domain.Action{ID: "a1", Use: use("one", "only"), Response: &domain.HTTPResponse{}}), domain.OutcomeInconclusive, []string{"step only failed: no response was recorded"}},
+		{"status 99 on a non-setup step", failedOnly(&domain.Action{ID: "a1", Use: use("one", "only"), Response: &domain.HTTPResponse{Status: 99}}), domain.OutcomeInconclusive, []string{"step only failed: no response was recorded"}},
+		{"status 0 on a setup step", with(pass, setupStatus(0)), domain.OutcomeBlocked, []string{"setup failed: create-order has no response"}},
+		{"write ran, 500, no invariant results", refundRan500NoInvariants, domain.OutcomeInconclusive, []string{"the invariants of step refund were not evaluated"}},
+		{"non-setup step has no invariant results", with(pass, noInvariants("order-unchanged")), domain.OutcomeInconclusive, []string{"the invariants of step order-unchanged were not evaluated"}},
+		{"setup step has no invariant results", with(pass, noInvariants("create-order")), domain.OutcomeInconclusive, []string{"the invariants of step create-order were not evaluated"}},
+		{"build with an empty service", with(pass, buildsWith("", "bbbbbbb")), domain.OutcomeInconclusive, []string{"no build was recorded"}},
+		{"build with an empty commit", with(pass, buildsWith("orders", "")), domain.OutcomeInconclusive, []string{"no build was recorded"}},
+		{"step with an empty id", with(pass, emptyStepID), domain.OutcomeInconclusive, []string{"the recorded evidence does not match the scenario"}},
 		{"stale with a failed check lists both", with(pass, buildsEnd("orders", "aaaaaaa"), checkState("refund-too-much", 0, domain.CheckFalse)), domain.OutcomeStale, []string{"the build changed during the run", "refund-too-much"}},
 		{"blocked wins over failed", with(pass, blocked("gate failed"), checkState("refund-too-much", 0, domain.CheckFalse)), domain.OutcomeBlocked, []string{"gate failed", "refund-too-much"}},
 		{"blocked wins over stale", with(pass, blocked("gate failed"), buildsEnd("orders", "aaaaaaa")), domain.OutcomeBlocked, []string{"gate failed", "the build changed during the run"}},
@@ -403,8 +462,8 @@ func TestComputeFailedStepNamesTheCauseOnce(t *testing.T) {
 		name   string
 		action *domain.Action
 	}{
-		{"error", &domain.Action{ID: "a1", Err: "timeout"}},
-		{"no response", &domain.Action{ID: "a1"}},
+		{"error", &domain.Action{ID: "a1", Use: use("one", "only"), Err: "timeout"}},
+		{"no response", &domain.Action{ID: "a1", Use: use("one", "only")}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -537,7 +596,7 @@ func TestComputeIsDeterministic(t *testing.T) {
 		for _, id := range []domain.StepID{"s1", "s2", "s3", "s4", "s5", "s6", "s7"} {
 			sc.Steps = append(sc.Steps, domain.Step{ID: id, Expect: []domain.Expectation{expectation(string(id))}})
 			steps[id] = verdict.StepEvidence{
-				Action:     ok("act-" + string(id)),
+				Action:     ok("many", string(id), "act-"+string(id)),
 				Checks:     []check.Result{{State: domain.CheckFalse, Expected: "e", Observed: "o"}},
 				Invariants: []check.Result{{State: domain.CheckFalse, Expected: "no server error"}},
 			}
@@ -559,7 +618,16 @@ func FuzzCompute(f *testing.F) {
 	f.Add([]byte{2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2})
 	f.Add([]byte{255, 3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9})
 
-	states := []domain.CheckState{domain.CheckTrue, domain.CheckFalse, domain.CheckNotEvaluated}
+	// Most choices keep the scenario clean, so that the oracle is reached by inputs that pass.
+	state := func(b byte) domain.CheckState {
+		switch b % 16 {
+		case 0:
+			return domain.CheckFalse
+		case 1:
+			return domain.CheckNotEvaluated
+		}
+		return domain.CheckTrue
+	}
 	f.Fuzz(func(t *testing.T, data []byte) {
 		at := 0
 		next := func() byte {
@@ -576,6 +644,7 @@ func FuzzCompute(f *testing.F) {
 			modeErr
 			modeStatus400
 			modeRefused
+			modeStatus0
 			modes
 		)
 		sc := domain.Scenario{ID: "fz"}
@@ -585,25 +654,53 @@ func FuzzCompute(f *testing.F) {
 		// The oracle reads only these variables, which the generator sets from its own choices.
 		noPassReason := ""
 		setupFailed, anyRefused, anyExpectation := false, false, false
+		var previous *domain.Action
 		for i := 0; i < 3; i++ {
 			id := domain.StepID([]string{"s1", "s2", "s3"}[i])
+			actionID := domain.ActionID("a" + string(id))
 			setup := next()&1 == 1
-			mode := int(next()) % modes
-			unknownEffect := next()&3 == 0
+			mode := modeOK
+			if v := int(next() % 20); v >= 14 {
+				mode = v - 13 // 1 .. modes-1
+			}
+			unknownEffect := next()%16 == 0
 			n := int(next() % 3)
-			truncate := next()&3 == 0
+			truncate := next()%16 == 0
+			owner := next() % 32 // 30: the use case names another step, 31: another scenario
+			borrow := next()%16 == 0
+			emptyInvariants := next()%16 == 0
 			step := domain.Step{ID: id, Setup: setup}
 			ev := verdict.StepEvidence{}
 			switch mode {
 			case modeOK:
-				ev.Action = ok("a" + string(id))
+				ev.Action = ok("fz", string(id), string(actionID))
 			case modeStatus400:
-				ev.Action = &domain.Action{ID: domain.ActionID("a" + string(id)), Response: &domain.HTTPResponse{Status: 400 + int(next())%200}}
+				ev.Action = &domain.Action{ID: actionID, Use: use("fz", string(id)), Response: &domain.HTTPResponse{Status: 400 + int(next())%200}}
+			case modeStatus0:
+				ev.Action = &domain.Action{ID: actionID, Use: use("fz", string(id)), Response: &domain.HTTPResponse{Status: int(next()) % 100}}
 			case modeErr:
-				ev.Action = &domain.Action{ID: domain.ActionID("a" + string(id)), Err: "reset"}
+				ev.Action = &domain.Action{ID: actionID, Use: use("fz", string(id)), Err: "reset"}
 			case modeRefused:
-				ev.Action = &domain.Action{ID: domain.ActionID("a" + string(id)), Refused: "denied"}
+				ev.Action = &domain.Action{ID: actionID, Use: use("fz", string(id)), Refused: "denied"}
+				if next()&1 == 1 {
+					ev.Action.Response = &domain.HTTPResponse{Status: 200}
+				}
 			}
+			if mode == modeOK && borrow && previous != nil {
+				// This step holds the action of the step before it.
+				a := *previous
+				ev.Action = &a
+				noPassReason = "a step holds the action of another step"
+			}
+			if ev.Action != nil && owner == 30 {
+				ev.Action.Use.Step = "other"
+				noPassReason = "an action names another step"
+			}
+			if ev.Action != nil && owner == 31 {
+				ev.Action.Use.Scenario = "other"
+				noPassReason = "an action names another scenario"
+			}
+			previous = ev.Action
 			if ev.Action != nil && unknownEffect {
 				ev.Action.EffectUnknown = true
 				noPassReason = "an action has an unknown effect"
@@ -614,20 +711,20 @@ func FuzzCompute(f *testing.F) {
 			if setup && mode != modeOK {
 				setupFailed = true
 			}
-			if !setup && (mode == modeMissing || mode == modeErr || mode == modeRefused) {
+			if !setup && (mode == modeMissing || mode == modeErr || mode == modeRefused || mode == modeStatus0) {
 				noPassReason = "a non-setup step has no response"
 			}
 			for j := 0; j < n; j++ {
 				cite := string(id) + string(rune('0'+j))
 				step.Expect = append(step.Expect, expectation(cite))
-				confirmed[cite] = next()&1 == 1
+				confirmed[cite] = next()%16 != 0
 				if !setup {
 					anyExpectation = true
 				}
 				if !confirmed[cite] {
 					noPassReason = "an expectation is unconfirmed"
 				}
-				st := states[int(next())%3]
+				st := state(next())
 				if st != domain.CheckTrue {
 					noPassReason = "a check is false or not evaluated"
 				}
@@ -639,19 +736,26 @@ func FuzzCompute(f *testing.F) {
 					noPassReason = "a check is missing"
 				}
 			}
-			st := states[int(next())%3]
+			st := state(next())
 			if st != domain.CheckTrue {
 				noPassReason = "an invariant is false or not evaluated"
 			}
-			ev.Invariants = []check.Result{{State: st}}
+			if emptyInvariants {
+				ev.Invariants = nil
+				if mode == modeOK || mode == modeStatus400 {
+					noPassReason = "a step that ran has no invariant results"
+				}
+			} else {
+				ev.Invariants = []check.Result{{State: st}}
+			}
 			sc.Steps = append(sc.Steps, step)
 			steps[id] = ev
 		}
 		if !anyExpectation {
 			noPassReason = "no non-setup step has an expectation"
 		}
-		if next()%4 == 0 {
-			steps["ghost"] = verdict.StepEvidence{Action: ok("zz")}
+		if next()%16 == 0 {
+			steps["ghost"] = verdict.StepEvidence{Action: ok("fz", "ghost", "zz")}
 			noPassReason = "the evidence has an unknown step"
 		}
 
@@ -662,7 +766,7 @@ func FuzzCompute(f *testing.F) {
 			BuildsStart: []domain.BuildRef{{Service: "orders", Commit: "a"}},
 			BuildsEnd:   []domain.BuildRef{{Service: "orders", Commit: "a"}},
 		}
-		if next()%4 == 0 {
+		if next()%16 == 0 {
 			in.Confirmed = nil
 			for _, step := range sc.Steps {
 				if len(step.Expect) > 0 {
@@ -670,7 +774,7 @@ func FuzzCompute(f *testing.F) {
 				}
 			}
 		}
-		switch next() % 5 {
+		switch next() % 20 {
 		case 1:
 			in.BuildsEnd[0].Commit = "b"
 			noPassReason = "the builds differ"
@@ -681,15 +785,15 @@ func FuzzCompute(f *testing.F) {
 			in.BuildsEnd = nil
 			noPassReason = "a build side is empty"
 		}
-		if next()&1 == 1 {
+		if next()%16 == 0 {
 			in.Blocked = []string{"blocked"}
 			noPassReason = "something is blocked"
 		}
-		if next()%4 == 0 {
+		if next()%16 == 0 {
 			in.NotRun = "not run"
 			noPassReason = "not run"
 		}
-		in.Retried = next()&1 == 1
+		in.Retried = next()%16 == 0
 		if in.Retried {
 			noPassReason = "the script needed a retry"
 		}
