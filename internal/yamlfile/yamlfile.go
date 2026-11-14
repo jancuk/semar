@@ -52,3 +52,44 @@ func LoadNode(node *yaml.Node, name string, v any) error {
 	}
 	return nil
 }
+
+// JSONable turns a decoded YAML value into one that encoding/json can encode.
+// YAML allows mapping keys that are not strings, and JSON does not.
+func JSONable(v any) (any, error) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, e := range x {
+			n, err := JSONable(e)
+			if err != nil {
+				return nil, err
+			}
+			x[k] = n
+		}
+		return x, nil
+	case map[any]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			ks, ok := k.(string)
+			if !ok {
+				return nil, fmt.Errorf("a mapping key must be a string, got %v", k)
+			}
+			n, err := JSONable(e)
+			if err != nil {
+				return nil, err
+			}
+			out[ks] = n
+		}
+		return out, nil
+	case []any:
+		for i, e := range x {
+			n, err := JSONable(e)
+			if err != nil {
+				return nil, err
+			}
+			x[i] = n
+		}
+		return x, nil
+	default:
+		return v, nil
+	}
+}
