@@ -240,6 +240,8 @@ func TestBuildErrors(t *testing.T) {
 	}
 }
 
+var dashed = regexp.MustCompile(`[A-Z](-[0-9A-Z])+`)
+
 func TestFindKeys(t *testing.T) {
 	short := regexp.MustCompile(`SHOP-[0-9]{3}`)
 	cases := []struct {
@@ -266,7 +268,10 @@ func TestFindKeys(t *testing.T) {
 		{"a key after a long rejected run", defaultTicket, strings.Repeat("A", 1000) + "-1A SHOP-2", []string{"SHOP-2"}},
 		{"a key after the search limit", defaultTicket, strings.Repeat(" ", maxKeyText) + "SHOP-1", nil},
 		{"a key cut by the search limit", defaultTicket, strings.Repeat(" ", maxKeyText-6) + "SHOP-12", nil},
-		{"a key that ends at the search limit", defaultTicket, strings.Repeat(" ", maxKeyText-7) + "SHOP-12 ", []string{"SHOP-12"}},
+		{"a key that ends at the search limit of a longer text", defaultTicket, strings.Repeat(" ", maxKeyText-7) + "SHOP-12 ", nil},
+		{"a key that ends at the search limit and the text", defaultTicket, strings.Repeat(" ", maxKeyText-7) + "SHOP-12", []string{"SHOP-12"}},
+		{"a key that the limit may cut", dashed, strings.Repeat(" ", maxKeyText-3) + "A-B-C", nil},
+		{"a key after a long rejected match", dashed, strings.Repeat("A-", 100) + "AB A-1", []string{"A-1"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -302,6 +307,26 @@ func TestFindKeysIsLinear(t *testing.T) {
 				t.Fatal("the ticket search took more than 5 s")
 			}
 		})
+	}
+}
+
+func TestFindKeysIsLinearForAnyPattern(t *testing.T) {
+	text := strings.Repeat("A-", (maxKeyText-2)/2) + "AB"
+	start := time.Now()
+	if keys := findKeys(dashed, text); keys != nil {
+		t.Fatalf("keys %v", keys)
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("the search of %d bytes took %v", len(text), took)
+	}
+}
+
+func TestBuildStopsWhenCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	repo := &fakeRepo{base: "mb", log: []vcs.Commit{{ID: "c1", Subject: "SHOP-1", Parents: []string{"p"}}}}
+	if _, err := Build(ctx, repo, Options{BaseCommit: "b", HeadCommit: "h"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want a cancel", err)
 	}
 }
 

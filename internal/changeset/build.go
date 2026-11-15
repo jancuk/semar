@@ -79,6 +79,9 @@ func Build(ctx context.Context, repo Repo, o Options) (domain.ChangeSet, error) 
 	ticketFiles := map[string]map[string]bool{}
 	fileTickets := make([]map[string]bool, len(files))
 	for _, c := range log {
+		if err := ctx.Err(); err != nil {
+			return domain.ChangeSet{}, fmt.Errorf("build change set: %w", err)
+		}
 		keys := findKeys(re, c.Subject+"\n"+c.Body)
 		for _, k := range keys {
 			if idcheck.Check("ticket key", k) != nil {
@@ -152,7 +155,8 @@ const maxKeyText = 64 << 10
 
 // findKeys returns the sorted, distinct matches of re that are not part of a
 // longer run of letters and digits. The caller's pattern need not hold \b.
-// Matches are searched in the first maxKeyText bytes only.
+// Matches are searched in the first maxKeyText bytes only, and a match that ends
+// at that limit while the text goes on is not a key, since it may be cut.
 func findKeys(re *regexp.Regexp, text string) []string {
 	search := text[:min(len(text), maxKeyText)]
 	found := map[string]bool{}
@@ -162,10 +166,12 @@ func findKeys(re *regexp.Regexp, text string) []string {
 			break
 		}
 		start, end := pos+loc[0], pos+loc[1]
-		if start == end || (start > 0 && isAlnum(text[start-1])) || (end < len(text) && isAlnum(text[end])) {
-			// No key starts inside this run, since each such position follows a letter
-			// or a digit. Restarting one byte later instead makes a long run quadratic.
-			pos = start + 1
+		cut := end == len(search) && len(search) < len(text)
+		if start == end || cut || (start > 0 && isAlnum(text[start-1])) || (end < len(text) && isAlnum(text[end])) {
+			// The pattern comes from the repository's configuration, so restarting inside
+			// a rejected match would let one long match be scanned again from each of its
+			// bytes. No key starts inside an alphanumeric run, so skip that run as well.
+			pos = max(start+1, end)
 			for pos < len(search) && isAlnum(search[pos-1]) && isAlnum(search[pos]) {
 				pos++
 			}
