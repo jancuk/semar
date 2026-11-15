@@ -63,7 +63,7 @@ providers:
   - id: deepseek
     kind: openai                # the OpenAI chat format
     baseUrl: https://api.deepseek.com
-    model: deepseek-chat
+    model: <model name>
     apiKey: keychain:deepseek   # stored by the dashboard
 ```
 
@@ -248,7 +248,7 @@ The page uses `internal/dashboard/ui/style.css` as given and does not change its
 | Claude Code | Nothing inside the working directory loads with the setup on: a settings directory with a hook and a permission rule, an MCP file, a skill directory, and an instruction file were all planted, and none took effect |
 | Claude Code | The person's permission mode decides which MCP tools run. Under the mode `auto`, a classifier approves them. Only `setup.deny` stops a tool for certain |
 | Claude Code | The person's plugins load with the setup on. Hooks stay off |
-| Claude Code | A job with the setup on costs more: on a machine with many plugins, one run wrote about 195,000 tokens to the cache, against about 17,000 with MCP off |
+| Claude Code | A job with the setup on costs more. On a machine with 11 MCP servers and 139 skills, one plan of 20 turns used 1,665,000 input tokens, of which 1,418,000 were read from the cache. The same plan without the setup used about 161,000. The planner called no MCP tool in that run |
 | Codex | The read-only sandbox of the tool lets a command read the whole disk. The driver defines its own permission profile, which reads the system's files and the working directory only. Proven on macOS only |
 | Codex | The person's own instruction file loads in every mode. No switch keeps it out and keeps the sign-in |
 | Codex | The tool sends the schema in a strict mode that refuses the plan schema. The driver then puts the schema in the prompt and checks that the answer is one JSON object. The plan stage's own checks still run |

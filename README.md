@@ -52,7 +52,7 @@ Semar is one static binary with no runtime dependency.
 
 * Go 1.26 or later. The build uses the toolchain named in `go.mod`, and Go downloads it on the first build.
 * `git` and `make`.
-* For `semar plan` only: [Claude Code](https://claude.com/claude-code) installed and signed in, with `claude` on your `PATH`. The other commands need no model.
+* For `semar plan` only: a model provider. The default is [Claude Code](https://claude.com/claude-code), installed and signed in, with `claude` on your `PATH`. [Choose the model](#choose-the-model) lists the others. The other commands need no model.
 
 **Build:**
 
@@ -132,7 +132,7 @@ semar plan --diff main..release \
 What `plan` does:
 
 1. It copies the source at the head commit to a temporary directory.
-2. It starts Claude Code in that copy with three read-only tools: read a file, search, and list files. The model has no shell and no network, and it cannot reach your test environment or read a file outside the copy.
+2. It starts the planner in that copy. The planner can read a file, search, and list files. It cannot read a file outside the copy, and it cannot reach your test environment. With a harness provider it can also use your own MCP servers and skills, unless you turn them off. See [Choose the model](#choose-the-model).
 3. The model returns one draft. Code validates it. Problems go back to the model, for at most three attempts.
 4. It writes the files below and removes the copy.
 
@@ -185,7 +185,85 @@ semar activity latest        # every request that was sent, in order
 * It does not invent data of the test environment. A scenario that needs an existing record, such as the ID of an order that the test account may read, is listed in `plan.md` under "Not drafted" with what it needs.
 * It drafts requests from the source. It does not try them against the service first.
 
-**What leaves your machine.** `plan` sends parts of your source and the diff to the model provider, through your own Claude Code and its account. It sends no token, no address of your test environment, and no file outside the copy. `changes`, `run`, `confirm`, and `activity` send nothing to a model.
+**What leaves your machine.** `plan` sends parts of your source and the diff to the model provider that you chose, through your own account or key. The line that `plan` prints at its start names the provider. It sends no token, no address of your test environment, and no file outside the copy. `changes`, `run`, `confirm`, and `activity` send nothing to a model.
+
+### Choose the model
+
+`semar plan` works with these kinds of provider:
+
+| Kind | What it is | Sign-in |
+| --- | --- | --- |
+| `claude` | Claude Code on your machine. The default | Its own sign-in, a subscription or a key |
+| `codex` | Codex on your machine | Its own sign-in |
+| `anthropic` | The Anthropic API | An API key |
+| `openai` | The OpenAI API, and any server that speaks the same chat format, such as DeepSeek, OpenRouter, or a local server | An API key. None for a server on your own machine |
+
+**The dashboard.** One command opens a page on your own machine:
+
+```bash
+semar dashboard
+```
+
+The page lists your providers and shows for each one whether it is installed and signed in. There you can:
+
+* add a provider, and paste an API key, which goes to the keychain of your operating system;
+* start the sign-in of Claude Code or Codex;
+* set the default provider and the model of each provider;
+* turn your MCP servers and skills on or off for a harness provider;
+* see the usage: runs, turns, tokens, and cost per provider and model, and for Claude Code the subscription windows that it reported after the last run.
+
+The page runs until you press Ctrl+C. It listens on `127.0.0.1` only, and its address holds a token that every request needs.
+
+**The file.** The dashboard writes `~/.config/semar/providers.yaml`, and you can edit the file by hand instead. A reload of the page shows your edit.
+
+```yaml
+version: 1
+default: claude                 # plans when nothing else names a provider
+providers:
+  - id: claude
+    kind: claude
+    model: ""                   # "" means the harness's own default
+    setup:
+      mcp: true                 # your MCP servers
+      skills: true              # your skills
+      deny: []                  # tool names that never run
+
+  - id: anthropic
+    kind: anthropic
+    model: claude-opus-5-5
+    apiKey: env:ANTHROPIC_API_KEY
+
+  - id: deepseek
+    kind: openai
+    baseUrl: https://api.deepseek.com
+    model: <model name>
+    apiKey: keychain:deepseek   # stored by the dashboard
+```
+
+The file never holds a key. `apiKey` is `env:NAME`, an environment variable, or `keychain:NAME`, an entry that the dashboard stored. Set `SEMAR_HOME` to keep the file in another directory.
+
+**Which provider plans.** In this order: the flag `--provider <id>`, then `default` of your file, then `plan.provider` of the repository's `semar.yaml`, then the built-in `claude`. Your file comes before `semar.yaml`, so a repository cannot choose where your source goes. `semar providers` prints the list and marks the one that would plan in the current directory.
+
+```bash
+semar providers
+semar plan --diff <link or range> --provider deepseek --model <model name>
+```
+
+**Your MCP servers and skills.** A harness provider loads them by default, with your own permission rules. Your hooks and your instruction file are not loaded for Claude Code. Nothing inside the repository under test is loaded: no settings, no MCP file, no skill.
+
+Know three things before you rely on this:
+
+* The planner reads a repository while it has these tools. Text in a file can ask it to call one. Your permission rules decide which tools run, and `setup.deny` names tools that never run. `plan.md` records how many tool calls were made and how many were refused.
+* It costs more. Every tool and skill is described to the model on every turn. On one machine with many plugins, a plan with the setup on used ten times the input tokens of the same plan without it.
+* `--no-setup` turns the setup off for one run. The planner then has the three file tools only.
+
+```bash
+semar plan --diff <link or range> --no-setup
+```
+
+An API provider never has MCP servers or skills. It runs with the three file tools.
+
+Codex differs in three ways: it always reads your own instruction file, it does not support `setup.deny`, and it has no limit on turns. [Plan 13](docs/implementation/13-model-providers-and-dashboard.md) lists what was tested for each kind.
 
 ### Hand-written scenarios
 
@@ -296,7 +374,7 @@ Three rules to know:
 
 * **The token is never in a file.** The configuration names an environment variable. Semar reads it at run time and removes its value from everything it stores. Use a test account, never a personal or a production credential.
 * **A result belongs to a build.** A run with no recorded build ends as `inconclusive`. With a build probe, Semar asks the service which commit it runs, before and after the run, and a change between the two makes the results `stale`. Without one, declare the build with `semar run --build <commit>`. The report then says that the build was declared and not read from the service.
-* **The harness is yours.** `semar plan` starts the `claude` on your `PATH`, or the absolute path in the environment variable `SEMAR_CLAUDE_BIN`. The configuration cannot name a program to start, because it is a file of the repository under test.
+* **The harness is yours.** `semar plan` starts the `claude` or the `codex` on your `PATH`, or the absolute path in the environment variable `SEMAR_CLAUDE_BIN` or `SEMAR_CODEX_BIN`. The configuration cannot name a program to start, because it is a file of the repository under test.
 
 The file also takes `redact`, `policy`, `replay`, `providers`, `tickets`, and `plan` blocks. The [technical requirements](docs/TRD.md) and [Plan 12](docs/implementation/12-plan-from-a-diff.md) describe them.
 
@@ -307,7 +385,9 @@ Every command takes `--dir <path>`, the root of the repository that holds `.sema
 | Command | What it does |
 | --- | --- |
 | `semar changes --diff <link or range>` | Prints the tickets, commits, and files of a change. No model |
-| `semar plan --diff <link or range>` | Drafts scenarios and scripts for a change, and writes `plan.md`. Also takes `--model <name>`, `--max-scenarios <n>`, and `--no-fetch` |
+| `semar plan --diff <link or range>` | Drafts scenarios and scripts for a change, and writes `plan.md`. Also takes `--provider <id>`, `--model <name>`, `--no-setup`, `--max-scenarios <n>`, and `--no-fetch` |
+| `semar dashboard` | Opens a page on your machine to manage the model providers and see usage. `--no-open` prints the address only, `--port <n>` sets the port |
+| `semar providers` | Prints your providers and marks the one that would plan here. No model |
 | `semar init --base-url <url>` | Writes `.semar/semar.yaml` |
 | `semar script add <file>` | Checks a script against its scenario and stores it |
 | `semar run --all` | Replays every scenario in `.semar/scenarios` |
