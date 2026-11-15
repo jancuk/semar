@@ -74,6 +74,7 @@ The planner could not read these files of the head commit.
 
 - Provider: claude (claude)
 - Model: model-x
+- Reasoning: high
 - Attempts: 2 of 3
 - Tokens: 1234 input, 56 output
 - Setup: the planner could use 2 MCP servers and 3 skills of your own setup, under the permission mode default

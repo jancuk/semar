@@ -84,12 +84,13 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 			return Output{}, fmt.Errorf("plan: %w", err)
 		}
 		res, err := p.Run(ctx, provider.Job{
-			Prompt:   text,
-			Workdir:  in.SourceDir,
-			Schema:   Schema(),
-			Model:    in.Model,
-			MaxTurns: in.Limits.MaxTurns,
-			Timeout:  in.Limits.Timeout,
+			Prompt:    text,
+			Workdir:   in.SourceDir,
+			Schema:    Schema(),
+			Model:     in.Model,
+			Reasoning: in.Reasoning,
+			MaxTurns:  in.Limits.MaxTurns,
+			Timeout:   in.Limits.Timeout,
 		})
 		sum(&total, res)
 		if err != nil {
@@ -143,6 +144,9 @@ func sum(total *provider.Result, res provider.Result) {
 	}
 	if res.Model != "" {
 		total.Model = res.Model
+	}
+	if res.Reasoning != "" {
+		total.Reasoning = res.Reasoning
 	}
 }
 

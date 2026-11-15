@@ -32,13 +32,16 @@ func usageOutcome(ctx context.Context, err error) string {
 
 // recordUsage appends one record to the person's usage log. A failure is one notice, because
 // the plan itself has succeeded or failed already and the log is not worth a second failure.
-func (o options) recordUsage(stderr io.Writer, inst provider.Instance, model string, out plan.Output, outcome, ref string, took time.Duration) {
+func (o options) recordUsage(stderr io.Writer, inst provider.Instance, model, reasoning string, out plan.Output, outcome, ref string, took time.Duration) {
 	r := out.Result
 	if r.Model != "" {
 		model = r.Model
 	}
+	if r.Reasoning != "" {
+		reasoning = r.Reasoning
+	}
 	rec := usage.Record{
-		At: o.Clock(), Provider: inst.ID(), Kind: inst.Kind(), Model: model, Command: "plan", Ref: ref,
+		At: o.Clock(), Provider: inst.ID(), Kind: inst.Kind(), Model: model, Reasoning: reasoning, Command: "plan", Ref: ref,
 		Outcome: outcome, Attempts: out.Attempts, Turns: r.Turns,
 		InputTokens: r.InputTokens, OutputTokens: r.OutputTokens,
 		CacheReadTokens: r.CacheReadTokens, CacheWriteTokens: r.CacheWriteTokens,

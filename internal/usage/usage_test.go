@@ -176,3 +176,23 @@ func TestLatestLimits(t *testing.T) {
 		t.Errorf("LatestLimits = %+v", got)
 	}
 }
+
+func TestReasoningIsKeptAndLeftOutWhenEmpty(t *testing.T) {
+	home := t.TempDir()
+	with, without := rec(1, "claude", "m1", "ok"), rec(2, "claude", "m1", "ok")
+	with.Reasoning = "high"
+	for _, r := range []Record{with, without} {
+		if err := Append(home, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, _ := os.ReadFile(filepath.Join(home, FileName))
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if !strings.Contains(lines[0], `"reasoning":"high"`) || strings.Contains(lines[1], "reasoning") {
+		t.Fatalf("lines:\n%s", data)
+	}
+	got, err := Read(home, time.Time{})
+	if err != nil || len(got) != 2 || got[0].Reasoning != "high" || got[1].Reasoning != "" {
+		t.Fatalf("Read = %+v, %v", got, err)
+	}
+}

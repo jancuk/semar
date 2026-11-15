@@ -97,6 +97,9 @@ func Render(w io.Writer, in Input, out Output) error {
 	b.WriteString("\n## How this plan was made\n\n")
 	fmt.Fprintf(&b, "- Provider: %s (%s)\n", shown(out.PlannerID, maxValueShown), shown(out.PlannerKind, maxValueShown))
 	fmt.Fprintf(&b, "- Model: %s\n", shown(valueOr(r.Model, "the harness default"), maxValueShown))
+	if level := valueOr(r.Reasoning, in.Reasoning); level != "" {
+		fmt.Fprintf(&b, "- Reasoning: %s\n", shown(level, maxValueShown))
+	}
 	fmt.Fprintf(&b, "- Attempts: %d of %d\n", out.Attempts, MaxAttempts)
 	fmt.Fprintf(&b, "- Tokens: %d input, %d output\n", r.InputTokens, r.OutputTokens)
 	fmt.Fprintf(&b, "- Setup: %s\n", setupLine(in.SetupOn, r.Loaded))

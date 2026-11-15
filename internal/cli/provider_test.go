@@ -340,3 +340,56 @@ func TestNoTestWritesTheDefaultHome(t *testing.T) {
 		t.Fatalf("the tests use the real home %s", home)
 	}
 }
+
+func TestReasoningOrder(t *testing.T) {
+	file := userconfig.File{Version: 1, Default: "acme", Providers: []userconfig.Provider{
+		{ID: "acme", Kind: "claude", Reasoning: "medium"},
+		{ID: "plain", Kind: "claude"},
+	}}
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"the flag beats the provider", []string{"--reasoning", "max"}, "max"},
+		{"the provider", nil, "medium"},
+		{"none", []string{"--provider", "plain"}, ""},
+		{"the flag on a provider without one", []string{"--provider", "plain", "--reasoning", "low"}, "low"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newPlanRepo(t, sampleapp.Options{})
+			p.configure(t, goodDraft)
+			p.yourFile(t, file)
+			s := &spy{err: &provider.Error{Class: provider.ProviderError, Detail: "stop"}}
+			p.opts.Providers = s.registry
+			res := p.must(t, cli.ExitError, append([]string{"plan", "--diff", "main..release"}, tc.args...)...)
+			if len(s.jobs) != 1 || s.jobs[0].Reasoning != tc.want {
+				t.Fatalf("jobs = %+v, want the level %q", s.jobs, tc.want)
+			}
+			if got := p.records(t); len(got) != 1 || got[0].Reasoning != tc.want {
+				t.Fatalf("records = %+v", got)
+			}
+			if has := strings.Contains(res.stderr, " reasoning, "); has != (tc.want != "") || tc.want != "" && !strings.Contains(res.stderr, "at "+tc.want+" reasoning") {
+				t.Errorf("start line:\n%s", res.stderr)
+			}
+		})
+	}
+	t.Run("a level that is not a word", func(t *testing.T) {
+		p := newPlanRepo(t, sampleapp.Options{})
+		p.configure(t, goodDraft)
+		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release", "--reasoning", "High;")
+		contains(t, "stderr", res.stderr, "--reasoning", "lower-case letters")
+	})
+}
+
+func TestProvidersCommandShowsReasoning(t *testing.T) {
+	p := newPlanRepo(t, sampleapp.Options{})
+	p.configure(t, goodDraft)
+	p.yourFile(t, userconfig.File{Version: 1, Default: "acme", Providers: []userconfig.Provider{
+		{ID: "acme", Kind: "claude", Reasoning: "xhigh"},
+		{ID: "plain", Kind: "claude"},
+	}})
+	res := p.must(t, cli.ExitOK, "providers")
+	contains(t, "stdout", res.stdout, "REASONING", "xhigh", "(its default)")
+}

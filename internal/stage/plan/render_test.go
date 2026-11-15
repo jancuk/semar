@@ -29,6 +29,7 @@ func TestRenderGolden(t *testing.T) {
 		{Path: "internal/refund/handler.go", Status: "modified", Kind: "source", Added: 9, Deleted: 0, Tickets: []string{"SHOP-482"}},
 	}
 	in.SetupOn = true
+	in.Reasoning = "high"
 	in.LeftOut = []LeftOut{{Path: "assets/logo.png", Reason: "larger than 5 MiB"}, {Path: "vendor/lib", Reason: "a submodule"}}
 	d := draft(t)
 	scs, scripts, ps := Validate(d, in)
@@ -38,7 +39,7 @@ func TestRenderGolden(t *testing.T) {
 	out := Output{
 		Draft: d, Scenarios: scs, Scripts: scripts, Attempts: 2,
 		Result: provider.Result{
-			Model: "model-x", InputTokens: 1234, OutputTokens: 56, Denied: 2,
+			Model: "model-x", Reasoning: "high", InputTokens: 1234, OutputTokens: 56, Denied: 2,
 			Tools:  []provider.ToolUse{{Name: "Read", Calls: 7}, {Name: "mcp__tracker__get_issue", Calls: 1}, {Name: "mcp__wiki__search", Calls: 2}},
 			Loaded: provider.Loaded{MCPServers: []string{"tracker", "wiki"}, Skills: 3, PermissionMode: "default"},
 		},
@@ -100,5 +101,33 @@ func TestSetupLine(t *testing.T) {
 				t.Errorf("%q names a server", got)
 			}
 		})
+	}
+}
+
+func TestRenderShowsReasoningOnlyWhenSet(t *testing.T) {
+	render := func(in Input, level string) string {
+		level2 := in.Reasoning
+		in = input(t)
+		in.Reasoning = level2
+		d := draft(t)
+		scs, scripts, ps := Validate(d, in)
+		if len(ps) > 0 {
+			t.Fatalf("problems: %v", ps)
+		}
+		var b strings.Builder
+		out := Output{Draft: d, Scenarios: scs, Scripts: scripts, Attempts: 1, Result: provider.Result{Reasoning: level}, PlannerID: "claude", PlannerKind: "claude"}
+		if err := Render(&b, in, out); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	if got := render(Input{}, ""); strings.Contains(got, "Reasoning") {
+		t.Errorf("plan.md names a level that was not set:\n%s", got)
+	}
+	if got := render(Input{}, "low"); !strings.Contains(got, "- Reasoning: low\n") {
+		t.Errorf("the level of the result is missing:\n%s", got)
+	}
+	if got := render(Input{Reasoning: "max"}, ""); !strings.Contains(got, "- Reasoning: max\n") {
+		t.Errorf("the level of the input is missing:\n%s", got)
 	}
 }

@@ -28,6 +28,7 @@ import (
 type planFlags struct {
 	diff         diffFlags
 	model        string
+	reasoning    string
 	provider     string
 	noSetup      bool
 	maxScenarios int
@@ -56,6 +57,7 @@ func newPlanCommand(o options) *cobra.Command {
 	}
 	addDiffFlags(cmd, &f.diff)
 	cmd.Flags().StringVar(&f.model, "model", "", "the model of the planner (default: the provider's model)")
+	cmd.Flags().StringVar(&f.reasoning, "reasoning", "", "the reasoning level of the planner, such as high (default: the provider's reasoning, else its own default)")
 	cmd.Flags().StringVar(&f.provider, "provider", "", "the provider that plans (default: see semar providers)")
 	cmd.Flags().BoolVar(&f.noSetup, "no-setup", false, "plan without your MCP servers and skills, for this run")
 	cmd.Flags().IntVar(&f.maxScenarios, "max-scenarios", 0, "the most scenarios to draft (default: plan.maxScenarios)")
@@ -73,6 +75,11 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if f.model != "" {
 		if err := config.CheckModel(f.model); err != nil {
 			return fmt.Errorf("--model: %w", err)
+		}
+	}
+	if f.reasoning != "" {
+		if err := config.CheckReasoning(f.reasoning); err != nil {
+			return fmt.Errorf("--reasoning: %w", err)
 		}
 	}
 	cfg, err := config.Load(f.dir)
@@ -155,6 +162,9 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if f.noSetup {
 		pc.Setup = config.Setup{}
 	}
+	if f.reasoning != "" {
+		pc.Reasoning = f.reasoning
+	}
 	model, err := planModel(f.model, pc, src.filePath)
 	if err != nil {
 		return err
@@ -187,21 +197,22 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	}
 
 	in.Model = model
+	in.Reasoning = pc.Reasoning
 	in.SetupOn = provider.IsHarness(pc.Kind) && (pc.Setup.MCP || pc.Setup.Skills)
-	fmt.Fprintln(stderr, startLine(pc, cs.Head, model))
+	fmt.Fprintln(stderr, startLine(pc, cs.Head, model, pc.Reasoning))
 
 	started := time.Now()
 	out, err := plan.Run(ctx, inst, in)
 	if err != nil {
-		o.recordUsage(stderr, inst, model, out, usageOutcome(ctx, err), "", time.Since(started))
+		o.recordUsage(stderr, inst, model, pc.Reasoning, out, usageOutcome(ctx, err), "", time.Since(started))
 		return planFailed(ctx, stderr, err)
 	}
 	planFile, err := writePlan(f.dir, in, out, known)
 	if err != nil {
-		o.recordUsage(stderr, inst, model, out, "failed:not_written", "", time.Since(started))
+		o.recordUsage(stderr, inst, model, pc.Reasoning, out, "failed:not_written", "", time.Since(started))
 		return err
 	}
-	o.recordUsage(stderr, inst, model, out, "ok", filepath.Base(filepath.Dir(planFile)), time.Since(started))
+	o.recordUsage(stderr, inst, model, pc.Reasoning, out, "ok", filepath.Base(filepath.Dir(planFile)), time.Since(started))
 	printPlanDone(stdout, out, planFile, nextRun(env, envName, f.env, cs.HeadCommit))
 	if len(out.Scenarios) == 0 {
 		return exitError{ExitUndecided}

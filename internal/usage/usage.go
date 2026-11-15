@@ -27,6 +27,7 @@ type Record struct {
 	Provider         string           `json:"provider"`
 	Kind             string           `json:"kind"`
 	Model            string           `json:"model"`
+	Reasoning        string           `json:"reasoning,omitempty"`
 	Command          string           `json:"command"`       // "plan"
 	Ref              string           `json:"ref,omitempty"` // the plan ID
 	Outcome          string           `json:"outcome"`       // "ok", "rejected", or "failed:<class>"

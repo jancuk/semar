@@ -33,6 +33,7 @@ type Input struct {
 	Existing      map[string][]domain.Scenario // by ticket: scenarios that already exist
 	Limits        config.Plan
 	Model         string
+	Reasoning     string    // the level that the planner was asked to use; "" for its default
 	SetupOn       bool      // the planner ran with the person's own MCP servers or skills switched on
 	LeftOut       []LeftOut // files of the head commit that the copy of the source lacks
 }

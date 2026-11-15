@@ -136,7 +136,7 @@ func planModel(flagModel string, p config.Provider, filePath string) (string, er
 }
 
 // startLine says what the planner may use and, for an API kind, where the source goes.
-func startLine(p config.Provider, head, model string) string {
+func startLine(p config.Provider, head, model, reasoning string) string {
 	var may string
 	switch {
 	case provider.IsHarness(p.Kind) && p.Setup.MCP && p.Setup.Skills:
@@ -150,8 +150,12 @@ func startLine(p config.Provider, head, model string) string {
 	case provider.IsAPI(p.Kind):
 		may = ", and sends the files it reads to " + terminalSafe(apiAddress(p))
 	}
+	with := terminalSafe(valueOr(model, "its default model"))
+	if reasoning != "" {
+		with += " at " + terminalSafe(reasoning) + " reasoning"
+	}
 	return fmt.Sprintf("semar: provider %s (%s) plans %s with %s%s; this can take several minutes",
-		terminalSafe(p.ID), terminalSafe(p.Kind), terminalSafe(head), terminalSafe(valueOr(model, "its default model")), may)
+		terminalSafe(p.ID), terminalSafe(p.Kind), terminalSafe(head), with, may)
 }
 
 func apiAddress(p config.Provider) string {
@@ -214,7 +218,7 @@ func listProviders(w io.Writer, o options, dir string) error {
 		rows = append(rows, row{p, reasonBuiltIn})
 	}
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "\tID\tKIND\tMODEL\tFROM")
+	fmt.Fprintln(tw, "\tID\tKIND\tMODEL\tREASONING\tFROM")
 	for _, r := range rows {
 		mark := ""
 		if chooseErr == nil && r.p.ID == chosen.ID {
@@ -228,7 +232,7 @@ func listProviders(w io.Writer, o options, dir string) error {
 		default:
 			model = "(its default)"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", mark, terminalSafe(r.p.ID), terminalSafe(r.p.Kind), terminalSafe(model), r.source)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", mark, terminalSafe(r.p.ID), terminalSafe(r.p.Kind), terminalSafe(model), terminalSafe(valueOr(r.p.Reasoning, "(its default)")), r.source)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
