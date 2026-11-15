@@ -214,13 +214,22 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 		runCtx, cancel = context.WithTimeout(ctx, job.Timeout)
 		defer cancel()
 	}
-	res, err := provider.RunProcess(runCtx, provider.ProcessSpec{
+	spec := provider.ProcessSpec{
 		Path:  path,
 		Args:  args,
 		Dir:   workdir,
 		Env:   d.env(),
 		Stdin: strings.NewReader(prompt),
-	})
+	}
+	if job.Progress != nil {
+		live := newTally()
+		spec.OnStdoutLine = func(line []byte) {
+			if ev, ok := decodeEvent(line); ok && live.add(ev) {
+				job.Progress(live.now)
+			}
+		}
+	}
+	res, err := provider.RunProcess(runCtx, spec)
 	switch {
 	case err == nil:
 		out, perr := parseEvents(res.Stdout, res.ExitCode, res.StderrTail)

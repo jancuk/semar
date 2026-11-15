@@ -38,6 +38,56 @@ type event struct {
 	} `json:"error"`
 }
 
+// decodeEvent reads one line of `codex exec --json`. An empty line, a line that is not an event,
+// and a line above maxEventLine are no event.
+func decodeEvent(line []byte) (event, bool) {
+	var ev event
+	line = bytes.TrimSpace(line)
+	if len(line) == 0 || len(line) > maxEventLine || json.Unmarshal(line, &ev) != nil || ev.Type == "" {
+		return event{}, false
+	}
+	return ev, true
+}
+
+// tally counts the turns and the tool calls of the events. The reports while the job runs and
+// the final parse count with it, so that they agree.
+type tally struct {
+	tools  map[string]string // the tool name of each call, by item ID
+	denied map[string]bool
+	now    provider.Progress
+}
+
+func newTally() *tally {
+	return &tally{tools: map[string]string{}, denied: map[string]bool{}}
+}
+
+// add counts one event and says whether the totals changed. A call is counted when its item
+// first appears, and the latest tool is the one whose call started last.
+func (t *tally) add(ev event) bool {
+	before := t.now
+	switch ev.Type {
+	case "item.started", "item.updated", "item.completed":
+		if ev.Item == nil {
+			break
+		}
+		name := toolName(ev.Item.Type, ev.Item.Server, ev.Item.Tool)
+		if name == "" {
+			break
+		}
+		if _, seen := t.tools[ev.Item.ID]; !seen {
+			t.now.Tool = provider.ProgressTool(name)
+		}
+		t.tools[ev.Item.ID] = name
+		t.now.ToolCalls = len(t.tools)
+		if ev.Item.Status == "declined" {
+			t.denied[ev.Item.ID] = true
+		}
+	case "turn.completed":
+		t.now.Turns++
+	}
+	return t.now != before
+}
+
 // parseEvents reads the JSON lines of `codex exec --json`. The answer is the text of the last
 // agent message, the usage is on each turn.completed, and a failure is a turn.failed or an
 // error event. An item of the type "error" is a warning and does not end the job.
@@ -48,35 +98,21 @@ func parseEvents(stdout []byte, exitCode int, stderrTail []byte) (provider.Resul
 		answer    string
 		failed    string
 		lastError string
-		tools     = map[string]string{}
-		denied    = map[string]bool{}
+		counted   = newTally()
 	)
 	for line := range bytes.SplitSeq(stdout, []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 || len(line) > maxEventLine {
-			continue
-		}
-		var ev event
-		if json.Unmarshal(line, &ev) != nil || ev.Type == "" {
+		ev, ok := decodeEvent(line)
+		if !ok {
 			continue
 		}
 		events++
+		counted.add(ev)
 		switch ev.Type {
-		case "item.started", "item.updated", "item.completed":
-			if ev.Item == nil {
-				continue
-			}
-			if name := toolName(ev.Item.Type, ev.Item.Server, ev.Item.Tool); name != "" {
-				tools[ev.Item.ID] = name
-				if ev.Item.Status == "declined" {
-					denied[ev.Item.ID] = true
-				}
-			}
-			if ev.Type == "item.completed" && ev.Item.Type == "agent_message" {
+		case "item.completed":
+			if ev.Item != nil && ev.Item.Type == "agent_message" {
 				answer = ev.Item.Text
 			}
 		case "turn.completed":
-			res.Turns++
 			if u := ev.Usage; u != nil {
 				res.InputTokens += u.InputTokens
 				res.CacheReadTokens += u.CachedInputTokens
@@ -92,6 +128,7 @@ func parseEvents(stdout []byte, exitCode int, stderrTail []byte) (provider.Resul
 			lastError = ev.Message
 		}
 	}
+	res.Turns = counted.now.Turns
 
 	switch {
 	case events == 0:
@@ -114,9 +151,9 @@ func parseEvents(stdout []byte, exitCode int, stderrTail []byte) (provider.Resul
 		return provider.Result{}, &provider.Error{Class: provider.ValidationError, Detail: "the answer is not one JSON object"}
 	}
 	res.Output = out
-	res.Denied = len(denied)
+	res.Denied = len(counted.denied)
 	counts := map[string]int{}
-	for _, name := range tools {
+	for _, name := range counted.tools {
 		counts[name]++
 	}
 	for _, name := range slices.Sorted(maps.Keys(counts)) {
