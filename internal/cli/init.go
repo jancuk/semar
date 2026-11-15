@@ -208,7 +208,7 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 			),
 		),
 	)
-	if found := knowledge.Conventional(dir); len(found) > 0 {
+	if found := knowledge.WithFolder(knowledge.Conventional(dir), folderInWorkTree(dir)); len(found) > 0 {
 		list := make([]*yaml.Node, len(found))
 		for i, k := range found {
 			list[i] = mapping("id", text(k.ID), "kind", text(k.Kind), "path", quoted(k.Path))

@@ -57,3 +57,36 @@ func isRegular(dir, rel string) bool {
 	}
 	return false
 }
+
+// WithFolder puts the slash path of a folder in front of every path of list. The paths of
+// knowledge start at the root of the repository, and Conventional starts at the folder that
+// the person works in. An entry whose new path the configuration would refuse, for example
+// because a folder name holds a back quote, is left out. An empty folder changes nothing.
+func WithFolder(list []config.Knowledge, folder string) []config.Knowledge {
+	if folder == "" {
+		return list
+	}
+	var out []config.Knowledge
+	for _, k := range list {
+		k.Path = folder + "/" + k.Path
+		if config.CheckKnowledgePath(k.Path) == nil {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// ConventionalBelow is Conventional for the folder of root that the slash path names, with
+// the paths written from root. A link on the way to the folder ends the search.
+func ConventionalBelow(root, folder string) []config.Knowledge {
+	dir := root
+	if folder != "" {
+		for _, n := range strings.Split(folder, "/") {
+			dir = filepath.Join(dir, n)
+			if fi, err := os.Lstat(dir); err != nil || !fi.IsDir() {
+				return nil
+			}
+		}
+	}
+	return WithFolder(Conventional(dir), folder)
+}

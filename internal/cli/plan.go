@@ -205,7 +205,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		fmt.Fprintf(stderr, "semar: %s of %s %s left out of the copy that the planner reads; plan.md lists them\n",
 			plural(len(leftOut), "file"), shortCommit(cs.HeadCommit), map[bool]string{true: "was", false: "were"}[len(leftOut) == 1])
 	}
-	if in.Knowledge, err = findKnowledge(stderr, in.SourceDir, cfg.Knowledge); err != nil {
+	if in.Knowledge, err = findKnowledge(stderr, in.SourceDir, folderInWorkTree(f.dir), cfg.Knowledge); err != nil {
 		return err
 	}
 
@@ -364,8 +364,9 @@ func removeAgentFiles(root string) error {
 
 // findKnowledge finds the listed sources in the copy of the source. It runs after the copy has
 // lost the files that instruct an agent, so a source that names one is not in the copy. A source
-// that cannot be used is reported, and the plan goes on without it.
-func findKnowledge(stderr io.Writer, sourceDir string, list []config.Knowledge) ([]knowledge.Source, error) {
+// that cannot be used is reported, and the plan goes on without it. folder is where --dir lies
+// below the root of the work tree, which is the root of the copy.
+func findKnowledge(stderr io.Writer, sourceDir, folder string, list []config.Knowledge) ([]knowledge.Source, error) {
 	sources, err := knowledge.Resolve(sourceDir, list)
 	if err != nil {
 		return nil, err
@@ -380,7 +381,7 @@ func findKnowledge(stderr io.Writer, sourceDir string, list []config.Knowledge) 
 		}
 	}
 	if len(list) == 0 {
-		if found := knowledge.Conventional(sourceDir); len(found) > 0 {
+		if found := knowledge.ConventionalBelow(sourceDir, folder); len(found) > 0 {
 			paths := make([]string, len(found))
 			for i, k := range found {
 				paths[i] = k.Path

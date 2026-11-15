@@ -138,3 +138,30 @@ func TestConventionalDocsIsAFile(t *testing.T) {
 		t.Errorf("got %+v, want nil", got)
 	}
 }
+
+func TestWithFolderAndConventionalBelow(t *testing.T) {
+	root := t.TempDir()
+	put(t, root, "services/orders/docs/openapi.yaml")
+	want := []config.Knowledge{api("services/orders/docs/openapi.yaml"), {ID: "docs", Kind: config.KnowledgeFiles, Path: "services/orders/docs"}}
+	if got := knowledge.ConventionalBelow(root, "services/orders"); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+	if got := knowledge.ConventionalBelow(root, "services/missing"); got != nil {
+		t.Errorf("a missing folder gave %+v", got)
+	}
+	if got := knowledge.WithFolder([]config.Knowledge{api("docs/openapi.yaml")}, "a`b"); got != nil {
+		t.Errorf("a path with a back quote was kept: %+v", got)
+	}
+	if got := knowledge.WithFolder([]config.Knowledge{docs}, ""); !reflect.DeepEqual(got, []config.Knowledge{docs}) {
+		t.Errorf("an empty folder changed the list: %+v", got)
+	}
+
+	outside := t.TempDir()
+	put(t, outside, "docs/openapi.yaml")
+	if err := os.Symlink(outside, filepath.Join(root, "linked")); err != nil {
+		t.Skip("symlinks are not available:", err)
+	}
+	if got := knowledge.ConventionalBelow(root, "linked"); got != nil {
+		t.Errorf("a link in the folder was followed: %+v", got)
+	}
+}

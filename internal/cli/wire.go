@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -113,4 +114,22 @@ func workTreeRoot(dir string) string {
 		return dir
 	}
 	return top
+}
+
+// folderInWorkTree is the slash path of dir below the root of its work tree, and "" when dir is
+// the root or no work tree holds it. The paths of knowledge start at the root, so a folder
+// below it must put its own path in front of what it finds.
+func folderInWorkTree(dir string) string {
+	top := workTreeRoot(dir)
+	// git names the real path, and dir may reach it through a link.
+	realTop, err1 := filepath.EvalSymlinks(top)
+	realDir, err2 := filepath.EvalSymlinks(dir)
+	if err1 != nil || err2 != nil {
+		return ""
+	}
+	rel, err := filepath.Rel(realTop, realDir)
+	if err != nil || rel == "." || !filepath.IsLocal(rel) {
+		return ""
+	}
+	return filepath.ToSlash(rel)
 }
