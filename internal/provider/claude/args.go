@@ -7,7 +7,8 @@ import (
 )
 
 // buildArgs never passes --bare, and --setting-sources takes one empty argument. Both keep
-// the settings, hooks, and MCP servers of the repository under test from loading.
+// the settings, hooks, and MCP servers of the repository under test from loading. The model
+// is joined to its flag, so that a value cannot be read as another flag.
 func buildArgs(job provider.Job, defaultModel string) []string {
 	args := []string{
 		"-p",
@@ -24,7 +25,7 @@ func buildArgs(job provider.Job, defaultModel string) []string {
 		model = defaultModel
 	}
 	if model != "" {
-		args = append(args, "--model", model)
+		args = append(args, "--model="+model)
 	}
 	return args
 }

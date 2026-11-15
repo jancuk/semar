@@ -28,21 +28,24 @@ const (
 )
 
 type Driver struct {
-	cfg    config.Provider
-	lookup func(string) (string, bool)
+	cfg      config.Provider
+	lookup   func(string) (string, bool)
+	repoRoot string
 }
 
-// New takes lookup, normally os.LookupEnv, for BinaryEnv and the child's environment.
-func New(cfg config.Provider, lookup func(string) (string, bool)) (*Driver, error) {
+// New takes lookup, normally os.LookupEnv, for BinaryEnv and the child's environment, and the
+// root of the repository under test, inside which no harness binary is started. An empty
+// repoRoot skips that check.
+func New(cfg config.Provider, lookup func(string) (string, bool), repoRoot string) (*Driver, error) {
 	if lookup == nil {
 		return nil, errors.New("claude: no environment lookup")
 	}
-	return &Driver{cfg: cfg, lookup: lookup}, nil
+	return &Driver{cfg: cfg, lookup: lookup, repoRoot: repoRoot}, nil
 }
 
-func Factory(lookup func(string) (string, bool)) provider.Factory {
+func Factory(lookup func(string) (string, bool), repoRoot string) provider.Factory {
 	return func(cfg config.Provider) (provider.Instance, error) {
-		d, err := New(cfg, lookup)
+		d, err := New(cfg, lookup, repoRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -86,18 +89,28 @@ func (d *Driver) binary() (string, *provider.Error) {
 	return abs, nil
 }
 
-// insideWorkdir refuses a binary that the copy of the repository under test could have supplied.
-func insideWorkdir(bin, workdir string) *provider.Error {
+// refuseInside refuses a binary that the repository under test, or the copy of it, could
+// have supplied: a PATH entry such as <repository>/bin would otherwise start the repository's
+// own program.
+func refuseInside(bin, repoRoot, workdir string) *provider.Error {
 	realBin, err := filepath.EvalSymlinks(bin)
 	if err != nil {
 		return &provider.Error{Class: provider.NotInstalled, Detail: fmt.Sprintf("the binary %q cannot be resolved: %v", bin, errors.Unwrap(err))}
 	}
-	realDir, err := filepath.EvalSymlinks(workdir)
-	if err != nil {
-		return &provider.Error{Class: provider.ValidationError, Detail: fmt.Sprintf("the working directory %q cannot be resolved", workdir)}
-	}
-	if rel, err := filepath.Rel(realDir, realBin); err == nil && filepath.IsLocal(rel) {
-		return &provider.Error{Class: provider.PermissionError, Detail: fmt.Sprintf("the binary %q lies inside the working directory of the job", bin)}
+	for _, d := range []struct{ dir, what string }{
+		{repoRoot, "the repository under test"},
+		{workdir, "the working directory of the job"},
+	} {
+		if d.dir == "" {
+			continue
+		}
+		realDir, err := filepath.EvalSymlinks(d.dir)
+		if err != nil {
+			return &provider.Error{Class: provider.ValidationError, Detail: fmt.Sprintf("%s, %q, cannot be resolved", d.what, d.dir)}
+		}
+		if rel, err := filepath.Rel(realDir, realBin); err == nil && filepath.IsLocal(rel) {
+			return &provider.Error{Class: provider.PermissionError, Detail: fmt.Sprintf("the binary %q lies inside %s, and a harness inside the repository under test is not started", bin, d.what)}
+		}
 	}
 	return nil
 }
@@ -105,6 +118,9 @@ func insideWorkdir(bin, workdir string) *provider.Error {
 // Health starts the binary with --version only, never a model turn.
 func (d *Driver) Health(ctx context.Context) provider.Health {
 	path, perr := d.binary()
+	if perr == nil {
+		perr = refuseInside(path, d.repoRoot, "")
+	}
 	if perr != nil {
 		return provider.Health{Detail: perr.Detail}
 	}
@@ -131,7 +147,7 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 	}
 	path, perr := d.binary()
 	if perr == nil {
-		perr = insideWorkdir(path, job.Workdir)
+		perr = refuseInside(path, d.repoRoot, job.Workdir)
 	}
 	if perr != nil {
 		return provider.Result{}, perr

@@ -727,3 +727,16 @@ func TestASecondPlanOfTheSameDiff(t *testing.T) {
 	}
 	p.assertNoTempCopy(t)
 }
+
+func TestPlanRefusesAModelThatIsNotAName(t *testing.T) {
+	for _, model := range []string{"--bare", "m1 --x", "m1\n", strings.Repeat("m", 129)} {
+		p := newPlanRepo(t, sampleapp.Options{})
+		p.configure(t, goodDraft)
+		p.opts.Providers = noProvider(t)
+		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release", "--model="+model)
+		contains(t, "stderr", res.stderr, "--model", "is not a model name")
+		if files := p.plannedFiles(t); len(files) != 0 {
+			t.Errorf("the plan wrote %v", files)
+		}
+	}
+}

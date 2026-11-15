@@ -226,7 +226,8 @@ func TestPlanBlocks(t *testing.T) {
 	t.Run("explicit", func(t *testing.T) {
 		cfg, err := loadText(t, `version: 1
 providers:
-  - {id: claude, kind: claude, model: m1}
+  - {id: claude, kind: claude, model: "claude-sonnet-5-5[1m]"}
+  - {id: bedrock, kind: claude, model: "us.anthropic.claude-opus-5-5:0/x_y"}
   - {id: fake, kind: fake, outputs: [a/b.json]}
 tickets: {pattern: "X-[0-9]+"}
 plan: {provider: fake, maxScenarios: 3, maxTurns: 7, timeout: 90s}
@@ -248,6 +249,10 @@ plan: {provider: fake, maxScenarios: 3, maxTurns: 7, timeout: 90s}
 		{"empty id", "version: 1\nproviders: [{kind: x}]\n", "id is required"},
 		{"no kind", "version: 1\nproviders: [{id: a}]\n", "kind is required"},
 		{"bad pattern", "version: 1\ntickets: {pattern: \"[\"}\n", "tickets.pattern"},
+		{"model like a flag", "version: 1\nproviders: [{id: a, kind: claude, model: \"--dangerously-skip-permissions\"}]\n", "providers[0].model"},
+		{"model with a space", "version: 1\nproviders: [{id: a, kind: claude, model: \"m1 --x\"}]\n", "providers[0].model"},
+		{"model with a newline", "version: 1\nproviders: [{id: a, kind: claude, model: \"m1\\n\"}]\n", "providers[0].model"},
+		{"model too long", "version: 1\nproviders: [{id: a, kind: claude, model: " + strings.Repeat("m", 129) + "}]\n", "providers[0].model"},
 		{"negative turns", "version: 1\nplan: {maxTurns: -1}\n", "plan.maxTurns must be positive"},
 		{"negative scenarios", "version: 1\nplan: {maxScenarios: -1}\n", "plan.maxScenarios must be positive"},
 		{"negative timeout", "version: 1\nplan: {timeout: -1m}\n", "plan.timeout must be positive"},

@@ -18,7 +18,7 @@ func compareParsers() []codehost.LinkParser {
 
 func providerRegistry(repoRoot string, lookupEnv func(string) (string, bool)) *provider.Registry {
 	r := provider.NewRegistry()
-	r.Register(claude.Kind, claude.Factory(lookupEnv))
+	r.Register(claude.Kind, claude.Factory(lookupEnv, repoRoot))
 	r.Register(fake.Kind, fake.Factory(repoRoot))
 	return r
 }

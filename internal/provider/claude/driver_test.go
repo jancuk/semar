@@ -77,7 +77,7 @@ func envWith(bin string) func(string) (string, bool) {
 
 func newDriver(t *testing.T, cfg config.Provider, bin string) *claude.Driver {
 	t.Helper()
-	d, err := claude.New(cfg, envWith(bin))
+	d, err := claude.New(cfg, envWith(bin), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,9 +147,10 @@ func TestRunModelFlag(t *testing.T) {
 		want                     []string
 	}{
 		{"none", "", "", nil},
-		{"configured", "cfg-model", "", []string{"--model", "cfg-model"}},
-		{"job wins", "cfg-model", "job-model", []string{"--model", "job-model"}},
-		{"job only", "", "job-model", []string{"--model", "job-model"}},
+		{"configured", "cfg-model", "", []string{"--model=cfg-model"}},
+		{"job wins", "cfg-model", "job-model", []string{"--model=job-model"}},
+		{"job only", "", "job-model", []string{"--model=job-model"}},
+		{"a value that looks like a flag", "", "--bare", []string{"--model=--bare"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -161,12 +162,12 @@ func TestRunModelFlag(t *testing.T) {
 				t.Fatal(err)
 			}
 			args := strings.Split(strings.TrimSuffix(read(t, b.args), "\x00"), "\x00")
-			if slices.Contains(args, "--bare") {
-				t.Fatal("--bare must never be passed")
+			if slices.Contains(args, "--bare") || slices.Contains(args, "--model") {
+				t.Fatalf("args = %q", args)
 			}
 			tail := args[len(args)-len(c.want):]
 			if len(c.want) == 0 {
-				if slices.Contains(args, "--model") {
+				if slices.ContainsFunc(args, func(a string) bool { return strings.HasPrefix(a, "--model") }) {
 					t.Fatalf("args = %q", args)
 				}
 				return
@@ -355,7 +356,7 @@ func TestRunStartsTheAbsolutePathFromPATH(t *testing.T) {
 		}
 		return envWith("")(name)
 	}
-	d, err := claude.New(config.Provider{}, childPath)
+	d, err := claude.New(config.Provider{}, childPath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,8 +470,80 @@ func TestHealth(t *testing.T) {
 }
 
 func TestFactory(t *testing.T) {
-	in, err := claude.Factory(os.LookupEnv)(config.Provider{ID: "x", Kind: "claude"})
+	in, err := claude.Factory(os.LookupEnv, "")(config.Provider{ID: "x", Kind: "claude"})
 	if err != nil || in.Kind() != "claude" || in.ID() != "x" {
 		t.Fatalf("got %v %v", in, err)
 	}
+}
+
+func TestAHarnessInsideTheRepositoryIsNotStarted(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "started")
+	body := fmt.Sprintf("#!/bin/sh\ntouch %q\necho '2.1.325 (Claude Code)'\n", marker)
+	place := func(t *testing.T, dir string) string {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		p := filepath.Join(dir, "claude")
+		if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	started := func() bool {
+		_, err := os.Stat(marker)
+		return err == nil
+	}
+	const refusal = "a harness inside the repository under test is not started"
+
+	cases := []struct {
+		name string
+		env  func(t *testing.T, repo string) func(string) (string, bool)
+	}{
+		{"the first entry of PATH", func(t *testing.T, repo string) func(string) (string, bool) {
+			place(t, filepath.Join(repo, "bin"))
+			t.Setenv("PATH", filepath.Join(repo, "bin")+string(os.PathListSeparator)+"/usr/bin:/bin")
+			return envWith("")
+		}},
+		{"SEMAR_CLAUDE_BIN", func(t *testing.T, repo string) func(string) (string, bool) {
+			return envWith(place(t, filepath.Join(repo, "tools")))
+		}},
+		{"a link outside that points into the repository", func(t *testing.T, repo string) func(string) (string, bool) {
+			link := filepath.Join(t.TempDir(), "claude")
+			if err := os.Symlink(place(t, filepath.Join(repo, "bin")), link); err != nil {
+				t.Fatal(err)
+			}
+			return envWith(link)
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			repo := t.TempDir()
+			d, err := claude.New(config.Provider{}, c.env(t, repo), repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := d.Health(context.Background())
+			if h.Installed || !strings.Contains(h.Detail, refusal) || !strings.Contains(h.Detail, "claude") {
+				t.Errorf("health = %+v", h)
+			}
+			_, err = d.Run(context.Background(), job(t))
+			if classOf(t, err) != provider.PermissionError || !strings.Contains(err.Error(), refusal) {
+				t.Errorf("run: %v", err)
+			}
+			if started() {
+				t.Fatal("the harness inside the repository was started")
+			}
+		})
+	}
+
+	t.Run("the same binary outside the repository starts", func(t *testing.T) {
+		d, err := claude.New(config.Provider{}, envWith(place(t, t.TempDir())), t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h := d.Health(context.Background()); !h.Installed || !started() {
+			t.Fatalf("health = %+v, started %v", h, started())
+		}
+	})
 }

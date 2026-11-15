@@ -18,6 +18,16 @@ var sources = []domain.Source{
 	domain.SourceTicket, domain.SourceTestcase, domain.SourcePerson, domain.SourceDiff, domain.SourceBaseline,
 }
 
+var modelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,127}$`)
+
+// CheckModel accepts a model name that cannot be read as a flag or hold a control character.
+func CheckModel(model string) error {
+	if !modelPattern.MatchString(model) {
+		return fmt.Errorf("%q is not a model name: use up to 128 letters, digits, and . _ : / [ ] -, starting with a letter or digit", model)
+	}
+	return nil
+}
+
 func joinErrors(errs []error) error { return errors.Join(errs...) }
 
 func validate(c Config, name string) error {
@@ -111,6 +121,11 @@ func validatePlan(c Config, add func(string, ...any)) {
 		ids[p.ID] = true
 		if p.Kind == "" {
 			add("%s.kind is required", pp)
+		}
+		if p.Model != "" {
+			if err := CheckModel(p.Model); err != nil {
+				add("%s.model: %v", pp, err)
+			}
 		}
 		for j, o := range p.Outputs {
 			if !filepath.IsLocal(o) {

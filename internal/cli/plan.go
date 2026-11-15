@@ -65,6 +65,11 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if f.maxScenarios < 0 {
 		return errors.New("--max-scenarios must be positive")
 	}
+	if f.model != "" {
+		if err := config.CheckModel(f.model); err != nil {
+			return fmt.Errorf("--model: %w", err)
+		}
+	}
 	cfg, err := config.Load(f.dir)
 	missing := errors.Is(err, fs.ErrNotExist)
 	var initData []byte
