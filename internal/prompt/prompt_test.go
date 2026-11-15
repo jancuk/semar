@@ -6,8 +6,8 @@ import (
 )
 
 func TestPlanVersion(t *testing.T) {
-	if got := PlanVersion(); got != "1" {
-		t.Errorf("PlanVersion() = %q, want 1", got)
+	if got := PlanVersion(); got != "2" {
+		t.Errorf("PlanVersion() = %q, want 2", got)
 	}
 }
 

@@ -13,7 +13,7 @@ type LedgerRow struct {
 	CleanedUp bool
 }
 
-// Ledger lists what the run changed in the test environment, in the order of
+// Ledger lists what the run changed in the environment, in the order of
 // first appearance. A delete is not a row: it marks the creates it undid.
 func Ledger(entries []domain.Activity) []LedgerRow {
 	var rows []LedgerRow

@@ -43,6 +43,7 @@ type ledgerView struct {
 
 type markdownView struct {
 	RunID, Environment, Started, Ended string
+	EnvironmentKind                    string
 	BuildsStart, BuildsEnd, Counts     string
 	Interrupted, OnlyDeclared          bool
 	Attention, Passed                  []scenarioView
@@ -60,15 +61,16 @@ func Markdown(w io.Writer, d Data) error {
 func buildView(d Data) markdownView {
 	run := d.Run
 	v := markdownView{
-		RunID:        shown(string(run.ID)),
-		Environment:  shown(run.Environment),
-		Started:      utc(run.StartedAt),
-		Ended:        utc(run.EndedAt),
-		BuildsStart:  builds(run.BuildsStart),
-		BuildsEnd:    builds(run.BuildsEnd),
-		Counts:       countLine(run.Results),
-		Interrupted:  run.EndedAt.IsZero(),
-		OnlyDeclared: onlyDeclared(run),
+		RunID:           shown(string(run.ID)),
+		Environment:     shown(run.Environment),
+		EnvironmentKind: shown(run.EnvironmentKind),
+		Started:         utc(run.StartedAt),
+		Ended:           utc(run.EndedAt),
+		BuildsStart:     builds(run.BuildsStart),
+		BuildsEnd:       builds(run.BuildsEnd),
+		Counts:          countLine(run.Results),
+		Interrupted:     run.EndedAt.IsZero(),
+		OnlyDeclared:    onlyDeclared(run),
 	}
 	for _, r := range ordered(run.Results) {
 		sv := scenarioView{

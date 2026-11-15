@@ -14,7 +14,7 @@ type Compare struct {
 	Host string // "" for a plain range
 	Repo string // the path of the repository on the host, for example "acme/orders". "" for a plain range
 	Base string // what is deployed to production
-	Head string // what is deployed to the test environment
+	Head string // what is deployed to the environment under test
 }
 
 // LinkParser reads a link of one host. It returns false when the link is not

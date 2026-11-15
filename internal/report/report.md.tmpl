@@ -4,7 +4,7 @@
 > This run did not finish: no end time was recorded. Scenarios without a result are missing from this report.
 
 {{ end -}}
-{{ if .Environment }}- Environment: {{ .Environment }}
+{{ if .Environment }}- Environment: {{ .Environment }}{{ if .EnvironmentKind }} ({{ .EnvironmentKind }}){{ end }}
 {{ end -}}
 - Started: {{ .Started }}
 - Ended: {{ .Ended }}
@@ -47,12 +47,12 @@ Outcome: **{{ .Outcome }}**
 </details>
 
 {{ end -}}
-## Data touched on UAT
+## Data touched
 
 {{ if .Ledger -}}
 {{ range .Ledger -}}
 - {{ .Verb }} {{ .Object }}{{ if .Scenario }}, by {{ .Scenario }}{{ if .Step }} step {{ .Step }}{{ end }}{{ end }}: {{ .Status }}
 {{ end -}}
 {{ else -}}
-Nothing was written in the test environment.
+Nothing was written in the environment.
 {{ end -}}

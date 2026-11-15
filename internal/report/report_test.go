@@ -68,7 +68,7 @@ func fixture() report.Data {
 	builds := []domain.BuildRef{{Service: "orders", Commit: "a1b2c3d", ConfigHash: "sha256:11aa"}}
 	buildsEnd := []domain.BuildRef{{Service: "orders", Commit: "a1b2c3d", ConfigHash: "sha256:11aa"}}
 	run := domain.Run{
-		Schema: 1, ID: "run-20261114-0001", Environment: "uat",
+		Schema: 1, ID: "run-20261114-0001", Environment: "uat", EnvironmentKind: "test",
 		StartedAt: t0, EndedAt: t0.Add(95 * time.Second),
 		BuildsStart: builds, BuildsEnd: buildsEnd,
 		Results: []domain.ScenarioResult{
@@ -128,6 +128,7 @@ func declaredFixture() report.Data {
 	d := fixture()
 	declared := []domain.BuildRef{{Service: "orders", Commit: "0123456789ab", Declared: true}}
 	d.Run.BuildsStart, d.Run.BuildsEnd = declared, slices.Clone(declared)
+	d.Run.Environment, d.Run.EnvironmentKind = "prod", "production"
 	return d
 }
 
@@ -195,7 +196,7 @@ func TestMarkdownOrder(t *testing.T) {
 		"a check with a confirmed source failed",
 		"refund-too-much: expected 422, got 201",
 		"status 422", "status 201", "ticket", "SHOP-482 AC2",
-		"Data touched on UAT",
+		"Data touched",
 		"2026-11-14T02:30:00Z", "2026-11-14T02:31:35Z",
 		"run-20261114-0001",
 	} {
@@ -228,11 +229,19 @@ func TestMarkdownStaleAndNotRunOrder(t *testing.T) {
 	}
 }
 
+func TestMarkdownEnvironmentOfARecordWithoutAKind(t *testing.T) {
+	d := fixture()
+	d.Run.EnvironmentKind = ""
+	if out := render(t, d); !strings.Contains(out, "- Environment: uat\n") {
+		t.Errorf("a record with no kind must show the name alone:\n%s", out)
+	}
+}
+
 func TestMarkdownEmptyLedger(t *testing.T) {
 	d := fixture()
 	d.Activity = nil
 	out := render(t, d)
-	if !strings.Contains(out, "Data touched on UAT") || !strings.Contains(out, "Nothing was written") {
+	if !strings.Contains(out, "Data touched") || !strings.Contains(out, "Nothing was written") {
 		t.Errorf("empty ledger must say nothing was written:\n%s", out)
 	}
 }

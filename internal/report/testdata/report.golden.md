@@ -1,6 +1,6 @@
 # Semar report run-20261114-0001
 
-- Environment: uat
+- Environment: uat (test)
 - Started: 2026-11-14T02:30:00Z
 - Ended: 2026-11-14T02:31:35Z
 - Builds at the start: orders a1b2c3d config sha256:11aa
@@ -51,7 +51,7 @@ Reproduce: semar run --scenario SHOP-482-02
 
 </details>
 
-## Data touched on UAT
+## Data touched
 
 - create order ord-1, by SHOP-482-01 step create-order: cleaned up
 - create refund rf-9, by SHOP-482-01 step refund: left in place

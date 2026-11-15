@@ -1,4 +1,4 @@
-// Package effects decides whether one HTTP request may be sent to the test environment.
+// Package effects decides whether one HTTP request may be sent to the environment.
 package effects
 
 import (
