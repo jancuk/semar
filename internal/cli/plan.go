@@ -37,6 +37,7 @@ type planFlags struct {
 	dir          string
 	init         initFlags
 	initGiven    bool
+	given        map[string]bool
 }
 
 // agentFiles are read by an agent harness as instructions or tools, and a .git directory would
@@ -52,6 +53,7 @@ func newPlanCommand(o options) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			f.initGiven = initFlagGiven(cmd)
+			f.given = givenInitFlags(cmd)
 			return planChange(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
 		},
 	}
@@ -100,7 +102,14 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	case err != nil:
 		return err
 	case f.initGiven:
-		return fmt.Errorf("the configuration exists; edit %s", configPath(f.dir))
+		diffs, err := diffInitFlags(cfg, f.env, f.authProfile, f.init, f.given)
+		if err != nil {
+			return err
+		}
+		if len(diffs) > 0 {
+			return initFlagsDiffer(diffs, "To plan with the file, run the command without the setup flags. To change the environment, edit "+configFileName+".")
+		}
+		fmt.Fprintf(stderr, "semar: %s already has these settings, so the setup flags are not needed\n", configFileName)
 	}
 	ticket, err := regexp.Compile(cfg.Tickets.Pattern)
 	if err != nil {

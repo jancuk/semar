@@ -76,6 +76,17 @@ func newInitCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if cfg, err := config.Load(dir); err == nil {
+				diffs, err := diffInitFlags(cfg, f.env, "", f, givenInitFlags(cmd))
+				if err != nil {
+					return fmt.Errorf("%s exists: %w; to change the environment, edit it", configFileName, err)
+				}
+				if len(diffs) > 0 {
+					return initFlagsDiffer(diffs, "To change the environment, edit "+configFileName+".")
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s already has these settings; nothing was written\n", configFileName)
+				return nil
+			}
 			path, err := writeInitConfig(dir, data)
 			if err != nil {
 				return err

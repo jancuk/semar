@@ -515,7 +515,10 @@ func TestPlanStopsBeforeTheProvider(t *testing.T) {
 		p.configure(t, goodDraft)
 		p.opts.Providers = noProvider(t)
 		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release", "--token-env", "OTHER")
-		contains(t, "stderr", res.stderr, "the configuration exists; edit")
+		contains(t, "stderr", res.stderr, ".semar/semar.yaml exists and differs from the flags:",
+			"  --token-env is OTHER, and the file has "+planTokenEnv+" for the auth profile default",
+			"To plan with the file, run the command without the setup flags. To change the environment, edit .semar/semar.yaml.")
+		p.assertNothingPlanned(t)
 	})
 	t.Run("a harness that is not installed", func(t *testing.T) {
 		p := newPlanRepo(t, sampleapp.Options{})
