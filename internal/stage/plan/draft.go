@@ -18,6 +18,9 @@ type Draft struct {
 	Scenarios  []ScenarioDraft `json:"scenarios"`
 	NotDrafted []NotDrafted    `json:"notDrafted"`
 	Uncovered  []Uncovered     `json:"uncovered"`
+	// Differences are where the planner says a document and the code disagree. Code checks
+	// that both places exist, and cannot check that they disagree.
+	Differences []Difference `json:"differences,omitempty"`
 }
 
 type TicketDraft struct {
@@ -85,6 +88,14 @@ type NotDrafted struct {
 type Uncovered struct {
 	File   string `json:"file"`
 	Reason string `json:"reason"`
+}
+
+// Difference is one place where a document of the repository and the code disagree.
+type Difference struct {
+	Ticket   string `json:"ticket"`
+	Document string `json:"document"` // starts with <file>:<line> of a document
+	Code     string `json:"code"`     // starts with <file>:<line> of the code
+	What     string `json:"what"`
 }
 
 // DecodeDraft reads one JSON object strictly: an unknown field and trailing data are errors,
@@ -223,6 +234,20 @@ const schema = `{
         "properties": {
           "file": {"type": "string"},
           "reason": {"type": "string"}
+        }
+      }
+    },
+    "differences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ticket", "document", "code", "what"],
+        "properties": {
+          "ticket": {"type": "string"},
+          "document": {"type": "string"},
+          "code": {"type": "string"},
+          "what": {"type": "string"}
         }
       }
     }

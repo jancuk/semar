@@ -24,6 +24,7 @@ type PlanData struct {
 	Methods      string
 	MaxScenarios int
 	Existing     string // a Markdown list, indented under its bullet; empty when there is none
+	Knowledge    string // a Markdown list of the documents to read; empty when there is none
 }
 
 // PlanVersion is the version line of the planner prompt.

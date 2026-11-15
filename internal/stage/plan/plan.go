@@ -32,11 +32,13 @@ type Planner interface {
 
 // Output is an accepted plan. Result is the result of the accepted attempt, with the turns, the
 // tokens, the cost, the tool calls and the refused calls summed over every attempt. Run returns
-// the same totals with an error, so that a failed job can still be counted.
+// the same totals with an error, so that a failed job can still be counted. Notes are where
+// the accepted requests differ from an API document of the configuration.
 type Output struct {
 	Draft       Draft
 	Scenarios   []domain.Scenario
 	Scripts     []domain.Script
+	Notes       []Note
 	Attempts    int
 	Result      provider.Result
 	PlannerID   string
@@ -67,6 +69,7 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 		Methods:      strings.Join(in.Methods, ", "),
 		MaxScenarios: in.Limits.MaxScenarios,
 		Existing:     existingList(in.Existing),
+		Knowledge:    knowledgeList(in.Knowledge),
 	}
 	var total provider.Result
 	var problems []Problem
@@ -110,8 +113,8 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 		}
 		total.Output = res.Output
 		return Output{
-			Draft: d, Scenarios: scenarios, Scripts: scripts, Attempts: attempt, Result: total,
-			PlannerID: p.ID(), PlannerKind: p.Kind(),
+			Draft: d, Scenarios: scenarios, Scripts: scripts, Notes: compare(in, scenarios, scripts),
+			Attempts: attempt, Result: total, PlannerID: p.ID(), PlannerKind: p.Kind(),
 		}, nil
 	}
 	return Output{Result: total, Attempts: MaxAttempts, PlannerID: p.ID(), PlannerKind: p.Kind()}, &Rejected{Problems: problems, Attempts: MaxAttempts}

@@ -86,6 +86,10 @@ func Render(w io.Writer, in Input, out Output) error {
 		fmt.Fprintf(&b, "- %s: %s\n", shown(u.File, maxValueShown), shown(u.Reason, maxTextShown))
 	}
 
+	if len(in.Knowledge) > 0 {
+		writeDocuments(&b, in, out)
+	}
+
 	if len(in.LeftOut) > 0 {
 		b.WriteString("\n## Files left out of the copy\n\nThe planner could not read these files of the head commit.\n\n")
 		for _, l := range in.LeftOut {
@@ -113,6 +117,56 @@ func Render(w io.Writer, in Input, out Output) error {
 
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// writeDocuments lists the configured sources, the notes of code, and the differences that the
+// planner reported.
+func writeDocuments(b *strings.Builder, in Input, out Output) {
+	value := func(s string) string { return shown(s, maxValueShown) }
+	b.WriteString("\n## Documents\n\nThe planner was told to read these before it drafted.\n\n")
+	apis := 0
+	for _, s := range in.Knowledge {
+		if !s.Usable() {
+			fmt.Fprintf(b, "- %s: %s\n", value(s.ID), value(s.Problem))
+			continue
+		}
+		fmt.Fprintf(b, "- %s: %s\n", value(s.ID), describe(s, value, ": "+value(s.Note)))
+		if s.API != nil {
+			apis++
+		}
+	}
+
+	if apis > 0 {
+		b.WriteString("\n### Compared with the API document\n\nCode compared every drafted request with the API document.\n\n")
+		if len(out.Notes) == 0 {
+			b.WriteString("No drafted request differs from the API document.\n")
+		}
+		for _, n := range out.Notes {
+			source := ""
+			if apis > 1 {
+				source = ", " + value(n.Source)
+			}
+			fmt.Fprintf(b, "- %s, step %s%s: %s\n", value(string(n.Scenario)), value(n.Step), source, shown(n.Message, maxTextShown))
+		}
+	}
+
+	b.WriteString("\n### Where the planner says a document and the code differ\n\n" +
+		"The planner reported these. Code checked that both places exist, and did not check that they differ.\n\n")
+	if len(out.Draft.Differences) == 0 {
+		b.WriteString("The planner reported no difference.\n")
+	}
+	for _, d := range out.Draft.Differences {
+		fmt.Fprintf(b, "- %s: %s and %s. %s\n", value(d.Ticket), value(citeOf(d.Document)), value(citeOf(d.Code)), shown(d.What, maxTextShown))
+		fmt.Fprintf(b, "  - Document: %s\n  - Code: %s\n", shown(d.Document, maxTextShown), shown(d.Code, maxTextShown))
+	}
+}
+
+// citeOf is the <file>:<line> that a validated text starts with.
+func citeOf(text string) string {
+	if m := citePattern.FindStringSubmatch(text); m != nil {
+		return m[1] + ":" + m[2]
+	}
+	return text
 }
 
 // setupLine counts what the planner loaded and never names it: the file may be committed, and

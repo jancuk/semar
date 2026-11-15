@@ -8,13 +8,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/knowledge"
 	"github.com/jancuk/semar/internal/provider"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")
 
-func TestRenderGolden(t *testing.T) {
+// goldenInput is the input of the golden plans: two tickets, a setup of the person's own, and
+// two files left out of the copy.
+func goldenInput(t *testing.T) Input {
+	t.Helper()
 	in := input(t)
 	in.Change.Commits = []domain.ChangeCommit{
 		{ID: strings.Repeat("c", 40), Subject: "SHOP-482 reject a refund above the total", Author: "Ada", At: time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC), Tickets: []string{"SHOP-482"}, Files: []string{"internal/refund/handler.go"}},
@@ -31,13 +36,18 @@ func TestRenderGolden(t *testing.T) {
 	in.SetupOn = true
 	in.Reasoning = "high"
 	in.LeftOut = []LeftOut{{Path: "assets/logo.png", Reason: "larger than 5 MiB"}, {Path: "vendor/lib", Reason: "a submodule"}}
-	d := draft(t)
+	return in
+}
+
+// goldenOutput validates d as Run does and fills the totals of two attempts.
+func goldenOutput(t *testing.T, in Input, d Draft) Output {
+	t.Helper()
 	scs, scripts, ps := Validate(d, in)
 	if len(ps) > 0 {
 		t.Fatalf("problems: %v", ps)
 	}
-	out := Output{
-		Draft: d, Scenarios: scs, Scripts: scripts, Attempts: 2,
+	return Output{
+		Draft: d, Scenarios: scs, Scripts: scripts, Notes: compare(in, scs, scripts), Attempts: 2,
 		Result: provider.Result{
 			Model: "model-x", Reasoning: "high", InputTokens: 1234, OutputTokens: 56, Denied: 2,
 			Tools:  []provider.ToolUse{{Name: "Read", Calls: 7}, {Name: "mcp__tracker__get_issue", Calls: 1}, {Name: "mcp__wiki__search", Calls: 2}},
@@ -45,19 +55,89 @@ func TestRenderGolden(t *testing.T) {
 		},
 		PlannerID: "claude", PlannerKind: "claude",
 	}
+}
+
+func TestRenderGolden(t *testing.T) {
+	in := goldenInput(t)
+	got := render(t, in, goldenOutput(t, in, draft(t)))
+	if strings.Contains(got, "tracker") || strings.Contains(got, "wiki") {
+		t.Error("plan.md names an MCP server")
+	}
+	if strings.Contains(got, "## Documents") {
+		t.Error("plan.md has a section of documents when the configuration lists none")
+	}
+	golden(t, "plan.golden.md", got)
+}
+
+func TestRenderGoldenWithDocuments(t *testing.T) {
+	in := withDocs(t, goldenInput(t))
+	in.Knowledge = []knowledge.Source{
+		apiSource(t, "api", staleAPI, ""),
+		docsSource,
+		{ID: "wiki", Kind: config.KnowledgeFiles, Path: "wiki", Folder: true, Files: knowledge.MaxFiles + 1},
+		{ID: "readme", Kind: config.KnowledgeFiles, Path: "README.md", Files: 1},
+		{ID: "legacy", Kind: config.KnowledgeOpenAPI, Path: "api/swagger.yaml", Files: 1, Note: `the document needs an "openapi" or "swagger" key with a version`},
+		{ID: "old", Kind: config.KnowledgeFiles, Path: "docs/old", Problem: "docs/old is not in the copy of the source"},
+	}
+	d := draft(t)
+	d.Differences = []Difference{{
+		Ticket:   "SHOP-482",
+		Document: "docs/refunds.md:14 says a refund above the total gets 409 *Conflict*",
+		Code:     "internal/refund/handler.go:41 returns 422",
+		What:     "The status of a refund above the total: see [the guide](https://docs.example.com/refunds).",
+	}}
+	out := goldenOutput(t, in, d)
+	out.PlannerID, out.PlannerKind = "planner", "harness"
+	if len(out.Notes) != 2 {
+		t.Fatalf("notes = %+v, want 2", out.Notes)
+	}
+	golden(t, "plan-documents.golden.md", render(t, in, out))
+}
+
+func TestRenderGoldenWithDocumentsAndNothingToReport(t *testing.T) {
+	in := withDocs(t, goldenInput(t))
+	in.Knowledge = []knowledge.Source{apiSource(t, "api", fullAPI, "orders"), docsSource}
+	out := goldenOutput(t, in, draft(t))
+	out.PlannerID, out.PlannerKind = "planner", "harness"
+	if len(out.Notes) != 0 {
+		t.Fatalf("notes = %+v, want none", out.Notes)
+	}
+	golden(t, "plan-documents-clean.golden.md", render(t, in, out))
+}
+
+// A section of documents is left out of plan.md when no API document was read, and a planner's
+// difference is still listed.
+func TestRenderDocumentsWithNoAPIDocument(t *testing.T) {
+	in := withDocs(t, input(t))
+	in.Knowledge = []knowledge.Source{docsSource}
+	d := draft(t)
+	d.Differences = []Difference{{Ticket: "SHOP-482", Document: "docs/refunds.md:2 a", Code: "internal/refund/handler.go:3 b", What: "c"}}
+	got := render(t, in, goldenOutput(t, in, d))
+	if strings.Contains(got, "Compared with the API document") {
+		t.Errorf("plan.md compares with an API document that was not read:\n%s", got)
+	}
+	if !strings.Contains(got, "- SHOP-482: docs/refunds.md:2 and internal/refund/handler.go:3. c\n  - Document: docs/refunds.md:2 a\n  - Code: internal/refund/handler.go:3 b\n") {
+		t.Errorf("plan.md lacks the difference:\n%s", got)
+	}
+}
+
+func render(t *testing.T, in Input, out Output) string {
+	t.Helper()
 	var b strings.Builder
 	if err := Render(&b, in, out); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(b.String(), "tracker") || strings.Contains(b.String(), "wiki") {
-		t.Error("plan.md names an MCP server")
-	}
-	golden := filepath.Join("testdata", "plan.golden.md")
+	return b.String()
+}
+
+func golden(t *testing.T, name, got string) {
+	t.Helper()
+	golden := filepath.Join("testdata", name)
 	if *update {
 		if err := os.MkdirAll("testdata", 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(golden, []byte(b.String()), 0o644); err != nil {
+		if err := os.WriteFile(golden, []byte(got), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -65,8 +145,8 @@ func TestRenderGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.String() != string(want) {
-		t.Errorf("plan.md differs from %s; rerun with -update if the change is intended:\n%s", golden, b.String())
+	if got != string(want) {
+		t.Errorf("plan.md differs from %s; rerun with -update if the change is intended:\n%s", golden, got)
 	}
 }
 

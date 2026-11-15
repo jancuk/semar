@@ -18,6 +18,7 @@ import (
 
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/knowledge"
 	"github.com/jancuk/semar/internal/scenario"
 	"github.com/jancuk/semar/internal/script"
 )
@@ -33,9 +34,10 @@ type Input struct {
 	Existing      map[string][]domain.Scenario // by ticket: scenarios that already exist
 	Limits        config.Plan
 	Model         string
-	Reasoning     string    // the level that the planner was asked to use; "" for its default
-	SetupOn       bool      // the planner ran with the person's own MCP servers or skills switched on
-	LeftOut       []LeftOut // files of the head commit that the copy of the source lacks
+	Reasoning     string             // the level that the planner was asked to use; "" for its default
+	SetupOn       bool               // the planner ran with the person's own MCP servers or skills switched on
+	LeftOut       []LeftOut          // files of the head commit that the copy of the source lacks
+	Knowledge     []knowledge.Source // the documents that the configuration lists, as found in the copy
 }
 
 // LeftOut is a file that the copy of the source does not hold, and why.
@@ -48,7 +50,10 @@ type Problem struct{ Path, Message string }
 // PlanDir is the directory of the source copy that holds what Semar wrote for the planner.
 const PlanDir = ".semar-plan"
 
-const maxCitedFile = 5 << 20
+const (
+	maxCitedFile   = 5 << 20
+	maxDifferences = 20
+)
 
 var (
 	ticketKinds = []string{"behaviour", "refactor", "config", "none"}
@@ -102,6 +107,7 @@ func Validate(d Draft, in Input) ([]domain.Scenario, []domain.Script, []Problem)
 		scripts = append(scripts, scr)
 	}
 	v.behaviourCovered(d)
+	v.differences(d.Differences)
 
 	if len(v.ps) > 0 {
 		return nil, nil, v.ps
@@ -324,23 +330,84 @@ func (v *validator) check(path string, c CheckDraft) domain.Check {
 }
 
 func (v *validator) cite(path, why string) {
-	m := citePattern.FindStringSubmatch(why)
+	v.cited(path, why, "why must start with <file>:<line> of the code that produces the result, for example internal/refund/handler.go:41")
+}
+
+// cited checks that text starts with <file>:<line> of a line of a file of the source copy, and
+// returns that file in its clean slash form. missing is the problem of a text that does not.
+func (v *validator) cited(path, text, missing string) (string, bool) {
+	m := citePattern.FindStringSubmatch(text)
 	if m == nil {
-		v.add(path, "why must start with <file>:<line> of the code that produces the result, for example internal/refund/handler.go:41")
-		return
+		v.add(path, "%s", missing)
+		return "", false
 	}
 	file := m[1]
 	line, err := strconv.Atoi(m[2])
 	if err != nil || line < 1 {
 		v.add(path, "%s:%s names no line: lines start at 1", file, m[2])
-		return
+		return "", false
 	}
 	f := v.file(file)
 	switch {
 	case f.problem != "":
 		v.add(path, "%s", f.problem)
+		return "", false
 	case line > f.lines:
 		v.add(path, "%s has %d lines, so it has no line %d", file, f.lines, line)
+		return "", false
+	}
+	return cleanSlash(file), true
+}
+
+func cleanSlash(file string) string {
+	return filepath.ToSlash(filepath.Clean(filepath.FromSlash(file)))
+}
+
+// differences checks the places that the planner names. It cannot check that the two texts
+// disagree; plan.md says so.
+func (v *validator) differences(ds []Difference) {
+	if len(ds) == 0 {
+		return
+	}
+	var usable []knowledge.Source
+	for _, s := range v.in.Knowledge {
+		if s.Usable() {
+			usable = append(usable, s)
+		}
+	}
+	if len(usable) == 0 {
+		v.add("differences", "no document was listed for you to read, so there is no difference to report: leave differences out")
+		return
+	}
+	if len(ds) > maxDifferences {
+		v.add("differences", "the draft has %d differences, and the limit is %d: keep the ones that a caller would notice first", len(ds), maxDifferences)
+	}
+	holds := func(file string) bool {
+		return slices.ContainsFunc(usable, func(s knowledge.Source) bool { return s.Holds(file) })
+	}
+	paths := make([]string, len(usable))
+	for i, s := range usable {
+		paths[i] = s.Path
+	}
+	for i, d := range ds {
+		p := fmt.Sprintf("differences[%d]", i)
+		if !v.known[d.Ticket] {
+			v.add(p+".ticket", "ticket %q is not in the change set; use one of %s", d.Ticket, v.ticketList())
+		}
+		if strings.TrimSpace(d.What) == "" {
+			v.add(p+".what", "say in one sentence what differs between the document and the code")
+		}
+		doc, docOK := v.cited(p+".document", d.Document, "document must start with <file>:<line> of a document that the team listed, for example docs/refunds.md:14")
+		code, codeOK := v.cited(p+".code", d.Code, "code must start with <file>:<line> of the code, for example internal/refund/handler.go:41")
+		if docOK && !holds(doc) {
+			v.add(p+".document", "%s is not one of the documents that the team listed; cite a file of %s", doc, strings.Join(paths, ", "))
+		}
+		switch {
+		case docOK && codeOK && doc == code:
+			v.add(p+".code", "document and code both cite %s; cite the code that does what the document describes", code)
+		case codeOK && holds(code):
+			v.add(p+".code", "%s is one of the documents that the team listed; cite the code that does what the document describes", code)
+		}
 	}
 }
 
