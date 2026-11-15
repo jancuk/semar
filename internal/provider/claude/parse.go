@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/jancuk/semar/internal/provider"
@@ -34,7 +33,7 @@ func parseOutput(stdout []byte, exitCode int, stderrTail []byte) (provider.Resul
 	if err := json.Unmarshal(bytes.TrimSpace(stdout), &env); err != nil {
 		return provider.Result{}, &provider.Error{
 			Class:  provider.ProviderError,
-			Detail: fmt.Sprintf("the harness output is not JSON, exit code %d: %s", exitCode, lastLine(stderrTail)),
+			Detail: fmt.Sprintf("the harness output is not JSON, exit code %d: %s", exitCode, provider.LastLine(stderrTail)),
 		}
 	}
 	if env.IsError {
@@ -55,7 +54,7 @@ func parseOutput(stdout []byte, exitCode int, stderrTail []byte) (provider.Resul
 }
 
 func classify(env envelope) *provider.Error {
-	subtype := truncate(redact(env.Subtype))
+	subtype := provider.Truncate(provider.Redact(env.Subtype))
 	lower := strings.ToLower(env.Subtype)
 	status := string(bytes.TrimSpace(env.APIErrorStatus))
 	switch {
@@ -79,37 +78,4 @@ func mainModel(env envelope) string {
 		}
 	}
 	return best
-}
-
-var secretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)(bearer\s+)\S+`),
-	regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|authorization)["']?\s*[=:]\s*)\S+`),
-	regexp.MustCompile(`\b[A-Za-z0-9_-]{24,}\b`),
-}
-
-func redact(s string) string {
-	for i, re := range secretPatterns {
-		if i < 2 {
-			s = re.ReplaceAllString(s, "${1}[redacted]")
-		} else {
-			s = re.ReplaceAllString(s, "[redacted]")
-		}
-	}
-	return s
-}
-
-func truncate(s string) string {
-	if r := []rune(s); len(r) > maxDetailRunes {
-		return string(r[:maxDetailRunes]) + "..."
-	}
-	return s
-}
-
-func lastLine(stderr []byte) string {
-	lines := strings.Split(strings.TrimSpace(string(stderr)), "\n")
-	line := strings.TrimSpace(lines[len(lines)-1])
-	if line == "" {
-		return "no message on standard error"
-	}
-	return truncate(redact(line))
 }

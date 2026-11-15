@@ -8,9 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -57,69 +54,14 @@ func (d *Driver) ID() string   { return d.cfg.ID }
 func (d *Driver) Kind() string { return Kind }
 
 func (d *Driver) binary() (string, *provider.Error) {
-	notInstalled := func(format string, args ...any) (string, *provider.Error) {
-		return "", &provider.Error{Class: provider.NotInstalled, Detail: fmt.Sprintf(format, args...)}
-	}
-	if p, ok := d.lookup(BinaryEnv); ok && p != "" {
-		if !filepath.IsAbs(p) {
-			return notInstalled("%s is %q, which is not an absolute path", BinaryEnv, p)
-		}
-		info, err := os.Stat(p)
-		switch {
-		case err != nil:
-			return notInstalled("%s names %q, which cannot be read: %v", BinaryEnv, p, errors.Unwrap(err))
-		case !info.Mode().IsRegular():
-			return notInstalled("%s names %q, which is not a regular file", BinaryEnv, p)
-		case runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0:
-			return notInstalled("%s names %q, which is not executable", BinaryEnv, p)
-		}
-		return p, nil
-	}
-	path, err := exec.LookPath(defaultBinary)
-	switch {
-	case errors.Is(err, exec.ErrDot):
-		return notInstalled("the binary %q was found on PATH only through a relative directory; set %s to an absolute path", defaultBinary, BinaryEnv)
-	case err != nil:
-		return notInstalled("the binary %q was not found on PATH, and %s is not set", defaultBinary, BinaryEnv)
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return notInstalled("the binary %q on PATH has no absolute path: %v", path, err)
-	}
-	return abs, nil
-}
-
-// refuseInside refuses a binary that the repository under test, or the copy of it, could
-// have supplied: a PATH entry such as <repository>/bin would otherwise start the repository's
-// own program.
-func refuseInside(bin, repoRoot, workdir string) *provider.Error {
-	realBin, err := filepath.EvalSymlinks(bin)
-	if err != nil {
-		return &provider.Error{Class: provider.NotInstalled, Detail: fmt.Sprintf("the binary %q cannot be resolved: %v", bin, errors.Unwrap(err))}
-	}
-	for _, d := range []struct{ dir, what string }{
-		{repoRoot, "the repository under test"},
-		{workdir, "the working directory of the job"},
-	} {
-		if d.dir == "" {
-			continue
-		}
-		realDir, err := filepath.EvalSymlinks(d.dir)
-		if err != nil {
-			return &provider.Error{Class: provider.ValidationError, Detail: fmt.Sprintf("%s, %q, cannot be resolved", d.what, d.dir)}
-		}
-		if rel, err := filepath.Rel(realDir, realBin); err == nil && filepath.IsLocal(rel) {
-			return &provider.Error{Class: provider.PermissionError, Detail: fmt.Sprintf("the binary %q lies inside %s, and a harness inside the repository under test is not started", bin, d.what)}
-		}
-	}
-	return nil
+	return provider.FindBinary(d.lookup, BinaryEnv, defaultBinary)
 }
 
 // Health starts the binary with --version only, never a model turn.
 func (d *Driver) Health(ctx context.Context) provider.Health {
 	path, perr := d.binary()
 	if perr == nil {
-		perr = refuseInside(path, d.repoRoot, "")
+		perr = provider.RefuseInside(path, d.repoRoot, "")
 	}
 	if perr != nil {
 		return provider.Health{Detail: perr.Detail}
@@ -135,7 +77,7 @@ func (d *Driver) Health(ctx context.Context) provider.Health {
 	case err != nil:
 		return provider.Health{Detail: fmt.Sprintf("%s --version: %v", path, err)}
 	case res.ExitCode != 0:
-		return provider.Health{Detail: fmt.Sprintf("%s --version ended with exit code %d: %s", path, res.ExitCode, lastLine(res.StderrTail))}
+		return provider.Health{Detail: fmt.Sprintf("%s --version ended with exit code %d: %s", path, res.ExitCode, provider.LastLine(res.StderrTail))}
 	}
 	version, _, _ := strings.Cut(strings.TrimSpace(string(res.Stdout)), "\n")
 	return provider.Health{Installed: true, Version: strings.TrimSpace(version)}
@@ -147,7 +89,7 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 	}
 	path, perr := d.binary()
 	if perr == nil {
-		perr = refuseInside(path, d.repoRoot, job.Workdir)
+		perr = provider.RefuseInside(path, d.repoRoot, job.Workdir)
 	}
 	if perr != nil {
 		return provider.Result{}, perr
@@ -177,7 +119,7 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 	case errors.Is(err, os.ErrNotExist):
 		return provider.Result{}, &provider.Error{Class: provider.NotInstalled, Detail: fmt.Sprintf("the binary %q could not be started", path)}
 	}
-	return provider.Result{}, &provider.Error{Class: provider.ProviderError, Detail: truncate(redact(err.Error()))}
+	return provider.Result{}, &provider.Error{Class: provider.ProviderError, Detail: provider.Truncate(provider.Redact(err.Error()))}
 }
 
 func deadlineText(job provider.Job) string {
