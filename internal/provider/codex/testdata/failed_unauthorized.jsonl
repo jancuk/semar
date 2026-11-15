@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"00000000-0000-0000-0000-000000000005"}
+{"type":"turn.started"}
+{"type":"error","message":"{\"error\":{\"message\":\"Your session has expired.\",\"code\":\"token_expired\"},\"status\":401}"}
+{"type":"turn.failed","error":{"message":"{\"error\":{\"message\":\"Your session has expired.\",\"code\":\"token_expired\"},\"status\":401}"}}

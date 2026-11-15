@@ -1,0 +1,15 @@
+{"type":"thread.started","thread_id":"00000000-0000-0000-0000-000000000001"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Exceeded skills context budget."}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"I will read the handler first.\n"}}
+{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"/bin/zsh -c 'cat orders.go'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"/bin/zsh -c 'cat orders.go'","aggregated_output":"package orders\n","exit_code":0,"status":"completed"}}
+this line is not JSON {
+{"type":"item.started","item":{"id":"item_3","type":"command_execution","command":"/bin/zsh -c 'cat ../secret'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"/bin/zsh -c 'cat ../secret'","aggregated_output":"","exit_code":null,"status":"declined"}}
+{"type":"item.started","item":{"id":"item_4","type":"mcp_tool_call","server":"orders","tool":"list_orders","arguments":{},"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_4","type":"mcp_tool_call","server":"orders","tool":"list_orders","arguments":{},"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_5","type":"mcp_tool_call","server":"orders","tool":"list_orders","arguments":{},"status":"failed"}}
+{"type":"item.completed","item":{"id":"item_6","type":"todo_list","items":[]}}
+{"type":"item.completed","item":{"id":"item_7","type":"agent_message","text":"{\"method\":\"GET\",\"path\":\"/v1/orders\"}"}}
+{"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":800,"cache_write_input_tokens":5,"output_tokens":90,"reasoning_output_tokens":10}}

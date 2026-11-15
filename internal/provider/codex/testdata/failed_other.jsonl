@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"00000000-0000-0000-0000-000000000006"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `acme-model` not found."}}
+{"type":"turn.started"}
+{"type":"error","message":"The 'acme-model' model is not supported when using Codex with a ChatGPT account."}
+{"type":"turn.failed","error":{"message":"The 'acme-model' model is not supported when using Codex with a ChatGPT account."}}
