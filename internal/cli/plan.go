@@ -20,6 +20,7 @@ import (
 	"github.com/jancuk/semar/internal/changeset"
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/knowledge"
 	"github.com/jancuk/semar/internal/provider"
 	"github.com/jancuk/semar/internal/stage/plan"
 	"github.com/jancuk/semar/internal/vcs"
@@ -204,6 +205,9 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		fmt.Fprintf(stderr, "semar: %s of %s %s left out of the copy that the planner reads; plan.md lists them\n",
 			plural(len(leftOut), "file"), shortCommit(cs.HeadCommit), map[bool]string{true: "was", false: "were"}[len(leftOut) == 1])
 	}
+	if in.Knowledge, err = findKnowledge(stderr, in.SourceDir, cfg.Knowledge); err != nil {
+		return err
+	}
 
 	in.Model = model
 	in.Reasoning = pc.Reasoning
@@ -222,7 +226,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		return err
 	}
 	o.recordUsage(stderr, inst, model, pc.Reasoning, out, "ok", filepath.Base(filepath.Dir(planFile)), time.Since(started))
-	printPlanDone(stdout, out, planFile, nextRun(env, envName, f.env, cs.HeadCommit))
+	printPlanDone(stdout, out, len(cfg.Knowledge) > 0, planFile, nextRun(env, envName, f.env, cs.HeadCommit))
 	if len(out.Scenarios) == 0 {
 		return exitError{ExitUndecided}
 	}
@@ -358,6 +362,40 @@ func removeAgentFiles(root string) error {
 	return nil
 }
 
+// findKnowledge finds the listed sources in the copy of the source. It runs after the copy has
+// lost the files that instruct an agent, so a source that names one is not in the copy. A source
+// that cannot be used is reported, and the plan goes on without it.
+func findKnowledge(stderr io.Writer, sourceDir string, list []config.Knowledge) ([]knowledge.Source, error) {
+	sources, err := knowledge.Resolve(sourceDir, list)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range sources {
+		switch {
+		case s.Problem != "":
+			fmt.Fprintf(stderr, "semar: knowledge source %s: %s; the planner is not told to read it\n", terminalSafe(s.ID), terminalSafe(s.Problem))
+		case s.Note != "":
+			fmt.Fprintf(stderr, "semar: knowledge source %s: %s cannot be read as an API document (%s); the planner reads it as a plain document, and no request is compared with it\n",
+				terminalSafe(s.ID), terminalSafe(s.Path), terminalSafe(s.Note))
+		}
+	}
+	if len(list) == 0 {
+		if found := knowledge.Conventional(sourceDir); len(found) > 0 {
+			paths := make([]string, len(found))
+			for i, k := range found {
+				paths[i] = k.Path
+			}
+			them := "them"
+			if len(found) == 1 {
+				them = "it"
+			}
+			fmt.Fprintf(stderr, "semar: the repository has %s; list %s under knowledge in %s so that the planner reads %s first\n",
+				terminalSafe(strings.Join(paths, " and ")), them, configFileName, them)
+		}
+	}
+	return sources, nil
+}
+
 func planFailed(ctx context.Context, stderr io.Writer, err error) error {
 	var rejected *plan.Rejected
 	var perr *provider.Error
@@ -412,7 +450,7 @@ func shortCommit(id string) string {
 	return id
 }
 
-func printPlanDone(w io.Writer, out plan.Output, planFile, run string) {
+func printPlanDone(w io.Writer, out plan.Output, listed bool, planFile, run string) {
 	count := map[string]int{}
 	for _, sc := range out.Scenarios {
 		count[sc.Ticket]++
@@ -421,6 +459,9 @@ func printPlanDone(w io.Writer, out plan.Output, planFile, run string) {
 		fmt.Fprintf(w, "%s (%s): %s\n", terminalSafe(t.Key), terminalSafe(t.Kind), plural(count[t.Key], "scenario"))
 	}
 	fmt.Fprintf(w, "not drafted: %d\n", len(out.Draft.NotDrafted))
+	if listed {
+		fmt.Fprintf(w, "differs from the documents: %d\n", len(out.Notes)+len(out.Draft.Differences))
+	}
 	fmt.Fprintf(w, "plan: %s\n", planFile)
 	if len(out.Scenarios) > 0 {
 		fmt.Fprintf(w, "next:\n  %s\n  semar confirm --all\n  %s\n", run, run)

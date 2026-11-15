@@ -115,13 +115,16 @@ func CheckKnowledgePath(path string) error // K4
 ### `internal/knowledge` (new)
 
 ```go
+const MaxFiles = 2000
+
 // Source is a configured source as found in the copy of the source.
 type Source struct {
 	ID, Kind, Path, Service string
 	Problem string            // why the planner cannot use it; "" when it can
-	Files   int               // the regular files under Path, counted up to 2,000
+	Folder  bool              // Path is a folder
+	Files   int               // the regular files under Path; MaxFiles+1 means more than MaxFiles
 	API     *openapi.Document // an openapi source that was read
-	Note    string            // an openapi source that could not be read as an API document, and why
+	Note    string            // why an openapi source could not be read as an API document
 }
 
 func Resolve(sourceDir string, list []config.Knowledge) ([]Source, error)
@@ -130,7 +133,8 @@ func (s Source) Holds(file string) bool // file is Path or is under Path; both a
 func Conventional(dir string) []config.Knowledge
 ```
 
-* `Resolve` opens `sourceDir` with `os.OpenRoot`. A path that is not in the copy gives `Problem`. An `openapi` source that is a folder gives `Problem`. An `openapi` file that does not parse keeps `Problem` empty and sets `Note`: the planner still reads it as a document, and nothing is compared.
+* `Resolve` opens `sourceDir` with `os.OpenRoot`, and returns an error only when that fails. A path that is not in the copy gives `Problem`, for example `docs/old is not in the copy of the source`. So does an `openapi` source that is a folder, and a path that is neither a regular file nor a folder (a link is never followed). An `openapi` file that does not parse keeps `Problem` empty and sets `Note` to the reason, without the path: the planner still reads it as a document, and nothing is compared. At most 5 MiB of an API document is read. The regular files of a folder are counted until the count passes `MaxFiles`.
+* `Holds` cleans `file` before it compares.
 * `Conventional` uses `os.Lstat` only and never follows a link. It returns `{api, openapi, <path>}` for the first regular file of this list, and `{docs, files, docs}` when `docs` is a folder:
   `docs/openapi.yaml`, `docs/openapi.yml`, `docs/openapi.json`, `docs/swagger.yaml`, `docs/swagger.yml`, `docs/swagger.json`, `api/openapi.yaml`, `api/openapi.yml`, `api/openapi.json`, `api/swagger.yaml`, `api/swagger.yml`, `api/swagger.json`, `openapi.yaml`, `openapi.yml`, `openapi.json`, `swagger.yaml`, `swagger.yml`, `swagger.json`.
 
@@ -150,7 +154,7 @@ type Difference struct {
 // Draft gains: Differences []Difference `json:"differences,omitempty"`
 ```
 
-* `Validate` refuses a difference when: there are more than 20, the ticket is not in the change set, `what` is empty, `document` or `code` does not start with `<file>:<line>` of a file and a line that exist in the copy, the file of `document` is not held by a usable source, or the two cites name the same file. With no usable source, any difference is a problem.
+* `Validate` refuses a difference when: there are more than 20, the ticket is not in the change set, `what` is empty, `document` or `code` does not start with `<file>:<line>` of a file and a line that exist in the copy, the file of `document` is not held by a usable source, the two cites name the same file, or the file of `code` is held by a usable source (a document is not the code). With no usable source, any difference is one problem at `differences`.
 * `Output` gains `Notes []Note`, which code computes after a draft is accepted:
 
 ```go
@@ -169,9 +173,9 @@ For every `openapi` source that was read, and every step whose service the sourc
 |---|---|
 | The route is not in the document with any method | `GET /v1/orders/{id}/refunds is not in the API document` |
 | The route is there with other methods | `the API document has /v1/orders/{id} with GET and PUT, and not with DELETE` |
-| An expected status is not declared | `status 422 is not declared for POST /v1/orders/{id}/refunds; the document declares 200, 400, and default` |
+| An expected status is not declared | `status 422 is not declared for POST /v1/orders/{id}/refunds; the document declares 200, 400, and 5XX` |
 
-The route of a step is its `hint`. A step with no service belongs to the only service of the environment.
+The route of a step is its `hint`, and the route in a message is the hint as drafted. A step with no service belongs to the only service of the environment. Every step is compared, setup steps too. A status is noted once for a step. `default` declares every status, so an operation that lists it gets no status note; one that lists no response says `the document declares no status`. The lists are sorted as `Lookup` and `Parse` sort them, and joined as `GET and PUT` or `200, 400, and 5XX`.
 
 ### The prompt section
 
@@ -191,6 +195,18 @@ The repository holds documents about this service. Read the ones that apply to t
 ```
 
 "What to return" names `differences` in the same condition.
+
+`Knowledge` is built in `internal/stage/plan`, one line per usable source, with every ID, path, and version quoted as code on one line. A folder's file names are not listed. For example:
+
+```
+- `api`: the API document `docs/openapi.yaml` (OpenAPI `3.0.3`, 42 operations)
+- `docs`: the documents under `docs` (12 files)
+- `readme`: the document `README.md`
+- `wiki`: the documents under `wiki` (more than 2,000 files)
+- `legacy`: the API document `api/swagger.yaml` (code could not read its routes)
+```
+
+The format is named Swagger when the version starts with `2`, and OpenAPI otherwise.
 
 ### `plan.md`
 
@@ -216,15 +232,20 @@ Code compared every drafted request with the API document.
 The planner reported these. Code checked that both places exist, and did not check that they differ.
 
 - SHOP-482: docs/refunds.md:14 and internal/refund/handler.go:41. <what>
+  - Document: <document>
+  - Code: <code>
 ```
 
-An empty list says so in one sentence. The first sub-section is left out when no API document was read.
+An empty list says so in one sentence: `No drafted request differs from the API document.` and `The planner reported no difference.` The first sub-section is left out when no API document was read. When more than one API document was read, a note names its source after the step. An `openapi` source with a `Note` reads `the API document <path> (code could not read its routes: <note>)`. The section comes before "Files left out of the copy", and every text in it is escaped as the rest of `plan.md`.
 
 ### `internal/cli`
 
-* `semar plan` resolves the sources after the copy of the source exists. Each `Problem` and each `Note` is one line on standard error that names the ID and the path. The plan continues.
-* When the configuration lists no source and `Conventional` finds one in the copy, `semar plan` prints one hint that names the paths and the `knowledge` key.
-* When the configuration lists a source, the summary prints `differs from the documents: <n>`, the notes plus the planner's differences.
+* `semar plan` resolves the sources after the copy of the source exists and has lost the instruction files of coding assistants, so a source that names one is not in the copy. Each `Problem` and each `Note` is one line on standard error that names the ID and the path. The plan continues:
+  `semar: knowledge source old: docs/old is not in the copy of the source; the planner is not told to read it`
+  `semar: knowledge source api: docs/openapi.yaml cannot be read as an API document (<note>); the planner reads it as a plain document, and no request is compared with it`
+* When the configuration lists no source and `Conventional` finds one in the copy, `semar plan` prints one hint that names the paths and the `knowledge` key:
+  `semar: the repository has docs/openapi.yaml and docs; list them under knowledge in .semar/semar.yaml so that the planner reads them first`
+* When the configuration lists a source, the summary prints `differs from the documents: <n>`, the notes plus the planner's differences, after `not drafted: <n>`.
 * `semar init`, and the first `semar plan` that writes the configuration, add the `knowledge` entries that `Conventional` finds in the repository, and say so.
 
 ## Tasks
