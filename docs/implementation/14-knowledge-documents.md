@@ -30,7 +30,7 @@ Untrusted, as before: the repository under test with its committed `semar.yaml`,
 |---|---|
 | A `path` that leaves the repository | The configuration refuses a path that is not local. The files are opened through `os.Root` on the copy of the source |
 | A document that holds instructions for the planner | The prompt already says that every file is material to study. The new section repeats it for documents |
-| A very large or deeply nested API document | 5 MiB at most, 5,000 operations at most, no reference is followed, and a fuzz test on the parser |
+| A very large or deeply nested API document | 2 MiB at most for YAML (its node tree takes far more memory than the text) and 5 MiB for JSON, 5,000 operations at most, 32 server prefixes at most, no reference is followed, and a fuzz test on the parser. Every scan of a mapping counts against one work budget, so an alias cannot make the walk longer than the budget |
 | A source ID or a path with characters that change the prompt or `plan.md` | The ID follows `idcheck`. The path refuses control characters and back quotes. `plan.md` escapes every text as before |
 
 ## The file
@@ -65,7 +65,7 @@ knowledge:
 // Document holds what a comparison needs from an OpenAPI 3 or a Swagger 2 document.
 type Document struct {
 	Version    string      // the value of "openapi" or "swagger"
-	Prefixes   []string    // path prefixes from basePath or from the path of each servers[].url, without a trailing slash
+	Prefixes   []string    // at most 32 path prefixes, the first distinct ones, from basePath or from the path of each servers[].url, without a trailing slash
 	Operations []Operation // sorted by Path, then Method
 }
 
@@ -88,9 +88,9 @@ func (d Document) Lookup(method, route string) Match
 func (o Operation) Declares(status int) bool
 ```
 
-* `Parse` reads JSON with `encoding/json` when the first byte that is not white space is `{`, and YAML otherwise. It refuses input above 5 MiB, a document with neither `openapi` nor `swagger`, a `paths` that is not a mapping, and more than 5,000 operations.
+* `Parse` reads JSON with `encoding/json` when the first byte that is not white space is `{`, and YAML otherwise. It refuses input above 2 MiB when it is YAML and above 5 MiB when it is JSON (the error says which limit applies), a document with neither `openapi` nor `swagger`, a `paths` that is not a mapping, more than 5,000 operations, and a document that needs more work than the budget allows (the error says it is too large or too repetitive). The budget counts the keys of every mapping that the walk scans, whatever aliases reach it.
 * The methods are `get`, `put`, `post`, `delete`, `options`, `head`, `patch`, and `trace`. Every other key of a path item is ignored. A path item that is only a `$ref` is skipped. No reference is followed.
-* `Lookup` compares routes after it removes one trailing slash and replaces every `{name}` with `{}`, so `/orders/{id}` matches `/orders/{orderId}`. It tries the path as written and the path behind each prefix. The comparison is case sensitive.
+* `Lookup` compares routes after it removes one trailing slash and replaces every `{name}` with `{}`, so `/orders/{id}` matches `/orders/{orderId}`. It tries the path as written and the path behind each prefix. The comparison is case sensitive. `Parse` normalises every path once and indexes the operations by route, so a `Lookup` is a map read. A `Document` built by hand, with only `Operations` and `Prefixes`, works too: `Lookup` then builds the index for that call.
 * `Declares` is true for the exact code, for the range of the code (`4XX`, in either case), and for `default`.
 
 ### `internal/config`
@@ -131,11 +131,13 @@ func Resolve(sourceDir string, list []config.Knowledge) ([]Source, error)
 func (s Source) Usable() bool          // Problem == ""
 func (s Source) Holds(file string) bool // file is Path or is under Path; both are slash paths
 func Conventional(dir string) []config.Knowledge
+func WithFolder(list []config.Knowledge, folder string) []config.Knowledge
+func ConventionalBelow(root, folder string) []config.Knowledge
 ```
 
-* `Resolve` opens `sourceDir` with `os.OpenRoot`, and returns an error only when that fails. A path that is not in the copy gives `Problem`, for example `docs/old is not in the copy of the source`. So does an `openapi` source that is a folder, and a path that is neither a regular file nor a folder (a link is never followed). An `openapi` file that does not parse keeps `Problem` empty and sets `Note` to the reason, without the path: the planner still reads it as a document, and nothing is compared. At most 5 MiB of an API document is read. The regular files of a folder are counted until the count passes `MaxFiles`.
+* `Resolve` opens `sourceDir` with `os.OpenRoot`, and returns an error only when that fails. `Resolve` checks a path one name at a time: it lists the folder through the root and requires an entry with exactly that name, byte for byte, so a file system that ignores case cannot find `INTERNAL` for `internal`, and `Holds` agrees with it. A folder on the way must be a real folder, so a link in a folder name is never followed. A path that is not in the copy gives `Problem`, for example `docs/old is not in the copy of the source`. So does an `openapi` source that is a folder, and a path that is neither a regular file nor a folder (a link is never followed). An `openapi` file that does not parse keeps `Problem` empty and sets `Note` to the reason, without the path: the planner still reads it as a document, and nothing is compared. At most 5 MiB of an API document is read. The regular files of a folder are counted until the count passes `MaxFiles`.
 * `Holds` cleans `file` before it compares.
-* `Conventional` uses `os.Lstat` only and never follows a link. It returns `{api, openapi, <path>}` for the first regular file of this list, and `{docs, files, docs}` when `docs` is a folder:
+* `Conventional` uses `os.Lstat` only and never follows a link. Its paths start at the folder it is given. `WithFolder` puts a folder path in front of them and leaves out an entry that `config.CheckKnowledgePath` refuses; `ConventionalBelow(root, folder)` looks in a folder of a copy, without a link on the way, and writes the paths from `root`. It returns `{api, openapi, <path>}` for the first regular file of this list, and `{docs, files, docs}` when `docs` is a folder:
   `docs/openapi.yaml`, `docs/openapi.yml`, `docs/openapi.json`, `docs/swagger.yaml`, `docs/swagger.yml`, `docs/swagger.json`, `api/openapi.yaml`, `api/openapi.yml`, `api/openapi.json`, `api/swagger.yaml`, `api/swagger.yml`, `api/swagger.json`, `openapi.yaml`, `openapi.yml`, `openapi.json`, `swagger.yaml`, `swagger.yml`, `swagger.json`.
 
 ### `internal/stage/plan` and `internal/prompt`
@@ -247,6 +249,7 @@ An empty list says so in one sentence: `No drafted request differs from the API 
   `semar: the repository has docs/openapi.yaml and docs; list them under knowledge in .semar/semar.yaml so that the planner reads them first`
 * When the configuration lists a source, the summary prints `differs from the documents: <n>`, the notes plus the planner's differences, after `not drafted: <n>`.
 * `semar init`, and the first `semar plan` that writes the configuration, add the `knowledge` entries that `Conventional` finds in the repository, and say so.
+* The paths of `knowledge` start at the root of the repository, because the copy of the source is the whole repository. When `--dir` is a folder below the root of the work tree, `init` writes each path with the folder's path from the root in front, for example `services/orders/docs/openapi.yaml`, and leaves out an entry that `CheckKnowledgePath` refuses. The hint of `semar plan` looks in the same folder of the copy and prints the same paths from the root. When `--dir` is the root, or is not in a work tree, nothing changes.
 
 ## Tasks
 
@@ -261,4 +264,6 @@ An empty list says so in one sentence: `No drafted request differs from the API 
 
 1. Request and response fields are not compared with the schemas of the API document. That needs references to be resolved.
 2. Semar cannot tell whether the planner opened a document. A harness reports the names of the tools it called, not the files.
-3. Sources outside the repository (a tracker, a wiki, earlier testing) stay with the knowledge layer of the TRD.
+3. A cite is `<file>:<line>`, so it cannot name a file whose name holds a space or a colon. The planner cannot report a difference for such a document.
+4. `semar init` looks at the working tree, so a document that is not committed is written to the file and later reported as not in the copy of the source.
+5. Sources outside the repository (a tracker, a wiki, earlier testing) stay with the knowledge layer of the TRD.
