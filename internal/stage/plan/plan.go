@@ -23,6 +23,13 @@ const (
 	maxProblemRunes  = 400
 )
 
+// Progress is where a plan is. Attempt starts at 1.
+type Progress struct {
+	Attempt  int
+	Problems int // the problems of the previous draft, 0 on the first attempt
+	provider.Progress
+}
+
 // Planner is the part of an agent provider that a plan uses.
 type Planner interface {
 	ID() string
@@ -86,6 +93,12 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 		if err != nil {
 			return Output{}, fmt.Errorf("plan: %w", err)
 		}
+		var report func(provider.Progress)
+		if in.Progress != nil {
+			prev := len(problems)
+			in.Progress(Progress{Attempt: attempt, Problems: prev})
+			report = func(pp provider.Progress) { in.Progress(Progress{Attempt: attempt, Problems: prev, Progress: pp}) }
+		}
 		res, err := p.Run(ctx, provider.Job{
 			Prompt:    text,
 			Workdir:   in.SourceDir,
@@ -94,6 +107,7 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 			Reasoning: in.Reasoning,
 			MaxTurns:  in.Limits.MaxTurns,
 			Timeout:   in.Limits.Timeout,
+			Progress:  report,
 		})
 		sum(&total, res)
 		if err != nil {

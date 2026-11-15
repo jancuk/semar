@@ -222,3 +222,52 @@ func TestExistingAndProblemLists(t *testing.T) {
 		t.Errorf("problemList is not bounded:\n%s", list[len(list)-200:])
 	}
 }
+
+// progressPlanner calls the function of each job as a provider does.
+type progressPlanner struct {
+	scripted
+	calls [][]provider.Progress
+}
+
+func (p *progressPlanner) Run(ctx context.Context, job provider.Job) (provider.Result, error) {
+	i := len(p.jobs)
+	if job.Progress != nil {
+		for _, c := range p.calls[i] {
+			job.Progress(c)
+		}
+	}
+	return p.scripted.Run(ctx, job)
+}
+
+func TestRunReportsProgressWithTheAttempt(t *testing.T) {
+	bad := withProblem(t, func(d *Draft) { d.Scenarios[0].Steps[1].Service = "payments" })
+	p := &progressPlanner{
+		scripted: scripted{results: []provider.Result{{Output: bad}, {Output: []byte(goodDraft)}}},
+		calls: [][]provider.Progress{
+			{{Turns: 1, ToolCalls: 2, Tool: "Read"}},
+			{{Turns: 1}},
+		},
+	}
+	in := input(t)
+	var got []Progress
+	in.Progress = func(pr Progress) { got = append(got, pr) }
+	if _, err := Run(t.Context(), p, in); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 4 || got[0] != (Progress{Attempt: 1}) ||
+		got[1] != (Progress{Attempt: 1, Progress: provider.Progress{Turns: 1, ToolCalls: 2, Tool: "Read"}}) ||
+		got[2].Attempt != 2 || got[2].Problems == 0 || got[2].Turns != 0 ||
+		got[3] != (Progress{Attempt: 2, Problems: got[2].Problems, Progress: provider.Progress{Turns: 1}}) {
+		t.Errorf("reports = %+v", got)
+	}
+}
+
+func TestRunWithNoProgressGivesTheJobNoFunction(t *testing.T) {
+	p := &scripted{results: []provider.Result{{Output: []byte(goodDraft)}}}
+	if _, err := Run(t.Context(), p, input(t)); err != nil {
+		t.Fatal(err)
+	}
+	if p.jobs[0].Progress != nil {
+		t.Error("the job has a Progress function, want nil")
+	}
+}

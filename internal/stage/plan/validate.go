@@ -38,6 +38,7 @@ type Input struct {
 	SetupOn       bool               // the planner ran with the person's own MCP servers or skills switched on
 	LeftOut       []LeftOut          // files of the head commit that the copy of the source lacks
 	Knowledge     []knowledge.Source // the documents that the configuration lists, as found in the copy
+	Progress      func(Progress)     // nil for no reports
 }
 
 // LeftOut is a file that the copy of the source does not hold, and why.
