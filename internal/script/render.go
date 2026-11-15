@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"unicode"
 
 	"github.com/jancuk/semar/internal/domain"
 )
@@ -162,7 +161,7 @@ func checkRenderedPath(tpl, rendered string) error {
 }
 
 func checkHeaderValue(name, val string) error {
-	if strings.IndexFunc(val, unicode.IsControl) >= 0 {
+	if strings.ContainsFunc(val, illegalInHeaderValue) {
 		return fmt.Errorf("variable %s cannot be used in a header: it holds a control character", name)
 	}
 	return nil

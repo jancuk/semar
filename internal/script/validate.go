@@ -206,11 +206,15 @@ func headerProblems(name, value string) []string {
 	case named(engineHeaders):
 		ps = append(ps, fmt.Sprintf("header %s is set by Semar on every request and cannot be in a script", name))
 	}
-	if strings.ContainsFunc(value, unicode.IsControl) {
+	if strings.ContainsFunc(value, illegalInHeaderValue) {
 		ps = append(ps, fmt.Sprintf("the value of header %q holds a control character", name))
 	}
 	return ps
 }
+
+// illegalInHeaderValue is a control character other than the horizontal tab, which RFC 9110
+// allows inside a field value.
+func illegalInHeaderValue(r rune) bool { return r != '\t' && unicode.IsControl(r) }
 
 // isToken reports whether s is a token of RFC 9110: one or more tchar.
 func isToken(s string) bool {

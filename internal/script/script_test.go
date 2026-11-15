@@ -193,6 +193,12 @@ func TestValidate(t *testing.T) {
 		{"a header value with an escape", func(_ *domain.Scenario, s *domain.Script) {
 			s.Steps[0].Request.Headers = map[string]string{"X-A": "\x1b[31m"}
 		}, "holds a control character"},
+		{"a header value with a vertical tab", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Headers = map[string]string{"X-A": "a\vb"}
+		}, "holds a control character"},
+		{"a header value with a tab", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[2].Request.Headers = map[string]string{"X-A": "a\tb", "X-B": "\t{{order_id}}"}
+		}, ""},
 		{"a valid header", func(_ *domain.Scenario, s *domain.Script) {
 			s.Steps[2].Request.Headers = map[string]string{"X-Request-For": "order {{order_id}}", "Accept": "application/json", "If-None-Match": `"x"`}
 		}, ""},
@@ -383,7 +389,8 @@ func TestRender(t *testing.T) {
 		{name: "path without slash", vars: base, req: domain.APIRequest{Path: "v1/{{order_id}}"}, wantErr: "v1/"},
 		{name: "trailing slash is kept", vars: base, req: domain.APIRequest{Path: "/v1/{{order_id}}/"}, want: domain.APIRequest{Path: "/v1/81234/"}},
 		{name: "value with dots and tilde", vars: map[string]string{"x": "a..b.c_d-e~f"}, req: domain.APIRequest{Path: "/v1/{{x}}"}, want: domain.APIRequest{Path: "/v1/a..b.c_d-e~f"}},
-		{name: "header with a tab", vars: map[string]string{"x": "a\tb"}, req: domain.APIRequest{Path: "/x", Headers: map[string]string{"A": "{{x}}"}}, wantErr: "x"},
+		{name: "header with a tab", vars: map[string]string{"x": "a\tb"}, req: domain.APIRequest{Path: "/x", Headers: map[string]string{"A": "{{x}}"}}, want: domain.APIRequest{Path: "/x", Headers: map[string]string{"A": "a\tb"}}},
+		{name: "header with a vertical tab", vars: map[string]string{"x": "a\vb"}, req: domain.APIRequest{Path: "/x", Headers: map[string]string{"A": "{{x}}"}}, wantErr: "x"},
 		{name: "header with a nul", vars: map[string]string{"x": "a\x00b"}, req: domain.APIRequest{Path: "/x", Headers: map[string]string{"A": "{{x}}"}}, wantErr: "x"},
 		{name: "header with a del", vars: map[string]string{"x": "a\x7fb"}, req: domain.APIRequest{Path: "/x", Headers: map[string]string{"A": "{{x}}"}}, wantErr: "x"},
 		{name: "spaced variable", vars: base, req: domain.APIRequest{Path: "/x/{{ order_id }}"}, wantErr: "malformed"},
