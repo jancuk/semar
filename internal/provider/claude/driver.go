@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,35 +20,84 @@ const (
 	Kind = "claude"
 	// BinaryEnv names the variable that holds the absolute path of the harness binary.
 	// The path is never read from the configuration, which the repository under test owns.
-	BinaryEnv     = "SEMAR_CLAUDE_BIN"
-	defaultBinary = "claude"
-	healthTimeout = 10 * time.Second
+	BinaryEnv       = "SEMAR_CLAUDE_BIN"
+	defaultBinary   = "claude"
+	healthTimeout   = 10 * time.Second
+	streamStdoutCap = 64 << 20
 )
 
 type Driver struct {
 	cfg      config.Provider
 	lookup   func(string) (string, bool)
+	environ  func() []string
 	repoRoot string
+	dropEnv  []string
+}
+
+// Options are what a driver needs besides the provider's definition.
+type Options struct {
+	// Lookup, normally os.LookupEnv, gives BinaryEnv and the short environment of a job
+	// without the person's setup.
+	Lookup func(string) (string, bool)
+	// Environ, normally os.Environ, gives the person's environment for a job with the setup.
+	// It may be nil when the setup is off.
+	Environ func() []string
+	// RepoRoot is the root of the repository under test, inside which no harness binary is
+	// started. An empty RepoRoot skips that check.
+	RepoRoot string
+	// DropEnv names more variables that a job with the setup never inherits, such as the
+	// variables that semar.yaml names as secrets.
+	DropEnv []string
 }
 
 // New takes lookup, normally os.LookupEnv, for BinaryEnv and the child's environment, and the
 // root of the repository under test, inside which no harness binary is started. An empty
-// repoRoot skips that check.
+// repoRoot skips that check. It cannot start a job with the person's setup; NewWith can.
 func New(cfg config.Provider, lookup func(string) (string, bool), repoRoot string) (*Driver, error) {
-	if lookup == nil {
+	return NewWith(cfg, Options{Lookup: lookup, RepoRoot: repoRoot})
+}
+
+func NewWith(cfg config.Provider, opts Options) (*Driver, error) {
+	if opts.Lookup == nil {
 		return nil, errors.New("claude: no environment lookup")
 	}
-	return &Driver{cfg: cfg, lookup: lookup, repoRoot: repoRoot}, nil
+	if usesSetup(cfg.Setup) && opts.Environ == nil {
+		return nil, fmt.Errorf("claude: provider %q uses the person's setup, and the driver was given no environment for it", cfg.ID)
+	}
+	if err := checkDeny(cfg.Setup.Deny); err != nil {
+		return nil, fmt.Errorf("claude: provider %q: %w", cfg.ID, err)
+	}
+	cfg.Setup.Deny = slices.Clone(cfg.Setup.Deny)
+	return &Driver{
+		cfg:      cfg,
+		lookup:   opts.Lookup,
+		environ:  opts.Environ,
+		repoRoot: opts.RepoRoot,
+		dropEnv:  slices.Clone(opts.DropEnv),
+	}, nil
 }
 
 func Factory(lookup func(string) (string, bool), repoRoot string) provider.Factory {
+	return FactoryWith(Options{Lookup: lookup, RepoRoot: repoRoot})
+}
+
+func FactoryWith(opts Options) provider.Factory {
 	return func(cfg config.Provider) (provider.Instance, error) {
-		d, err := New(cfg, lookup, repoRoot)
+		d, err := NewWith(cfg, opts)
 		if err != nil {
 			return nil, err
 		}
 		return d, nil
 	}
+}
+
+// childEnv is the environment of a job and of the status command: the short list without the
+// setup, and the person's environment without vendors' and Semar's variables with it.
+func (d *Driver) childEnv() []string {
+	if !usesSetup(d.cfg.Setup) {
+		return provider.ChildEnv(d.lookup)
+	}
+	return append(provider.SetupEnv(d.environ(), d.dropEnv), setupEnvExtra...)
 }
 
 func (d *Driver) ID() string   { return d.cfg.ID }
@@ -100,14 +150,22 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 		runCtx, cancel = context.WithTimeout(ctx, job.Timeout)
 		defer cancel()
 	}
+	// The stream repeats every tool result, so it is allowed more than the one object.
+	stdoutCap := provider.DefaultStdoutCap
+	if usesSetup(d.cfg.Setup) {
+		stdoutCap = streamStdoutCap
+	}
 	res, err := provider.RunProcess(runCtx, provider.ProcessSpec{
-		Path:  path,
-		Args:  buildArgs(job, d.cfg.Model),
-		Dir:   job.Workdir,
-		Env:   provider.ChildEnv(d.lookup),
-		Stdin: strings.NewReader(job.Prompt),
+		Path:      path,
+		Args:      buildArgs(job, d.cfg),
+		Dir:       job.Workdir,
+		Env:       d.childEnv(),
+		Stdin:     strings.NewReader(job.Prompt),
+		StdoutCap: stdoutCap,
 	})
 	switch {
+	case err == nil && usesSetup(d.cfg.Setup):
+		return parseStream(res.Stdout, res.ExitCode, res.StderrTail)
 	case err == nil:
 		return parseOutput(res.Stdout, res.ExitCode, res.StderrTail)
 	case errors.Is(err, context.DeadlineExceeded):
@@ -115,7 +173,7 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 	case errors.Is(err, context.Canceled):
 		return provider.Result{}, fmt.Errorf("run claude: %w", ctx.Err())
 	case errors.Is(err, provider.ErrOutputTooLarge):
-		return provider.Result{}, &provider.Error{Class: provider.ProviderError, Detail: "the harness wrote more than 16 MiB of output"}
+		return provider.Result{}, &provider.Error{Class: provider.ProviderError, Detail: fmt.Sprintf("the harness wrote more than %d MiB of output", stdoutCap>>20)}
 	case errors.Is(err, os.ErrNotExist):
 		return provider.Result{}, &provider.Error{Class: provider.NotInstalled, Detail: fmt.Sprintf("the binary %q could not be started", path)}
 	}

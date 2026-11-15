@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","tools":["Glob","Grep","Read"],"mcp_servers":[],"skills":[],"permissionMode":"default"}
+{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":1,"resetsAt":1794746400,"status":"rejected"}}}}
+{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"api_error_status":429}

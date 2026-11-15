@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","tools":["Glob","Grep","Read"],"mcp_servers":[],"skills":[],"permissionMode":"default"}
+{"type":"result","subtype":"success","is_error":false,"structured_output":{"method":"GE

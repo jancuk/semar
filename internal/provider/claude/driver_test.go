@@ -39,9 +39,12 @@ func newBinary(t *testing.T, fixture string, exit int, stderr string) fakeBinary
 	}
 	body := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\0' \"$@\" > %q\nprintf '%%s' \"$0\" > %q\npwd -P > %q\nenv > %q\ncat > %q\n", b.args, b.zero, b.cwd, b.env, b.stdin)
 	if fixture != "" {
-		abs, err := filepath.Abs(filepath.Join("testdata", fixture))
-		if err != nil {
-			t.Fatal(err)
+		abs := fixture
+		if !filepath.IsAbs(fixture) {
+			var err error
+			if abs, err = filepath.Abs(filepath.Join("testdata", fixture)); err != nil {
+				t.Fatal(err)
+			}
 		}
 		body += fmt.Sprintf("cat %q\n", abs)
 	}

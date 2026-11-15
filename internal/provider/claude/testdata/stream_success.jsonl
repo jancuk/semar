@@ -1,0 +1,16 @@
+{"type":"system","subtype":"init","cwd":"/work","session_id":"00000000-0000-4000-8000-000000000002","tools":["Glob","Grep","Read","Skill","StructuredOutput","mcp__orders__list","mcp__orders__delete"],"mcp_servers":[{"name":"orders","status":"connected","source":"user"},{"name":"acme-docs","status":"pending","source":"user"},{"name":"broken","status":"failed","source":"user"}],"skills":["review","orders-guide"],"plugins":[{"name":"acme","path":"/p","source":"user","version":"1.0.0"}],"permissionMode":"default","model":"claude-sonnet-5-5"}
+{"type":"assistant","message":{"id":"m1","content":[{"type":"thinking","thinking":"look at the handler"}]}}
+{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"a.go"}}]}}
+{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"b.go"}}]}}
+{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"b.go"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"package orders"}]}}
+{"type":"user","message":{"role":"user","content":"a plain text message"}}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1794746400,"rateLimitType":"five_hour","unifiedWindows":{"seven_day":{"utilization":0.14,"resetsAt":1795284000,"status":"allowed"},"five_hour":{"utilization":0.08,"resetsAt":1794746400,"status":"allowed"}}}}
+{"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","id":"t3","name":"mcp__orders__list","input":{}},{"type":"tool_use","id":"t4","name":"Grep","input":{"pattern":"Order"}},{"type":"tool_use","id":"t5","name":"mcp__orders__delete","input":{"id":"1"}}]}}
+{"type":"system","subtype":"permission_denied","tool_name":"mcp__orders__delete","tool_use_id":"t5"}
+{"type":"something_new","value":1}
+this line is not JSON {
+{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.09,"resetsAt":1794746400,"status":"allowed_warning"}}}}
+
+{"type":"assistant","message":{"id":"m3","content":[{"type":"tool_use","id":"t6","name":"StructuredOutput","input":{"method":"GET","path":"/v1/orders"}}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":4,"total_cost_usd":0.2772,"usage":{"input_tokens":4,"cache_creation_input_tokens":66396,"cache_read_input_tokens":62997,"output_tokens":531},"modelUsage":{"claude-sonnet-5-5":{"outputTokens":531},"claude-haiku-5-5":{"outputTokens":16}},"permission_denials":[{"tool_name":"mcp__orders__delete","tool_use_id":"t5","tool_input":{"id":"1"}}],"structured_output":{"method":"GET","path":"/v1/orders"}}

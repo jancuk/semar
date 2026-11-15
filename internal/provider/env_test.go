@@ -31,3 +31,25 @@ func TestChildEnv(t *testing.T) {
 		t.Fatalf("an unset variable must be skipped, got %v", got)
 	}
 }
+
+func TestSetupEnv(t *testing.T) {
+	environ := []string{
+		"PATH=/bin", "HOME=/h", "CLAUDE_CONFIG_DIR=/h/.claude", "EDITOR=vi", "ORDERS_DB_URL=postgres://db.example.com",
+		"ANTHROPIC_API_KEY=sk-1", "ANTHROPIC_BASE_URL=https://proxy.example.com", "OPENAI_API_KEY=sk-2",
+		"OPENAI_BASE_URL=https://api.example.com", "AZURE_OPENAI_API_KEY=k", "DEEPSEEK_API_KEY=k", "GEMINI_API_KEY=k",
+		"GOOGLE_API_KEY=k", "GOOGLE_CLOUD_PROJECT=acme", "OPENROUTER_API_KEY=k", "anthropic_api_key=lower",
+		"SEMAR_CLAUDE_BIN=/x", "SEMAR_HOME=/y",
+		"CLAUDECODE=1", "CLAUDE_CODE_ENTRYPOINT=cli", "CLAUDE_CODE_SESSION_ID=s", "CLAUDE_CODE_OAUTH_TOKEN=t",
+		"CLAUDE_AGENT_SDK_VERSION=1", "CLAUDE_PLUGIN_DATA=/p", "CLAUDE_PID=1", "CLAUDE_EFFORT=high", "AI_AGENT=x",
+		"ACME_TOKEN=secret", "acme_password=secret",
+		"=C:=C:\\", "BROKEN",
+	}
+	got := provider.SetupEnv(environ, []string{"ACME_TOKEN", "ACME_PASSWORD"})
+	want := []string{"PATH=/bin", "HOME=/h", "CLAUDE_CONFIG_DIR=/h/.claude", "EDITOR=vi", "ORDERS_DB_URL=postgres://db.example.com", "GOOGLE_CLOUD_PROJECT=acme"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+	if got := provider.SetupEnv(nil, nil); len(got) != 0 {
+		t.Fatalf("got %q", got)
+	}
+}

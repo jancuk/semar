@@ -4,20 +4,28 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/jancuk/semar/internal/provider"
 )
 
-const maxDetailRunes = 300
+// maxEventLine bounds one event of the stream. A longer line is skipped, so that one huge
+// tool result cannot cost the whole job, and a job whose result was skipped fails.
+const maxEventLine = 8 << 20
+
+const answerTool = "StructuredOutput"
 
 type envelope struct {
-	IsError          bool            `json:"is_error"`
-	Subtype          string          `json:"subtype"`
-	StructuredOutput json.RawMessage `json:"structured_output"`
-	NumTurns         int             `json:"num_turns"`
-	APIErrorStatus   json.RawMessage `json:"api_error_status"`
-	Usage            struct {
+	IsError           bool              `json:"is_error"`
+	Subtype           string            `json:"subtype"`
+	StructuredOutput  json.RawMessage   `json:"structured_output"`
+	NumTurns          int               `json:"num_turns"`
+	APIErrorStatus    json.RawMessage   `json:"api_error_status"`
+	TotalCostUSD      float64           `json:"total_cost_usd"`
+	PermissionDenials []json.RawMessage `json:"permission_denials"`
+	Usage             struct {
 		InputTokens              int `json:"input_tokens"`
 		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
@@ -28,14 +36,23 @@ type envelope struct {
 	} `json:"modelUsage"`
 }
 
+// parseOutput reads the one JSON object of --output-format json.
 func parseOutput(stdout []byte, exitCode int, stderrTail []byte) (provider.Result, error) {
 	var env envelope
 	if err := json.Unmarshal(bytes.TrimSpace(stdout), &env); err != nil {
-		return provider.Result{}, &provider.Error{
-			Class:  provider.ProviderError,
-			Detail: fmt.Sprintf("the harness output is not JSON, exit code %d: %s", exitCode, provider.LastLine(stderrTail)),
-		}
+		return provider.Result{}, notJSON(exitCode, stderrTail)
 	}
+	return fromEnvelope(env)
+}
+
+func notJSON(exitCode int, stderrTail []byte) *provider.Error {
+	return &provider.Error{
+		Class:  provider.ProviderError,
+		Detail: fmt.Sprintf("the harness output is not JSON, exit code %d: %s", exitCode, provider.LastLine(stderrTail)),
+	}
+}
+
+func fromEnvelope(env envelope) (provider.Result, error) {
 	if env.IsError {
 		return provider.Result{}, classify(env)
 	}
@@ -45,12 +62,162 @@ func parseOutput(stdout []byte, exitCode int, stderrTail []byte) (provider.Resul
 		return provider.Result{}, &provider.Error{Class: provider.ValidationError, Detail: "the output holds no object"}
 	}
 	return provider.Result{
-		Output:       json.RawMessage(out),
-		Model:        mainModel(env),
-		Turns:        env.NumTurns,
-		InputTokens:  env.Usage.InputTokens + env.Usage.CacheCreationInputTokens + env.Usage.CacheReadInputTokens,
-		OutputTokens: env.Usage.OutputTokens,
+		Output:           json.RawMessage(out),
+		Model:            mainModel(env),
+		Turns:            env.NumTurns,
+		InputTokens:      env.Usage.InputTokens + env.Usage.CacheCreationInputTokens + env.Usage.CacheReadInputTokens,
+		OutputTokens:     env.Usage.OutputTokens,
+		CacheReadTokens:  env.Usage.CacheReadInputTokens,
+		CacheWriteTokens: env.Usage.CacheCreationInputTokens,
+		CostUSD:          env.TotalCostUSD,
+		Denied:           len(env.PermissionDenials),
 	}, nil
+}
+
+type initEvent struct {
+	MCPServers []struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	} `json:"mcp_servers"`
+	Skills         []json.RawMessage `json:"skills"`
+	Tools          []string          `json:"tools"`
+	PermissionMode string            `json:"permissionMode"`
+}
+
+type assistantEvent struct {
+	Message struct {
+		Content []struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"content"`
+	} `json:"message"`
+}
+
+type rateLimitEvent struct {
+	Info struct {
+		Windows map[string]struct {
+			Utilization float64 `json:"utilization"`
+			ResetsAt    int64   `json:"resetsAt"` // Unix seconds
+			Status      string  `json:"status"`
+		} `json:"unifiedWindows"`
+	} `json:"rate_limit_info"`
+}
+
+// parseStream reads the events of --output-format stream-json, one JSON object per line.
+// An event of an unknown type, and a line that is not JSON, is skipped.
+func parseStream(stdout []byte, exitCode int, stderrTail []byte) (provider.Result, error) {
+	var (
+		result    *envelope
+		start     *initEvent
+		anyJSON   bool
+		tooLong   bool
+		calls     = map[string]int{}
+		seenCalls = map[string]bool{}
+		limits    = map[string]provider.Limit{}
+	)
+	for rest := stdout; len(rest) > 0; {
+		var line []byte
+		line, rest, _ = bytes.Cut(rest, []byte("\n"))
+		if len(line) > maxEventLine {
+			tooLong = true
+			continue
+		}
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var head struct {
+			Type    string `json:"type"`
+			Subtype string `json:"subtype"`
+		}
+		if json.Unmarshal(line, &head) != nil {
+			continue
+		}
+		anyJSON = true
+		switch {
+		case head.Type == "system" && head.Subtype == "init":
+			var ev initEvent
+			if json.Unmarshal(line, &ev) == nil {
+				start = &ev
+			}
+		case head.Type == "assistant":
+			var ev assistantEvent
+			if json.Unmarshal(line, &ev) != nil {
+				continue
+			}
+			// One message can come in several events; the call ID counts each call once. The
+			// harness returns the answer through a tool of its own, which is no call of the job.
+			for _, c := range ev.Message.Content {
+				if c.Type != "tool_use" || c.Name == "" || c.Name == answerTool || (c.ID != "" && seenCalls[c.ID]) {
+					continue
+				}
+				seenCalls[c.ID] = true
+				calls[c.Name]++
+			}
+		case head.Type == "rate_limit_event":
+			var ev rateLimitEvent
+			if json.Unmarshal(line, &ev) != nil {
+				continue
+			}
+			for name, w := range ev.Info.Windows {
+				l := provider.Limit{Window: name, Utilization: w.Utilization, Status: w.Status}
+				if w.ResetsAt > 0 {
+					l.ResetsAt = time.Unix(w.ResetsAt, 0).UTC()
+				}
+				limits[name] = l
+			}
+		case head.Type == "result":
+			var ev envelope
+			if json.Unmarshal(line, &ev) == nil {
+				result = &ev
+			}
+		}
+	}
+	if result == nil {
+		if !anyJSON && !tooLong {
+			return provider.Result{}, notJSON(exitCode, stderrTail)
+		}
+		detail := fmt.Sprintf("the harness output holds no result event, exit code %d: %s", exitCode, provider.LastLine(stderrTail))
+		if tooLong {
+			detail = fmt.Sprintf("the harness output holds no result event that Semar could read, and a line was longer than %d MiB, exit code %d", maxEventLine>>20, exitCode)
+		}
+		return provider.Result{}, &provider.Error{Class: provider.ProviderError, Detail: detail}
+	}
+	res, err := fromEnvelope(*result)
+	if err != nil {
+		return res, err
+	}
+	for name, n := range calls {
+		res.Tools = append(res.Tools, provider.ToolUse{Name: name, Calls: n})
+	}
+	slices.SortFunc(res.Tools, func(a, b provider.ToolUse) int { return strings.Compare(a.Name, b.Name) })
+	for _, l := range limits {
+		res.Limits = append(res.Limits, l)
+	}
+	slices.SortFunc(res.Limits, func(a, b provider.Limit) int { return strings.Compare(a.Window, b.Window) })
+	if start != nil {
+		res.Loaded = loaded(*start)
+	}
+	return res, nil
+}
+
+// loaded names what the job could use: the MCP servers that connected or were still
+// connecting, and the skills only when the Skill tool was there to call them.
+func loaded(ev initEvent) provider.Loaded {
+	var l provider.Loaded
+	for _, s := range ev.MCPServers {
+		if s.Name != "" && (s.Status == "connected" || s.Status == "pending") {
+			l.MCPServers = append(l.MCPServers, s.Name)
+		}
+	}
+	slices.Sort(l.MCPServers)
+	l.MCPServers = slices.Compact(l.MCPServers)
+	if slices.Contains(ev.Tools, "Skill") {
+		l.Skills = len(ev.Skills)
+	}
+	l.PermissionMode = ev.PermissionMode
+	return l
 }
 
 func classify(env envelope) *provider.Error {

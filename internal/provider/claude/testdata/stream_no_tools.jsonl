@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","tools":["Glob","Grep","Read","StructuredOutput"],"mcp_servers":[{"name":"orders","status":"connected"}],"skills":["review","orders-guide"],"permissionMode":"auto"}
+{"type":"result","subtype":"success","is_error":false,"num_turns":1,"usage":{"input_tokens":3,"output_tokens":5},"structured_output":{"method":"GET"}}
