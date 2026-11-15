@@ -48,13 +48,15 @@ type ScenarioResult struct {
 }
 
 type Run struct {
-	Schema      int               `json:"schema"`
-	ID          RunID             `json:"id"`
-	Environment string            `json:"environment"`
-	StartedAt   time.Time         `json:"startedAt"`
-	EndedAt     time.Time         `json:"endedAt"`
-	BuildsStart []BuildRef        `json:"buildsStart"`
-	BuildsEnd   []BuildRef        `json:"buildsEnd"`
-	Results     []ScenarioResult  `json:"results"`
-	Files       map[string]string `json:"files"` // relative path to SHA-256
+	Schema      int    `json:"schema"`
+	ID          RunID  `json:"id"`
+	Environment string `json:"environment"`
+	// EnvironmentKind is empty in records written before the kind was stored.
+	EnvironmentKind string            `json:"environmentKind,omitempty"`
+	StartedAt       time.Time         `json:"startedAt"`
+	EndedAt         time.Time         `json:"endedAt"`
+	BuildsStart     []BuildRef        `json:"buildsStart"`
+	BuildsEnd       []BuildRef        `json:"buildsEnd"`
+	Results         []ScenarioResult  `json:"results"`
+	Files           map[string]string `json:"files"` // relative path to SHA-256
 }

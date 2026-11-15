@@ -28,6 +28,12 @@ type Config struct {
 	providersDefaulted bool
 }
 
+// The kinds of environment that semar.yaml may declare.
+const (
+	KindTest       = "test"
+	KindProduction = "production"
+)
+
 type Environment struct {
 	Kind     string    `yaml:"kind"`
 	Hosts    []string  `yaml:"hosts"`

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/jancuk/semar/internal/config"
 )
 
 func TestRemoveAgentFiles(t *testing.T) {
@@ -42,5 +44,15 @@ func TestRemoveAgentFiles(t *testing.T) {
 	slices.Sort(got)
 	if want := []string{".gitignore", ".gitmodules", "main.go", "sub/keep.txt"}; !slices.Equal(got, want) {
 		t.Fatalf("left %q, want %q", got, want)
+	}
+}
+
+func TestNextRunNamesAProductionEnvironment(t *testing.T) {
+	prod := config.Environment{Kind: config.KindProduction}
+	if got := nextRun(prod, "production", "", "0123456789abcdef"); got != "semar run --all --env production" {
+		t.Errorf("nextRun = %q", got)
+	}
+	if got := nextRun(config.Environment{Kind: config.KindTest}, "uat", "", "0123456789abcdef"); got != "semar run --all" {
+		t.Errorf("nextRun = %q", got)
 	}
 }

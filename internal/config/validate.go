@@ -92,8 +92,8 @@ func validate(c Config, name string) error {
 
 func validateEnvironment(name string, e Environment, add func(string, ...any)) {
 	p := "environments." + name
-	if e.Kind != "test" {
-		add("%s.kind must be test, got %q", p, e.Kind)
+	if e.Kind != KindTest && e.Kind != KindProduction {
+		add("%s.kind must be %s or %s, got %q", p, KindTest, KindProduction, e.Kind)
 	}
 	if len(e.Hosts) == 0 {
 		add("%s.hosts needs at least one entry", p)

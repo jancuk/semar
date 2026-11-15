@@ -35,17 +35,18 @@ const (
 // initFlags are the flags of semar init. plan takes the same flags.
 type initFlags struct {
 	baseURL, env, service, authHeader, authValue, tokenEnv string
-	buildURL, buildCommit                                  string
+	buildURL, buildCommit, kind                            string
 }
 
-var initFlagNames = []string{"base-url", "service", "auth-header", "auth-value", "token-env", "build-url", "build-commit"}
+var initFlagNames = []string{"base-url", "service", "auth-header", "auth-value", "token-env", "build-url", "build-commit", "kind"}
 
 func addInitFlags(cmd *cobra.Command, f *initFlags) {
-	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "the address of the service in the test environment, such as https://orders.uat.example.com")
+	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "the address of the service in the environment, such as https://orders.uat.example.com")
 	cmd.Flags().StringVar(&f.service, "service", "", "the name of the service (default: the name of the repository directory)")
 	cmd.Flags().StringVar(&f.authHeader, "auth-header", defaultAuthHeader, "the header that carries the session")
 	cmd.Flags().StringVar(&f.authValue, "auth-value", defaultAuthValue, "the value of that header; it must hold "+tokenPlaceholder)
 	cmd.Flags().StringVar(&f.tokenEnv, "token-env", defaultTokenEnv, "the environment variable that holds the token")
+	cmd.Flags().StringVar(&f.kind, "kind", config.KindTest, "the kind of the environment, test or production; production is read only and allows GET and HEAD")
 	cmd.Flags().StringVar(&f.buildURL, "build-url", "", "an address on the host of --base-url that answers with the commit the service runs, such as https://orders.uat.example.com/version")
 	cmd.Flags().StringVar(&f.buildCommit, "build-commit", "", "the JSONPath of the commit in the answer of --build-url (default "+defaultBuildPath+")")
 }
@@ -65,11 +66,11 @@ func newInitCommand() *cobra.Command {
 	var dir string
 	cmd := &cobra.Command{
 		Use:   "init --base-url <url>",
-		Short: "Write .semar/semar.yaml for one test environment",
+		Short: "Write .semar/semar.yaml for one environment",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if f.baseURL == "" {
-				return errors.New("--base-url is required: the address of the service in the test environment")
+				return errors.New("--base-url is required: the address of the service in the environment")
 			}
 			data, err := buildInitConfig(dir, f)
 			if err != nil {
@@ -84,7 +85,7 @@ func newInitCommand() *cobra.Command {
 		},
 	}
 	addInitFlags(cmd, &f)
-	cmd.Flags().StringVar(&f.env, "env", defaultEnvName, "the name of the test environment")
+	cmd.Flags().StringVar(&f.env, "env", "", "the name of the environment (default uat, or production with --kind production)")
 	addDirFlag(cmd, &dir)
 	return cmd
 }
@@ -93,6 +94,11 @@ func configPath(dir string) string { return filepath.Join(semarDir(dir), "semar.
 
 func printInitDone(w io.Writer, path string, f initFlags) {
 	fmt.Fprintf(w, "wrote %s\n", path)
+	if f.kind == config.KindProduction {
+		fmt.Fprintln(w, "the production environment is read only; edit the file to allow more")
+		fmt.Fprintf(w, "export %s=<the token of a read only account> before semar run --env <the environment name>\n", f.tokenEnv)
+		return
+	}
 	fmt.Fprintf(w, "export %s=<the token of the test account> before semar run\n", f.tokenEnv)
 }
 
@@ -116,9 +122,25 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(f.baseURL, "#"):
 		return nil, fmt.Errorf("--base-url %q must not hold a query or a fragment", f.baseURL)
 	}
+	kind := f.kind
+	if kind == "" {
+		kind = config.KindTest
+	}
+	if kind != config.KindTest && kind != config.KindProduction {
+		return nil, fmt.Errorf("--kind %q must be %s or %s", f.kind, config.KindTest, config.KindProduction)
+	}
 	env := f.env
 	if env == "" {
 		env = defaultEnvName
+		if kind == config.KindProduction {
+			env = config.KindProduction
+		}
+	}
+	methods := []*yaml.Node{text("GET"), text("POST"), text("PUT"), text("PATCH"), text("DELETE")}
+	mode := "test_data"
+	if kind == config.KindProduction {
+		methods = []*yaml.Node{text("GET"), text("HEAD")}
+		mode = "read_only"
 	}
 	if err := idcheck.Check("environment name", env); err != nil {
 		return nil, fmt.Errorf("--env: %w", err)
@@ -151,10 +173,10 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 		"version", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: "1"},
 		"environments", mapping(
 			env, mapping(
-				"kind", text("test"),
+				"kind", text(kind),
 				"hosts", flow(sequence(quoted(strings.ToLower(u.Host)))),
-				"methods", flow(sequence(text("GET"), text("POST"), text("PUT"), text("PATCH"), text("DELETE"))),
-				"effects", mapping("mode", text("test_data")),
+				"methods", flow(sequence(methods...)),
+				"effects", mapping("mode", text(mode)),
 				"services", sequence(serviceNode(service, f.baseURL, probe)),
 			),
 		),

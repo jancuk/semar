@@ -59,7 +59,7 @@ func newPlanCommand(o options) *cobra.Command {
 	cmd.Flags().StringVar(&f.provider, "provider", "", "the provider that plans (default: see semar providers)")
 	cmd.Flags().BoolVar(&f.noSetup, "no-setup", false, "plan without your MCP servers and skills, for this run")
 	cmd.Flags().IntVar(&f.maxScenarios, "max-scenarios", 0, "the most scenarios to draft (default: plan.maxScenarios)")
-	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to plan for; needed when there are several. With --base-url, the name of the new environment (default uat)")
+	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to plan for; needed when there are several. With --base-url, the name of the new environment (default uat, or production with --kind production)")
 	cmd.Flags().StringVar(&f.authProfile, "auth-profile", "", "the auth profile of the scenarios; needed when there are several and none is named default")
 	addInitFlags(cmd, &f.init)
 	addDirFlag(cmd, &f.dir)
@@ -124,7 +124,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 			terminalSafe(cs.Base), terminalSafe(cs.Head), terminalSafe(cfg.Tickets.Pattern), configPath(f.dir))
 		return exitError{ExitUndecided}
 	}
-	in, env, err := planInput(cfg, f, cs)
+	in, envName, env, err := planInput(cfg, f, cs)
 	if err != nil {
 		return err
 	}
@@ -202,7 +202,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		return err
 	}
 	o.recordUsage(stderr, inst, model, out, "ok", filepath.Base(filepath.Dir(planFile)), time.Since(started))
-	printPlanDone(stdout, out, planFile, nextRun(env, f.env, cs.HeadCommit))
+	printPlanDone(stdout, out, planFile, nextRun(env, envName, f.env, cs.HeadCommit))
 	if len(out.Scenarios) == 0 {
 		return exitError{ExitUndecided}
 	}
@@ -217,13 +217,13 @@ func valueOr(s, fallback string) string {
 }
 
 // planInput takes the names the planner may use from the environment that run would pick.
-func planInput(cfg config.Config, f planFlags, cs domain.ChangeSet) (plan.Input, config.Environment, error) {
-	_, env, err := cfg.Environment(f.env)
+func planInput(cfg config.Config, f planFlags, cs domain.ChangeSet) (plan.Input, string, config.Environment, error) {
+	envName, env, err := cfg.Environment(f.env)
 	if err != nil {
-		return plan.Input{}, env, err
+		return plan.Input{}, "", env, err
 	}
 	if len(env.Services) == 0 {
-		return plan.Input{}, env, errors.New("the environment has no service; add one under services in semar.yaml")
+		return plan.Input{}, "", env, errors.New("the environment has no service; add one under services in semar.yaml")
 	}
 	var services []string
 	for _, s := range env.Services {
@@ -231,7 +231,7 @@ func planInput(cfg config.Config, f planFlags, cs domain.ChangeSet) (plan.Input,
 	}
 	profile, err := pickAuthProfile(cfg, f.authProfile)
 	if err != nil {
-		return plan.Input{}, env, err
+		return plan.Input{}, "", env, err
 	}
 	var header string
 	if p := cfg.AuthProfiles[profile].Session; p != nil {
@@ -244,7 +244,7 @@ func planInput(cfg config.Config, f planFlags, cs domain.ChangeSet) (plan.Input,
 	return plan.Input{
 		Change: cs, Services: services, Methods: env.Methods, AuthProfile: profile, SessionHeader: header,
 		Existing: map[string][]domain.Scenario{}, Limits: limits,
-	}, env, nil
+	}, envName, env, nil
 }
 
 func pickAuthProfile(cfg config.Config, name string) (string, error) {
@@ -364,10 +364,11 @@ func planFailed(ctx context.Context, stderr io.Writer, err error) error {
 
 // nextRun is the run command that can reach passed: a service with no build probe needs its
 // build declared, and the head of the plan is what the test environment is meant to run.
-func nextRun(env config.Environment, envFlag, head string) string {
+func nextRun(env config.Environment, envName, envFlag, head string) string {
 	cmd := "semar run --all"
-	if envFlag != "" {
-		cmd += " --env " + terminalSafe(envFlag)
+	// A production environment is run only when it is named.
+	if envFlag != "" || env.Kind == config.KindProduction {
+		cmd += " --env " + terminalSafe(envName)
 	}
 	var unprobed []string
 	for _, s := range env.Services {

@@ -34,11 +34,32 @@ func loadFixture(t *testing.T, name string) (config.Config, error) {
 	return loadText(t, string(data))
 }
 
+func TestEnvironmentKinds(t *testing.T) {
+	const rest = "    hosts: [h]\n    methods: [GET]\n    effects: {mode: read_only}\n"
+	for _, kind := range []string{"test", "production"} {
+		cfg, err := loadText(t, "version: 1\nenvironments:\n  e:\n    kind: "+kind+"\n"+rest)
+		if err != nil {
+			t.Fatalf("kind %s: %v", kind, err)
+		}
+		if got := cfg.Environments["e"].Kind; got != kind {
+			t.Errorf("kind = %q, want %q", got, kind)
+		}
+	}
+	// A production environment still states its methods and mode.
+	_, err := loadText(t, "version: 1\nenvironments:\n  e:\n    kind: production\n    hosts: [h]\n")
+	if err == nil || !strings.Contains(err.Error(), "methods needs at least one entry") || !strings.Contains(err.Error(), "effects.mode is required") {
+		t.Errorf("want methods and mode to stay required, got %v", err)
+	}
+	if _, err := loadText(t, "version: 1\nenvironments:\n  e:\n"+rest); err == nil || !strings.Contains(err.Error(), "kind must be test or production") {
+		t.Errorf("a missing kind: got %v", err)
+	}
+}
+
 func TestLoad(t *testing.T) {
 	cases := []struct{ file, want string }{
 		{"valid.yaml", ""},
 		{"unknown-key.yaml", "semar.yaml:4"},
-		{"kind-prod.yaml", "kind must be test"},
+		{"kind-unknown.yaml", "kind must be test or production, got \"staging\""},
 		{"no-effects-mode.yaml", "effects.mode is required: test_data or read_only"},
 		{"service-off-list.yaml", "baseUrl host api.other.example.com is not in hosts"},
 		{"later-plan-keys.yaml", ""},

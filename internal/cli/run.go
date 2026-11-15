@@ -43,7 +43,7 @@ func newRunCommand(o options) *cobra.Command {
 	var f runFlags
 	cmd := &cobra.Command{
 		Use:   "run (--scenario <id>... | --all)",
-		Short: "Replay scenarios against the test environment and write a report",
+		Short: "Replay scenarios against an environment and write a report",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runScenarios(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
@@ -51,7 +51,7 @@ func newRunCommand(o options) *cobra.Command {
 	}
 	cmd.Flags().StringArrayVar(&f.scenarios, "scenario", nil, "the ID of a scenario to run; repeat for more")
 	cmd.Flags().BoolVar(&f.all, "all", false, "run every scenario in .semar/scenarios")
-	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to run against; needed when there are several")
+	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to run against; needed when there are several, and always for a production environment")
 	cmd.Flags().StringArrayVar(&f.builds, "build", nil, "the commit that a service with no build probe runs, as <commit> or <service>=<commit>; repeat for more")
 	addDirFlag(cmd, &f.dir)
 	return cmd
@@ -69,6 +69,9 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 	if err != nil {
 		return err
 	}
+	if env.Kind == config.KindProduction && f.env == "" {
+		return fmt.Errorf("the environment %q is a production environment; name it with --env %s to run against it", envName, envName)
+	}
 	declared, err := build.ParseDeclared(f.builds, env.Services)
 	if err != nil {
 		return err
@@ -82,11 +85,12 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 		return exitError{ExitUndecided}
 	}
 
+	fmt.Fprintf(stderr, "semar: running against %s (%s, %s)\n", envName, env.Kind, effectsWords(env.Effects.Mode))
 	r, err := newReplay(ctx, o, f.dir, cfg, env, declared, scenarios)
 	if err != nil {
 		return err
 	}
-	record := domain.Run{ID: r.id, Environment: envName, StartedAt: o.Clock()}
+	record := domain.Run{ID: r.id, Environment: envName, EnvironmentKind: env.Kind, StartedAt: o.Clock()}
 	results, start, end, runErr := r.runner.Run(ctx, scenarios)
 	interrupted := ctx.Err() != nil
 	if runErr != nil && !interrupted {
@@ -140,6 +144,14 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 		return exitError{code}
 	}
 	return nil
+}
+
+// effectsWords says what a test may change in an environment of this effects mode.
+func effectsWords(mode string) string {
+	if mode == "read_only" {
+		return "read only"
+	}
+	return "test data"
 }
 
 func selectScenarios(f runFlags) ([]domain.Scenario, error) {

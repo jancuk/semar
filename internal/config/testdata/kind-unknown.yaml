@@ -1,7 +1,7 @@
 version: 1
 environments:
   uat:
-    kind: prod
+    kind: staging
     hosts: [api.uat.example.com]
     methods: [GET, POST]
     effects:
