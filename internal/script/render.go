@@ -2,8 +2,10 @@ package script
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -28,14 +30,14 @@ func Render(req domain.APIRequest, vars map[string]string) (domain.APIRequest, e
 	if err = checkRenderedPath(req.Path, out.Path); err != nil {
 		return domain.APIRequest{}, fmt.Errorf("path: %w", err)
 	}
-	if out.Query, err = renderMap(req.Query, vars, nil); err != nil {
-		return domain.APIRequest{}, fmt.Errorf("query: %w", err)
+	if out.Query, err = renderMap("query", req.Query, vars, nil); err != nil {
+		return domain.APIRequest{}, err
 	}
-	if out.Headers, err = renderMap(req.Headers, vars, checkHeaderValue); err != nil {
-		return domain.APIRequest{}, fmt.Errorf("headers: %w", err)
+	if out.Headers, err = renderMap("header", req.Headers, vars, checkHeaderValue); err != nil {
+		return domain.APIRequest{}, err
 	}
-	if out.JSON, err = renderJSON(req.JSON, vars); err != nil {
-		return domain.APIRequest{}, fmt.Errorf("json: %w", err)
+	if out.JSON, err = renderJSON("json", req.JSON, vars); err != nil {
+		return domain.APIRequest{}, err
 	}
 	return out, nil
 }
@@ -166,29 +168,35 @@ func checkHeaderValue(name, val string) error {
 	return nil
 }
 
-func renderMap(m map[string]string, vars map[string]string, check func(name, val string) error) (map[string]string, error) {
+// renderMap renders the values in the order of their keys, so that the same request
+// always fails on the same key.
+func renderMap(kind string, m map[string]string, vars map[string]string, check func(name, val string) error) (map[string]string, error) {
 	if m == nil {
 		return nil, nil
 	}
 	out := make(map[string]string, len(m))
-	for k, v := range m {
-		r, err := substitute(v, vars, check)
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		r, err := substitute(m[k], vars, check)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", k, err)
+			return nil, fmt.Errorf("%s %s: %w", kind, k, err)
 		}
 		out[k] = r
 	}
 	return out, nil
 }
 
-func renderJSON(v any, vars map[string]string) (any, error) {
+func renderJSON(where string, v any, vars map[string]string) (any, error) {
 	switch x := v.(type) {
 	case string:
-		return substitute(x, vars, nil)
+		r, err := substitute(x, vars, nil)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", where, err)
+		}
+		return r, nil
 	case map[string]any:
 		out := make(map[string]any, len(x))
-		for k, e := range x {
-			r, err := renderJSON(e, vars)
+		for _, k := range slices.Sorted(maps.Keys(x)) {
+			r, err := renderJSON(where+"."+k, x[k], vars)
 			if err != nil {
 				return nil, err
 			}
@@ -198,7 +206,7 @@ func renderJSON(v any, vars map[string]string) (any, error) {
 	case []any:
 		out := make([]any, len(x))
 		for i, e := range x {
-			r, err := renderJSON(e, vars)
+			r, err := renderJSON(fmt.Sprintf("%s[%d]", where, i), e, vars)
 			if err != nil {
 				return nil, err
 			}
@@ -210,36 +218,62 @@ func renderJSON(v any, vars map[string]string) (any, error) {
 	}
 }
 
-// templateStrings lists every string of a request in which a {{variable}} is replaced:
-// the path, the query values, the header values, and the string values of the JSON body.
-func templateStrings(req domain.APIRequest) []string {
-	out := []string{req.Path}
-	for _, v := range req.Query {
-		out = append(out, v)
+// template is one string of a request in which a {{variable}} is replaced, and where it is:
+// "path", "query page", "header X-A", or a JSON location such as "json items[0].id".
+type template struct{ where, text string }
+
+// templates lists the path, the query values and the header values in the order of their
+// keys, and the string values of the JSON body in the order of their keys, so that the
+// problems of a request always come in the same order.
+func templates(req domain.APIRequest) []template {
+	out := []template{{"path", req.Path}}
+	for _, k := range slices.Sorted(maps.Keys(req.Query)) {
+		out = append(out, template{"query " + k, req.Query[k]})
 	}
-	for _, v := range req.Headers {
-		out = append(out, v)
+	for _, k := range slices.Sorted(maps.Keys(req.Headers)) {
+		out = append(out, template{"header " + k, req.Headers[k]})
 	}
-	var walk func(any)
-	walk = func(v any) {
+	var walk func(where string, v any)
+	walk = func(where string, v any) {
 		switch x := v.(type) {
 		case string:
-			out = append(out, x)
+			out = append(out, template{where, x})
 		case map[string]any:
-			for _, e := range x {
-				walk(e)
+			for _, k := range slices.Sorted(maps.Keys(x)) {
+				walk(where+"."+k, x[k])
 			}
 		case []any:
-			for _, e := range x {
-				walk(e)
+			for i, e := range x {
+				walk(fmt.Sprintf("%s[%d]", where, i), e)
 			}
 		}
 	}
-	walk(req.JSON)
+	walk("json", req.JSON)
 	return out
 }
 
-// variables lists the names used in a request, in no particular order.
+// templateStrings is the text of templates, in the same order.
+func templateStrings(req domain.APIRequest) []string {
+	ts := templates(req)
+	out := make([]string, len(ts))
+	for i, t := range ts {
+		out[i] = t.text
+	}
+	return out
+}
+
+// templateProblems reports every malformed variable of a request, each with where it is.
+func templateProblems(req domain.APIRequest) []string {
+	var out []string
+	for _, t := range templates(req) {
+		if err := checkPlaceholders(t.text); err != nil {
+			out = append(out, t.where+": "+err.Error())
+		}
+	}
+	return out
+}
+
+// variables lists the names used in a request, in the order of templates.
 func variables(req domain.APIRequest) []string {
 	var names []string
 	for _, s := range templateStrings(req) {
