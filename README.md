@@ -24,7 +24,7 @@ Semar does not remove people from the decision. A person still confirms an expec
 
 ## The problem
 
-Without dedicated QA, developers divide their time between building, checking changes by hand, and maintaining tests. Verification may be incomplete or skipped, and expected behavior may exist only in conversations. Teams with QA face a verification queue. Both need useful tests and trustworthy evidence without a new full-time maintenance job.
+Developers divide their time between building, checking changes by hand, and maintaining tests. Verification may be incomplete or skipped, and expected behavior may exist only in conversations. Teams with QA face a verification queue. Both need useful tests and trustworthy evidence without a new full-time maintenance job.
 
 ## How a result can be trusted
 
