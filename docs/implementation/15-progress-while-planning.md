@@ -26,6 +26,7 @@ The output of a harness and the output of the model are untrusted.
 | Risk | Answer |
 |---|---|
 | A tool name with control characters or escape sequences reaches the terminal | The name is passed through `terminalSafe` and cut to 24 characters |
+| A very long tool name makes every report large | A name in a report is cut to 200 bytes (`provider.MaxToolName`) |
 | A very long line of a stream is held in memory a second time | A line above 1 MiB is not parsed for progress. The whole output is still kept under the existing cap for the final parse |
 | A progress report after the job has returned writes to a terminal that shows other text | A provider never calls the function after `Run` returns. The reporter ignores a report after it has stopped |
 
@@ -46,9 +47,9 @@ type Progress struct {
 ```
 
 * A provider calls `Progress` with the totals so far each time they change. It may call it from another goroutine, one call at a time. It never calls it after `Run` returns.
-* `ProcessSpec` gains `OnStdoutLine func(line []byte)`. `RunProcess` calls it for each complete line of standard output as the line arrives, in order, from one goroutine, and never after `RunProcess` returns. A line above 1 MiB is skipped. Standard output is still kept whole under `StdoutCap`.
-* Claude Code: always `--output-format stream-json --verbose`. Each `assistant` event is one response, and each `tool_use` part of it is one tool call.
-* Codex: each completed item that the final parse counts as a tool call is one tool call, with the same name. Each `turn.completed` event is one response.
+* `ProcessSpec` gains `OnStdoutLine func(line []byte)`. `RunProcess` calls it for each complete line of standard output as the line arrives, in order, from one goroutine, and never after `RunProcess` returns. A line above 1 MiB is skipped. A last line with no line ending is not passed, and the calls stop when the cap is reached. The slice is valid only during the call, and the function must return quickly, because the child waits while it runs. Standard output is still kept whole under `StdoutCap`.
+* Claude Code: always `--output-format stream-json --verbose`. One message of the model arrives in several `assistant` events with the same message ID, so each new message ID is one response, and an event without an ID counts alone. Each new `tool_use` call ID is one tool call. The harness's own call that returns the structured output is not counted. The final result takes the number of turns that the harness reports, which can differ from the number of messages.
+* Codex: each item that the final parse counts as a tool call is one tool call when it first appears, with the same name. The latest tool is the call that started last. Each `turn.completed` event is one response.
 * An API kind: after each response of the model, with the calls of that response.
 * The fake kind reports nothing.
 
