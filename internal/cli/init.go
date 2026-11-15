@@ -21,6 +21,7 @@ import (
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/hostrule"
 	"github.com/jancuk/semar/internal/idcheck"
+	"github.com/jancuk/semar/internal/knowledge"
 )
 
 const (
@@ -105,6 +106,15 @@ func configPath(dir string) string { return filepath.Join(semarDir(dir), "semar.
 
 func printInitDone(w io.Writer, path string, f initFlags) {
 	fmt.Fprintf(w, "wrote %s\n", path)
+	// The line says what the file holds, so it is read back from the file: plan prints
+	// this after it has written the file, and it does not pass the entries on.
+	if cfg, err := config.Load(filepath.Dir(filepath.Dir(path))); err == nil && len(cfg.Knowledge) > 0 {
+		parts := make([]string, len(cfg.Knowledge))
+		for i, k := range cfg.Knowledge {
+			parts[i] = k.ID + " (" + k.Path + ")"
+		}
+		fmt.Fprintf(w, "added knowledge: %s\n", strings.Join(parts, ", "))
+	}
 	if f.kind == config.KindProduction {
 		fmt.Fprintln(w, "the production environment is read only; edit the file to allow more")
 		fmt.Fprintf(w, "export %s=<the token of a read only account> before semar run --env <the environment name>\n", f.tokenEnv)
@@ -198,6 +208,13 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 			),
 		),
 	)
+	if found := knowledge.Conventional(dir); len(found) > 0 {
+		list := make([]*yaml.Node, len(found))
+		for i, k := range found {
+			list[i] = mapping("id", text(k.ID), "kind", text(k.Kind), "path", quoted(k.Path))
+		}
+		doc.Content = append(doc.Content, text("knowledge"), sequence(list...))
+	}
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
