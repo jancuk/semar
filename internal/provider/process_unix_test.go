@@ -164,3 +164,38 @@ func TestRunProcessMissingBinary(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestRunProcessEndsAGrandchildThatHoldsStdout(t *testing.T) {
+	pidfile := filepath.Join(t.TempDir(), "pid")
+	spec := provider.ProcessSpec{
+		Path:  "/bin/sh",
+		Args:  []string{"-c", `sleep 30 & echo $! > "$0"; echo {}`, pidfile},
+		Grace: 200 * time.Millisecond,
+	}
+	start := time.Now()
+	res, err := provider.RunProcess(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("RunProcess took %v", elapsed)
+	}
+	if string(res.Stdout) != "{}\n" || res.ExitCode != 0 {
+		t.Fatalf("got %q, exit code %d", res.Stdout, res.ExitCode)
+	}
+	data, err := os.ReadFile(pidfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; alive(pid); i++ {
+		if i > 200 {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("the grandchild %d is still alive", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

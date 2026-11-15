@@ -36,8 +36,9 @@ type ProcessResult struct {
 
 // RunProcess starts a child in its own process group and waits for it. When ctx ends it
 // sends the group a stop signal, waits the grace period, then kills the group. It always
-// waits for the child. A child that ends with a status other than 0 is not an error.
-// When ctx ends first, the error wraps ctx.Err().
+// waits for the child, and kills what is left of the group after it, so that no grandchild
+// outlives the run. A child that ends with a status other than 0 is not an error. When ctx
+// ends first, the error wraps ctx.Err().
 func RunProcess(ctx context.Context, spec ProcessSpec) (ProcessResult, error) {
 	limit := spec.StdoutCap
 	if limit <= 0 {
@@ -65,9 +66,7 @@ func RunProcess(ctx context.Context, spec ProcessSpec) (ProcessResult, error) {
 		return ProcessResult{}, fmt.Errorf("start %s: %w", spec.Path, err)
 	}
 	waitErr := cmd.Wait()
-	if runCtx.Err() != nil {
-		killGroup(cmd)
-	}
+	killGroup(cmd)
 	res := ProcessResult{Stdout: out.bytes(), StderrTail: errTail.bytes(), ExitCode: -1}
 	if cmd.ProcessState != nil {
 		res.ExitCode = cmd.ProcessState.ExitCode()
@@ -79,10 +78,15 @@ func RunProcess(ctx context.Context, spec ProcessSpec) (ProcessResult, error) {
 		return res, fmt.Errorf("stop %s: %w", spec.Path, ctx.Err())
 	}
 	var exitErr *exec.ExitError
-	if waitErr != nil && !errors.As(waitErr, &exitErr) {
-		return res, fmt.Errorf("run %s: %w", spec.Path, waitErr)
+	switch {
+	case waitErr == nil, errors.As(waitErr, &exitErr):
+		return res, nil
+	case errors.Is(waitErr, exec.ErrWaitDelay) && res.ExitCode == 0:
+		// The child finished, and a grandchild kept standard output open past the grace
+		// period. What the child wrote is complete.
+		return res, nil
 	}
-	return res, nil
+	return res, fmt.Errorf("run %s: %w", spec.Path, waitErr)
 }
 
 type cappedBuffer struct {
