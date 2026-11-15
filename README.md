@@ -231,7 +231,7 @@ The page lists your providers and shows for each one whether it is installed and
 
 * add a provider, and paste an API key, which goes to the keychain of your operating system;
 * start the sign-in of Claude Code or Codex;
-* set the default provider, and choose the model of each provider from a list;
+* choose the provider that plans, its model from a list, and its reasoning level;
 * turn your MCP servers and skills on or off for a harness provider;
 * see the usage: runs, turns, tokens, and cost per provider and model, and for Claude Code the subscription windows that it reported after the last run.
 
@@ -245,7 +245,8 @@ default: claude                 # plans when nothing else names a provider
 providers:
   - id: claude
     kind: claude
-    model: ""                   # "" means the harness's own default
+    model: ""                   # "" means the provider's own default
+    reasoning: high             # optional; "" means the model's own default
     setup:
       mcp: true                 # your MCP servers
       skills: true              # your skills
@@ -270,6 +271,7 @@ The file never holds a key. `apiKey` is `env:NAME`, an environment variable, or 
 ```bash
 semar providers
 semar plan --diff <link or range> --provider deepseek --model <model name>
+semar plan --diff <link or range> --reasoning high
 ```
 
 **Your MCP servers and skills.** A harness provider loads them by default, with your own permission rules. Your hooks and your instruction file are not loaded for Claude Code. Nothing inside the repository under test is loaded: no settings, no MCP file, no skill.
@@ -418,7 +420,7 @@ Every command takes `--dir <path>`, the root of the repository that holds `.sema
 | Command | What it does |
 | --- | --- |
 | `semar changes --diff <link or range>` | Prints the tickets, commits, and files of a change. No model |
-| `semar plan --diff <link or range>` | Drafts scenarios and scripts for a change, and writes `plan.md`. Also takes `--provider <id>`, `--model <name>`, `--no-setup`, `--max-scenarios <n>`, and `--no-fetch` |
+| `semar plan --diff <link or range>` | Drafts scenarios and scripts for a change, and writes `plan.md`. Also takes `--provider <id>`, `--model <name>`, `--reasoning <level>`, `--no-setup`, `--max-scenarios <n>`, and `--no-fetch` |
 | `semar dashboard` | Opens a page on your machine to manage the model providers and see usage. `--no-open` prints the address only, `--port <n>` sets the port |
 | `semar providers` | Prints your providers and marks the one that would plan here. No model |
 | `semar init --base-url <url>` | Writes `.semar/semar.yaml` |

@@ -256,9 +256,24 @@ The page uses `internal/dashboard/ui/style.css` as given and does not change its
 | Codex | `setup.deny` cannot be honoured, so the driver refuses a provider that has one. There is no turn limit; the timeout works |
 | API kinds | No vendor was called. The adapters are tested against local servers only |
 
+## Reasoning level
+
+A provider can carry `reasoning: <level>`, and `semar plan --reasoning <level>` sets it for one run. Empty means the model's own default. Only the person's file can set it.
+
+| Kind | What is sent |
+|---|---|
+| `claude` | `--effort=<level>`: `low`, `medium`, `high`, `xhigh`, or `max` |
+| `codex` | `--config model_reasoning_effort="<level>"`. The levels of each model come from Codex's catalog |
+| `anthropic` | `output_config.effort` in the request |
+| `openai` | `reasoning_effort` in the request. For an address that is not OpenAI's own, only when the person set a level |
+
+The level is written to the usage record and to `plan.md`. The models route gives, per model, a description, the levels it accepts, and its default level, and the page offers only those.
+
 ## Open points
 
+
 * The subscription windows are known only after a run. There is no command that returns them without a model turn.
+* The `openai` kind uses chat completions with tools. The vendor's documentation says that some of its newest models take tools only through another API, so those models may not plan through this kind. No vendor was called to check.
 * An API kind cannot use MCP servers. The person's MCP servers reach the planner through a harness kind only.
 * Codex and each API vendor report usage in their own way. The usage record holds what each reports and leaves the rest at zero.
 * `plan.md` counts the calls of MCP tools and withholds their names, because a name holds the name of a server on the person's machine and the file may be committed.
