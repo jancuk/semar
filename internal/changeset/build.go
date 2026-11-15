@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/vcs"
 )
 
@@ -79,6 +80,11 @@ func Build(ctx context.Context, repo Repo, o Options) (domain.ChangeSet, error) 
 	fileTickets := make([]map[string]bool, len(files))
 	for _, c := range log {
 		keys := findKeys(re, c.Subject+"\n"+c.Body)
+		for _, k := range keys {
+			if idcheck.Check("ticket key", k) != nil {
+				return domain.ChangeSet{}, fmt.Errorf("ticket key %q in commit %s cannot be used as a name: change tickets.pattern so that a key holds only letters, digits, \".\", \"_\", and \"-\", and starts with a letter or a digit", k, c.ID)
+			}
+		}
 		merge := len(c.Parents) > 1
 		cc := domain.ChangeCommit{
 			ID: c.ID, Subject: c.Subject, Body: c.Body, Author: c.Author, At: c.At,
@@ -141,18 +147,28 @@ func sortedKeys(m map[string]bool) []string {
 	return keys
 }
 
+// maxKeyText bounds the text of one commit that is searched for keys.
+const maxKeyText = 64 << 10
+
 // findKeys returns the sorted, distinct matches of re that are not part of a
 // longer run of letters and digits. The caller's pattern need not hold \b.
+// Matches are searched in the first maxKeyText bytes only.
 func findKeys(re *regexp.Regexp, text string) []string {
+	search := text[:min(len(text), maxKeyText)]
 	found := map[string]bool{}
-	for pos := 0; pos <= len(text); {
-		loc := re.FindStringIndex(text[pos:])
+	for pos := 0; pos <= len(search); {
+		loc := re.FindStringIndex(search[pos:])
 		if loc == nil {
 			break
 		}
 		start, end := pos+loc[0], pos+loc[1]
 		if start == end || (start > 0 && isAlnum(text[start-1])) || (end < len(text) && isAlnum(text[end])) {
+			// No key starts inside this run, since each such position follows a letter
+			// or a digit. Restarting one byte later instead makes a long run quadratic.
 			pos = start + 1
+			for pos < len(search) && isAlnum(search[pos-1]) && isAlnum(search[pos]) {
+				pos++
+			}
 			continue
 		}
 		found[text[start:end]] = true

@@ -3,10 +3,12 @@ package changeset
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jancuk/semar/internal/domain"
@@ -261,6 +263,10 @@ func TestFindKeys(t *testing.T) {
 		{"key at the end", defaultTicket, "see\nSHOP-482", []string{"SHOP-482"}},
 		{"empty", defaultTicket, "", nil},
 		{"a pattern that matches the empty string", regexp.MustCompile(`x*`), "abc", nil},
+		{"a key after a long rejected run", defaultTicket, strings.Repeat("A", 1000) + "-1A SHOP-2", []string{"SHOP-2"}},
+		{"a key after the search limit", defaultTicket, strings.Repeat(" ", maxKeyText) + "SHOP-1", nil},
+		{"a key cut by the search limit", defaultTicket, strings.Repeat(" ", maxKeyText-6) + "SHOP-12", nil},
+		{"a key that ends at the search limit", defaultTicket, strings.Repeat(" ", maxKeyText-7) + "SHOP-12 ", []string{"SHOP-12"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -268,6 +274,46 @@ func TestFindKeys(t *testing.T) {
 				t.Fatalf("findKeys(%q) = %v, want %v", c.text, got, c.want)
 			}
 		})
+	}
+}
+
+func TestFindKeysIsLinear(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"a 1 MiB body", strings.Repeat("A", 1<<20) + "-1A"},
+		{"a rejected run inside the search limit", strings.Repeat("A", maxKeyText-16) + "-1A"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			repo := &fakeRepo{base: "mb", log: []vcs.Commit{{ID: "c1", Subject: "long", Body: c.body, Parents: []string{"p"}}}}
+			done := make(chan error, 1)
+			go func() {
+				cs, err := Build(context.Background(), repo, Options{BaseCommit: "b", HeadCommit: "h"})
+				if err == nil && len(cs.Tickets) != 0 {
+					err = fmt.Errorf("tickets %v", cs.Tickets)
+				}
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the ticket search took more than 5 s")
+			}
+		})
+	}
+}
+
+func TestBuildRefusesAKeyThatIsNotAName(t *testing.T) {
+	repo := &fakeRepo{base: "mb", log: []vcs.Commit{
+		{ID: "c1", Subject: "ok A-1", Parents: []string{"p"}},
+		{ID: "c2", Subject: "fix A/1", Parents: []string{"c1"}},
+	}}
+	_, err := Build(context.Background(), repo, Options{BaseCommit: "b", HeadCommit: "h", Ticket: regexp.MustCompile(`A[-/][0-9]`)})
+	want := `ticket key "A/1" in commit c2 cannot be used as a name: change tickets.pattern`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("got %v, want %q", err, want)
 	}
 }
 
