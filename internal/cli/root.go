@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/provider"
 )
 
 // Version is set at build time with -ldflags and never changed at run time.
@@ -27,6 +28,8 @@ type options struct {
 	Stdin     io.Reader
 	Terminal  func() bool // whether Stdin is a terminal
 	LookupEnv func(string) (string, bool)
+	TempRoot  string // where plan copies the source; "" is the system default
+	Providers func(repoRoot string) *provider.Registry
 }
 
 func (o options) withDefaults() options {
@@ -48,6 +51,9 @@ func (o options) withDefaults() options {
 	}
 	if o.LookupEnv == nil {
 		o.LookupEnv = os.LookupEnv
+	}
+	if o.Providers == nil {
+		o.Providers = providerRegistry
 	}
 	return o
 }
@@ -113,7 +119,8 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 			return err
 		},
 	})
-	root.AddCommand(newRunCommand(o), newScriptCommand(), newConfirmCommand(o), newActivityCommand())
+	root.AddCommand(newRunCommand(o), newScriptCommand(), newConfirmCommand(o), newActivityCommand(),
+		newInitCommand(), newChangesCommand(), newPlanCommand(o))
 	return root
 }
 

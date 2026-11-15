@@ -24,55 +24,91 @@ const localIdentity = "local, unverified identity"
 
 type confirmFlags struct {
 	yes bool
+	all bool
 	dir string
 }
 
 func newConfirmCommand(o options) *cobra.Command {
 	var f confirmFlags
 	cmd := &cobra.Command{
-		Use:   "confirm <scenario id>",
-		Short: "Confirm the expected results of a scenario that need a person",
-		Args:  cobra.ExactArgs(1),
+		Use:   "confirm (<scenario id> | --all)",
+		Short: "Confirm the expected results of scenarios that need a person",
+		Args: func(_ *cobra.Command, args []string) error {
+			switch {
+			case f.all && len(args) > 0:
+				return errors.New("pass the ID of one scenario, or --all, and not both")
+			case !f.all && len(args) != 1:
+				return errors.New("pass the ID of one scenario, or --all")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return confirmScenario(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f, domain.ScenarioID(args[0]))
+			return confirmScenarios(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f, args)
 		},
 	}
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "confirm without asking")
+	cmd.Flags().BoolVar(&f.all, "all", false, "confirm every scenario in .semar/scenarios that needs a confirmation")
 	addDirFlag(cmd, &f.dir)
 	return cmd
 }
 
-func confirmScenario(ctx context.Context, stdout, stderr io.Writer, o options, f confirmFlags, id domain.ScenarioID) error {
+// unconfirmed is a scenario with the expected results that need a person.
+type unconfirmed struct {
+	sc      domain.Scenario
+	lines   []string
+	sources []domain.Source
+}
+
+func confirmScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f confirmFlags, args []string) error {
 	cfg, err := config.Load(f.dir)
 	if err != nil {
 		return err
 	}
-	sc, err := loadScenario(f.dir, id)
-	if err != nil {
-		return err
+	var scs []domain.Scenario
+	if f.all {
+		if scs, err = loadAllScenarios(f.dir); err != nil {
+			return err
+		}
+	} else {
+		sc, err := loadScenario(f.dir, domain.ScenarioID(args[0]))
+		if err != nil {
+			return err
+		}
+		scs = []domain.Scenario{sc}
 	}
-	var needed []string
-	var sources []domain.Source
-	for _, st := range sc.Steps {
-		for _, e := range st.Expect {
-			if !confirm.Needs(e.Source, cfg.Policy.Trust.Confirm) {
-				continue
+	var todo []unconfirmed
+	for _, sc := range scs {
+		u := unconfirmed{sc: sc}
+		for _, st := range sc.Steps {
+			for _, e := range st.Expect {
+				if !confirm.Needs(e.Source, cfg.Policy.Trust.Confirm) {
+					continue
+				}
+				line := fmt.Sprintf("step %s: %s (source %s", st.ID, check.DescribeFull(e.Check), e.Source)
+				if e.Cite != "" {
+					line += ", cite: " + e.Cite
+				}
+				u.lines = append(u.lines, terminalSafe(line+")"))
+				u.sources = append(u.sources, e.Source)
 			}
-			line := fmt.Sprintf("step %s: %s (source %s", st.ID, check.DescribeFull(e.Check), e.Source)
-			if e.Cite != "" {
-				line += ", cite: " + e.Cite
-			}
-			needed = append(needed, terminalSafe(line+")"))
-			sources = append(sources, e.Source)
+		}
+		if len(u.lines) > 0 {
+			todo = append(todo, u)
 		}
 	}
-	if len(needed) == 0 {
-		fmt.Fprintf(stdout, "no expected result of scenario %s needs a confirmation\n", sc.ID)
+	if len(todo) == 0 {
+		if f.all {
+			fmt.Fprintln(stdout, "no expected result of any scenario needs a confirmation")
+		} else {
+			fmt.Fprintf(stdout, "no expected result of scenario %s needs a confirmation\n", scs[0].ID)
+		}
 		return nil
 	}
-	fmt.Fprintf(stdout, "Scenario %s has %d expected results that a person must confirm:\n", sc.ID, len(needed))
-	for _, line := range needed {
-		fmt.Fprintf(stdout, "  - %s\n", line)
+	for _, u := range todo {
+		fmt.Fprintf(stdout, "Scenario %s has %d expected results that a person must confirm:\n", u.sc.ID, len(u.lines))
+		for _, line := range u.lines {
+			fmt.Fprintf(stdout, "  - %s\n", line)
+		}
 	}
 
 	if !f.yes {
@@ -98,18 +134,21 @@ func confirmScenario(ctx context.Context, stdout, stderr io.Writer, o options, f
 	if err != nil {
 		return err
 	}
-	rec := confirm.Record{
-		Scenario:   sc.ID,
-		ExpectHash: domain.ExpectHash(sc),
-		User:       name,
-		Identity:   localIdentity,
-		At:         o.Clock().UTC(),
-		Sources:    slices.Compact(slices.Sorted(slices.Values(sources))),
+	confirmations := confirm.NewLocal(store.Root())
+	for _, u := range todo {
+		rec := confirm.Record{
+			Scenario:   u.sc.ID,
+			ExpectHash: domain.ExpectHash(u.sc),
+			User:       name,
+			Identity:   localIdentity,
+			At:         o.Clock().UTC(),
+			Sources:    slices.Compact(slices.Sorted(slices.Values(u.sources))),
+		}
+		if err := confirmations.Put(rec); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "confirmed scenario %s for expectation hash %s as %s (%s)\n", u.sc.ID, rec.ExpectHash, name, localIdentity)
 	}
-	if err := confirm.NewLocal(store.Root()).Put(rec); err != nil {
-		return err
-	}
-	fmt.Fprintf(stdout, "confirmed scenario %s for expectation hash %s as %s (%s)\n", sc.ID, rec.ExpectHash, name, localIdentity)
 	return nil
 }
 
