@@ -70,7 +70,9 @@ func (g *Git) RemoteURL(ctx context.Context, remote string) (string, error) {
 
 // Fetch updates the remote-tracking references of the named branches, or of
 // every branch when none is named. A name that the remote has no branch of, such
-// as a tag, a commit ID, or "origin/x", is left for Resolve. Nothing else in the
+// as a tag, a commit ID, or "origin/x", is left for Resolve, unless this clone
+// tracks a branch of that name: then the branch was deleted on the remote, and
+// Resolve would quietly use its last fetched commit. Nothing else in the
 // repository changes.
 //
 // The fetch uses the transport, credential helper, and URL rewrites of the user's
@@ -90,6 +92,18 @@ func (g *Git) Fetch(ctx context.Context, remote string, names ...string) error {
 		branches, err := g.remoteBranches(ctx, remote, names)
 		if err != nil {
 			return err
+		}
+		for _, n := range names {
+			if slices.Contains(branches, n) {
+				continue
+			}
+			tracked, err := g.hasRef(ctx, "refs/remotes/"+remote+"/"+n)
+			if err != nil {
+				return err
+			}
+			if tracked {
+				return &BranchGoneError{Branch: n, Remote: remote}
+			}
 		}
 		if len(branches) == 0 {
 			return nil
@@ -129,6 +143,25 @@ func (g *Git) remoteBranches(ctx context.Context, remote string, names []string)
 		}
 	}
 	return branches, nil
+}
+
+// BranchGoneError is a branch that this clone tracks and the remote no longer has.
+type BranchGoneError struct{ Branch, Remote string }
+
+func (e *BranchGoneError) Error() string {
+	return fmt.Sprintf("branch %s no longer exists on %s; pass --no-fetch to use the last fetched commit", e.Branch, e.Remote)
+}
+
+func (g *Git) hasRef(ctx context.Context, ref string) (bool, error) {
+	_, err := g.run(ctx, maxOutputBytes, "rev-parse", "--verify", "--quiet", "--end-of-options", ref)
+	if err == nil {
+		return true, nil
+	}
+	var ge *gitError
+	if errors.As(err, &ge) && ge.code == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("look up %s: %w", ref, err)
 }
 
 // Resolve returns the commit that refs/remotes/<remote>/<name> names, or else

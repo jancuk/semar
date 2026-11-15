@@ -610,6 +610,15 @@ func TestChangesPrintsTheTable(t *testing.T) {
 			t.Errorf("origin/release is %s, want %s", got, p.head(t))
 		}
 	})
+	t.Run("a branch that the remote no longer has", func(t *testing.T) {
+		gittest.Run(t, p.git.Git("remote", "get-url", "origin"), nil, "branch", "-D", "release")
+		res := p.must(t, cli.ExitError, "changes", "--diff", "main..release")
+		contains(t, "stderr", res.stderr, "branch release no longer exists on origin; pass --no-fetch to use the last fetched commit\n")
+		if strings.Count(res.stderr, "--no-fetch") != 1 {
+			t.Errorf("stderr = %q", res.stderr)
+		}
+		p.must(t, cli.ExitOK, "changes", "--diff", "main..release", "--no-fetch")
+	})
 	t.Run("a fetch that fails", func(t *testing.T) {
 		p.git.Git("remote", "set-url", "origin", filepath.Join(t.TempDir(), "missing.git"))
 		res := p.must(t, cli.ExitError, "changes", "--diff", "main..release")

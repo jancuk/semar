@@ -91,7 +91,11 @@ func readChange(ctx context.Context, stderr io.Writer, dir string, f diffFlags, 
 	}
 	if !f.noFetch && remoteErr == nil {
 		fmt.Fprintf(stderr, "semar: fetching %s and %s from origin\n", cmp.Base, cmp.Head)
-		if err := g.Fetch(ctx, "origin", cmp.Base, cmp.Head); err != nil {
+		var gone *vcs.BranchGoneError
+		switch err := g.Fetch(ctx, "origin", cmp.Base, cmp.Head); {
+		case errors.As(err, &gone):
+			return nil, domain.ChangeSet{}, err
+		case err != nil:
 			return nil, domain.ChangeSet{}, fmt.Errorf("%w; pass --no-fetch to use the branches as they are in this clone", err)
 		}
 	}

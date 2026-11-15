@@ -494,3 +494,27 @@ func TestFetchOnlyBranches(t *testing.T) {
 		t.Fatalf("release resolves to %q, %v, want %q", got, err, next)
 	}
 }
+
+func TestFetchReportsABranchTheRemoteNoLongerHas(t *testing.T) {
+	fx := build(t)
+	fx.repo.Git("tag", "v1", fx.f1)
+	bare := fx.repo.Bare()
+	fx.repo.Git("push", "--quiet", bare, "--tags")
+	clone := filepath.Join(t.TempDir(), "clone")
+	gittest.Run(t, filepath.Dir(clone), nil, "clone", "--quiet", bare, clone)
+	gittest.Run(t, clone, nil, "branch", "local-only", fx.f1)
+	gittest.Run(t, bare, nil, "branch", "-D", "release")
+
+	g := open(t, clone)
+	ctx := context.Background()
+	err := g.Fetch(ctx, "origin", "main", "release")
+	want := "branch release no longer exists on origin; pass --no-fetch to use the last fetched commit"
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %q", err, want)
+	}
+	for _, name := range []string{"v1", fx.f1, "local-only", "main"} {
+		if err := g.Fetch(ctx, "origin", name); err != nil {
+			t.Errorf("Fetch %q: %v", name, err)
+		}
+	}
+}
