@@ -220,6 +220,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 
 	started := time.Now()
 	rep := startProgress(stderr, o.Clock, o.StderrTerminal(), o.Tick)
+	defer rep.Stop() // so a panic or an early return cannot leave the status line on the screen
 	in.Progress = rep.Report
 	out, err := plan.Run(ctx, inst, in)
 	rep.Stop()

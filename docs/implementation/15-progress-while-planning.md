@@ -99,8 +99,10 @@ semar: the planner finished in 1m24s
 * Not on a terminal, there is no status line. Every 30 seconds one line is printed, as above. It always names the draft, shows a count only when it is above zero, and never names a tool. The rejected-draft line is printed in this mode too.
 * On an error or an interrupt, no line is added, and the failure lines follow the erased line.
 * The elapsed time is `45s`, `1m24s`, or `1h02m03s`.
-* The clock and the ticker are injected (G8), so a test does not sleep. `options` has `StderrTerminal func() bool`, decided once from the real standard error and `TERM` in `withDefaults`, and `Tick`, a function from an interval to a channel of ticks and a stop function.
-* The reporter writes under one mutex and owns one goroutine. `Stop` erases the line, ends the goroutine, and waits for it. A report after `Stop` writes nothing.
+* The clock and the ticker are injected (G8), so a test does not sleep. `options` has `StderrTerminal func() bool`, which reads the real standard error and `TERM`. `planChange` calls it once per plan, when the reporter starts. `options` also has `Tick`, a function from an interval to a channel of ticks and a stop function.
+* `Report` never waits for a write, because for Claude Code and Codex it runs inside the line callback of the child, and a write to a stalled terminal (flow control with Ctrl-S, a stuck SSH session) would otherwise block the child on its full pipe, and then the cancel and the timeout could not end the job. `Report` only stores the latest state, and the rejected drafts that are due, under a small mutex that is never held during a write, and wakes the reporter's goroutine with a non-blocking send on a channel of size 1.
+* Every write to standard error is made by the goroutine, or by `Stop`, under a separate write mutex. The rejected-draft line is written by the goroutine at once, before the next status line. Each line is written once and in order, and `Stop` writes the ones that are still due. `Stop` then erases the line, ends the goroutine, and waits for it. A report after `Stop` writes nothing.
+* `planChange` calls `Stop` with `defer` as soon as the reporter starts, and also calls it before the success line, so a panic or an early return cannot leave the status line on the screen.
 * The reporter is safe for calls from several goroutines, and `Stop` can be called more than once.
 
 ## Tasks
@@ -114,3 +116,5 @@ semar: the planner finished in 1m24s
 
 1. `semar run` and the fetch of `semar plan` show no progress. Both are short today.
 2. The width of the terminal is not read, so a narrow terminal wraps the line.
+3. A Claude Code job without the person's setup now writes the stream, which repeats every tool result, so a very large plan can reach the 64 MiB output cap where the single-object format did not.
+4. The separator `·` and the spinner are not ASCII, so a terminal that shows such characters two columns wide can wrap the line.

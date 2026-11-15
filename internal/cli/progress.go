@@ -45,6 +45,11 @@ func stderrIsTerminal(lookupEnv func(string) (string, bool)) bool {
 
 // progressReporter shows how a plan is going: one status line on a terminal, or one line every
 // 30 seconds elsewhere. It owns one goroutine, which Stop ends.
+//
+// Report runs inside the line callback of a child process, so it must never wait for a write: a
+// stalled terminal would then block the child, and the job could not be cancelled. Report only
+// stores state under mu, which is never held during a write. Every write happens on the
+// goroutine or in Stop, under wmu.
 type progressReporter struct {
 	w        io.Writer
 	clock    func() time.Time
@@ -55,16 +60,23 @@ type progressReporter struct {
 	stopped bool
 	stopAt  time.Time
 	last    plan.Progress
-	frame   int
+	notices []rejectedDraft
 
+	wmu   sync.Mutex
+	frame int
+
+	wake chan struct{}
 	quit chan struct{}
 	done chan struct{}
 	once sync.Once
 }
 
+// rejectedDraft is a line that is due: the draft and the problems that made the planner redo it.
+type rejectedDraft struct{ attempt, problems int }
+
 func startProgress(w io.Writer, clock func() time.Time, terminal bool, tick ticker) *progressReporter {
 	r := &progressReporter{w: w, clock: clock, terminal: terminal, start: clock(),
-		quit: make(chan struct{}), done: make(chan struct{})}
+		wake: make(chan struct{}, 1), quit: make(chan struct{}), done: make(chan struct{})}
 	every := plainEvery
 	if terminal {
 		every = statusEvery
@@ -77,6 +89,8 @@ func startProgress(w io.Writer, clock func() time.Time, terminal bool, tick tick
 			select {
 			case <-ticks:
 				r.tick()
+			case <-r.wake:
+				r.flush()
 			case <-r.quit:
 				return
 			}
@@ -85,20 +99,26 @@ func startProgress(w io.Writer, clock func() time.Time, terminal bool, tick tick
 	return r
 }
 
-// Report takes the progress of the plan. It is safe to call from any goroutine.
+// Report takes the progress of the plan. It is safe to call from any goroutine and never waits
+// for a write.
 func (r *progressReporter) Report(p plan.Progress) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.stopped {
+		r.mu.Unlock()
 		return
 	}
 	if r.last.Attempt > 0 && p.Attempt > r.last.Attempt {
-		if r.terminal {
-			io.WriteString(r.w, eraseLine)
-		}
-		fmt.Fprintf(r.w, "semar: draft %d had %s; the planner is fixing them\n", r.last.Attempt, problemCount(p.Problems))
+		r.notices = append(r.notices, rejectedDraft{r.last.Attempt, p.Problems})
 	}
 	r.last = p
+	due := len(r.notices) > 0
+	r.mu.Unlock()
+	if due {
+		select {
+		case r.wake <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func problemCount(n int) string {
@@ -108,35 +128,63 @@ func problemCount(n int) string {
 	return fmt.Sprintf("%d problems", n)
 }
 
-func (r *progressReporter) tick() {
+// flush writes the lines that are due.
+func (r *progressReporter) flush() {
+	r.wmu.Lock()
+	defer r.wmu.Unlock()
+	r.flushLocked()
+}
+
+// flushLocked needs wmu. It takes the lines under mu while wmu is held, so that two callers
+// cannot write them out of order, lose one, or write one twice.
+func (r *progressReporter) flushLocked() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.stopped {
+	notices := r.notices
+	r.notices = nil
+	r.mu.Unlock()
+	for _, n := range notices {
+		if r.terminal {
+			io.WriteString(r.w, eraseLine)
+		}
+		fmt.Fprintf(r.w, "semar: draft %d had %s; the planner is fixing them\n", n.attempt, problemCount(n.problems))
+	}
+}
+
+func (r *progressReporter) tick() {
+	r.wmu.Lock()
+	defer r.wmu.Unlock()
+	r.flushLocked()
+	r.mu.Lock()
+	stopped, last, elapsed := r.stopped, r.last, r.clock().Sub(r.start)
+	r.mu.Unlock()
+	if stopped {
 		return
 	}
-	elapsed := r.clock().Sub(r.start)
 	if !r.terminal {
-		fmt.Fprintln(r.w, plainLine(elapsed, r.last))
+		fmt.Fprintln(r.w, plainLine(elapsed, last))
 		return
 	}
-	io.WriteString(r.w, "\r"+statusLine(spinner[r.frame%len(spinner)], elapsed, r.last)+"\x1b[K")
+	io.WriteString(r.w, "\r"+statusLine(spinner[r.frame%len(spinner)], elapsed, last)+"\x1b[K")
 	r.frame++
 }
 
-// Stop erases the status line, ends the goroutine, and waits for it. Nothing is written after
-// it returns. It can be called more than once.
+// Stop writes the lines that are still due, erases the status line, ends the goroutine, and
+// waits for it. Nothing is written after it returns. It can be called more than once.
 func (r *progressReporter) Stop() {
 	r.once.Do(func() {
 		r.mu.Lock()
 		r.stopped = true
 		r.stopAt = r.clock()
+		r.mu.Unlock()
+		close(r.quit)
+		<-r.done
+		r.wmu.Lock()
+		defer r.wmu.Unlock()
+		r.flushLocked()
 		if r.terminal {
 			io.WriteString(r.w, eraseLine)
 		}
-		r.mu.Unlock()
-		close(r.quit)
 	})
-	<-r.done
 }
 
 // Elapsed is the time from the start to Stop, or to now while the reporter runs.

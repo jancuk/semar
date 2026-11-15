@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -78,12 +79,14 @@ func TestTerminalStatusLine(t *testing.T) {
 	want += "\r⠼ planning · 1m24s · 100000 responses · 100000 tool calls\x1b[K"
 
 	r.Report(plan.Progress{Attempt: 2, Problems: 1})
+	r.flush() // the goroutine may have written the line already
 	want += "\r\x1b[Ksemar: draft 1 had 1 problem; the planner is fixing them\n"
 	r.Report(plan.Progress{Attempt: 2, Problems: 1, Progress: provider.Progress{Turns: 2}})
 	r.tick()
 	want += "\r⠴ planning · 1m24s · draft 2 of 3 · 2 responses\x1b[K"
 
 	r.Report(plan.Progress{Attempt: 3, Problems: 4})
+	r.flush() // the goroutine may have written the line already
 	want += "\r\x1b[Ksemar: draft 2 had 4 problems; the planner is fixing them\n"
 
 	if got := out.String(); got != want {
@@ -135,6 +138,7 @@ func TestPlainReporter(t *testing.T) {
 		t.Fatalf("got %q, want %q", out.String(), want)
 	}
 	r.Report(plan.Progress{Attempt: 2, Problems: 4})
+	r.flush() // the goroutine may have written the line already
 	want += "semar: draft 1 had 4 problems; the planner is fixing them\n"
 	clock.Advance(30 * time.Second)
 	r.tick()
@@ -220,5 +224,62 @@ func TestReporterRace(t *testing.T) {
 	r.Report(plan.Progress{Attempt: 9})
 	if out.String() != end {
 		t.Error("something was written after Stop")
+	}
+}
+
+// blockingWriter holds every Write until release is closed.
+type blockingWriter struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+	out     lockedBuffer
+}
+
+func (b *blockingWriter) Write(p []byte) (int, error) {
+	b.once.Do(func() { close(b.entered) })
+	<-b.release
+	return b.out.Write(p)
+}
+
+func TestReportDoesNotWaitForAStalledWriter(t *testing.T) {
+	clock := &fakeClock{t: time.Unix(1000, 0)}
+	w := &blockingWriter{entered: make(chan struct{}), release: make(chan struct{})}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(w.release) }) }
+	defer release()
+	ticks := make(chan time.Time)
+	r := startProgress(w, clock.Now, true, func(time.Duration) (<-chan time.Time, func()) { return ticks, func() {} })
+
+	ticks <- time.Time{}
+	select {
+	case <-w.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the tick did not start a write")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 1; i <= 50; i++ {
+			r.Report(plan.Progress{Attempt: 1 + i/10, Problems: i, Progress: provider.Progress{Turns: i}})
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Report waited for a write that was stalled")
+	}
+
+	release()
+	r.Stop()
+	got := w.out.String()
+	for attempt := 1; attempt <= 5; attempt++ {
+		line := "semar: draft " + strconv.Itoa(attempt) + " had "
+		if n := strings.Count(got, line); n != 1 {
+			t.Errorf("%q written %d times in %q", line, n, got)
+		}
+	}
+	if !strings.HasSuffix(got, "\r\x1b[K") {
+		t.Errorf("the status line was not erased: %q", got)
 	}
 }
