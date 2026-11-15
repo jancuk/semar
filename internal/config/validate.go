@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/jancuk/semar/internal/domain"
@@ -198,4 +199,12 @@ func validatePlan(c Config, add func(string, ...any)) {
 	if c.Plan.Timeout < 0 {
 		add("plan.timeout must be positive")
 	}
+	// The cleanup of old copies of the source keeps a copy for 7 days, which is more than the
+	// three drafts of a plan can take at this limit.
+	if c.Plan.Timeout > MaxPlanTimeout {
+		add("plan.timeout must be at most %s", MaxPlanTimeout)
+	}
 }
+
+// MaxPlanTimeout is the longest time that one planner draft may take.
+const MaxPlanTimeout = 24 * time.Hour

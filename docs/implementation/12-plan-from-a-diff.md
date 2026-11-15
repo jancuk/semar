@@ -248,7 +248,7 @@ plan:
   provider: ""          # empty: the first provider
   maxScenarios: 12
   maxTurns: 60
-  timeout: 15m
+  timeout: 15m         # at most 24h
 ```
 
 A `fake` provider has `outputs: [file, ...]`, one JSON file per call, relative to the repository root. It makes every stage testable with no model (A11).
@@ -362,7 +362,7 @@ With `--build-url <url>` it adds an `http` build probe to the service, and `--bu
 | R1 | Every git call is `exec.CommandContext` with an argument list. A branch name, a commit, or a path that starts with `-` or holds a control character is refused before git runs, and names follow `--end-of-options` or `--` | G13 |
 | R2 | Git runs with `GIT_TERMINAL_PROMPT=0`, no pager, `core.hooksPath` set to the null device, `core.fsmonitor` off, and no signature check in a log. Semar never writes to the work tree, the index, or a branch of the repository under test. `Fetch` updates only remote-tracking references, and only for names that are branches of the remote. A branch that the remote no longer has is an error. A fetch uses the transport and the credentials of the user's own git configuration. That file is the user's and is not content of the repository | The content of the repository under test is not trusted |
 | R3 | `Archive` reads the tree and the file contents from the object store, so no attribute, filter, or substitution of the repository applies. It copies regular files only, leaves out a path that is not local (`filepath.IsLocal`), every entry inside a `.git` directory in any spelling that a file system could read as `.git`, links, and submodules, and caps one file at 5 MiB and the copy at 500 MiB. Every file it leaves out is returned with the reason and listed in `plan.md` | G19 |
-| R4 | The copy of the source lives in a new directory with mode 0700 under `semar/work` in the user cache directory, not in the system temporary directory, because a harness profile can deny that one. It is removed when the command ends, also on an error or a cancel. A copy that a crash left is removed by the next plan once it is a day old. Without a cache directory, the system temporary directory is used | G19 |
+| R4 | The copy of the source lives in a new directory with mode 0700 under `semar/work` in the user cache directory, not in the system temporary directory, because a harness profile can deny that one. It is removed when the command ends, also on an error or a cancel. A copy that a crash left is removed by the next plan once it is 7 days old. `plan.timeout` is refused above 24 hours, so the three drafts of a running plan take at most 72 hours and its copy is never that old. Without a cache directory, the system temporary directory is used | G19 |
 | R5 | Before the planner starts, these are removed from the copy: `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, and the directories `.claude`, `.codex`, and `.cursor`, at every depth | H3 |
 | R6 | A ticket key matches only at a word boundary. `SHOP-4820` does not hold the key `SHOP-482` | Plan 03, review focus 1 |
 | R7 | A merge commit adds its keys to the change set and adds no files. A file belongs to the tickets of the commits, not merges, that touched it | TRD, Limits of linking |

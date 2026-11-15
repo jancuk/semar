@@ -266,6 +266,12 @@ plan: {provider: fake, maxScenarios: 3, maxTurns: 7, timeout: 90s}
 			t.Fatalf("got %+v", cfg)
 		}
 	})
+	t.Run("a timeout of one day", func(t *testing.T) {
+		cfg, err := loadText(t, "version: 1\nplan: {timeout: 24h}\n")
+		if err != nil || cfg.Plan.Timeout != 24*time.Hour {
+			t.Fatalf("got %+v, %v", cfg.Plan, err)
+		}
+	})
 	cases := []struct{ name, text, want string }{
 		{"unknown provider key", "version: 1\nproviders:\n  - id: a\n    kind: claude\n    bogus: 1\n", "semar.yaml:5"},
 		{"an address from the repository", "version: 1\nproviders:\n  - id: a\n    kind: openai\n    baseUrl: https://example.com\n", "semar.yaml:5"},
@@ -287,6 +293,7 @@ plan: {provider: fake, maxScenarios: 3, maxTurns: 7, timeout: 90s}
 		{"negative turns", "version: 1\nplan: {maxTurns: -1}\n", "plan.maxTurns must be positive"},
 		{"negative scenarios", "version: 1\nplan: {maxScenarios: -1}\n", "plan.maxScenarios must be positive"},
 		{"negative timeout", "version: 1\nplan: {timeout: -1m}\n", "plan.timeout must be positive"},
+		{"timeout above a day", "version: 1\nplan: {timeout: 25h}\n", "plan.timeout must be at most 24h"},
 		{"bad timeout", "version: 1\nplan: {timeout: soon}\n", "semar.yaml:2"},
 		{"output escapes", "version: 1\nproviders: [{id: a, kind: fake, outputs: [../x.json]}]\n", "outputs[0]"},
 		{"output absolute", "version: 1\nproviders: [{id: a, kind: fake, outputs: [/x.json]}]\n", "outputs[0]"},

@@ -70,7 +70,7 @@ func TestSourceCopyRootFallsBackWithoutACacheDirectory(t *testing.T) {
 func TestSourceCopyRootRemovesOldCopies(t *testing.T) {
 	cache, outside := t.TempDir(), t.TempDir()
 	// A link keeps its creation time, which Go cannot set, so the clock runs ahead of it.
-	now := time.Now().Add(72 * time.Hour)
+	now := time.Now().Add(10 * 24 * time.Hour)
 	work := filepath.Join(cache, "semar", "work")
 	if err := os.MkdirAll(work, 0o700); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,9 @@ func TestSourceCopyRootRemovesOldCopies(t *testing.T) {
 		}
 		return p
 	}
-	old := mk("semar-plan-old", 25*time.Hour)
+	old := mk("semar-plan-old", 8*24*time.Hour)
+	// A plan with the longest timeout runs three drafts, 72 hours, and still uses its copy.
+	running := mk("semar-plan-running", 73*time.Hour)
 	fresh := mk("semar-plan-new", time.Hour)
 	other := mk("keep-me", 48*time.Hour)
 
@@ -105,8 +107,8 @@ func TestSourceCopyRootRemovesOldCopies(t *testing.T) {
 	if !gone(old) {
 		t.Error("the old copy was kept")
 	}
-	if gone(fresh) || gone(other) {
-		t.Error("a new copy or an entry with another name was removed")
+	if gone(fresh) || gone(running) || gone(other) {
+		t.Error("a new copy, a copy that a running plan can use, or an entry with another name was removed")
 	}
 	if !gone(link) {
 		t.Error("the link was kept")

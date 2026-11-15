@@ -490,12 +490,14 @@ func plural(n int, noun string) string {
 
 const (
 	sourceCopyPrefix = "semar-plan-"
-	sourceCopyMaxAge = 24 * time.Hour
+	// Three drafts at the longest plan.timeout take 72 hours, so a copy that a running plan
+	// uses is never this old.
+	sourceCopyMaxAge = 7 * 24 * time.Hour
 )
 
 // sourceCopyRoot is the directory that holds the copy of the source. A harness profile may deny
 // the temporary directory, so the default is the user cache directory. The system does not clean
-// that directory, so a copy that a crash left is removed here once it is a day old. A root that a
+// that directory, so a copy that a crash left is removed here once it is 7 days old. A root that a
 // caller sets is used as it is and is never cleaned.
 func sourceCopyRoot(o options) (string, error) {
 	if o.TempRoot != "" {
