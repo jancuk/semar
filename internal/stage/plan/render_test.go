@@ -28,6 +28,7 @@ func TestRenderGolden(t *testing.T) {
 		{Path: "internal/orders/read.go", Status: "modified", Kind: "source", Added: 2, Deleted: 1, Tickets: []string{"SHOP-483"}},
 		{Path: "internal/refund/handler.go", Status: "modified", Kind: "source", Added: 9, Deleted: 0, Tickets: []string{"SHOP-482"}},
 	}
+	in.SetupOn = true
 	in.LeftOut = []LeftOut{{Path: "assets/logo.png", Reason: "larger than 5 MiB"}, {Path: "vendor/lib", Reason: "a submodule"}}
 	d := draft(t)
 	scs, scripts, ps := Validate(d, in)
@@ -36,12 +37,19 @@ func TestRenderGolden(t *testing.T) {
 	}
 	out := Output{
 		Draft: d, Scenarios: scs, Scripts: scripts, Attempts: 2,
-		Result:    provider.Result{Model: "model-x", InputTokens: 1234, OutputTokens: 56},
+		Result: provider.Result{
+			Model: "model-x", InputTokens: 1234, OutputTokens: 56, Denied: 2,
+			Tools:  []provider.ToolUse{{Name: "Read", Calls: 7}, {Name: "mcp__tracker__get_issue", Calls: 1}, {Name: "mcp__wiki__search", Calls: 2}},
+			Loaded: provider.Loaded{MCPServers: []string{"tracker", "wiki"}, Skills: 3, PermissionMode: "default"},
+		},
 		PlannerID: "claude", PlannerKind: "claude",
 	}
 	var b strings.Builder
 	if err := Render(&b, in, out); err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(b.String(), "tracker") || strings.Contains(b.String(), "wiki") {
+		t.Error("plan.md names an MCP server")
 	}
 	golden := filepath.Join("testdata", "plan.golden.md")
 	if *update {
@@ -66,5 +74,31 @@ func TestParagraphKeepsTextFromStartingAList(t *testing.T) {
 		if got := paragraph(in); got != want {
 			t.Errorf("paragraph(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestSetupLine(t *testing.T) {
+	loaded := provider.Loaded{MCPServers: []string{"secret-server-name"}, Skills: 2, PermissionMode: "plan"}
+	cases := []struct {
+		name  string
+		on    bool
+		l     provider.Loaded
+		want  string
+		never string
+	}{
+		{"off", false, loaded, "the planner had the three file tools only", "secret-server-name"},
+		{"on and reported", true, loaded, "the planner could use 1 MCP servers and 2 skills of your own setup, under the permission mode plan", "secret-server-name"},
+		{"on and not reported", true, provider.Loaded{}, "did not report what it loaded", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := setupLine(tc.on, tc.l)
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("got %q, want it to hold %q", got, tc.want)
+			}
+			if tc.never != "" && strings.Contains(got, tc.never) {
+				t.Errorf("%q names a server", got)
+			}
+		})
 	}
 }

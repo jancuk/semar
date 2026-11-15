@@ -12,6 +12,7 @@ import (
 	"github.com/jancuk/semar/internal/check"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/prompt"
+	"github.com/jancuk/semar/internal/provider"
 )
 
 const (
@@ -98,6 +99,9 @@ func Render(w io.Writer, in Input, out Output) error {
 	fmt.Fprintf(&b, "- Model: %s\n", shown(valueOr(r.Model, "the harness default"), maxValueShown))
 	fmt.Fprintf(&b, "- Attempts: %d of %d\n", out.Attempts, MaxAttempts)
 	fmt.Fprintf(&b, "- Tokens: %d input, %d output\n", r.InputTokens, r.OutputTokens)
+	fmt.Fprintf(&b, "- Setup: %s\n", setupLine(in.SetupOn, r.Loaded))
+	fmt.Fprintf(&b, "- Tool calls: %s\n", toolLine(r.Tools))
+	fmt.Fprintf(&b, "- Refused tool calls: %d\n", r.Denied)
 	fmt.Fprintf(&b, "- Prompt version: %s\n", shown(prompt.PlanVersion(), maxValueShown))
 	b.WriteString("\nEvery expected result here was read from the code by a model. Confirm each scenario before its result counts.\n")
 	b.WriteString("\nThe requests were drafted from the source and were not sent before the first run.\n")
@@ -106,6 +110,43 @@ func Render(w io.Writer, in Input, out Output) error {
 
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// setupLine counts what the planner loaded and never names it: the file may be committed, and
+// the names of a person's MCP servers are theirs.
+func setupLine(setupOn bool, l provider.Loaded) string {
+	switch {
+	case !setupOn:
+		return "the planner had the three file tools only"
+	case l.PermissionMode == "" && l.Skills == 0 && len(l.MCPServers) == 0:
+		return "the planner could use your own setup, and the provider did not report what it loaded"
+	}
+	mode := ""
+	if l.PermissionMode != "" {
+		mode = ", under the permission mode " + shown(l.PermissionMode, maxValueShown)
+	}
+	return fmt.Sprintf("the planner could use %d MCP servers and %d skills of your own setup%s", len(l.MCPServers), l.Skills, mode)
+}
+
+// toolLine counts MCP tool calls together, because the name of such a tool holds the name of
+// its server.
+func toolLine(tools []provider.ToolUse) string {
+	var parts []string
+	mcp := 0
+	for _, t := range tools {
+		if strings.HasPrefix(t.Name, "mcp__") {
+			mcp += t.Calls
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s %d", shown(t.Name, maxValueShown), t.Calls))
+	}
+	if mcp > 0 {
+		parts = append(parts, fmt.Sprintf("MCP tools (names withheld) %d", mcp))
+	}
+	if len(parts) == 0 {
+		return "none reported"
+	}
+	return strings.Join(parts, ", ")
 }
 
 func writeScenario(b *strings.Builder, sc domain.Scenario) {

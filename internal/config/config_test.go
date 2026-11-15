@@ -249,7 +249,7 @@ plan: {provider: fake, maxScenarios: 3, maxTurns: 7, timeout: 90s}
 		{"unknown provider key", "version: 1\nproviders:\n  - id: a\n    kind: claude\n    bogus: 1\n", "semar.yaml:5"},
 		{"unknown plan key", "version: 1\nplan:\n  maxTurn: 1\n", "semar.yaml:3"},
 		{"unknown tickets key", "version: 1\ntickets:\n  regex: x\n", "semar.yaml:3"},
-		{"plan provider names none", "version: 1\nplan: {provider: nope}\n", `plan.provider: "nope" names no provider`},
+		{"plan provider is unsafe", "version: 1\nplan: {provider: ../nope}\n", "plan.provider"},
 		{"duplicate id", "version: 1\nproviders: [{id: a, kind: x}, {id: a, kind: x}]\n", "used twice"},
 		{"unsafe id", "version: 1\nproviders: [{id: ../a, kind: x}]\n", "invalid provider id"},
 		{"empty id", "version: 1\nproviders: [{kind: x}]\n", "id is required"},

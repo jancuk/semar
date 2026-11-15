@@ -24,6 +24,8 @@ type Config struct {
 	Providers    []Provider             `yaml:"providers"`
 	Tickets      Tickets                `yaml:"tickets"`
 	Plan         Plan                   `yaml:"plan"`
+
+	providersDefaulted bool
 }
 
 type Environment struct {
@@ -226,6 +228,7 @@ func resolveAlias(n *yaml.Node) *yaml.Node {
 func applyPlanDefaults(cfg *Config) {
 	if len(cfg.Providers) == 0 {
 		cfg.Providers = []Provider{{ID: "claude", Kind: "claude"}}
+		cfg.providersDefaulted = true
 	}
 	if cfg.Tickets.Pattern == "" {
 		cfg.Tickets.Pattern = defaultTicketPattern
@@ -249,6 +252,27 @@ func (c Config) PlanProvider() Provider {
 		}
 	}
 	return c.Providers[0]
+}
+
+// Declared returns the providers that the file lists, and none when it lists none.
+func (c Config) Declared() []Provider {
+	if c.providersDefaulted {
+		return nil
+	}
+	return c.Providers
+}
+
+// PlanProviderID is the provider that the file asks to plan: plan.provider, else the first
+// one it lists. It is empty when the file names none. The person's own file may define the
+// provider, so the ID is not checked against Declared here.
+func (c Config) PlanProviderID() string {
+	if c.Plan.Provider != "" {
+		return c.Plan.Provider
+	}
+	if d := c.Declared(); len(d) > 0 {
+		return d[0].ID
+	}
+	return ""
 }
 
 // Environment returns the named environment. An empty name selects the only

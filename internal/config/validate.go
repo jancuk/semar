@@ -147,8 +147,12 @@ func validatePlan(c Config, add func(string, ...any)) {
 	if _, err := regexp.Compile(c.Tickets.Pattern); err != nil {
 		add("tickets.pattern: %v", err)
 	}
-	if c.Plan.Provider != "" && !ids[c.Plan.Provider] {
-		add("plan.provider: %q names no provider", c.Plan.Provider)
+	// plan.provider may name a provider that only the person's own file defines, so the
+	// command line checks that the name is known.
+	if c.Plan.Provider != "" {
+		if err := idcheck.Check("provider id", c.Plan.Provider); err != nil {
+			add("plan.provider: %v", err)
+		}
 	}
 	if c.Plan.MaxScenarios < 0 {
 		add("plan.maxScenarios must be positive")

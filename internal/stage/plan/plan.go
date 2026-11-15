@@ -30,8 +30,9 @@ type Planner interface {
 	Run(ctx context.Context, job provider.Job) (provider.Result, error)
 }
 
-// Output is an accepted plan. Result is the result of the accepted attempt, with the turns and
-// the tokens summed over every attempt.
+// Output is an accepted plan. Result is the result of the accepted attempt, with the turns, the
+// tokens, the cost, the tool calls and the refused calls summed over every attempt. Run returns
+// the same totals with an error, so that a failed job can still be counted.
 type Output struct {
 	Draft       Draft
 	Scenarios   []domain.Scenario
@@ -90,12 +91,10 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 			MaxTurns: in.Limits.MaxTurns,
 			Timeout:  in.Limits.Timeout,
 		})
+		sum(&total, res)
 		if err != nil {
-			return Output{}, fmt.Errorf("plan, attempt %d: %w", attempt, err)
+			return Output{Result: total, Attempts: attempt, PlannerID: p.ID(), PlannerKind: p.Kind()}, fmt.Errorf("plan, attempt %d: %w", attempt, err)
 		}
-		total.Turns += res.Turns
-		total.InputTokens += res.InputTokens
-		total.OutputTokens += res.OutputTokens
 		previous = res.Output
 
 		d, err := DecodeDraft(res.Output)
@@ -108,13 +107,43 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 			problems = ps
 			continue
 		}
-		total.Output, total.Model = res.Output, res.Model
+		total.Output = res.Output
 		return Output{
 			Draft: d, Scenarios: scenarios, Scripts: scripts, Attempts: attempt, Result: total,
 			PlannerID: p.ID(), PlannerKind: p.Kind(),
 		}, nil
 	}
-	return Output{}, &Rejected{Problems: problems, Attempts: MaxAttempts}
+	return Output{Result: total, Attempts: MaxAttempts, PlannerID: p.ID(), PlannerKind: p.Kind()}, &Rejected{Problems: problems, Attempts: MaxAttempts}
+}
+
+// sum adds one attempt to the totals. The limits, the loaded setup, and the model are those
+// of the latest attempt that reported them.
+func sum(total *provider.Result, res provider.Result) {
+	total.Turns += res.Turns
+	total.InputTokens += res.InputTokens
+	total.OutputTokens += res.OutputTokens
+	total.CacheReadTokens += res.CacheReadTokens
+	total.CacheWriteTokens += res.CacheWriteTokens
+	total.CostUSD += res.CostUSD
+	total.Denied += res.Denied
+	for _, u := range res.Tools {
+		i := slices.IndexFunc(total.Tools, func(t provider.ToolUse) bool { return t.Name == u.Name })
+		if i < 0 {
+			total.Tools = append(total.Tools, u)
+			continue
+		}
+		total.Tools[i].Calls += u.Calls
+	}
+	slices.SortFunc(total.Tools, func(a, b provider.ToolUse) int { return strings.Compare(a.Name, b.Name) })
+	if len(res.Limits) > 0 {
+		total.Limits = res.Limits
+	}
+	if res.Loaded.PermissionMode != "" || res.Loaded.Skills > 0 || len(res.Loaded.MCPServers) > 0 {
+		total.Loaded = res.Loaded
+	}
+	if res.Model != "" {
+		total.Model = res.Model
+	}
 }
 
 // problemList is a Markdown list with one problem per line. The messages quote the draft, so
