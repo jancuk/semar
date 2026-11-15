@@ -91,8 +91,8 @@ func (s *Store) runDir(id domain.RunID) (string, error) {
 	return join(s.root, "runs", string(id))
 }
 
-// scriptRel is the path of a stored script below the root.
-func scriptRel(id domain.ScenarioID, h domain.Hash) (string, error) {
+// ScriptPath is the path of a stored script below the store's root.
+func ScriptPath(id domain.ScenarioID, h domain.Hash) (string, error) {
 	if err := idcheck.Check("scenario ID", string(id)); err != nil {
 		return "", err
 	}
@@ -123,7 +123,7 @@ func (s *Store) openScripts(rel string, create bool) (*os.Root, error) {
 }
 
 func (s *Store) PutScript(sc domain.Script) error {
-	rel, err := scriptRel(sc.Scenario, sc.ExpectHash)
+	rel, err := ScriptPath(sc.Scenario, sc.ExpectHash)
 	if err != nil {
 		return fmt.Errorf("store script: %w", err)
 	}
@@ -144,42 +144,10 @@ func (s *Store) PutScript(sc domain.Script) error {
 	return atomicfile.WriteIn(root, rel, []byte(buf.String()), atomicfile.FileMode)
 }
 
-// RemoveScript removes a stored script, and its scenario's directory when nothing else is
-// left in it. A script that is not stored is not an error.
-func (s *Store) RemoveScript(id domain.ScenarioID, h domain.Hash) error {
-	rel, err := scriptRel(id, h)
-	if err != nil {
-		return fmt.Errorf("remove script: %w", err)
-	}
-	root, err := s.openScripts(rel, false)
-	if err != nil {
-		return fmt.Errorf("remove script %s: %w", id, err)
-	}
-	defer root.Close()
-	if err := root.Remove(rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("remove script %s: %w", id, err)
-	}
-	dir, err := root.Open(filepath.Dir(rel))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("remove script %s: %w", id, err)
-	}
-	names, err := dir.Readdirnames(1)
-	_ = dir.Close()
-	if len(names) == 0 && errors.Is(err, io.EOF) {
-		if err := root.Remove(filepath.Dir(rel)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("remove script %s: %w", id, err)
-		}
-	}
-	return nil
-}
-
 // Script reports false when no script is stored for the scenario and hash.
 // A stored file that does not parse, or that belongs to another scenario or hash, is an error.
 func (s *Store) Script(id domain.ScenarioID, h domain.Hash) (domain.Script, bool, error) {
-	rel, err := scriptRel(id, h)
+	rel, err := ScriptPath(id, h)
 	if err != nil {
 		return domain.Script{}, false, fmt.Errorf("load script: %w", err)
 	}

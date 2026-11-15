@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/evidence"
 )
 
@@ -228,7 +227,6 @@ func TestScriptsRefuseALinkedOrNonDirectoryComponent(t *testing.T) {
 			check("PutScript", s.PutScript(scriptFixture("refund", "aaa")))
 			_, _, err := s.Script("refund", "aaa")
 			check("Script", err)
-			check("RemoveScript", s.RemoveScript("refund", "aaa"))
 			entries, err := os.ReadDir(target)
 			if err != nil {
 				t.Fatal(err)
@@ -237,33 +235,5 @@ func TestScriptsRefuseALinkedOrNonDirectoryComponent(t *testing.T) {
 				t.Errorf("a script was written at the link's target: %v", entries)
 			}
 		})
-	}
-}
-
-func TestRemoveScript(t *testing.T) {
-	s := openStore(t)
-	for _, h := range []domain.Hash{"aaa", "bbb"} {
-		if err := s.PutScript(scriptFixture("refund", string(h))); err != nil {
-			t.Fatal(err)
-		}
-	}
-	dir := filepath.Join(s.Root(), "store", "scripts", "refund")
-	if err := s.RemoveScript("refund", "aaa"); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok, err := s.Script("refund", "aaa"); ok || err != nil {
-		t.Errorf("Script(aaa) after RemoveScript = %v, %v", ok, err)
-	}
-	if _, ok, err := s.Script("refund", "bbb"); !ok || err != nil {
-		t.Errorf("Script(bbb) = %v, %v; the other script must stay", ok, err)
-	}
-	if err := s.RemoveScript("refund", "bbb"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
-		t.Errorf("the empty directory of the scenario stays: %v", err)
-	}
-	if err := s.RemoveScript("refund", "bbb"); err != nil {
-		t.Errorf("removing a script that is not stored: %v", err)
 	}
 }

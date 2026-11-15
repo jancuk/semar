@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -36,7 +37,9 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 	}
 	var scenarioFiles []planFile
 	var scripts []domain.Script
-	checked := []string{filepath.Join(".semar", "plans")}
+	var scriptFiles []string
+	storeDirs := []string{filepath.Join(".semar", "runs"), filepath.Join(".semar", "store"), filepath.Join(".semar", "store", "scripts")}
+	checked := []string{filepath.Join(".semar", "plans"), storeDirs[0]}
 	for i, sc := range out.Scenarios {
 		if err := idcheck.Check("ticket", sc.Ticket); err != nil {
 			return "", fmt.Errorf("scenario %s: %w", sc.ID, err)
@@ -53,11 +56,17 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 		}
 		f := planFile{filepath.Join(".semar", "scenarios", sc.Ticket, string(sc.ID)+".yaml"), data}
 		scenarioFiles = append(scenarioFiles, f)
-		checked = append(checked, filepath.Dir(f.rel), filepath.Join(".semar", "store", "scripts", string(sc.ID)))
 		s := out.Scripts[i]
 		s.ExpectHash = domain.ExpectHash(sc)
 		s.AuthoredBy = domain.ProviderRef{Instance: out.PlannerID, Model: out.Result.Model, Harness: out.PlannerKind}
 		scripts = append(scripts, s)
+		rel, err := evidence.ScriptPath(s.Scenario, s.ExpectHash)
+		if err != nil {
+			return "", err
+		}
+		scriptFiles = append(scriptFiles, filepath.Join(".semar", rel))
+		storeDirs = append(storeDirs, filepath.Dir(scriptFiles[i]))
+		checked = append(checked, filepath.Dir(f.rel), filepath.Dir(scriptFiles[i]))
 	}
 	var md bytes.Buffer
 	if err := plan.Render(&md, in, out); err != nil {
@@ -83,19 +92,22 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 			return "", fmt.Errorf("%s exists already; nothing was written", filepath.Join(dir, f.rel))
 		}
 	}
-	store, err := evidence.Open(semarDir(dir))
-	if err != nil {
-		return "", err
-	}
-	for _, s := range scripts {
-		if _, found, err := store.Script(s.Scenario, s.ExpectHash); err != nil {
-			return "", fmt.Errorf("%w; nothing was written", err)
-		} else if found {
-			return "", fmt.Errorf("a script of scenario %s for expectation hash %s is stored already; nothing was written", s.Scenario, s.ExpectHash)
+	for i, p := range scriptFiles {
+		if _, err := root.Lstat(p); !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("a script of scenario %s for expectation hash %s is stored already; nothing was written", scripts[i].Scenario, scripts[i].ExpectHash)
 		}
 	}
 
-	w := &planWriter{root: root, store: store}
+	w := &planWriter{root: root}
+	for _, d := range slices.Compact(storeDirs) {
+		if _, err := root.Lstat(d); errors.Is(err, fs.ErrNotExist) {
+			w.storeDirs = append(w.storeDirs, d)
+		}
+	}
+	store, err := evidence.Open(semarDir(dir))
+	if err != nil {
+		return w.undo(err)
+	}
 	planDir, err := w.newPlanDir(in.Change.HeadCommit)
 	if err != nil {
 		return w.undo(err)
@@ -105,11 +117,11 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 			return w.undo(err)
 		}
 	}
-	for _, s := range scripts {
+	for i, s := range scripts {
 		if err := store.PutScript(s); err != nil {
 			return w.undo(err)
 		}
-		w.scripts = append(w.scripts, s)
+		w.files = append(w.files, scriptFiles[i])
 	}
 	for _, f := range []planFile{{filepath.Join(planDir, "plan.md"), md.Bytes()}, {filepath.Join(planDir, "draft.json"), draft}} {
 		if err := w.writeFile(f); err != nil {
@@ -121,12 +133,11 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 
 // planWriter remembers what one plan wrote, so that undo can remove exactly that.
 type planWriter struct {
-	root    *os.Root
-	store   *evidence.Store
-	dirs    []string // created, outermost first
-	files   []string
-	scripts []domain.Script
-	planDir string
+	root      *os.Root
+	dirs      []string // created, outermost first
+	storeDirs []string // missing before the store was opened, outermost first
+	files     []string
+	planDir   string
 }
 
 func (w *planWriter) writeFile(f planFile) error {
@@ -175,13 +186,8 @@ func (w *planWriter) newPlanDir(head string) (string, error) {
 
 func (w *planWriter) undo(cause error) (string, error) {
 	errs := []error{cause}
-	for _, s := range w.scripts {
-		if err := w.store.RemoveScript(s.Scenario, s.ExpectHash); err != nil {
-			errs = append(errs, err)
-		}
-	}
 	for _, f := range w.files {
-		if err := w.root.Remove(f); err != nil {
+		if err := w.root.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, err)
 		}
 	}
@@ -195,5 +201,31 @@ func (w *planWriter) undo(cause error) (string, error) {
 			errs = append(errs, err)
 		}
 	}
+	for _, d := range slices.Backward(w.storeDirs) {
+		if err := removeIfEmpty(w.root, d); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	return "", fmt.Errorf("the plan was not written, and what it had written was removed: %w", errors.Join(errs...))
+}
+
+// removeIfEmpty keeps a directory that holds anything, because another command may have
+// written there since the plan began.
+func removeIfEmpty(root *os.Root, d string) error {
+	dir, err := root.Open(d)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	names, err := dir.Readdirnames(1)
+	_ = dir.Close()
+	if len(names) > 0 || !errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err := root.Remove(d); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
 }

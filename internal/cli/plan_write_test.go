@@ -1,10 +1,13 @@
 package cli_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/jancuk/semar/internal/cli"
@@ -131,8 +134,12 @@ func TestAPlanThatCannotBeWrittenLeavesNothing(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+		before := tree(t, p.path(".semar"))
 		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
 		contains(t, "stderr", res.stderr, "the plan was not written, and what it had written was removed")
+		if after := tree(t, p.path(".semar")); !slices.Equal(after, before) {
+			t.Errorf(".semar changed:\nbefore %q\nafter  %q", before, after)
+		}
 		if files := p.plannedFiles(t); len(files) != 0 {
 			t.Errorf("the plan left %v", files)
 		}
@@ -173,4 +180,67 @@ func TestInitRefusesALinkOrAFileAtSemar(t *testing.T) {
 			contains(t, "stderr", res.stderr, p.path(".semar"), "not a directory")
 		})
 	}
+}
+
+// tree lists every directory and file below root, with a digest of each file's content.
+func tree(t *testing.T, root string) []string {
+	t.Helper()
+	var entries []string
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, p)
+		switch {
+		case d.IsDir():
+			entries = append(entries, "dir  "+filepath.ToSlash(rel))
+		case d.Type().IsRegular():
+			data, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			sum := sha256.Sum256(data)
+			entries = append(entries, "file "+filepath.ToSlash(rel)+" "+hex.EncodeToString(sum[:8]))
+		default:
+			entries = append(entries, "other "+filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return entries
+}
+
+func TestARefusedPlanLeavesSemarAsItWas(t *testing.T) {
+	t.Run("a target scenario file exists", func(t *testing.T) {
+		p := newPlanRepo(t, sampleapp.Options{})
+		p.configure(t, goodDraft)
+		if err := os.MkdirAll(p.path(".semar", "scenarios", "SHOP-482", "SHOP-482-01.yaml"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		before := tree(t, p.path(".semar"))
+		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
+		contains(t, "stderr", res.stderr, "SHOP-482-01.yaml exists already; nothing was written")
+		if after := tree(t, p.path(".semar")); !slices.Equal(after, before) {
+			t.Errorf(".semar changed:\nbefore %q\nafter  %q", before, after)
+		}
+	})
+
+	t.Run("a script is stored already", func(t *testing.T) {
+		p := newPlanRepo(t, sampleapp.Options{})
+		p.configure(t, goodDraft, goodDraft)
+		p.must(t, cli.ExitOK, "plan", "--diff", "main..release")
+		for _, d := range []string{"scenarios", "plans", "runs"} {
+			if err := os.RemoveAll(p.path(".semar", d)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		before := tree(t, p.path(".semar"))
+		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
+		contains(t, "stderr", res.stderr, "is stored already; nothing was written")
+		if after := tree(t, p.path(".semar")); !slices.Equal(after, before) {
+			t.Errorf(".semar changed:\nbefore %q\nafter  %q", before, after)
+		}
+	})
 }
