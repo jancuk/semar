@@ -196,6 +196,16 @@ func TestValidate(t *testing.T) {
 		{"a valid header", func(_ *domain.Scenario, s *domain.Script) {
 			s.Steps[2].Request.Headers = map[string]string{"X-Request-For": "order {{order_id}}", "Accept": "application/json", "If-None-Match": `"x"`}
 		}, ""},
+		{"a malformed variable names its key", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Headers = map[string]string{"X-A": "{{ x }}"}
+			s.Steps[0].Request.Query = map[string]string{"page": "{{a.b}}"}
+		}, "header X-A: "},
+		{"a malformed variable in a query names its key", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Query = map[string]string{"page": "{{a.b}}"}
+		}, "query page: "},
+		{"a malformed variable in a json body names its place", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.JSON = map[string]any{"a": []any{"x", "{{"}}
+		}, "json.a[1]: "},
 		{"malformed variable in a json string", func(_ *domain.Scenario, s *domain.Script) {
 			s.Steps[0].Request.JSON = map[string]any{"a": []any{map[string]any{"b": "{{"}}}
 		}, "malformed variable"},

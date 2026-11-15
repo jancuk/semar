@@ -152,12 +152,8 @@ func validateRequest(ss domain.ScriptStep, hint *domain.RequestHint, hasEarlierC
 			add("%s", msg)
 		}
 	}
-	reported := map[string]bool{}
-	for _, tpl := range templateStrings(*r) {
-		if err := checkPlaceholders(tpl); err != nil && !reported[tpl] {
-			reported[tpl] = true
-			add("%v", err)
-		}
+	for _, m := range templateProblems(*r) {
+		add("%s", m)
 	}
 
 	names := variables(*r)
