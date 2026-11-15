@@ -70,6 +70,29 @@ func TestOpen(t *testing.T) {
 	}
 }
 
+func TestTopLevel(t *testing.T) {
+	fx := build(t)
+	sub := filepath.Join(fx.repo.Dir, "deep", "er")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	g, err := Open(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := g.TopLevel(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(fx.repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := filepath.EvalSymlinks(got); err != nil || resolved != want {
+		t.Fatalf("TopLevel from %s = %q (%v), want %q", sub, got, err, want)
+	}
+}
+
 func TestLog(t *testing.T) {
 	fx := build(t)
 	g := open(t, fx.repo.Dir)

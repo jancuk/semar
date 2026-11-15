@@ -68,6 +68,19 @@ func (g *Git) RemoteURL(ctx context.Context, remote string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// TopLevel is the root of the work tree that holds the directory.
+func (g *Git) TopLevel(ctx context.Context) (string, error) {
+	out, err := g.run(ctx, maxOutputBytes, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("find the root of the work tree: %w", err)
+	}
+	top := strings.TrimRight(string(out), "\r\n")
+	if top == "" {
+		return "", errors.New("find the root of the work tree: git named no directory")
+	}
+	return top, nil
+}
+
 // Fetch updates the remote-tracking references of the named branches, or of
 // every branch when none is named. A name that the remote has no branch of, such
 // as a tag, a commit ID, or "origin/x", is left for Resolve, unless this clone
