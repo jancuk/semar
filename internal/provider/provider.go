@@ -47,6 +47,15 @@ type Job struct {
 	Reasoning string          // "" means: the provider's own default level
 	MaxTurns  int
 	Timeout   time.Duration
+	Progress  func(Progress) // nil for no reports
+}
+
+// Progress is what a running job has done so far. A provider reports it when it can, with
+// the totals so far, one call at a time, and never after Run returns.
+type Progress struct {
+	Turns     int    // responses of the model so far
+	ToolCalls int    // tool calls so far
+	Tool      string // the name of the latest tool call, "" when there is none
 }
 
 // Result is what one job returned. InputTokens counts every input token, and the two cache
