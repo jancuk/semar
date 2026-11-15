@@ -32,7 +32,8 @@ type options struct {
 	Stdin     io.Reader
 	Terminal  func() bool // whether Stdin is a terminal
 	LookupEnv func(string) (string, bool)
-	TempRoot  string // where plan copies the source; "" is the system default
+	TempRoot  string                 // where plan copies the source; "" is a directory in the user cache directory
+	CacheDir  func() (string, error) // the user cache directory; nil is os.UserCacheDir
 	Providers func(repoRoot string) *provider.Registry
 	Environ   func() []string // the person's environment, for a harness that runs with their setup
 	Home      string          // where providers.yaml and usage.jsonl live; "" is $SEMAR_HOME or ~/.config/semar
@@ -68,6 +69,9 @@ func (o options) withDefaults() options {
 	}
 	if o.Terminal == nil {
 		o.Terminal = stdinIsTerminal
+	}
+	if o.CacheDir == nil {
+		o.CacheDir = os.UserCacheDir
 	}
 	if o.LookupEnv == nil {
 		o.LookupEnv = os.LookupEnv

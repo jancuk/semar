@@ -60,6 +60,8 @@ func buildArgs(s argSpec) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The temporary directories stay denied. A model that sees its working directory inside a
+	// denied directory may stop without reading, so the copy of the source is made elsewhere.
 	readable := []string{`":minimal"="read"`, `":tmpdir"="deny"`, `":slash_tmp"="deny"`, dir + `="read"`}
 	for _, root := range s.skillRoots {
 		q, err := tomlString(root)

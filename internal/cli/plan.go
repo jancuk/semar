@@ -189,7 +189,11 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		return exitError{ExitError}
 	}
 
-	tmp, err := os.MkdirTemp(o.TempRoot, "semar-plan-")
+	root, err := sourceCopyRoot(o)
+	if err != nil {
+		return fmt.Errorf("create a directory for the copy of the source: %w", err)
+	}
+	tmp, err := os.MkdirTemp(root, sourceCopyPrefix)
 	if err != nil {
 		return fmt.Errorf("create a directory for the copy of the source: %w", err)
 	}
@@ -481,4 +485,55 @@ func plural(n int, noun string) string {
 		return "1 " + noun
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+const (
+	sourceCopyPrefix = "semar-plan-"
+	sourceCopyMaxAge = 24 * time.Hour
+)
+
+// sourceCopyRoot is the directory that holds the copy of the source. A harness profile may deny
+// the temporary directory, so the default is the user cache directory. The system does not clean
+// that directory, so a copy that a crash left is removed here once it is a day old. A root that a
+// caller sets is used as it is and is never cleaned.
+func sourceCopyRoot(o options) (string, error) {
+	if o.TempRoot != "" {
+		return o.TempRoot, nil
+	}
+	cacheDir := o.CacheDir
+	if cacheDir == nil {
+		cacheDir = os.UserCacheDir
+	}
+	cache, err := cacheDir()
+	if err != nil || cache == "" {
+		return "", nil
+	}
+	root := filepath.Join(cache, "semar", "work")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", err
+	}
+	now := time.Now
+	if o.Clock != nil {
+		now = o.Clock
+	}
+	removeOldCopies(root, now().Add(-sourceCopyMaxAge))
+	return root, nil
+}
+
+// removeOldCopies ignores every error: a copy that stays is only disk space. RemoveAll on a link
+// removes the link and not its target.
+func removeOldCopies(root string, before time.Time) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), sourceCopyPrefix) {
+			continue
+		}
+		p := filepath.Join(root, e.Name())
+		if fi, err := os.Lstat(p); err == nil && fi.ModTime().Before(before) {
+			_ = os.RemoveAll(p)
+		}
+	}
 }

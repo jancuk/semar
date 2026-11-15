@@ -64,6 +64,8 @@ func newRepo(t *testing.T, o repoOptions) *repo {
 		// Home and Keychain keep a test away from the person's own files and keychain.
 		Home:     t.TempDir(),
 		Keychain: keychain.Memory(),
+		// The copy of the source goes in a directory of the test, never in the person's cache.
+		TempRoot: t.TempDir(),
 		// A test never has a status line, whatever its standard error is.
 		StderrTerminal: func() bool { return false },
 	}
