@@ -51,7 +51,8 @@ func toolDefs(schema json.RawMessage) []Tool {
 		{
 			Name: toolReadFile,
 			Description: "Read lines of one text file in the working directory. The result holds each line with its " +
-				"line number. It returns at most 2000 lines or 256 KiB per call; a note says where to continue. " +
+				"line number. It returns 2000 lines unless limit says otherwise, and never more than 256 KiB per call; " +
+				"a note says where to continue. " +
 				"A binary file is refused.",
 			Schema: json.RawMessage(`{"type":"object","properties":{` +
 				`"path":{"type":"string","description":"The file path, relative to the working directory."},` +

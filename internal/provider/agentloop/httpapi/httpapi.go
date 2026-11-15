@@ -134,6 +134,18 @@ func Client(c *http.Client) *http.Client {
 	return out
 }
 
+// Encode writes v as JSON without escaping <, >, and &, so that text the model wrote, such as
+// a thinking block, goes back as the same bytes.
+func Encode(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
 // Caller sends the requests of one job.
 type Caller struct {
 	HTTP   *http.Client // from Client
