@@ -160,8 +160,17 @@ type Caller struct {
 // Post sends body as JSON and returns the body of a 2xx response. It retries once after a 429
 // or a 5xx. An error is a *provider.Error, or the context's error.
 func (c *Caller) Post(ctx context.Context, target string, body []byte) ([]byte, error) {
+	return c.send(ctx, http.MethodPost, target, body)
+}
+
+// Get is Post for a request without a body, such as the list of models.
+func (c *Caller) Get(ctx context.Context, target string) ([]byte, error) {
+	return c.send(ctx, http.MethodGet, target, nil)
+}
+
+func (c *Caller) send(ctx context.Context, method, target string, body []byte) ([]byte, error) {
 	for attempt := 1; ; attempt++ {
-		status, header, data, err := c.post(ctx, target, body)
+		status, header, data, err := c.do(ctx, method, target, body)
 		if err != nil {
 			return nil, err
 		}
@@ -182,15 +191,21 @@ func (c *Caller) Post(ctx context.Context, target string, body []byte) ([]byte, 
 	}
 }
 
-func (c *Caller) post(ctx context.Context, target string, body []byte) (int, http.Header, []byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
+func (c *Caller) do(ctx context.Context, method, target string, body []byte) (int, http.Header, []byte, error) {
+	var rd io.Reader
+	if body != nil {
+		rd = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target, rd)
 	if err != nil {
 		return 0, nil, nil, &provider.Error{Class: provider.ProviderError, Detail: "the request could not be built"}
 	}
 	for k, v := range c.Header {
 		req.Header[k] = v
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {

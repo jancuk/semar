@@ -109,6 +109,17 @@ type AccountStatus struct {
 	Detail   string `json:"detail,omitempty"` // one line for a person
 }
 
+// ModelLister is implemented by an Instance that can name the models a person may choose.
+// It starts no model turn.
+type ModelLister interface {
+	Models(ctx context.Context) ([]Model, error)
+}
+
+type Model struct {
+	ID    string `json:"id"`              // what goes into the provider's model field
+	Label string `json:"label,omitempty"` // a name for a person
+}
+
 // The kinds of provider. A harness kind starts a program that the person installed and
 // signed in. An API kind calls a model API with a key.
 const (
