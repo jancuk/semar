@@ -89,7 +89,7 @@ func (e Endpoint) Key(resolve func(string) (string, error)) (string, *provider.E
 		err = errors.New("it is empty")
 	}
 	if err != nil {
-		detail := fmt.Sprintf("the API key reference %s does not resolve: %s", e.KeyRef, provider.Redact(err.Error()))
+		detail := "the API key cannot be used: " + provider.Redact(err.Error())
 		if key != "" {
 			detail = strings.ReplaceAll(detail, key, "[redacted]")
 		}

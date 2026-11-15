@@ -746,13 +746,13 @@ func TestAccount(t *testing.T) {
 		want                 provider.AccountStatus
 	}{
 		{"chatgpt", "", "Logged in using ChatGPT\nAccount: someone@example.com", 0,
-			provider.AccountStatus{SignedIn: true, Method: "subscription", Detail: "signed in with ChatGPT"}},
+			provider.AccountStatus{SignedIn: true, Method: "subscription", Detail: "Signed in to Codex with ChatGPT."}},
 		{"api key", "", "Logged in using an API key - sk-proj-***ABCD (someone@example.com)", 0,
-			provider.AccountStatus{SignedIn: true, Method: "api key", Detail: "signed in with an API key"}},
+			provider.AccountStatus{SignedIn: true, Method: "api key", Detail: "Signed in to Codex with an API key."}},
 		{"access token", "Logged in using access token\n", "", 0,
-			provider.AccountStatus{SignedIn: true, Method: "access token", Detail: "signed in with an access token"}},
+			provider.AccountStatus{SignedIn: true, Method: "access token", Detail: "Signed in to Codex with an access token."}},
 		{"not signed in", "", "Not logged in", 1,
-			provider.AccountStatus{Detail: "not signed in; run codex login"}},
+			provider.AccountStatus{Detail: "Not signed in. Run codex login."}},
 		{"failure", "", "someone@example.com: keychain locked", 2,
 			provider.AccountStatus{Detail: "codex login status ended with exit code 2"}},
 		{"unknown answer", "someone@example.com\n", "", 0,

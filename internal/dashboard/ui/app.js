@@ -247,10 +247,12 @@
 
   function details(p) {
     const out = [];
-    if (p.health && p.health.version) out.push('Version ' + p.health.version + '.');
-    if (isHarness(p.kind) && p.account && p.account.detail) out.push(p.account.detail);
-    else if (p.health && p.health.detail) out.push(p.health.detail);
-    if (!isHarness(p.kind)) {
+    if (isHarness(p.kind)) {
+      if (p.health && p.health.version) out.push('Version ' + p.health.version + '.');
+      if (p.account && p.account.detail) out.push(p.account.detail);
+      else if (p.health && p.health.detail) out.push(p.health.detail);
+    } else {
+      if (p.apiKey && p.keyReady && p.health && p.health.detail) out.push(p.health.detail);
       if (!p.apiKey) out.push('No key is needed for a server on this computer.');
       else if (!p.keyReady && p.apiKey.startsWith('env:')) out.push('The environment variable ' + p.apiKey.slice(4) + ' is not set where semar dashboard runs.');
       else if (!p.keyReady) out.push('The keychain has no key for this provider. Set the key below.');

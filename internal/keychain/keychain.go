@@ -153,22 +153,22 @@ func Resolver(lookupEnv func(string) (string, bool), store Store) func(ref strin
 		case "env":
 			v, ok := lookupEnv(name)
 			if !ok || v == "" {
-				return "", fmt.Errorf("key reference %s: the environment variable is not set or is empty", ref)
+				return "", fmt.Errorf("the environment variable of %s is not set or is empty", ref)
 			}
 			return v, nil
 		default:
 			if store == nil {
-				return "", fmt.Errorf("key reference %s: no keychain is available", ref)
+				return "", fmt.Errorf("no keychain is available for %s", ref)
 			}
 			v, err := store.Get(name)
 			if errors.Is(err, ErrNotFound) {
-				return "", fmt.Errorf("key reference %s: the keychain has no entry with this name; store the key again", ref)
+				return "", fmt.Errorf("the keychain has no entry for %s; store the key again", ref)
 			}
 			if err != nil {
-				return "", fmt.Errorf("key reference %s: the keychain could not be read: %w", ref, err)
+				return "", fmt.Errorf("the keychain could not be read for %s: %w", ref, err)
 			}
 			if v == "" {
-				return "", fmt.Errorf("key reference %s: the keychain entry is empty", ref)
+				return "", fmt.Errorf("the keychain entry of %s is empty", ref)
 			}
 			return v, nil
 		}

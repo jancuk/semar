@@ -58,7 +58,7 @@ func TestKeyHealthStatus(t *testing.T) {
 	if h := ep.Health(good); !h.Installed || h.Version != "api.example.com" {
 		t.Errorf("health = %+v", h)
 	}
-	if h := ep.Health(bad); h.Installed || !strings.Contains(h.Detail, "env:ACME_KEY does not resolve") {
+	if h := ep.Health(bad); h.Installed || !strings.Contains(h.Detail, "the API key cannot be used: the variable ACME_KEY is not set") {
 		t.Errorf("health = %+v", h)
 	}
 	if st := ep.Status(good); !st.SignedIn || st.Method != "api key" || strings.Contains(st.Detail, "acme-key-1") {
