@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -53,7 +54,15 @@ func validate(c Config, name string) error {
 	}
 	slices.Sort(envNames)
 	for _, n := range envNames {
+		if err := idcheck.Check("environment name", n); err != nil {
+			add("environments: %v", err)
+		}
 		validateEnvironment(n, c.Environments[n], add)
+	}
+	for _, n := range slices.Sorted(maps.Keys(c.AuthProfiles)) {
+		if err := idcheck.Check("auth profile name", n); err != nil {
+			add("authProfiles: %v", err)
+		}
 	}
 	return joinErrors(errs)
 }
@@ -81,6 +90,8 @@ func validateEnvironment(name string, e Environment, add func(string, ...any)) {
 		sp := fmt.Sprintf("%s.services[%d]", p, i)
 		if s.Name == "" {
 			add("%s.name is required", sp)
+		} else if err := idcheck.Check("service name", s.Name); err != nil {
+			add("%s.name: %v", sp, err)
 		}
 		u, err := url.Parse(s.BaseURL)
 		switch {

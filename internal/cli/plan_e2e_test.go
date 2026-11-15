@@ -630,6 +630,11 @@ func TestInit(t *testing.T) {
 		{"--base-url", "https://x.example", "--auth-value", "{{secret.TOKEN}} {{secret.TOKEN}}"},
 		{"--base-url", "https://x.example", "--token-env", "A-B"},
 		{"--base-url", "https://x.example", "--service", "../x"},
+		{"--base-url", "https://x.example", "--service", "orders=x"},
+		{"--base-url", "https://x.example", "--service", "orders x"},
+		{"--base-url", "https://x.example", "--service", "orders;x"},
+		{"--base-url", "https://x.example", "--env", "u=at"},
+		{"--base-url", "https://x.example", "--env", "u at"},
 		{"--base-url", "https://x.example", "--build-commit", "$.sha"},
 		{"--base-url", "https://x.example", "--build-url", "https://other.example/version"},
 		{"--base-url", "https://x.example", "--build-url", "https://x.example:8443/version"},
@@ -738,5 +743,17 @@ func TestPlanRefusesAModelThatIsNotAName(t *testing.T) {
 		if files := p.plannedFiles(t); len(files) != 0 {
 			t.Errorf("the plan wrote %v", files)
 		}
+	}
+}
+
+func TestInitNamesABadServiceOrEnvironment(t *testing.T) {
+	p := newPlanRepo(t, sampleapp.Options{})
+	p.opts.Providers = noProvider(t)
+	res := p.must(t, cli.ExitError, "init", "--base-url", "https://x.example", "--service", "orders=x")
+	contains(t, "stderr", res.stderr, `--service: invalid service name "orders=x"`)
+	res = p.must(t, cli.ExitError, "plan", "--diff", "main..release", "--base-url", "https://x.example", "--env", "u at")
+	contains(t, "stderr", res.stderr, `--env: invalid environment name "u at"`)
+	if exists(t, p.path(".semar")) {
+		t.Error("a refused init wrote .semar")
 	}
 }
