@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -27,6 +28,8 @@ import (
 type planFlags struct {
 	diff         diffFlags
 	model        string
+	provider     string
+	noSetup      bool
 	maxScenarios int
 	env          string
 	authProfile  string
@@ -38,7 +41,7 @@ type planFlags struct {
 // agentFiles are read by an agent harness as instructions or tools, and a .git directory would
 // make the copy a repository whose configuration the repository under test chose. They are
 // removed from the copy at every depth before the planner starts (R5).
-var agentFiles = []string{"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".mcp.json", ".claude", ".codex", ".cursor", ".git"}
+var agentFiles = []string{"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".mcp.json", ".claude", ".codex", ".agents", "AGENTS.override.md", ".cursor", ".git"}
 
 func newPlanCommand(o options) *cobra.Command {
 	var f planFlags
@@ -53,6 +56,8 @@ func newPlanCommand(o options) *cobra.Command {
 	}
 	addDiffFlags(cmd, &f.diff)
 	cmd.Flags().StringVar(&f.model, "model", "", "the model of the planner (default: the provider's model)")
+	cmd.Flags().StringVar(&f.provider, "provider", "", "the provider that plans (default: see semar providers)")
+	cmd.Flags().BoolVar(&f.noSetup, "no-setup", false, "plan without your MCP servers and skills, for this run")
 	cmd.Flags().IntVar(&f.maxScenarios, "max-scenarios", 0, "the most scenarios to draft (default: plan.maxScenarios)")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to plan for; needed when there are several. With --base-url, the name of the new environment (default uat)")
 	cmd.Flags().StringVar(&f.authProfile, "auth-profile", "", "the auth profile of the scenarios; needed when there are several and none is named default")
@@ -139,7 +144,22 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		}
 	}
 
-	pc := cfg.PlanProvider()
+	src, err := loadSources(o, f.dir, cfg)
+	if err != nil {
+		return err
+	}
+	pc, _, err := src.choose(f.provider)
+	if err != nil {
+		return err
+	}
+	if f.noSetup {
+		pc.Setup = config.Setup{}
+	}
+	model, err := planModel(f.model, pc, src.filePath)
+	if err != nil {
+		return err
+	}
+	o.drop.set(secretEnvNames(cfg))
 	inst, err := o.Providers(f.dir).New(pc)
 	if err != nil {
 		return err
@@ -166,22 +186,22 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 			plural(len(leftOut), "file"), shortCommit(cs.HeadCommit), map[bool]string{true: "was", false: "were"}[len(leftOut) == 1])
 	}
 
-	model := f.model
-	if model == "" {
-		model = pc.Model
-	}
-	in.Model = f.model
-	fmt.Fprintf(stderr, "semar: provider %s (%s) plans %s with %s; this can take several minutes\n",
-		inst.ID(), inst.Kind(), terminalSafe(cs.Head), terminalSafe(valueOr(model, "its default model")))
+	in.Model = model
+	in.SetupOn = provider.IsHarness(pc.Kind) && (pc.Setup.MCP || pc.Setup.Skills)
+	fmt.Fprintln(stderr, startLine(pc, cs.Head, model))
 
+	started := time.Now()
 	out, err := plan.Run(ctx, inst, in)
 	if err != nil {
+		o.recordUsage(stderr, inst, model, out, usageOutcome(ctx, err), "", time.Since(started))
 		return planFailed(ctx, stderr, err)
 	}
 	planFile, err := writePlan(f.dir, in, out, known)
 	if err != nil {
+		o.recordUsage(stderr, inst, model, out, "failed:not_written", "", time.Since(started))
 		return err
 	}
+	o.recordUsage(stderr, inst, model, out, "ok", filepath.Base(filepath.Dir(planFile)), time.Since(started))
 	printPlanDone(stdout, out, planFile, nextRun(env, f.env, cs.HeadCommit))
 	if len(out.Scenarios) == 0 {
 		return exitError{ExitUndecided}

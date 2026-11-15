@@ -14,7 +14,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/keychain"
 	"github.com/jancuk/semar/internal/provider"
+	"github.com/jancuk/semar/internal/userconfig"
 )
 
 // Version is set at build time with -ldflags and never changed at run time.
@@ -30,6 +32,19 @@ type options struct {
 	LookupEnv func(string) (string, bool)
 	TempRoot  string // where plan copies the source; "" is the system default
 	Providers func(repoRoot string) *provider.Registry
+	Environ   func() []string // the person's environment, for a harness that runs with their setup
+	Home      string          // where providers.yaml and usage.jsonl live; "" is $SEMAR_HOME or ~/.config/semar
+	Keychain  keychain.Store  // nil is the keychain of the operating system
+
+	drop *envDrop
+}
+
+// home is the directory of the person's own files.
+func (o options) home() (string, error) {
+	if o.Home != "" {
+		return o.Home, nil
+	}
+	return userconfig.Home(o.LookupEnv)
 }
 
 func (o options) withDefaults() options {
@@ -52,9 +67,18 @@ func (o options) withDefaults() options {
 	if o.LookupEnv == nil {
 		o.LookupEnv = os.LookupEnv
 	}
+	if o.Environ == nil {
+		o.Environ = os.Environ
+	}
+	if o.Keychain == nil {
+		o.Keychain = keychain.OS()
+	}
+	if o.drop == nil {
+		o.drop = &envDrop{}
+	}
 	if o.Providers == nil {
-		lookup := o.LookupEnv
-		o.Providers = func(repoRoot string) *provider.Registry { return providerRegistry(repoRoot, lookup) }
+		deps := providerDeps{lookupEnv: o.LookupEnv, environ: o.Environ, store: o.Keychain, drop: o.drop}
+		o.Providers = func(repoRoot string) *provider.Registry { return providerRegistry(repoRoot, deps) }
 	}
 	return o
 }
@@ -121,7 +145,7 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 		},
 	})
 	root.AddCommand(newRunCommand(o), newScriptCommand(), newConfirmCommand(o), newActivityCommand(),
-		newInitCommand(), newChangesCommand(), newPlanCommand(o))
+		newInitCommand(), newChangesCommand(), newPlanCommand(o), newProvidersCommand(o))
 	return root
 }
 

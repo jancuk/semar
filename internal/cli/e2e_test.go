@@ -20,6 +20,7 @@ import (
 
 	"github.com/jancuk/semar/internal/cli"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/keychain"
 	"github.com/jancuk/semar/internal/sampleapp"
 	"github.com/jancuk/semar/internal/scenario"
 	"github.com/jancuk/semar/internal/script"
@@ -60,6 +61,9 @@ func newRepo(t *testing.T, o repoOptions) *repo {
 		RunID: func() domain.RunID { return domain.RunID(fmt.Sprintf("r-test-%04d", ids.Add(1))) },
 		User:  func() (string, error) { return "tester", nil },
 		Stdin: strings.NewReader(""),
+		// Home and Keychain keep a test away from the person's own files and keychain.
+		Home:     t.TempDir(),
+		Keychain: keychain.Memory(),
 	}
 	if o.session != "" {
 		r.rewriteConfig(t, func(s string) string {
