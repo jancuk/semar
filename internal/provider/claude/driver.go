@@ -64,7 +64,7 @@ func NewWith(cfg config.Provider, opts Options) (*Driver, error) {
 	if usesSetup(cfg.Setup) && opts.Environ == nil {
 		return nil, fmt.Errorf("claude: provider %q uses the person's setup, and the driver was given no environment for it", cfg.ID)
 	}
-	if err := checkDeny(cfg.Setup.Deny); err != nil {
+	if err := config.CheckDeny(cfg.Setup.Deny); err != nil {
 		return nil, fmt.Errorf("claude: provider %q: %w", cfg.ID, err)
 	}
 	cfg.Setup.Deny = slices.Clone(cfg.Setup.Deny)

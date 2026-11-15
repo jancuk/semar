@@ -47,6 +47,12 @@ func pathID(w http.ResponseWriter, r *http.Request) (string, bool) {
 // change loads the file, lets edit change it, and saves it, all under the lock. A file that
 // is not valid on disk is never overwritten: the person fixes it by hand first.
 func (s *Server) change(w http.ResponseWriter, edit func(f *userconfig.File) error) bool {
+	return s.changeThen(w, edit, nil)
+}
+
+// changeThen runs after, when it is not nil, once the file is saved and still under the lock,
+// so that no other change sees the file and the keychain disagree.
+func (s *Server) changeThen(w http.ResponseWriter, edit func(f *userconfig.File) error, after func() error) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, _, err := userconfig.Load(s.d.Home)
@@ -65,6 +71,12 @@ func (s *Server) change(w http.ResponseWriter, edit func(f *userconfig.File) err
 	if err := userconfig.Save(s.d.Home, f); err != nil {
 		fail(w, http.StatusInternalServerError, "The providers file could not be saved: "+scrub(err.Error()))
 		return false
+	}
+	if after != nil {
+		if err := after(); err != nil {
+			fail(w, statusOf(err), scrub(err.Error()))
+			return false
+		}
 	}
 	return true
 }
@@ -128,7 +140,17 @@ func (s *Server) deleteProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	var removed userconfig.Provider
 	var others []userconfig.Provider
-	if !s.change(w, func(f *userconfig.File) error {
+	deleteKey := func() error {
+		name, isKeychain := strings.CutPrefix(removed.APIKey, keychainScheme)
+		shared := slices.ContainsFunc(others, func(p userconfig.Provider) bool { return strings.EqualFold(p.APIKey, removed.APIKey) })
+		if isKeychain && !shared {
+			if err := s.d.Keys.Delete(name); err != nil && !errors.Is(err, keychain.ErrNotFound) {
+				return refuse(http.StatusInternalServerError, "The provider was removed, but its key could not be deleted from the keychain: %v", err)
+			}
+		}
+		return nil
+	}
+	if !s.changeThen(w, func(f *userconfig.File) error {
 		i := find(f, id)
 		switch {
 		case i < 0:
@@ -140,16 +162,8 @@ func (s *Server) deleteProvider(w http.ResponseWriter, r *http.Request) {
 		f.Providers = slices.Delete(f.Providers, i, i+1)
 		others = f.Providers
 		return nil
-	}) {
+	}, deleteKey) {
 		return
-	}
-	name, isKeychain := strings.CutPrefix(removed.APIKey, keychainScheme)
-	shared := slices.ContainsFunc(others, func(p userconfig.Provider) bool { return p.APIKey == removed.APIKey })
-	if isKeychain && !shared {
-		if err := s.d.Keys.Delete(name); err != nil && !errors.Is(err, keychain.ErrNotFound) {
-			fail(w, http.StatusInternalServerError, "The provider was removed, but its key could not be deleted from the keychain: "+scrub(err.Error()))
-			return
-		}
 	}
 	reply(w, http.StatusOK, struct {
 		Removed string `json:"removed"`
@@ -207,6 +221,11 @@ func (s *Server) putKey(w http.ResponseWriter, r *http.Request) {
 			return refuse(http.StatusNotFound, "There is no provider with the ID %s.", id)
 		case !provider.IsAPI(f.Providers[i].Kind):
 			return refuse(http.StatusBadRequest, "%s signs in by itself and takes no key.", id)
+		}
+		for j, p := range f.Providers {
+			if j != i && strings.EqualFold(p.APIKey, ref) {
+				return refuse(http.StatusConflict, "The provider %s uses the keychain entry %s as its key, and storing a key for %s would replace it. Change the apiKey of %s first.", p.ID, p.APIKey, id, p.ID)
+			}
 		}
 		// The key is stored before the file names it, so the file never points at an
 		// entry that a failed write left out.

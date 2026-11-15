@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/hostrule"
@@ -25,6 +26,28 @@ var modelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,127}$`
 func CheckModel(model string) error {
 	if !modelPattern.MatchString(model) {
 		return fmt.Errorf("%q is not a model name: use up to 128 letters, digits, and . _ : / [ ] -, starting with a letter or digit", model)
+	}
+	return nil
+}
+
+// CheckDeny refuses a setup.deny entry that a harness could read as a flag or split into
+// several. The person's file and the Claude driver both use it.
+func CheckDeny(deny []string) error {
+	for i, entry := range deny {
+		var problem string
+		switch {
+		case strings.TrimSpace(entry) == "":
+			problem = "is empty"
+		case strings.HasPrefix(entry, "-"):
+			problem = "starts with a dash"
+		case strings.Contains(entry, ","):
+			problem = "holds a comma; give each tool as its own entry"
+		case strings.ContainsFunc(entry, unicode.IsControl):
+			problem = "holds a control character"
+		}
+		if problem != "" {
+			return fmt.Errorf("entry %d of setup.deny, %q, %s", i+1, entry, problem)
+		}
 	}
 	return nil
 }

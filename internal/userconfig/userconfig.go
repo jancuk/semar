@@ -198,6 +198,9 @@ func (f File) Validate() error {
 		add("%s: version must be 1", FileName)
 	}
 	seen := map[string]bool{}
+	// A keychain may ignore case in its names, so IDs that differ only in case would share
+	// the entry keychain:<id>.
+	folded := map[string]string{}
 	for i, p := range f.Providers {
 		where := fmt.Sprintf("%s: provider %d", FileName, i+1)
 		if err := idcheck.Check("provider id", p.ID); err != nil {
@@ -205,8 +208,14 @@ func (f File) Validate() error {
 			continue
 		}
 		where = fmt.Sprintf("%s: provider %q", FileName, p.ID)
-		if seen[p.ID] {
+		other, clash := folded[strings.ToLower(p.ID)]
+		switch {
+		case seen[p.ID]:
 			add("%s: the id is used twice", where)
+		case clash:
+			add("%s: the id differs from %q only in case; give one of them another id", where, other)
+		default:
+			folded[strings.ToLower(p.ID)] = p.ID
 		}
 		seen[p.ID] = true
 		errs = append(errs, validateProvider(where, p)...)
@@ -246,10 +255,8 @@ func validateProvider(where string, p Provider) []error {
 			add("apiKey is for the anthropic and openai kinds, and %s signs in by itself", p.Kind)
 		}
 		if p.Setup != nil {
-			for _, d := range p.Setup.Deny {
-				if strings.TrimSpace(d) == "" {
-					add("setup.deny must not hold an empty entry")
-				}
+			if err := config.CheckDeny(p.Setup.Deny); err != nil {
+				add("%v", err)
 			}
 		}
 		return errs

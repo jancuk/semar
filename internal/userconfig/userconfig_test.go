@@ -86,6 +86,7 @@ func TestValidateRules(t *testing.T) {
 			f.Providers[1].APIKey = ""
 			f.Providers[1].Model = ""
 		}), "used twice"},
+		{"ids that differ only in case", mut(func(f *File) { f.Providers[1].ID = "CLAUDE" }), `"CLAUDE": the id differs from "claude" only in case`},
 		{"default unknown", mut(func(f *File) { f.Default = "nope" }), `default "nope"`},
 		{"default empty", mut(func(f *File) { f.Default = "" }), "default must name"},
 		// F3
@@ -97,6 +98,10 @@ func TestValidateRules(t *testing.T) {
 		{"baseUrl on harness", mut(func(f *File) { f.Providers[0].BaseURL = "https://api.example.com" }), "baseUrl is for"},
 		{"apiKey on harness", mut(func(f *File) { f.Providers[0].APIKey = "env:X" }), "apiKey is for"},
 		{"empty deny", mut(func(f *File) { f.Providers[0].Setup = &Setup{Deny: []string{" "}} }), "setup.deny"},
+		{"deny with a dash", mut(func(f *File) { f.Providers[0].Setup = &Setup{Deny: []string{"--dangerously-skip-permissions"}} }), "starts with a dash"},
+		{"deny with a comma", mut(func(f *File) { f.Providers[0].Setup = &Setup{Deny: []string{"Bash,Edit"}} }), "holds a comma"},
+		{"deny with a control character", mut(func(f *File) { f.Providers[0].Setup = &Setup{Deny: []string{"Bash\nEdit"}} }), "control character"},
+		{"deny of an MCP tool", mut(func(f *File) { f.Providers[0].Setup = &Setup{Deny: []string{"mcp__orders__delete", "Bash(rm:*)"}} }), ""},
 		// F5
 		{"http remote", mut(func(f *File) { f.Providers[1].BaseURL = "http://api.example.com" }), "http is allowed only"},
 		{"http localhost", mut(func(f *File) { f.Providers[1].BaseURL = "http://localhost:8080/v1" }), ""},

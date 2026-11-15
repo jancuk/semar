@@ -645,3 +645,65 @@ func TestEmbeddedPage(t *testing.T) {
 		}
 	}
 }
+
+// lockWatch records whether the server held its lock at each change of the keychain.
+type lockWatch struct {
+	keychain.Store
+	s      *Server
+	mu     sync.Mutex
+	unheld []string
+}
+
+func (l *lockWatch) note(op string) {
+	if l.s.mu.TryLock() {
+		l.s.mu.Unlock()
+		l.mu.Lock()
+		l.unheld = append(l.unheld, op)
+		l.mu.Unlock()
+	}
+}
+
+func (l *lockWatch) Set(name, value string) error {
+	l.note("set " + name)
+	return l.Store.Set(name, value)
+}
+func (l *lockWatch) Delete(name string) error { l.note("delete " + name); return l.Store.Delete(name) }
+
+func TestKeychainChangesHoldTheLock(t *testing.T) {
+	var watch *lockWatch
+	fx := newFixture(t, func(s *Server) {
+		watch = &lockWatch{Store: s.d.Keys, s: s}
+		s.d.Keys = watch
+	})
+	fx.writeFile(twoProviders)
+	want(t, fx.call("PUT", "/api/providers/deepseek/key", `{"value":"sk-ds-0123456789"}`), http.StatusOK)
+	want(t, fx.call("DELETE", "/api/providers/deepseek", ""), http.StatusOK)
+	if _, err := fx.keys.Get("deepseek"); err == nil {
+		t.Fatal("the keychain entry of the removed provider is still there")
+	}
+	if len(watch.unheld) > 0 {
+		t.Fatalf("the keychain was changed without the lock: %q", watch.unheld)
+	}
+}
+
+func TestPutKeyRefusesAnEntryOfAnotherProvider(t *testing.T) {
+	fx := newFixture(t)
+	fx.writeFile(twoProviders + `  - id: acme
+    kind: anthropic
+    apiKey: keychain:Deepseek
+`)
+	if err := fx.keys.Set("Deepseek", "sk-acme-0123456789"); err != nil {
+		t.Fatal(err)
+	}
+	a := fx.call("PUT", "/api/providers/deepseek/key", `{"value":"sk-ds-0123456789"}`)
+	want(t, a, http.StatusConflict)
+	if !strings.Contains(a.body, "acme") || !strings.Contains(a.body, "keychain:Deepseek") {
+		t.Errorf("answer %s does not name the provider and its reference", a.body)
+	}
+	if got, _ := fx.keys.Get("Deepseek"); got != "sk-acme-0123456789" {
+		t.Fatal("the key of another provider was replaced")
+	}
+	if p := fx.state().Providers[1]; p.APIKey != "env:DEEPSEEK_API_KEY" {
+		t.Fatalf("provider %+v", p)
+	}
+}

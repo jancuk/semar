@@ -1,10 +1,7 @@
 package claude
 
 import (
-	"fmt"
 	"strconv"
-	"strings"
-	"unicode"
 
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/provider"
@@ -62,25 +59,4 @@ func buildArgs(job provider.Job, cfg config.Provider) []string {
 		args = append(args, "--model="+model)
 	}
 	return args
-}
-
-// checkDeny refuses an entry that the harness could read as a flag or split into several.
-func checkDeny(deny []string) error {
-	for i, entry := range deny {
-		var problem string
-		switch {
-		case strings.TrimSpace(entry) == "":
-			problem = "is empty"
-		case strings.HasPrefix(entry, "-"):
-			problem = "starts with a dash"
-		case strings.Contains(entry, ","):
-			problem = "holds a comma; give each tool as its own entry"
-		case strings.ContainsFunc(entry, unicode.IsControl):
-			problem = "holds a control character"
-		}
-		if problem != "" {
-			return fmt.Errorf("entry %d of setup.deny, %q, %s", i+1, entry, problem)
-		}
-	}
-	return nil
 }
