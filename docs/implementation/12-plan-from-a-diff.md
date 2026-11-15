@@ -14,12 +14,15 @@
 cd <the repository under test>
 semar plan --diff 'https://bitbucket.org/<workspace>/<repo>/branches/compare/<head>%0D<base>' \
   --base-url https://<host of the test environment> --token-env MY_TOKEN
-semar run --all
+semar run --all --build <head commit>     # shows whether the drafted requests fit
+semar confirm --all                       # a person accepts the expected results
+semar run --all --build <head commit>     # the result
 ```
 
 * `semar changes --diff <link or range>` prints the change table with no model: the tickets, their commits, the commits with no ticket, and the changed files.
 * `semar plan --diff <link or range>` writes `.semar/semar.yaml` when it is missing, scenario files, stored scripts, and `plan.md`.
 * `semar init --base-url <url>` writes only `.semar/semar.yaml`.
+* `semar run --build <commit>` declares the build of a service that has no endpoint for its version.
 
 ## Architecture
 
@@ -44,7 +47,7 @@ link or range --> codehost.ParseCompare --> vcs.Git (fetch, log, diff, archive) 
 ```text
 internal/domain/change.go           ChangeSet, ChangeCommit, TicketChange, FileChange
 internal/vcs/git.go                 reads a git repository through the git command (G13)
-internal/vcs/archive.go             the files of one commit, copied to a directory
+internal/vcs/archive.go             the files of one commit, copied to a directory, read from the object store
 internal/codehost/compare.go        Compare, LinkParser, ParseCompare, SameRepo
 internal/codehost/bitbucket/        the compare link of Bitbucket Cloud
 internal/codehost/github/           the compare link of GitHub
@@ -58,6 +61,7 @@ internal/provider/env.go            the child's environment (H2)
 internal/provider/claude/           the Claude Code driver: args.go, parse.go, driver.go, testdata/
 internal/provider/fake/             replays outputs from files
 internal/config/                    gains providers, tickets, and plan
+internal/build/declared.go          a build that the user declares, and a prober that combines both kinds
 internal/scenario/marshal.go        a Scenario to YAML that Parse reads back unchanged
 internal/script/marshal.go          a Script to YAML that Parse reads back unchanged
 internal/prompt/prompt.go, plan.md  the embedded planner prompt with a version line (A9)
@@ -128,7 +132,8 @@ func (g *Git) MergeBase(ctx context.Context, a, b string) (string, error)
 func (g *Git) Log(ctx context.Context, from, to string) ([]Commit, error)    // commits of to that from lacks, oldest first
 func (g *Git) DiffStat(ctx context.Context, base, head string) ([]FileStat, error)
 func (g *Git) Diff(ctx context.Context, base, head string) ([]byte, error)
-func (g *Git) Archive(ctx context.Context, commit, dest string) error        // dest must not exist
+type Skipped struct{ Path, Reason string }
+func (g *Git) Archive(ctx context.Context, commit, dest string) ([]Skipped, error) // dest must not exist
 
 // internal/codehost
 type Compare struct {
@@ -236,7 +241,6 @@ func Render(w io.Writer, in Input, out Output) error
 providers:
   - id: claude
     kind: claude        # claude | fake
-    binaryPath: ""      # empty: look on PATH
     model: ""           # empty: the harness's own default
 tickets:
   pattern: "[A-Z][A-Z0-9]+-[0-9]+"
@@ -248,6 +252,8 @@ plan:
 ```
 
 A `fake` provider has `outputs: [file, ...]`, one JSON file per call, relative to the repository root. It makes every stage testable with no model (A11).
+
+The configuration is a file of the repository under test, so it never names a program to start. The Claude Code binary is the one on `PATH`, or the absolute path in the environment variable `SEMAR_CLAUDE_BIN`. A `binaryPath` key is an error.
 
 **Links.** `ParseCompare` accepts:
 
@@ -345,19 +351,23 @@ authProfiles:
     secrets: {TOKEN: "env:<--token-env, default SEMAR_TOKEN>"}
 ```
 
+With `--build-url <url>` it adds an `http` build probe to the service, and `--build-commit <JSONPath>` names where the answer holds the commit. The default is `$.commit`.
+
+**A declared build.** A result belongs to a build, so a run with no recorded build is `inconclusive`. A service with no endpoint for its version gets its build from the command line: `semar run --build <commit>`, or `--build <service>=<commit>` when several services lack a probe. The run stores the build with `declared: true`, and the report says that it was declared and not read from the service, and that a declared build cannot show a redeploy during the run.
+
 ## Rules
 
 | # | Rule | Source |
 | --- | --- | --- |
 | R1 | Every git call is `exec.CommandContext` with an argument list. A branch name, a commit, or a path that starts with `-` or holds a control character is refused before git runs, and names follow `--end-of-options` or `--` | G13 |
-| R2 | Git runs with `GIT_TERMINAL_PROMPT=0`, no pager, `core.hooksPath` set to the null device, and `core.fsmonitor` off. Semar never writes to the work tree, the index, or a branch of the repository under test. `Fetch` updates only remote-tracking references | The repository under test is not trusted |
-| R3 | `Archive` copies regular files only. It refuses a path that is not local (`filepath.IsLocal`), skips links and devices, and caps one file at 5 MiB and the copy at 500 MiB | G19 |
+| R2 | Git runs with `GIT_TERMINAL_PROMPT=0`, no pager, `core.hooksPath` set to the null device, `core.fsmonitor` off, and no signature check in a log. Semar never writes to the work tree, the index, or a branch of the repository under test. `Fetch` updates only remote-tracking references, and only for names that are branches of the remote. A fetch uses the transport and the credentials of the user's own git configuration. That file is the user's and is not content of the repository | The content of the repository under test is not trusted |
+| R3 | `Archive` reads the tree and the file contents from the object store, so no attribute, filter, or substitution of the repository applies. It copies regular files only, refuses a path that is not local (`filepath.IsLocal`), skips links and submodules, and caps one file at 5 MiB and the copy at 500 MiB. Every file it leaves out is returned with the reason and listed in `plan.md` | G19 |
 | R4 | The copy of the source lives in a new temporary directory with mode 0700 and is removed when the command ends, also on an error or a cancel | G19 |
 | R5 | Before the planner starts, these are removed from the copy: `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, and the directories `.claude`, `.codex`, and `.cursor`, at every depth | H3 |
 | R6 | A ticket key matches only at a word boundary. `SHOP-4820` does not hold the key `SHOP-482` | Plan 03, review focus 1 |
 | R7 | A merge commit adds its keys to the change set and adds no files. A file belongs to the tickets of the commits, not merges, that touched it | TRD, Limits of linking |
 | R8 | When a link names a repository, the `origin` remote of the directory must name the same one. Otherwise the command stops with both names | A plan for the wrong repository is worse than none |
-| R9 | The Claude driver starts `claude -p --output-format json --json-schema <schema> --tools Read,Grep,Glob --strict-mcp-config --setting-sources "" --no-session-persistence --max-turns <n>`, with `--model` only when one is set, the prompt on standard input, and the copy as the working directory. It never passes `--bare` | H3. Checked on Claude Code 2.1.325 |
+| R9 | The Claude driver starts the binary found on `PATH`, or named by `SEMAR_CLAUDE_BIN`, as an absolute path that is not inside the copy: `claude -p --output-format json --json-schema <schema> --tools Read,Grep,Glob --strict-mcp-config --setting-sources "" --no-session-persistence --max-turns <n>`, with `--model` only when one is set, the prompt on standard input, and the copy as the working directory. It never passes `--bare` | H3. Checked on Claude Code 2.1.325: with these flags and the environment of R10, reading a file outside the working directory is refused for an absolute path, a relative path, a link, a search, and a file listing |
 | R10 | The child's environment is `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `TERM`, and `TMPDIR` from the parent. No other variable is passed | H2 |
 | R11 | On a cancel or a timeout the driver stops the child's whole process group and waits for it | H9 |
 | R12 | The driver reads `is_error`, `subtype`, `structured_output`, `num_turns`, `usage`, and `modelUsage` from the output, and ignores every other field. An output with no `structured_output` object is `validation_error` | H4 |
@@ -369,7 +379,9 @@ authProfiles:
 | R18 | The prompt, the draft, and text from the repository are data. No field of the draft sets a host, a secret, an auth profile, or a file path to write. File names come from the ticket key and a number that code assigns | A7 |
 | R19 | The planner is told the names of the services and that an auth profile exists. It is never given a base URL, a header value, or a secret | A5 |
 | R20 | `semar changes` starts no provider. `semar plan` starts none when the change set has no commit | A11 |
-| R21 | `semar plan` writes every file or none: it validates the whole draft first, and writes scenario files before scripts | A half-written plan cannot be told from a small one |
+| R21 | `semar plan` writes every file or none: it validates the whole draft first, writes scenario files before scripts, and removes what it wrote when a later write fails. No directory on the way to a file may be a link | A half-written plan cannot be told from a small one, and a link must not move a file out of the repository |
+| R23 | A request header has a valid name, no control character in its value, and is not one that the HTTP client owns, such as `Host` or `Content-Length`. The rule is in `script.Validate`, so it holds for a hand-written script too | One set of rules for a request |
+| R24 | A ticket key must be usable as one path segment. A range in which no commit names a ticket stops the command before a provider starts | Scenario IDs and directories come from the key |
 | R22 | A request in a draft may use a literal ID only when the same scenario captured it or the source copy holds it as a fixed test value. Otherwise the planner lists the case under `notDrafted` with what it needs. This rule is in the prompt and in `plan.md`. Code cannot check it | A drafted test must not guess data of the test environment |
 
 ## Tasks
@@ -403,3 +415,5 @@ In a fixture repository, the two commands of "What works when it is done" run wi
 * Scripts are drafted from the source and were never sent. Plan 02 replaces the draft with a recording through Semar's tools.
 * Ticket titles and acceptance criteria need the tracker port of Plan 03. Until then a ticket is its key and its commits, and no expectation can have the source `ticket`.
 * A scenario that needs data of the test environment, such as the ID of an existing loan, is listed as not drafted. Data sets belong to Plan 11.
+* An auth profile sends one session header. A service behind a gateway that reads several identity headers, one set per role, needs the auth profiles of Plan 04.
+* A link to one pull request needs the code host's API, which belongs to Plan 08.

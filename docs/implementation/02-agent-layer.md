@@ -142,7 +142,6 @@ func Run(ctx context.Context, d Deps, scenarios []domain.Scenario) ([]Result, er
 providers:
   - id: claude
     kind: claude              # the adapter. "driver" in the TRD
-    binaryPath: ""            # empty: look on PATH
     env: {}                   # a value may be { secret: "env:NAME" }
     models: []
 agents:

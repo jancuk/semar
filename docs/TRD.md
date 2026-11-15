@@ -1009,7 +1009,7 @@ roles:
   screener:     { decider: typesafe }                 # optional
 ```
 
-`default` means "do not pass a model flag". Each instance also accepts `binaryPath`, `home` (mapped to `CLAUDE_CONFIG_DIR` or `CODEX_HOME`), and `launchArgs`.
+`default` means "do not pass a model flag". Each instance also accepts `home` (mapped to `CLAUDE_CONFIG_DIR` or `CODEX_HOME`). The path of a harness binary and its launch arguments are never read from this file, because the file belongs to the repository under test. The binary is the one on `PATH`, or the absolute path in an environment variable of the user, such as `SEMAR_CLAUDE_BIN`.
 
 ### Decision models
 

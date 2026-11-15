@@ -19,9 +19,12 @@ If the expected behavior is written nowhere outside the code, no tool can detect
 
 ## Status
 
-The model-free core is implemented in Go: replay of accepted scripts against an HTTP API, an effects policy that limits what a test may change, redaction, an evidence store, the verdict, and the report.
+Two parts are implemented in Go.
 
-The agent layer, planning from a change, security probes, providers and agents, data stores, team mode, web, and Android are specified in `docs/implementation/` and are not built yet. [docs/implementation/README.md](docs/implementation/README.md) gives the sequence of plans and what each one adds. Plans 01 to 04 are the first usable version, from a plan to a report for one API ticket.
+* **The model-free core:** replay of accepted scripts against an HTTP API, an effects policy that limits what a test may change, redaction, an evidence store, the verdict, and the report.
+* **A test plan from a diff:** `semar plan --diff` reads the difference between two branches, finds the tickets in the commits, and has a model draft scenarios and requests from the source. Code validates the draft. The model has read-only tools and a copy of the source, and it never reaches the test environment.
+
+Live recording of scripts by an agent, the tracker and risk levels, security probes, providers and agents, data stores, team mode, web, and Android are specified in `docs/implementation/` and are not built yet. [docs/implementation/README.md](docs/implementation/README.md) gives the sequence of plans and what each one adds. Plans 01 to 04 are the first usable version, from a plan to a report for one API ticket.
 
 ## Quick start
 
@@ -32,13 +35,29 @@ make build     # writes bin/semar
 make check     # gofmt, go vet, staticcheck, govulncheck, and the tests
 ```
 
-All four commands take `--dir <path>`, the root of the repository that holds `.semar/`. It defaults to the current directory.
+From a deployed change to a result, inside a clone of the service's repository:
 
 ```
+semar plan --diff 'https://bitbucket.org/<workspace>/<repo>/branches/compare/<head>%0D<base>' \
+  --base-url https://<host of the test environment> --token-env MY_TOKEN
+export MY_TOKEN=<the token of a test account>
+semar run --all --build <head commit>   # shows whether the drafted requests fit
+semar confirm --all                     # a person accepts the expected results
+semar run --all --build <head commit>   # the result
+```
+
+`--diff` also takes a GitHub or GitLab compare link, or a plain range such as `main..release`. `--base-url` and `--token-env` are needed only the first time: they write `.semar/semar.yaml`. Planning starts the Claude Code binary on `PATH` with read-only tools. `--build` declares the build under test when the service has no endpoint for its version.
+
+Every command takes `--dir <path>`, the root of the repository that holds `.semar/`. It defaults to the current directory.
+
+```
+semar plan --diff <link or range>   # write scenarios, scripts, and plan.md for a change
+semar changes --diff <link or range>  # print the tickets, commits, and files of a change; no model
+semar init --base-url <url>    # write .semar/semar.yaml
 semar run --scenario <id>      # replay one scenario; repeat the flag for more
 semar run --all                # replay every scenario in .semar/scenarios
 semar script add <file>        # check a script against its scenario and store it
-semar confirm <scenario id> --yes   # confirm the expected results that need a person
+semar confirm <scenario id> --yes   # confirm the expected results that need a person; --all for every scenario
 semar activity <run id|latest> # print what a run did, in order
 ```
 
@@ -50,6 +69,7 @@ The layout of `.semar/`:
 .semar/
   semar.yaml          environments, services, auth profiles, redaction, policy
   scenarios/          one YAML file per scenario, for example SHOP-482/SHOP-482-01.yaml
+  plans/<head commit>/  plan.md and the accepted draft of one planned change
   runs/<run id>/      run.json, report.md, activity.jsonl, and the recorded exchanges of one run
   store/              accepted scripts and confirmations
 ```
