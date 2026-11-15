@@ -91,6 +91,11 @@ func New(cfg config.Provider, o Options) (*Driver, error) {
 			return nil, fmt.Errorf("provider %q: %w", cfg.ID, err)
 		}
 	}
+	if cfg.Reasoning != "" {
+		if err := config.CheckReasoning(cfg.Reasoning); err != nil {
+			return nil, fmt.Errorf("provider %q: %w", cfg.ID, err)
+		}
+	}
 	return &Driver{cfg: cfg, o: o}, nil
 }
 
@@ -163,6 +168,12 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 			return provider.Result{}, &provider.Error{Class: provider.ValidationError, Detail: err.Error()}
 		}
 	}
+	level := provider.JobReasoning(job, d.cfg)
+	if level != "" {
+		if err := config.CheckReasoning(level); err != nil {
+			return provider.Result{}, &provider.Error{Class: provider.ValidationError, Detail: err.Error()}
+		}
+	}
 	workdir, err := filepath.EvalSymlinks(job.Workdir)
 	if err != nil {
 		return provider.Result{}, &provider.Error{Class: provider.ValidationError, Detail: fmt.Sprintf("the working directory %q cannot be resolved", job.Workdir)}
@@ -188,6 +199,7 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 		workdir:    workdir,
 		schemaFile: schemaFile,
 		model:      model,
+		reasoning:  level,
 		setup:      d.cfg.Setup,
 		skillRoots: d.skillRoots(),
 		repoSkills: repoSkills(workdir),
@@ -216,6 +228,7 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 			return provider.Result{}, perr
 		}
 		out.Model = model
+		out.Reasoning = level
 		return out, nil
 	case errors.Is(err, context.DeadlineExceeded):
 		return provider.Result{}, &provider.Error{Class: provider.TransportError, Detail: "the harness did not finish in " + deadlineText(job)}

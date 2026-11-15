@@ -53,6 +53,11 @@ type request struct {
 	Messages     []message     `json:"messages"`
 	Tools        []tool        `json:"tools"`
 	CacheControl *cacheControl `json:"cache_control,omitempty"`
+	OutputConfig *outputConfig `json:"output_config,omitempty"`
+}
+
+type outputConfig struct {
+	Effort string `json:"effort"`
 }
 
 // buildRequest maps the neutral conversation. The tools, the system text, and the prompt never

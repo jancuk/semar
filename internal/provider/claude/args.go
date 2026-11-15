@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"slices"
 	"strconv"
 
 	"github.com/jancuk/semar/internal/config"
@@ -16,6 +17,16 @@ const setupSettings = `{"disableAllHooks":true,"permissions":{"blockReadsOutside
 // setupEnvExtra keeps the person's instruction files and the automatic memory out of a job
 // with the setup. --setting-sources user would load the instruction file of the person.
 var setupEnvExtra = []string{"CLAUDE_CODE_DISABLE_CLAUDE_MDS=1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"}
+
+// Levels are the values of the --effort flag of the installed version, weakest first.
+var Levels = []string{"low", "medium", "high", "xhigh", "max"}
+
+func checkLevel(level string) error {
+	if level == "" || slices.Contains(Levels, level) {
+		return nil
+	}
+	return provider.RefuseReasoning(Kind, level, Levels)
+}
 
 func usesSetup(s config.Setup) bool { return s.MCP || s.Skills }
 
@@ -57,6 +68,9 @@ func buildArgs(job provider.Job, cfg config.Provider) []string {
 	}
 	if model != "" {
 		args = append(args, "--model="+model)
+	}
+	if level := provider.JobReasoning(job, cfg); level != "" {
+		args = append(args, "--effort="+level)
 	}
 	return args
 }

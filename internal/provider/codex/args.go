@@ -27,6 +27,7 @@ type argSpec struct {
 	workdir    string // resolved, absolute
 	schemaFile string // "" when the schema goes in the prompt
 	model      string
+	reasoning  string
 	setup      config.Setup
 	skillRoots []string
 	repoSkills []string
@@ -79,6 +80,13 @@ func buildArgs(s argSpec) ([]string, error) {
 		`projects={` + dir + `={trust_level="untrusted"}}`,
 		`default_permissions="` + profileName + `"`,
 		`permissions.` + profileName + `={filesystem={` + strings.Join(readable, ", ") + `}}`,
+	}
+	if s.reasoning != "" {
+		q, err := tomlString(s.reasoning)
+		if err != nil {
+			return nil, err
+		}
+		overrides = append(overrides, "model_reasoning_effort="+q)
 	}
 	if s.setupOn() && !s.setup.MCP {
 		overrides = append(overrides, `mcp_servers={}`)

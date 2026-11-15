@@ -10,13 +10,16 @@ import (
 	"github.com/jancuk/semar/internal/provider/agentloop"
 )
 
-// The request uses only the fields that servers of this format share: no strict schemas, no
+// The request uses only the fields that servers of this format share, and reasoning_effort when asked: no strict schemas, no
 // tool_choice (some reasoning modes refuse a forced choice), and no output limit, whose field
 // name differs between servers, so each server's default applies.
 type request struct {
 	Model    string `json:"model"`
 	Messages []any  `json:"messages"`
 	Tools    []tool `json:"tools"`
+	// ReasoningEffort is sent only when the person set a level, because a server that does not
+	// know the field may refuse it.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type tool struct {

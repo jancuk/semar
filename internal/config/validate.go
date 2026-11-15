@@ -30,6 +30,17 @@ func CheckModel(model string) error {
 	return nil
 }
 
+var reasoningPattern = regexp.MustCompile(`^[a-z]{1,16}$`)
+
+// CheckReasoning accepts a reasoning level that cannot be read as a flag or hold a control
+// character: 1 to 16 lower-case letters. Each kind decides which levels it can pass on.
+func CheckReasoning(level string) error {
+	if !reasoningPattern.MatchString(level) {
+		return fmt.Errorf("%q is not a reasoning level: use 1 to 16 lower-case letters, such as high", level)
+	}
+	return nil
+}
+
 // CheckDeny refuses a setup.deny entry that a harness could read as a flag or split into
 // several. The person's file and the Claude driver both use it.
 func CheckDeny(deny []string) error {

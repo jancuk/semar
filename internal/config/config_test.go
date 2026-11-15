@@ -270,6 +270,7 @@ plan: {provider: fake, maxScenarios: 3, maxTurns: 7, timeout: 90s}
 		{"unknown provider key", "version: 1\nproviders:\n  - id: a\n    kind: claude\n    bogus: 1\n", "semar.yaml:5"},
 		{"an address from the repository", "version: 1\nproviders:\n  - id: a\n    kind: openai\n    baseUrl: https://example.com\n", "semar.yaml:5"},
 		{"a key from the repository", "version: 1\nproviders:\n  - id: a\n    kind: openai\n    apiKey: env:KEY\n", "semar.yaml:5"},
+		{"a reasoning level from the repository", "version: 1\nproviders:\n  - id: a\n    kind: claude\n    reasoning: high\n", "semar.yaml:5"},
 		{"a setup from the repository", "version: 1\nproviders:\n  - id: a\n    kind: claude\n    setup: {mcp: true}\n", "semar.yaml:5"},
 		{"unknown plan key", "version: 1\nplan:\n  maxTurn: 1\n", "semar.yaml:3"},
 		{"unknown tickets key", "version: 1\ntickets:\n  regex: x\n", "semar.yaml:3"},

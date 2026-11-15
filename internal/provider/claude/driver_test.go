@@ -550,3 +550,56 @@ func TestAHarnessInsideTheRepositoryIsNotStarted(t *testing.T) {
 		}
 	})
 }
+
+func TestRunReasoningFlag(t *testing.T) {
+	cases := []struct {
+		name, cfgLevel, jobLevel, want string
+	}{
+		{"none", "", "", ""},
+		{"configured", "medium", "", "--effort=medium"},
+		{"job wins", "medium", "max", "--effort=max"},
+		{"job only", "", "xhigh", "--effort=xhigh"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b := newBinary(t, "success.json", 0, "")
+			d := newDriver(t, config.Provider{Reasoning: c.cfgLevel}, b.path)
+			j := job(t)
+			j.Reasoning = c.jobLevel
+			res, err := d.Run(context.Background(), j)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := strings.Split(strings.TrimSuffix(read(t, b.args), "\x00"), "\x00")
+			var got []string
+			for _, a := range args {
+				if strings.Contains(a, "effort") {
+					got = append(got, a)
+				}
+			}
+			if c.want == "" && len(got) != 0 || c.want != "" && !slices.Equal(got, []string{c.want}) {
+				t.Fatalf("args = %q", args)
+			}
+			if res.Reasoning != strings.TrimPrefix(c.want, "--effort=") {
+				t.Fatalf("result level = %q", res.Reasoning)
+			}
+		})
+	}
+}
+
+func TestReasoningLevelsAreChecked(t *testing.T) {
+	if _, err := claude.New(config.Provider{ID: "c", Reasoning: "extreme"}, envWith("/bin/true"), ""); err == nil ||
+		!strings.Contains(err.Error(), "low, medium, high, xhigh, max") {
+		t.Fatalf("New: %v", err)
+	}
+	b := newBinary(t, "success.json", 0, "")
+	j := job(t)
+	j.Reasoning = "--bare"
+	_, err := newDriver(t, config.Provider{}, b.path).Run(context.Background(), j)
+	if classOf(t, err) != provider.ValidationError || !strings.Contains(err.Error(), "low, medium, high, xhigh, max") {
+		t.Fatalf("got %v", err)
+	}
+	if _, statErr := os.Stat(b.args); statErr == nil {
+		t.Fatal("the child started")
+	}
+}

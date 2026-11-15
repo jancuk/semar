@@ -49,7 +49,11 @@ func (d *Driver) Models(ctx context.Context) ([]provider.Model, error) {
 	out := make([]provider.Model, 0, len(body.Data))
 	for _, m := range body.Data {
 		if config.CheckModel(m.ID) == nil {
-			out = append(out, provider.Model{ID: m.ID})
+			model := provider.Model{ID: m.ID}
+			if d.endpoint.Base.Host == vendorHost {
+				model = withReasoning(model)
+			}
+			out = append(out, model)
 		}
 	}
 	slices.SortFunc(out, func(a, b provider.Model) int { return strings.Compare(a.ID, b.ID) })

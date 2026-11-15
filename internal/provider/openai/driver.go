@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 const (
 	Kind        = provider.KindOpenAI
 	DefaultBase = "https://api.openai.com/v1"
+	vendorHost  = "api.openai.com"
 )
 
 type Options struct {
@@ -42,7 +44,20 @@ func New(cfg config.Provider, o Options) (*Driver, error) {
 	if err != nil {
 		return nil, errors.New("provider " + cfg.ID + ": " + err.Error())
 	}
-	return &Driver{cfg: cfg, endpoint: ep, resolve: o.ResolveKey, http: httpapi.Client(o.HTTP)}, nil
+	d := &Driver{cfg: cfg, endpoint: ep, resolve: o.ResolveKey, http: httpapi.Client(o.HTTP)}
+	if err := d.checkLevel(cfg.Reasoning); err != nil {
+		return nil, errors.New("provider " + cfg.ID + ": " + err.Error())
+	}
+	return d, nil
+}
+
+// checkLevel refuses a level that OpenAI's own API does not know. Which of these a model takes
+// is for the API to say. Another server of this format may take other values, so it is asked.
+func (d *Driver) checkLevel(level string) error {
+	if level == "" || d.endpoint.Base.Host != vendorHost || slices.Contains(Levels, level) {
+		return nil
+	}
+	return provider.RefuseReasoning(Kind, level, Levels)
 }
 
 func Factory(o Options) provider.Factory {
@@ -75,6 +90,10 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 	if err := config.CheckModel(model); err != nil {
 		return provider.Result{}, &provider.Error{Class: provider.ValidationError, Detail: err.Error()}
 	}
+	level := provider.JobReasoning(job, d.cfg)
+	if err := d.checkLevel(level); err != nil {
+		return provider.Result{}, &provider.Error{Class: provider.ValidationError, Detail: err.Error()}
+	}
 	key, perr := d.endpoint.Key(d.resolve)
 	if perr != nil {
 		return provider.Result{}, perr
@@ -87,19 +106,25 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 		model:  model,
 		url:    d.endpoint.URL("/chat/completions"),
 		caller: &httpapi.Caller{HTTP: d.http, Header: header, Secret: key, DefaultWait: d.retryWait},
+		effort: level,
 	}
-	return agentloop.Run(ctx, c, job)
+	res, err := agentloop.Run(ctx, c, job)
+	res.Reasoning = level
+	return res, err
 }
 
 type client struct {
 	model  string
 	url    string
 	caller *httpapi.Caller
+	effort string
 	turn   int
 }
 
 func (c *client) Next(ctx context.Context, req agentloop.Request) (agentloop.Response, error) {
-	body, err := httpapi.Encode(buildRequest(c.model, req))
+	r := buildRequest(c.model, req)
+	r.ReasoningEffort = c.effort
+	body, err := httpapi.Encode(r)
 	if err != nil {
 		return agentloop.Response{}, &provider.Error{Class: provider.ProviderError, Detail: "the request could not be encoded"}
 	}

@@ -102,6 +102,8 @@ type Provider struct {
 	APIKey  string `yaml:"-"` // API kinds: a reference such as env:NAME or keychain:NAME, never the key
 	Setup   Setup  `yaml:"-"` // harness kinds: what of the person's own harness setup is loaded
 	User    bool   `yaml:"-"` // true when the person's own file defines this provider
+
+	Reasoning string `yaml:"-"` // the reasoning level; "" means the provider's own default
 }
 
 // Setup says which parts of the person's own harness setup a job may use. The zero value

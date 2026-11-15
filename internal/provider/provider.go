@@ -40,12 +40,13 @@ type Health struct {
 }
 
 type Job struct {
-	Prompt   string
-	Workdir  string          // the only directory the harness may read
-	Schema   json.RawMessage // the JSON Schema of the output
-	Model    string          // "" means: pass no model flag
-	MaxTurns int
-	Timeout  time.Duration
+	Prompt    string
+	Workdir   string          // the only directory the harness may read
+	Schema    json.RawMessage // the JSON Schema of the output
+	Model     string          // "" means: pass no model flag
+	Reasoning string          // "" means: the provider's own default level
+	MaxTurns  int
+	Timeout   time.Duration
 }
 
 // Result is what one job returned. InputTokens counts every input token, and the two cache
@@ -53,6 +54,7 @@ type Job struct {
 type Result struct {
 	Output           json.RawMessage // one JSON object
 	Model            string
+	Reasoning        string // the level that was asked for; "" for the default
 	Turns            int
 	InputTokens      int
 	OutputTokens     int
@@ -116,8 +118,25 @@ type ModelLister interface {
 }
 
 type Model struct {
-	ID    string `json:"id"`              // what goes into the provider's model field
-	Label string `json:"label,omitempty"` // a name for a person
+	ID               string   `json:"id"`                         // what goes into the provider's model field
+	Label            string   `json:"label,omitempty"`            // a name for a person
+	Description      string   `json:"description,omitempty"`      // one sentence about the model, from the provider
+	Reasoning        []string `json:"reasoning,omitempty"`        // the levels this model accepts, weakest first
+	DefaultReasoning string   `json:"defaultReasoning,omitempty"` // the level the provider uses when none is set
+}
+
+// JobReasoning is the level of a job: the job's own, else the provider's.
+func JobReasoning(job Job, cfg config.Provider) string {
+	if job.Reasoning != "" {
+		return job.Reasoning
+	}
+	return cfg.Reasoning
+}
+
+// RefuseReasoning is the error for a level that a kind cannot pass on. It lists the levels
+// the kind knows.
+func RefuseReasoning(kind, level string, known []string) error {
+	return fmt.Errorf("the %s kind does not know the reasoning level %q; the levels are %s", kind, level, strings.Join(known, ", "))
 }
 
 // The kinds of provider. A harness kind starts a program that the person installed and

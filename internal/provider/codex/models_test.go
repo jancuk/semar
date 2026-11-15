@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -94,4 +95,24 @@ func TestModelsFailures(t *testing.T) {
 			t.Fatal("no error")
 		}
 	})
+}
+
+func TestModelsCarryLevelsAndDescription(t *testing.T) {
+	catalog := `{"models":[
+	  {"slug":"acme-large","display_name":"Acme Large","description":"The model for hard problems.","visibility":"list","priority":1,
+	   "default_reasoning_level":"medium",
+	   "supported_reasoning_levels":[{"effort":"low","description":"x"},{"effort":"medium","description":"y"},{"effort":"High","description":"bad case"},{"effort":"high"},{"effort":"low"},{"effort":"extra high"}]},
+	  {"slug":"acme-plain","display_name":"Acme Plain","visibility":"list","priority":2,"default_reasoning_level":"Not Valid"}]}`
+	bin, _, _ := catalogBinary(t, "cat <<'EOF'\n"+catalog+"\nEOF")
+	got, err := newDriver(t, config.Provider{}, bin).Models(context.Background())
+	if err != nil || len(got) != 2 {
+		t.Fatalf("models = %+v, error %v", got, err)
+	}
+	large := got[0]
+	if large.Description != "The model for hard problems." || !slices.Equal(large.Reasoning, []string{"low", "medium", "high"}) || large.DefaultReasoning != "medium" {
+		t.Fatalf("acme-large = %+v", large)
+	}
+	if plain := got[1]; plain.Description != "" || len(plain.Reasoning) != 0 || plain.DefaultReasoning != "" {
+		t.Fatalf("acme-plain = %+v", plain)
+	}
 }

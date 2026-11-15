@@ -333,3 +333,61 @@ func TestFindDefaultsAreFreshCopies(t *testing.T) {
 		t.Error("Find shares the deny slice with the file")
 	}
 }
+
+func TestReasoning(t *testing.T) {
+	t.Run("round trip", func(t *testing.T) {
+		home := filepath.Join(t.TempDir(), "semar")
+		f := valid()
+		f.Providers[0].Reasoning = "xhigh"
+		if err := Save(home, f); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(filepath.Join(home, FileName))
+		if strings.Count(string(data), "reasoning:") != 1 || !strings.Contains(string(data), "reasoning: xhigh") {
+			t.Fatalf("file:\n%s", data)
+		}
+		got, _, err := Load(home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c, _ := got.Find("claude"); c.Reasoning != "xhigh" {
+			t.Fatalf("claude: %+v", c)
+		}
+		if c, _ := got.Find("acme"); c.Reasoning != "" {
+			t.Fatalf("acme: %+v", c)
+		}
+	})
+	t.Run("the key is left out when empty", func(t *testing.T) {
+		home := t.TempDir()
+		if err := Save(home, valid()); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(filepath.Join(home, FileName))
+		if strings.Contains(string(data), "reasoning") {
+			t.Fatalf("file:\n%s", data)
+		}
+	})
+	t.Run("validation", func(t *testing.T) {
+		for level, ok := range map[string]bool{
+			"high": true, "a": true, "abcdefghijklmnop": true,
+			"abcdefghijklmnopq": false, "High": false, "x-high": false, "xhigh1": false, "--effort": false, "hi gh": false, "hi\ngh": false, "é": false,
+		} {
+			f := valid()
+			f.Providers[0].Reasoning = level
+			err := f.Validate()
+			if ok && err != nil || !ok && (err == nil || !strings.Contains(err.Error(), "reasoning")) {
+				t.Errorf("level %q: %v", level, err)
+			}
+		}
+	})
+	t.Run("a hand-written file", func(t *testing.T) {
+		home := t.TempDir()
+		text := "version: 1\ndefault: claude\nproviders:\n  - id: claude\n    kind: claude\n    reasoning: Max!\n"
+		if err := os.WriteFile(filepath.Join(home, FileName), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Load(home); err == nil || !strings.Contains(err.Error(), "reasoning") {
+			t.Fatalf("Load: %v", err)
+		}
+	})
+}

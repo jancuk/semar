@@ -22,6 +22,12 @@ type catalogEntry struct {
 	DisplayName string `json:"display_name"`
 	Visibility  string `json:"visibility"`
 	Priority    int    `json:"priority"`
+	Description string `json:"description"`
+
+	DefaultLevel string `json:"default_reasoning_level"`
+	Levels       []struct {
+		Effort string `json:"effort"`
+	} `json:"supported_reasoning_levels"`
 }
 
 var _ provider.ModelLister = (*Driver)(nil)
@@ -77,7 +83,16 @@ func (d *Driver) Models(ctx context.Context) ([]provider.Model, error) {
 		if len(out) == maxModels {
 			break
 		}
-		out = append(out, provider.Model{ID: m.Slug, Label: m.DisplayName})
+		model := provider.Model{ID: m.Slug, Label: m.DisplayName, Description: m.Description}
+		for _, l := range m.Levels {
+			if config.CheckReasoning(l.Effort) == nil && !slices.Contains(model.Reasoning, l.Effort) {
+				model.Reasoning = append(model.Reasoning, l.Effort)
+			}
+		}
+		if config.CheckReasoning(m.DefaultLevel) == nil {
+			model.DefaultReasoning = m.DefaultLevel
+		}
+		out = append(out, model)
 	}
 	return out, nil
 }

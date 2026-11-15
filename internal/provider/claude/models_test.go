@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"slices"
 	"testing"
 )
 
@@ -13,6 +14,9 @@ func TestModelsAreTheAliasesOfTheFlag(t *testing.T) {
 	for _, m := range got {
 		if m.Label == "" {
 			t.Errorf("%s has no label", m.ID)
+		}
+		if !slices.Equal(m.Reasoning, []string{"low", "medium", "high", "xhigh", "max"}) || m.DefaultReasoning != "" {
+			t.Errorf("%s: levels %v, default %q", m.ID, m.Reasoning, m.DefaultReasoning)
 		}
 	}
 }

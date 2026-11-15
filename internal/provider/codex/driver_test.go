@@ -806,3 +806,57 @@ func TestFactory(t *testing.T) {
 		t.Fatal("the factory accepted setup.deny")
 	}
 }
+
+func TestRunReasoning(t *testing.T) {
+	cases := []struct {
+		name, cfgLevel, jobLevel, want string
+	}{
+		{"none", "", "", ""},
+		{"configured", "medium", "", `model_reasoning_effort="medium"`},
+		{"job wins", "medium", "xhigh", `model_reasoning_effort="xhigh"`},
+		{"a level that only the catalog knows", "", "acme", `model_reasoning_effort="acme"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b := newBinary(t, "success.jsonl", 0, "")
+			d := newDriver(t, config.Provider{Reasoning: c.cfgLevel}, b.path)
+			j := job(t)
+			j.Reasoning = c.jobLevel
+			res, err := d.Run(context.Background(), j)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := argsOf(t, b)
+			var got []string
+			for i, a := range args {
+				if strings.Contains(a, "model_reasoning_effort") {
+					if args[i-1] != "--config" {
+						t.Fatalf("the override is not the value of --config: %q", args)
+					}
+					got = append(got, a)
+				}
+			}
+			if c.want == "" && len(got) != 0 || c.want != "" && !slices.Equal(got, []string{c.want}) {
+				t.Fatalf("args = %q", args)
+			}
+			if want := strings.TrimSuffix(strings.TrimPrefix(c.want, `model_reasoning_effort="`), `"`); res.Reasoning != want {
+				t.Fatalf("result level = %q, want %q", res.Reasoning, want)
+			}
+		})
+	}
+	t.Run("a level that looks like a flag", func(t *testing.T) {
+		b := newBinary(t, "success.jsonl", 0, "")
+		j := job(t)
+		j.Reasoning = `high"; sandbox_mode="danger-full-access`
+		_, err := newDriver(t, config.Provider{}, b.path).Run(context.Background(), j)
+		if classOf(t, err) != provider.ValidationError {
+			t.Fatalf("got %v", err)
+		}
+		if _, statErr := os.Stat(b.args); statErr == nil {
+			t.Fatal("the child started")
+		}
+		if _, err := codex.New(config.Provider{ID: "x", Reasoning: "-c"}, codex.Options{Lookup: os.LookupEnv}); err == nil {
+			t.Fatal("New accepted the level")
+		}
+	})
+}

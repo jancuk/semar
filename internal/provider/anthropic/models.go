@@ -48,7 +48,11 @@ func (d *Driver) Models(ctx context.Context) ([]provider.Model, error) {
 			break
 		}
 		if config.CheckModel(m.ID) == nil {
-			out = append(out, provider.Model{ID: m.ID, Label: m.DisplayName})
+			model := provider.Model{ID: m.ID, Label: m.DisplayName}
+			if d.endpoint.Base.Host == vendorHost {
+				model = withEffort(model)
+			}
+			out = append(out, model)
 		}
 	}
 	return out, nil

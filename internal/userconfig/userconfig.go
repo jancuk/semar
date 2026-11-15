@@ -68,12 +68,13 @@ type File struct {
 // Provider is one entry. BaseURL and APIKey belong to the API kinds and Setup to the
 // harness kinds.
 type Provider struct {
-	ID      string `yaml:"id"`
-	Kind    string `yaml:"kind"`
-	Model   string `yaml:"model,omitempty"`
-	BaseURL string `yaml:"baseUrl,omitempty"`
-	APIKey  string `yaml:"apiKey,omitempty"`
-	Setup   *Setup `yaml:"setup,omitempty"`
+	ID        string `yaml:"id"`
+	Kind      string `yaml:"kind"`
+	Model     string `yaml:"model,omitempty"`
+	Reasoning string `yaml:"reasoning,omitempty"`
+	BaseURL   string `yaml:"baseUrl,omitempty"`
+	APIKey    string `yaml:"apiKey,omitempty"`
+	Setup     *Setup `yaml:"setup,omitempty"`
 }
 
 // Setup holds the switches of a harness kind. A nil switch means true.
@@ -247,6 +248,11 @@ func validateProvider(where string, p Provider) []error {
 			add("model: %v", err)
 		}
 	}
+	if p.Reasoning != "" {
+		if err := config.CheckReasoning(p.Reasoning); err != nil {
+			add("reasoning: %v", err)
+		}
+	}
 	if provider.IsHarness(p.Kind) {
 		if p.BaseURL != "" {
 			add("baseUrl is for the anthropic and openai kinds, and %s signs in by itself", p.Kind)
@@ -332,7 +338,7 @@ func (f File) All() []config.Provider {
 }
 
 func (p Provider) toConfig() config.Provider {
-	c := config.Provider{ID: p.ID, Kind: p.Kind, Model: p.Model, BaseURL: p.BaseURL, APIKey: p.APIKey, User: true}
+	c := config.Provider{ID: p.ID, Kind: p.Kind, Model: p.Model, Reasoning: p.Reasoning, BaseURL: p.BaseURL, APIKey: p.APIKey, User: true}
 	if provider.IsHarness(p.Kind) {
 		c.Setup = resolveSetup(p.Setup)
 	}

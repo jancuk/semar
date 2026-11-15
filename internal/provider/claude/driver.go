@@ -67,6 +67,9 @@ func NewWith(cfg config.Provider, opts Options) (*Driver, error) {
 	if err := config.CheckDeny(cfg.Setup.Deny); err != nil {
 		return nil, fmt.Errorf("claude: provider %q: %w", cfg.ID, err)
 	}
+	if err := checkLevel(cfg.Reasoning); err != nil {
+		return nil, fmt.Errorf("claude: provider %q: %w", cfg.ID, err)
+	}
 	cfg.Setup.Deny = slices.Clone(cfg.Setup.Deny)
 	return &Driver{
 		cfg:      cfg,
@@ -137,6 +140,10 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 	if err := checkJob(job); err != nil {
 		return provider.Result{}, err
 	}
+	level := provider.JobReasoning(job, d.cfg)
+	if err := checkLevel(level); err != nil {
+		return provider.Result{}, &provider.Error{Class: provider.ValidationError, Detail: err.Error()}
+	}
 	path, perr := d.binary()
 	if perr == nil {
 		perr = provider.RefuseInside(path, d.repoRoot, job.Workdir)
@@ -164,10 +171,14 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 		StdoutCap: stdoutCap,
 	})
 	switch {
-	case err == nil && usesSetup(d.cfg.Setup):
-		return parseStream(res.Stdout, res.ExitCode, res.StderrTail)
 	case err == nil:
-		return parseOutput(res.Stdout, res.ExitCode, res.StderrTail)
+		parse := parseOutput
+		if usesSetup(d.cfg.Setup) {
+			parse = parseStream
+		}
+		out, perr := parse(res.Stdout, res.ExitCode, res.StderrTail)
+		out.Reasoning = level
+		return out, perr
 	case errors.Is(err, context.DeadlineExceeded):
 		return provider.Result{}, &provider.Error{Class: provider.TransportError, Detail: "the harness did not finish in " + deadlineText(job)}
 	case errors.Is(err, context.Canceled):
