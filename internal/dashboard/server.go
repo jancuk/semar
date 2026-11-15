@@ -57,6 +57,7 @@ type Server struct {
 	mu sync.Mutex
 
 	checkTimeout time.Duration
+	listTimeout  time.Duration
 	loginLimit   time.Duration
 	logins       logins
 }
@@ -73,7 +74,7 @@ func New(d Deps) (*Server, error) {
 	if _, err := rand.Read(b); err != nil {
 		return nil, fmt.Errorf("make the dashboard token: %w", err)
 	}
-	s := &Server{d: d, token: hex.EncodeToString(b), checkTimeout: checkTimeout, loginLimit: loginLimit}
+	s := &Server{d: d, token: hex.EncodeToString(b), checkTimeout: checkTimeout, listTimeout: listTimeout, loginLimit: loginLimit}
 	s.logins.init()
 	s.handler = s.routes()
 	return s, nil
@@ -120,6 +121,7 @@ func (s *Server) routes() http.Handler {
 	api.Handle("/api/state", allow(map[string]http.HandlerFunc{"GET": s.getState}))
 	api.Handle("/api/providers/{id}", allow(map[string]http.HandlerFunc{"PUT": s.putProvider, "DELETE": s.deleteProvider}))
 	api.Handle("/api/providers/{id}/key", allow(map[string]http.HandlerFunc{"PUT": s.putKey}))
+	api.Handle("/api/providers/{id}/models", allow(map[string]http.HandlerFunc{"GET": s.getModels}))
 	api.Handle("/api/providers/{id}/login", allow(map[string]http.HandlerFunc{"POST": s.postLogin}))
 	api.Handle("/api/default", allow(map[string]http.HandlerFunc{"PUT": s.putDefault}))
 	api.Handle("/api/logins/{job}", allow(map[string]http.HandlerFunc{"GET": s.getLogin, "DELETE": s.deleteLogin}))
