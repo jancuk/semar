@@ -283,3 +283,19 @@ func TestReportDoesNotWaitForAStalledWriter(t *testing.T) {
 		t.Errorf("the status line was not erased: %q", got)
 	}
 }
+
+func TestToolLabelHasOnlyPrintableASCII(t *testing.T) {
+	for _, tc := range []struct{ name, want string }{
+		{strings.Repeat("世", 30), strings.Repeat("?", toolNameWidth)},
+		{"Read日本Tool é", "Read??Tool ?"},
+		{"a\x1b[31mb\nc", "a\\x1b[31mb c"},
+	} {
+		if got := toolLabel(tc.name); got != tc.want {
+			t.Errorf("toolLabel(%q) = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	line := statusLine("⠋", time.Second, plan.Progress{Attempt: 1, Progress: provider.Progress{Turns: 1, Tool: strings.Repeat("世", 30)}})
+	if !strings.HasSuffix(line, "last: "+strings.Repeat("?", toolNameWidth)) {
+		t.Errorf("line = %q", line)
+	}
+}

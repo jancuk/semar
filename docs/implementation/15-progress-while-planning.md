@@ -25,7 +25,7 @@ The output of a harness and the output of the model are untrusted.
 
 | Risk | Answer |
 |---|---|
-| A tool name with control characters or escape sequences reaches the terminal | The name is passed through `terminalSafe` and cut to 24 characters |
+| A tool name with control characters or escape sequences reaches the terminal | The name is passed through `terminalSafe`, every character outside printable ASCII becomes `?`, and the name is cut to 24 characters. A wide character takes two columns, so it would make the line wrap and scroll on every redraw |
 | A very long tool name makes every report large | A name in a report is cut to 200 bytes (`provider.MaxToolName`) |
 | A very long line of a stream is held in memory a second time | A line above 1 MiB is not parsed for progress. The whole output is still kept under the existing cap for the final parse |
 | A progress report after the job has returned writes to a terminal that shows other text | A provider never calls the function after `Run` returns. The reporter ignores a report after it has stopped |
@@ -95,7 +95,7 @@ After the planner ends, in both cases, when the plan succeeded:
 semar: the planner finished in 1m24s
 ```
 
-* The text of the line is cut to 78 characters by dropping parts from the end, never the spinner or the elapsed time. The name of the tool is cut to 24 characters, and a newline or a tab in it becomes a space.
+* The text of the line is cut to 78 characters by dropping parts from the end, never the spinner or the elapsed time. The name of the tool is cut to 24 characters, a newline or a tab in it becomes a space, and any other character outside printable ASCII (0x20 to 0x7e) becomes `?`, after the escaping and before the cut.
 * Not on a terminal, there is no status line. Every 30 seconds one line is printed, as above. It always names the draft, shows a count only when it is above zero, and never names a tool. The rejected-draft line is printed in this mode too.
 * On an error or an interrupt, no line is added, and the failure lines follow the erased line.
 * The elapsed time is `45s`, `1m24s`, or `1h02m03s`.

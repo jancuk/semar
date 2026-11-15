@@ -240,8 +240,12 @@ func toolLabel(name string) string {
 		return "an MCP tool"
 	}
 	safe := strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\t' {
+		switch {
+		case r == '\n' || r == '\t':
 			return ' '
+		case r < 0x20 || r > 0x7e:
+			// A wide character takes two columns, which the 78-character rule does not count.
+			return '?'
 		}
 		return r
 	}, terminalSafe(name))
