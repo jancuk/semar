@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -68,22 +69,66 @@ func (g *Git) RemoteURL(ctx context.Context, remote string) (string, error) {
 }
 
 // Fetch updates the remote-tracking references of the named branches, or of
-// every branch when none is named. Nothing else in the repository changes.
-func (g *Git) Fetch(ctx context.Context, remote string, branches ...string) error {
-	args := []string{"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-auto-gc", "--no-write-fetch-head", "--", remote}
-	for _, b := range branches {
-		if err := checkBranch(b); err != nil {
+// every branch when none is named. A name that the remote has no branch of, such
+// as a tag, a commit ID, or "origin/x", is left for Resolve. Nothing else in the
+// repository changes.
+//
+// The fetch uses the transport, credential helper, and URL rewrites of the user's
+// own git configuration on purpose: that is how the user reaches the remote, and
+// .git/config belongs to the user, not to the content of the repository under test.
+func (g *Git) Fetch(ctx context.Context, remote string, names ...string) error {
+	for _, n := range names {
+		if err := checkBranch(n); err != nil {
 			return err
 		}
-		args = append(args, "+refs/heads/"+b+":refs/remotes/"+remote+"/"+b)
 	}
 	if _, err := g.RemoteURL(ctx, remote); err != nil {
 		return err
+	}
+	args := []string{"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-auto-gc", "--no-write-fetch-head", "--", remote}
+	if len(names) > 0 {
+		branches, err := g.remoteBranches(ctx, remote, names)
+		if err != nil {
+			return err
+		}
+		if len(branches) == 0 {
+			return nil
+		}
+		for _, b := range branches {
+			args = append(args, "+refs/heads/"+b+":refs/remotes/"+remote+"/"+b)
+		}
 	}
 	if _, err := g.run(ctx, maxOutputBytes, args...); err != nil {
 		return fmt.Errorf("fetch %s: %w", remote, err)
 	}
 	return nil
+}
+
+// remoteBranches returns the names, in the given order, that are branches of the remote.
+// ls-remote matches a pattern against the tail of a reference, so only an exact name counts.
+func (g *Git) remoteBranches(ctx context.Context, remote string, names []string) ([]string, error) {
+	args := []string{"ls-remote", "--heads", remote, "--"}
+	for _, n := range names {
+		args = append(args, "refs/heads/"+n)
+	}
+	out, err := g.run(ctx, maxOutputBytes, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list the branches of %s: %w", remote, err)
+	}
+	found := map[string]bool{}
+	for line := range strings.Lines(string(out)) {
+		_, ref, ok := strings.Cut(strings.TrimRight(line, "\n"), "\t")
+		if ok {
+			found[ref] = true
+		}
+	}
+	var branches []string
+	for _, n := range names {
+		if found["refs/heads/"+n] && !slices.Contains(branches, n) {
+			branches = append(branches, n)
+		}
+	}
+	return branches, nil
 }
 
 // Resolve returns the commit that refs/remotes/<remote>/<name> names, or else
@@ -141,7 +186,7 @@ func (g *Git) Log(ctx context.Context, from, to string) ([]Commit, error) {
 		return nil, err
 	}
 	const fields = 6
-	out, err := g.run(ctx, maxOutputBytes, "log", "-z", "--topo-order", "--reverse", "--no-color",
+	out, err := g.run(ctx, maxOutputBytes, "log", "-z", "--topo-order", "--reverse", "--no-color", "--no-show-signature",
 		"--format=%H%x00%P%x00%an%x00%at%x00%s%x00%b", "--end-of-options", from+".."+to)
 	if err != nil {
 		return nil, fmt.Errorf("log %s..%s: %w", from, to, err)
@@ -369,7 +414,14 @@ var scrubbedEnv = []string{
 }
 
 func (g *Git) command(ctx context.Context, args ...string) *exec.Cmd {
-	full := append([]string{"-C", g.dir, "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "--no-pager"}, args...)
+	full := append([]string{
+		"-C", g.dir,
+		"-c", "core.hooksPath=" + os.DevNull,
+		"-c", "core.fsmonitor=false",
+		// a signature check would start gpg.program, which .git/config can set
+		"-c", "log.showSignature=false",
+		"--no-pager",
+	}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	var env []string
 next:

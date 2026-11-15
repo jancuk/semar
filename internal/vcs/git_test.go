@@ -300,7 +300,7 @@ func TestOptionLookalikesAreRefused(t *testing.T) {
 		"Log":        func() error { _, err := g.Log(ctx, "main", bad); return err },
 		"DiffStat":   func() error { _, err := g.DiffStat(ctx, bad, "main"); return err },
 		"Diff":       func() error { _, err := g.Diff(ctx, "main", bad); return err },
-		"Archive":    func() error { return g.Archive(ctx, bad, filepath.Join(t.TempDir(), "x")) },
+		"Archive":    func() error { _, err := g.Archive(ctx, bad, filepath.Join(t.TempDir(), "x")); return err },
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {
@@ -401,10 +401,96 @@ func TestHooksDoNotRun(t *testing.T) {
 	if _, err := g.Log(ctx, "main", "origin/release"); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.Archive(ctx, "origin/release", filepath.Join(t.TempDir(), "copy")); err != nil {
+	if _, err := g.Archive(ctx, "origin/release", filepath.Join(t.TempDir(), "copy")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("a hook of the repository ran")
+	}
+}
+
+func TestLogDoesNotCheckSignatures(t *testing.T) {
+	r := gittest.New(t)
+	base := r.Commit("base", map[string]*string{"a.txt": gittest.S("a\n")})
+	tree := r.Git("rev-parse", base+"^{tree}")
+	body := "tree " + tree + "\nparent " + base + "\n" +
+		"author Ada Author <ada@example.com> 1767258000 +0000\n" +
+		"committer Ada Author <ada@example.com> 1767258000 +0000\n" +
+		"gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEEabcdefghijklmnopqrstuvwxyz\n -----END PGP SIGNATURE-----\n" +
+		"\nSHOP-9 signed\n"
+	signed, err := gitStdin(t, r.Dir, []byte(body), "hash-object", "-t", "commit", "-w", "--stdin")
+	if err != nil {
+		t.Skipf("this git does not write a hand-made signed commit: %v", err)
+	}
+	marker := filepath.Join(t.TempDir(), "gpg-ran")
+	program := filepath.Join(t.TempDir(), "gpg")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\ntouch '"+marker+"'\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r.Git("config", "log.showSignature", "true")
+	r.Git("config", "gpg.program", program)
+
+	// Without the overrides the program runs, so the check below proves something.
+	r.Git("log", "-1", "--format=%H", signed)
+	if _, err := os.Stat(marker); err != nil {
+		t.Skipf("this git did not check the signature during a log: %v", err)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+
+	commits, err := open(t, r.Dir).Log(context.Background(), base, signed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 1 || commits[0].ID != signed || commits[0].Subject != "SHOP-9 signed" {
+		t.Fatalf("got %+v", commits)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("gpg.program ran during a log")
+	}
+}
+
+func TestFetchOnlyBranches(t *testing.T) {
+	fx := build(t)
+	fx.repo.Git("tag", "v1", fx.f1)
+	bare := fx.repo.Bare()
+	fx.repo.Git("push", "--quiet", bare, "--tags")
+	clone := filepath.Join(t.TempDir(), "clone")
+	gittest.Run(t, filepath.Dir(clone), nil, "clone", "--quiet", bare, clone)
+	next := fx.repo.Commit("later work", map[string]*string{"later.txt": gittest.S("x\n")})
+	fx.repo.Git("push", "--quiet", bare, "release")
+
+	trace := filepath.Join(t.TempDir(), "trace")
+	t.Setenv("GIT_TRACE", trace)
+	fetches := func() int {
+		data, _ := os.ReadFile(trace)
+		return strings.Count(string(data), "built-in: git fetch")
+	}
+	g := open(t, clone)
+	ctx := context.Background()
+	for _, name := range []string{"v1", fx.f1, "origin/release"} {
+		if err := g.Fetch(ctx, "origin", name); err != nil {
+			t.Fatalf("Fetch %q: %v", name, err)
+		}
+		if n := fetches(); n != 0 {
+			t.Fatalf("Fetch %q started %d fetches, want none", name, n)
+		}
+		if out := gittest.Run(t, clone, nil, "for-each-ref", "refs/remotes/origin/"+name); out != "" {
+			t.Fatalf("Fetch %q created %s", name, out)
+		}
+	}
+	if got, err := g.Resolve(ctx, "origin", "v1"); err != nil || got != fx.f1 {
+		t.Fatalf("v1 resolves to %q, %v", got, err)
+	}
+
+	if err := g.Fetch(ctx, "origin", "v1", "release"); err != nil {
+		t.Fatal(err)
+	}
+	if n := fetches(); n != 1 {
+		t.Fatalf("started %d fetches, want 1", n)
+	}
+	if got, err := g.Resolve(ctx, "origin", "release"); err != nil || got != next {
+		t.Fatalf("release resolves to %q, %v, want %q", got, err, next)
 	}
 }
