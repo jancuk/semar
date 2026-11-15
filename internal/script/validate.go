@@ -2,8 +2,11 @@ package script
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
+	"strings"
+	"unicode"
 
 	"github.com/theory/jsonpath"
 
@@ -16,6 +19,13 @@ type Problem struct {
 }
 
 var knownMethods = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
+
+var (
+	// clientHeaders frame the message or the connection, so the HTTP client sets them.
+	clientHeaders = []string{"Host", "Content-Length", "Transfer-Encoding", "Connection", "Upgrade", "TE", "Trailer", "Keep-Alive", "Proxy-Connection"}
+	// engineHeaders are set on every request by the API engine, which drops a script's value.
+	engineHeaders = []string{"traceparent", "baggage", "User-Agent", "X-Semar-Run"}
+)
 
 // Validate returns every reason the script cannot stand for the scenario.
 // An empty hash never matches, even when both sides are empty.
@@ -137,6 +147,11 @@ func validateRequest(ss domain.ScriptStep, hint *domain.RequestHint, hasEarlierC
 	if percentBeforeVariable.MatchString(r.Path) {
 		add("in path %s a variable directly follows a percent sign and could finish an escape", r.Path)
 	}
+	for _, name := range slices.Sorted(maps.Keys(r.Headers)) {
+		for _, msg := range headerProblems(name, r.Headers[name]) {
+			add("%s", msg)
+		}
+	}
 	reported := map[string]bool{}
 	for _, tpl := range templateStrings(*r) {
 		if err := checkPlaceholders(tpl); err != nil && !reported[tpl] {
@@ -174,6 +189,41 @@ func usesVariableAtParams(hint, actual string) bool {
 	a, _ := segments(actual)
 	for i := range h {
 		if isParam(h[i]) && !variablePattern.MatchString(a[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// headerProblems holds the rules for a request header of a script, written by hand or drafted.
+// A variable's value is checked again when the request is rendered.
+func headerProblems(name, value string) []string {
+	var ps []string
+	named := func(list []string) bool {
+		return slices.ContainsFunc(list, func(h string) bool { return strings.EqualFold(h, name) })
+	}
+	switch {
+	case !isToken(name):
+		ps = append(ps, fmt.Sprintf("header name %q is not a valid HTTP header name", name))
+	case named(clientHeaders):
+		ps = append(ps, fmt.Sprintf("header %s is set by the HTTP client and cannot be in a script", name))
+	case named(engineHeaders):
+		ps = append(ps, fmt.Sprintf("header %s is set by Semar on every request and cannot be in a script", name))
+	}
+	if strings.ContainsFunc(value, unicode.IsControl) {
+		ps = append(ps, fmt.Sprintf("the value of header %q holds a control character", name))
+	}
+	return ps
+}
+
+// isToken reports whether s is a token of RFC 9110: one or more tchar.
+func isToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0) {
 			return false
 		}
 	}

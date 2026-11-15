@@ -166,6 +166,36 @@ func TestValidate(t *testing.T) {
 		{"malformed variable in a header", func(_ *domain.Scenario, s *domain.Script) {
 			s.Steps[0].Request.Headers = map[string]string{"A": "{{ x }}"}
 		}, "malformed variable"},
+		{"an empty header name", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Headers = map[string]string{"": "1"}
+		}, `header name "" is not a valid HTTP header name`},
+		{"a header name with a space", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Headers = map[string]string{"X A": "1"}
+		}, `header name "X A" is not a valid HTTP header name`},
+		{"a header name with a colon", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Headers = map[string]string{"X-A:": "1"}
+		}, "not a valid HTTP header name"},
+		{"a header name with a non-ASCII letter", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Headers = map[string]string{"X-Ä": "1"}
+		}, "not a valid HTTP header name"},
+		{"a header value with a line feed", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Headers = map[string]string{"X-A": "a\nX-B: b"}
+		}, "the value of header \"X-A\" holds a control character"},
+		{"a header value with a carriage return around a variable", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[2].Request.Headers = map[string]string{"X-A": "{{order_id}}\r"}
+		}, "holds a control character"},
+		{"a header value with a nul", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Headers = map[string]string{"X-A": "a\x00"}
+		}, "holds a control character"},
+		{"a header value with a del", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Headers = map[string]string{"X-A": "a\x7f"}
+		}, "holds a control character"},
+		{"a header value with an escape", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Headers = map[string]string{"X-A": "\x1b[31m"}
+		}, "holds a control character"},
+		{"a valid header", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[2].Request.Headers = map[string]string{"X-Request-For": "order {{order_id}}", "Accept": "application/json", "If-None-Match": `"x"`}
+		}, ""},
 		{"malformed variable in a json string", func(_ *domain.Scenario, s *domain.Script) {
 			s.Steps[0].Request.JSON = map[string]any{"a": []any{map[string]any{"b": "{{"}}}
 		}, "malformed variable"},
@@ -218,6 +248,29 @@ func TestValidate(t *testing.T) {
 				}
 			}
 			t.Fatalf("want a problem with %q, got %+v", c.want, ps)
+		})
+	}
+}
+
+func TestValidateRefusesTheHeadersThatTheClientOrTheEngineSets(t *testing.T) {
+	for _, name := range []string{"Host", "host", "Content-Length", "TRANSFER-ENCODING", "Connection", "Upgrade", "TE", "te", "Trailer", "Keep-Alive", "Proxy-Connection"} {
+		t.Run(name, func(t *testing.T) {
+			sc, s := loadPair(t)
+			s.Steps[0].Request.Headers = map[string]string{name: "x"}
+			ps := script.Validate(sc, s)
+			if len(ps) != 1 || ps[0].Step != s.Steps[0].Step || !strings.Contains(ps[0].Message, "set by the HTTP client") {
+				t.Fatalf("got %+v", ps)
+			}
+		})
+	}
+	for _, name := range []string{"traceparent", "Baggage", "user-agent", "X-Semar-Run"} {
+		t.Run(name, func(t *testing.T) {
+			sc, s := loadPair(t)
+			s.Steps[0].Request.Headers = map[string]string{name: "x"}
+			ps := script.Validate(sc, s)
+			if len(ps) != 1 || !strings.Contains(ps[0].Message, "set by Semar on every request") {
+				t.Fatalf("got %+v", ps)
+			}
 		})
 	}
 }
