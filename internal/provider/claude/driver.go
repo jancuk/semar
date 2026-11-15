@@ -20,9 +20,10 @@ const (
 	Kind = "claude"
 	// BinaryEnv names the variable that holds the absolute path of the harness binary.
 	// The path is never read from the configuration, which the repository under test owns.
-	BinaryEnv       = "SEMAR_CLAUDE_BIN"
-	defaultBinary   = "claude"
-	healthTimeout   = 10 * time.Second
+	BinaryEnv     = "SEMAR_CLAUDE_BIN"
+	defaultBinary = "claude"
+	healthTimeout = 10 * time.Second
+	// The stream repeats every tool result, so it is allowed more than the default.
 	streamStdoutCap = 64 << 20
 )
 
@@ -157,26 +158,30 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 		runCtx, cancel = context.WithTimeout(ctx, job.Timeout)
 		defer cancel()
 	}
-	// The stream repeats every tool result, so it is allowed more than the one object.
-	stdoutCap := provider.DefaultStdoutCap
-	if usesSetup(d.cfg.Setup) {
-		stdoutCap = streamStdoutCap
-	}
-	res, err := provider.RunProcess(runCtx, provider.ProcessSpec{
+	spec := provider.ProcessSpec{
 		Path:      path,
 		Args:      buildArgs(job, d.cfg),
 		Dir:       job.Workdir,
 		Env:       d.childEnv(),
 		Stdin:     strings.NewReader(job.Prompt),
-		StdoutCap: stdoutCap,
-	})
+		StdoutCap: streamStdoutCap,
+	}
+	if job.Progress != nil {
+		live := newTally()
+		spec.OnStdoutLine = func(line []byte) {
+			if live.addLine(line) {
+				job.Progress(live.now)
+			}
+		}
+	}
+	res, err := provider.RunProcess(runCtx, spec)
 	switch {
 	case err == nil:
-		parse := parseOutput
-		if usesSetup(d.cfg.Setup) {
-			parse = parseStream
+		out, perr := parseStream(res.Stdout, res.ExitCode, res.StderrTail)
+		if !usesSetup(d.cfg.Setup) {
+			// Nothing of the person's setup loaded; the init event names only the defaults.
+			out.Loaded = provider.Loaded{}
 		}
-		out, perr := parse(res.Stdout, res.ExitCode, res.StderrTail)
 		out.Reasoning = level
 		return out, perr
 	case errors.Is(err, context.DeadlineExceeded):
@@ -184,7 +189,7 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 	case errors.Is(err, context.Canceled):
 		return provider.Result{}, fmt.Errorf("run claude: %w", ctx.Err())
 	case errors.Is(err, provider.ErrOutputTooLarge):
-		return provider.Result{}, &provider.Error{Class: provider.ProviderError, Detail: fmt.Sprintf("the harness wrote more than %d MiB of output", stdoutCap>>20)}
+		return provider.Result{}, &provider.Error{Class: provider.ProviderError, Detail: fmt.Sprintf("the harness wrote more than %d MiB of output", streamStdoutCap>>20)}
 	case errors.Is(err, os.ErrNotExist):
 		return provider.Result{}, &provider.Error{Class: provider.NotInstalled, Detail: fmt.Sprintf("the binary %q could not be started", path)}
 	}

@@ -36,15 +36,6 @@ type envelope struct {
 	} `json:"modelUsage"`
 }
 
-// parseOutput reads the one JSON object of --output-format json.
-func parseOutput(stdout []byte, exitCode int, stderrTail []byte) (provider.Result, error) {
-	var env envelope
-	if err := json.Unmarshal(bytes.TrimSpace(stdout), &env); err != nil {
-		return provider.Result{}, notJSON(exitCode, stderrTail)
-	}
-	return fromEnvelope(env)
-}
-
 func notJSON(exitCode int, stderrTail []byte) *provider.Error {
 	return &provider.Error{
 		Class:  provider.ProviderError,
@@ -86,6 +77,7 @@ type initEvent struct {
 
 type assistantEvent struct {
 	Message struct {
+		ID      string `json:"id"`
 		Content []struct {
 			Type string `json:"type"`
 			ID   string `json:"id"`
@@ -104,17 +96,65 @@ type rateLimitEvent struct {
 	} `json:"rate_limit_info"`
 }
 
+// tally counts the responses and the tool calls of a stream. The reports while the job runs
+// and the final parse count with it, so that the last report agrees with Result.Tools.
+type tally struct {
+	messages map[string]bool
+	seen     map[string]bool
+	calls    map[string]int
+	now      provider.Progress
+}
+
+func newTally() *tally {
+	return &tally{messages: map[string]bool{}, seen: map[string]bool{}, calls: map[string]int{}}
+}
+
+// add counts one assistant event and says whether the totals changed. One message can come in
+// several events, so the message ID counts each response once and the call ID each call once.
+// The harness returns the answer through a tool of its own, which is no call of the job.
+func (t *tally) add(ev assistantEvent) bool {
+	before := t.now
+	if id := ev.Message.ID; id == "" || !t.messages[id] {
+		t.messages[id] = true
+		t.now.Turns++
+	}
+	for _, c := range ev.Message.Content {
+		if c.Type != "tool_use" || c.Name == "" || c.Name == answerTool || (c.ID != "" && t.seen[c.ID]) {
+			continue
+		}
+		t.seen[c.ID] = true
+		t.calls[c.Name]++
+		t.now.ToolCalls++
+		t.now.Tool = provider.ProgressTool(c.Name)
+	}
+	return t.now != before
+}
+
+// addLine counts one line of a running stream and says whether the totals changed.
+func (t *tally) addLine(line []byte) bool {
+	var head struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(line, &head) != nil || head.Type != "assistant" {
+		return false
+	}
+	var ev assistantEvent
+	if json.Unmarshal(line, &ev) != nil {
+		return false
+	}
+	return t.add(ev)
+}
+
 // parseStream reads the events of --output-format stream-json, one JSON object per line.
 // An event of an unknown type, and a line that is not JSON, is skipped.
 func parseStream(stdout []byte, exitCode int, stderrTail []byte) (provider.Result, error) {
 	var (
-		result    *envelope
-		start     *initEvent
-		anyJSON   bool
-		tooLong   bool
-		calls     = map[string]int{}
-		seenCalls = map[string]bool{}
-		limits    = map[string]provider.Limit{}
+		result  *envelope
+		start   *initEvent
+		anyJSON bool
+		tooLong bool
+		counted = newTally()
+		limits  = map[string]provider.Limit{}
 	)
 	for rest := stdout; len(rest) > 0; {
 		var line []byte
@@ -143,17 +183,8 @@ func parseStream(stdout []byte, exitCode int, stderrTail []byte) (provider.Resul
 			}
 		case head.Type == "assistant":
 			var ev assistantEvent
-			if json.Unmarshal(line, &ev) != nil {
-				continue
-			}
-			// One message can come in several events; the call ID counts each call once. The
-			// harness returns the answer through a tool of its own, which is no call of the job.
-			for _, c := range ev.Message.Content {
-				if c.Type != "tool_use" || c.Name == "" || c.Name == answerTool || (c.ID != "" && seenCalls[c.ID]) {
-					continue
-				}
-				seenCalls[c.ID] = true
-				calls[c.Name]++
+			if json.Unmarshal(line, &ev) == nil {
+				counted.add(ev)
 			}
 		case head.Type == "rate_limit_event":
 			var ev rateLimitEvent
@@ -188,7 +219,7 @@ func parseStream(stdout []byte, exitCode int, stderrTail []byte) (provider.Resul
 	if err != nil {
 		return res, err
 	}
-	for name, n := range calls {
+	for name, n := range counted.calls {
 		res.Tools = append(res.Tools, provider.ToolUse{Name: name, Calls: n})
 	}
 	slices.SortFunc(res.Tools, func(a, b provider.ToolUse) int { return strings.Compare(a.Name, b.Name) })

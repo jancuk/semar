@@ -71,17 +71,12 @@ func TestSetupArgs(t *testing.T) {
 		{"both on with deny and a model", config.Setup{MCP: true, Skills: true, Deny: []string{"mcp__orders__delete", "Bash(git push:*)"}}, "m1", cat(streamHead,
 			[]string{"--tools", "Read,Grep,Glob,Skill", "--setting-sources", "user", "--settings", setupSettings,
 				"--disallowedTools", "mcp__orders__delete", "Bash(git push:*)"}, tail, []string{"--model=m1"})},
-		{"deny with both off", config.Setup{Deny: []string{"Grep"}}, "", cat(
-			[]string{"-p", "--output-format", "json", "--json-schema", schema, "--tools", "Read,Grep,Glob",
-				"--strict-mcp-config", "--setting-sources", "", "--disallowedTools", "Grep"}, tail)},
+		{"deny with both off", config.Setup{Deny: []string{"Grep"}}, "", cat(streamHead,
+			[]string{"--tools", "Read,Grep,Glob", "--strict-mcp-config", "--setting-sources", "", "--disallowedTools", "Grep"}, tail)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fixture := "stream_success.jsonl"
-			if !c.setup.MCP && !c.setup.Skills {
-				fixture = "success.json"
-			}
-			b := newBinary(t, fixture, 0, "")
+			b := newBinary(t, "stream_success.jsonl", 0, "")
 			d := newSetupDriver(t, config.Provider{ID: "c", Kind: "claude", Model: c.model, Setup: c.setup}, b.path)
 			if _, err := d.Run(context.Background(), job(t)); err != nil {
 				t.Fatal(err)
@@ -117,7 +112,7 @@ func TestSetupEnvironment(t *testing.T) {
 		}
 	})
 	t.Run("without the setup the short list stays", func(t *testing.T) {
-		b := newBinary(t, "success.json", 0, "")
+		b := newBinary(t, "success.jsonl", 0, "")
 		d := newSetupDriver(t, config.Provider{Setup: config.Setup{Deny: []string{"Grep"}}}, b.path)
 		if _, err := d.Run(context.Background(), job(t)); err != nil {
 			t.Fatal(err)
@@ -235,8 +230,8 @@ func TestStreamFailures(t *testing.T) {
 		{"a broken result line", "stream_broken_result.jsonl", 0, "", provider.ProviderError, "no result event"},
 		{"an over-long result line", long, 0, "", provider.ProviderError, "longer than 8 MiB"},
 		{"no output", "", 2, "boom", provider.ProviderError, "not JSON, exit code 2: boom"},
-		{"output that is no object", "output_not_object.json", 0, "", provider.ValidationError, "the output holds no object"},
-		{"the turn limit", "error_max_turns.json", 1, "", provider.ValidationError, "the turn limit"},
+		{"output that is no object", "output_not_object.jsonl", 0, "", provider.ValidationError, "the output holds no object"},
+		{"the turn limit", "error_max_turns.jsonl", 1, "", provider.ValidationError, "the turn limit"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

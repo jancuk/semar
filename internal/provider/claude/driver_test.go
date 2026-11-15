@@ -101,7 +101,7 @@ func classOf(t *testing.T, err error) provider.FailureClass {
 }
 
 func TestRunSuccess(t *testing.T) {
-	b := newBinary(t, "success.json", 0, "")
+	b := newBinary(t, "success.jsonl", 0, "")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-do-not-pass")
 	t.Setenv("CLAUDECODE", "1")
 	t.Setenv("SEMAR_RANDOM", "x")
@@ -112,15 +112,24 @@ func TestRunSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(res.Output) != `{"method":"GET","path":"/v1/ping"}` || res.Model != "claude-sonnet-5-5" || res.Turns != 4 ||
-		res.InputTokens != 6+6017+11639 || res.OutputTokens != 275 {
+		res.InputTokens != 6+6017+11639 || res.OutputTokens != 275 || res.CacheReadTokens != 11639 || res.CacheWriteTokens != 6017 ||
+		res.CostUSD != 0.0281195 || res.Denied != 0 || res.Limits != nil {
 		t.Fatalf("got %+v", res)
+	}
+	wantTools := []provider.ToolUse{{Name: "Glob", Calls: 1}, {Name: "Grep", Calls: 1}, {Name: "Read", Calls: 2}}
+	if !slices.Equal(res.Tools, wantTools) {
+		t.Fatalf("tools = %+v", res.Tools)
+	}
+	// Without the setup nothing of the person's setup loads, whatever the init event names.
+	if l := res.Loaded; l.PermissionMode != "" || l.Skills != 0 || l.MCPServers != nil {
+		t.Fatalf("loaded = %+v", l)
 	}
 	if d.ID() != "c" || d.Kind() != "claude" {
 		t.Fatal("identity")
 	}
 
 	wantArgs := []string{
-		"-p", "--output-format", "json", "--json-schema", schema, "--tools", "Read,Grep,Glob",
+		"-p", "--output-format", "stream-json", "--verbose", "--json-schema", schema, "--tools", "Read,Grep,Glob",
 		"--strict-mcp-config", "--setting-sources", "", "--no-session-persistence", "--max-turns", "7",
 	}
 	got := strings.Split(strings.TrimSuffix(read(t, b.args), "\x00"), "\x00")
@@ -157,7 +166,7 @@ func TestRunModelFlag(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			b := newBinary(t, "success.json", 0, "")
+			b := newBinary(t, "success.jsonl", 0, "")
 			d := newDriver(t, config.Provider{Model: c.cfgModel}, b.path)
 			j := job(t)
 			j.Model = c.jobModel
@@ -183,7 +192,7 @@ func TestRunModelFlag(t *testing.T) {
 }
 
 func TestRunModelTie(t *testing.T) {
-	b := newBinary(t, "tie.json", 0, "")
+	b := newBinary(t, "tie.jsonl", 0, "")
 	res, err := newDriver(t, config.Provider{}, b.path).Run(context.Background(), job(t))
 	if err != nil || res.Model != "aa-model" {
 		t.Fatalf("got %+v %v", res, err)
@@ -198,13 +207,13 @@ func TestRunFailureClasses(t *testing.T) {
 		class         provider.FailureClass
 		detail        string
 	}{
-		{"turn limit", "error_max_turns.json", 1, "", provider.ValidationError, "the harness reached the turn limit"},
-		{"usage limit by status", "error_usage_limit.json", 1, "", provider.UsageLimit, "usage or rate limit"},
-		{"rate limit by subtype", "error_rate_limit_subtype.json", 1, "", provider.UsageLimit, "rate limit reached"},
-		{"unauthorized", "error_unauthorized.json", 1, "", provider.PermissionError, "401"},
-		{"other error", "error_other.json", 1, "", provider.ProviderError, "error_during_execution"},
-		{"no object", "no_object.json", 0, "", provider.ValidationError, "the output holds no object"},
-		{"output is not an object", "output_not_object.json", 0, "", provider.ValidationError, "the output holds no object"},
+		{"turn limit", "error_max_turns.jsonl", 1, "", provider.ValidationError, "the harness reached the turn limit"},
+		{"usage limit by status", "error_usage_limit.jsonl", 1, "", provider.UsageLimit, "usage or rate limit"},
+		{"rate limit by subtype", "error_rate_limit_subtype.jsonl", 1, "", provider.UsageLimit, "rate limit reached"},
+		{"unauthorized", "error_unauthorized.jsonl", 1, "", provider.PermissionError, "401"},
+		{"other error", "error_other.jsonl", 1, "", provider.ProviderError, "error_during_execution"},
+		{"no object", "no_object.jsonl", 0, "", provider.ValidationError, "the output holds no object"},
+		{"output is not an object", "output_not_object.jsonl", 0, "", provider.ValidationError, "the output holds no object"},
 		{"crash with no JSON", "", 3, "boom: out of memory", provider.ProviderError, "exit code 3: boom: out of memory"},
 		{"not JSON on success", "", 0, "", provider.ProviderError, "not JSON"},
 	}
@@ -251,7 +260,7 @@ func TestRunNotInstalled(t *testing.T) {
 		}
 	})
 	t.Run("relative PATH entry", func(t *testing.T) {
-		b := newBinary(t, "success.json", 0, "")
+		b := newBinary(t, "success.jsonl", 0, "")
 		dir := t.TempDir()
 		if err := os.Mkdir(filepath.Join(dir, "bin"), 0o700); err != nil {
 			t.Fatal(err)
@@ -299,7 +308,7 @@ func TestBinaryFromEnvironmentIsChecked(t *testing.T) {
 }
 
 func TestRunRefusesABinaryInsideTheWorkdir(t *testing.T) {
-	b := newBinary(t, "success.json", 0, "")
+	b := newBinary(t, "success.jsonl", 0, "")
 	body, err := os.ReadFile(b.path)
 	if err != nil {
 		t.Fatal(err)
@@ -346,7 +355,7 @@ func TestRunRefusesABinaryInsideTheWorkdir(t *testing.T) {
 }
 
 func TestRunStartsTheAbsolutePathFromPATH(t *testing.T) {
-	b := newBinary(t, "success.json", 0, "")
+	b := newBinary(t, "success.jsonl", 0, "")
 	dir := t.TempDir()
 	want := filepath.Join(dir, "claude")
 	if err := os.Symlink(b.path, want); err != nil {
@@ -415,7 +424,7 @@ func TestRunTimeoutAndCancel(t *testing.T) {
 }
 
 func TestRunRefusesBadJobs(t *testing.T) {
-	b := newBinary(t, "success.json", 0, "")
+	b := newBinary(t, "success.jsonl", 0, "")
 	file := filepath.Join(t.TempDir(), "f")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -562,7 +571,7 @@ func TestRunReasoningFlag(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			b := newBinary(t, "success.json", 0, "")
+			b := newBinary(t, "success.jsonl", 0, "")
 			d := newDriver(t, config.Provider{Reasoning: c.cfgLevel}, b.path)
 			j := job(t)
 			j.Reasoning = c.jobLevel
@@ -592,7 +601,7 @@ func TestReasoningLevelsAreChecked(t *testing.T) {
 		!strings.Contains(err.Error(), "low, medium, high, xhigh, max") {
 		t.Fatalf("New: %v", err)
 	}
-	b := newBinary(t, "success.json", 0, "")
+	b := newBinary(t, "success.jsonl", 0, "")
 	j := job(t)
 	j.Reasoning = "--bare"
 	_, err := newDriver(t, config.Provider{}, b.path).Run(context.Background(), j)

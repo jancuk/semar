@@ -38,12 +38,8 @@ func usesSetup(s config.Setup) bool { return s.MCP || s.Skills }
 func buildArgs(job provider.Job, cfg config.Provider) []string {
 	s := cfg.Setup
 	setup := usesSetup(s)
-	args := []string{"-p"}
-	if setup {
-		args = append(args, "--output-format", "stream-json", "--verbose")
-	} else {
-		args = append(args, "--output-format", "json")
-	}
+	// The stream is the only format that shows the job's progress while it runs.
+	args := []string{"-p", "--output-format", "stream-json", "--verbose"}
 	tools := "Read,Grep,Glob"
 	if s.Skills {
 		tools += ",Skill"
