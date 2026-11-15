@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/jancuk/semar/internal/cli"
 )
 
 const helperEnv = "SEMAR_MAIN_SIGNAL_HELPER"
@@ -26,7 +28,7 @@ func TestHelperProcess(t *testing.T) {
 		return
 	}
 	ignored := signal.Ignored(syscall.SIGHUP)
-	ctx, stop := signal.NotifyContext(context.Background(), stopSignals()...)
+	ctx, stop := signal.NotifyContext(context.Background(), cli.StopSignals()...)
 	defer stop()
 	lines := make(chan string)
 	go func() {

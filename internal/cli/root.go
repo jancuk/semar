@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"os/user"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -110,6 +112,18 @@ func (e exitError) Error() string { return fmt.Sprintf("exit %d", e.code) }
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return run(ctx, args, stdout, stderr, options{})
+}
+
+// StopSignals are the signals that cancel the command instead of ending the process, so
+// that it removes its temporary files and ends the programs it started. SIGHUP arrives when
+// the terminal closes; Windows never sends it. A hangup that the parent ignored, as nohup
+// does, stays ignored: asking for it would turn the handling back on.
+func StopSignals() []os.Signal {
+	sigs := []os.Signal{os.Interrupt, syscall.SIGTERM}
+	if !signal.Ignored(syscall.SIGHUP) {
+		sigs = append(sigs, syscall.SIGHUP)
+	}
+	return sigs
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, o options) int {

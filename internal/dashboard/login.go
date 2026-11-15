@@ -48,8 +48,12 @@ func (l *logins) init() {
 	l.ctx, l.cancel = context.WithCancel(context.Background())
 }
 
+// stop cancels under the lock, so that startLogin either sees the end or has added its job to
+// the wait group already.
 func (l *logins) stop() {
+	l.mu.Lock()
 	l.cancel()
+	l.mu.Unlock()
 	l.wg.Wait()
 }
 

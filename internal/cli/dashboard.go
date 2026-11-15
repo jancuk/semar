@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"os/exec"
 	"os/signal"
 	"runtime"
@@ -68,7 +67,9 @@ func runDashboard(ctx context.Context, stdout, stderr io.Writer, o options, sys 
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	// A kill or a closed terminal stops the dashboard as Ctrl+C does, so that Serve ends the
+	// sign-ins, which run in process groups of their own.
+	ctx, stop := signal.NotifyContext(ctx, StopSignals()...)
 	defer stop()
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
