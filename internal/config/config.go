@@ -24,6 +24,7 @@ type Config struct {
 	Providers    []Provider             `yaml:"providers"`
 	Tickets      Tickets                `yaml:"tickets"`
 	Plan         Plan                   `yaml:"plan"`
+	Knowledge    []Knowledge            `yaml:"knowledge"`
 
 	providersDefaulted bool
 }
@@ -136,13 +137,13 @@ const (
 
 var topLevelKeys = []string{
 	"version", "environments", "authProfiles", "redact", "policy", "replay",
-	"providers", "tickets", "plan",
+	"providers", "tickets", "plan", "knowledge",
 }
 
 // laterPlanKeys belong to plans that are not built yet. They are accepted and ignored.
 var laterPlanKeys = []string{
 	"observe", "web", "android", "access", "databases", "repos", "risk",
-	"knowledge", "mcpServers", "mcpTools", "publish", "regression", "security",
+	"mcpServers", "mcpTools", "publish", "regression", "security",
 	"explore", "notify", "decisions", "agents", "assign", "passes", "limits",
 	"evidence", "change",
 }
@@ -199,6 +200,11 @@ func parse(data []byte, name string) (Config, error) {
 	applyPlanDefaults(&cfg)
 	if err := validate(cfg, name); err != nil {
 		return Config{}, err
+	}
+	// Every later reader sees the clean path. validate has accepted it, so one trailing
+	// slash is the only thing left to remove.
+	for i := range cfg.Knowledge {
+		cfg.Knowledge[i].Path = strings.TrimSuffix(cfg.Knowledge[i].Path, "/")
 	}
 	return cfg, nil
 }

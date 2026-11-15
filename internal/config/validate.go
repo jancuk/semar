@@ -82,6 +82,7 @@ func validate(c Config, name string) error {
 		}
 	}
 	validatePlan(c, add)
+	validateKnowledge(c, add)
 	envNames := make([]string, 0, len(c.Environments))
 	for n := range c.Environments {
 		envNames = append(envNames, n)
