@@ -254,6 +254,7 @@ The page uses `internal/dashboard/ui/style.css` as given and does not change its
 | Codex | The person's own instruction file loads in every mode. No switch keeps it out and keeps the sign-in |
 | Codex | The tool sends the schema in a strict mode that refuses the plan schema. The driver then puts the schema in the prompt and checks that the answer is one JSON object. The plan stage's own checks still run |
 | Codex | `setup.deny` cannot be honoured, so the driver refuses a provider that has one. There is no turn limit; the timeout works |
+| Codex | A plan came back with no scenario and no tool call. The summary said that the source directory is inside a path that the active filesystem policy denies. The copy of the source was in the system temporary directory, which the profile denies, and the model read that and stopped. Reads of the working directory do work under the profile. The copy is now made under `semar/work` in the user cache directory, and the deny entries stay |
 | API kinds | No vendor was called. The adapters are tested against local servers only |
 
 ## Reasoning level
