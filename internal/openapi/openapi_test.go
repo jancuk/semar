@@ -125,7 +125,8 @@ func TestParse(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse: %v", err)
 			}
-			if !reflect.DeepEqual(got, tt.want) {
+			// The index is an unexported detail of a parsed document.
+			if got.Version != tt.want.Version || !reflect.DeepEqual(got.Prefixes, tt.want.Prefixes) || !reflect.DeepEqual(got.Operations, tt.want.Operations) {
 				t.Errorf("Parse =\n%+v\nwant\n%+v", got, tt.want)
 			}
 		})
@@ -156,7 +157,8 @@ func TestParseRefusals(t *testing.T) {
 		want string
 	}{
 		{"empty", "", "docs/api.yaml"},
-		{"too large", strings.Repeat(" ", 5<<20+1), "larger than 5 MiB"},
+		{"yaml too large", strings.Repeat(" ", 2<<20+1), "larger than 2 MiB, the limit for YAML"},
+		{"json too large", "{" + strings.Repeat(" ", 5<<20), "larger than 5 MiB, the limit for JSON"},
 		{"scalar", "hello", "not a mapping"},
 		{"list", "- a\n- b\n", "not a mapping"},
 		{"no version key", "info: {}\npaths: {}\n", "\"openapi\" or \"swagger\""},

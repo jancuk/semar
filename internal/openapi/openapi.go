@@ -19,8 +19,13 @@ import (
 )
 
 const (
-	maxBytes      = 5 << 20
+	maxJSONBytes = 5 << 20
+	// A YAML document becomes a node tree that takes about 100 times its size in
+	// memory, so its limit is lower.
+	maxYAMLBytes  = 2 << 20
 	maxOperations = 5000
+	// maxPrefixes keeps Parse and Lookup cheap when a document lists thousands of servers.
+	maxPrefixes = 32
 	// maxWork bounds the keys visited. Aliases let one node be reached many
 	// times, so the size of the input alone does not bound the walk.
 	maxWork = 2_000_000
@@ -31,6 +36,35 @@ type Document struct {
 	Version    string      // the value of "openapi" or "swagger"
 	Prefixes   []string    // path prefixes from basePath or from the path of each servers[].url, without a trailing slash
 	Operations []Operation // sorted by Path, then Method
+
+	index *routeIndex // built by Parse; Lookup builds a temporary one when it is nil
+}
+
+// routeIndex maps a normalised route to the operations that answer it, in the order of
+// Operations. It is read-only after it is built.
+type routeIndex struct {
+	ops    int
+	routes map[string][]int
+}
+
+func buildIndex(prefixes []string, ops []Operation) *routeIndex {
+	idx := &routeIndex{ops: len(ops), routes: make(map[string][]int, len(ops))}
+	for i, op := range ops {
+		keys := make([]string, 0, 1+len(prefixes))
+		add := func(k string) {
+			if !slices.Contains(keys, k) {
+				keys = append(keys, k)
+			}
+		}
+		add(normalize(op.Path))
+		for _, p := range prefixes {
+			add(normalize(p + op.Path))
+		}
+		for _, k := range keys {
+			idx.routes[k] = append(idx.routes[k], i)
+		}
+	}
+	return idx
 }
 
 // Operation is one method on one path.
@@ -53,25 +87,33 @@ var methods = []string{"get", "put", "post", "delete", "options", "head", "patch
 
 // Parse reads an API document. name is used in error messages.
 func Parse(data []byte, name string) (Document, error) {
-	if len(data) > maxBytes {
-		return Document{}, fmt.Errorf("%s: the file is larger than 5 MiB", name)
-	}
 	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 	var (
 		raw rawDoc
 		err error
 	)
 	if t := bytes.TrimLeft(data, " \t\r\n"); len(t) > 0 && t[0] == '{' {
+		if len(data) > maxJSONBytes {
+			return Document{}, fmt.Errorf("%s: the file is larger than 5 MiB, the limit for JSON", name)
+		}
 		raw, err = readJSON(data, name)
 	} else {
+		if len(data) > maxYAMLBytes {
+			return Document{}, fmt.Errorf("%s: the file is larger than 2 MiB, the limit for YAML", name)
+		}
 		raw, err = readYAML(data, name)
 	}
 	if err != nil {
 		return Document{}, err
 	}
 	doc := Document{Version: raw.version, Operations: raw.ops}
+	seen := map[string]bool{}
 	for _, u := range raw.urls {
-		if p := prefixOf(u, raw.isURL); p != "" && !slices.Contains(doc.Prefixes, p) {
+		if len(doc.Prefixes) == maxPrefixes {
+			break
+		}
+		if p := prefixOf(u, raw.isURL); p != "" && !seen[p] {
+			seen[p] = true
 			doc.Prefixes = append(doc.Prefixes, p)
 		}
 	}
@@ -82,6 +124,7 @@ func Parse(data []byte, name string) (Document, error) {
 		}
 		return a.Method < b.Method
 	})
+	doc.index = buildIndex(doc.Prefixes, doc.Operations)
 	return doc, nil
 }
 
@@ -226,12 +269,28 @@ func readYAML(data []byte, name string) (rawDoc, error) {
 	if top == nil || top.Kind != yaml.MappingNode {
 		return rawDoc{}, fmt.Errorf("%s: the document is not a mapping", name)
 	}
-	var out rawDoc
+	// Every scan of a mapping is charged, so aliases cannot make the walk longer than the budget.
+	b := budget(maxWork)
+	look := func(m *yaml.Node, key string) (*yaml.Node, error) {
+		if b.spend(len(m.Content)/2+1) != nil {
+			return nil, tooMuch(name)
+		}
+		return field(m, key), nil
+	}
+	var (
+		out rawDoc
+		err error
+	)
 	key := "openapi"
-	v := field(top, key)
+	v, err := look(top, key)
+	if err != nil {
+		return rawDoc{}, err
+	}
 	if v == nil {
 		key = "swagger"
-		v = field(top, key)
+		if v, err = look(top, key); err != nil {
+			return rawDoc{}, err
+		}
 	}
 	// An unquoted 2.0 or 3.1 is a number in YAML, so any scalar is accepted.
 	if v == nil || v.Kind != yaml.ScalarNode || v.Value == "" {
@@ -239,30 +298,47 @@ func readYAML(data []byte, name string) (rawDoc, error) {
 	}
 	out.version = v.Value
 	if key == "swagger" {
-		if bp := field(top, "basePath"); bp != nil && bp.Kind == yaml.ScalarNode {
+		bp, err := look(top, "basePath")
+		if err != nil {
+			return rawDoc{}, err
+		}
+		if bp != nil && bp.Kind == yaml.ScalarNode {
 			out.urls = append(out.urls, bp.Value)
 		}
 	} else {
 		out.isURL = true
-		if servers := field(top, "servers"); servers != nil && servers.Kind == yaml.SequenceNode {
+		servers, err := look(top, "servers")
+		if err != nil {
+			return rawDoc{}, err
+		}
+		if servers != nil && servers.Kind == yaml.SequenceNode {
+			if b.spend(len(servers.Content)) != nil {
+				return rawDoc{}, tooMuch(name)
+			}
 			for _, s := range servers.Content {
 				if s = resolve(s); s == nil || s.Kind != yaml.MappingNode {
 					continue
 				}
-				if u := field(s, "url"); u != nil && u.Kind == yaml.ScalarNode {
+				u, err := look(s, "url")
+				if err != nil {
+					return rawDoc{}, err
+				}
+				if u != nil && u.Kind == yaml.ScalarNode {
 					out.urls = append(out.urls, u.Value)
 				}
 			}
 		}
 	}
-	paths := field(top, "paths")
+	paths, err := look(top, "paths")
+	if err != nil {
+		return rawDoc{}, err
+	}
 	if paths == nil || (paths.Kind == yaml.ScalarNode && paths.Tag == "!!null") {
 		return out, nil
 	}
 	if paths.Kind != yaml.MappingNode {
 		return rawDoc{}, fmt.Errorf("%s: \"paths\" must be a mapping", name)
 	}
-	b := budget(maxWork)
 	for i := 0; i+1 < len(paths.Content); i += 2 {
 		pk := resolve(paths.Content[i])
 		item := resolve(paths.Content[i+1])
@@ -279,7 +355,11 @@ func readYAML(data []byte, name string) (rawDoc, error) {
 			}
 			op := Operation{Method: strings.ToUpper(mk.Value), Path: pk.Value, Line: mk.Line}
 			if o := resolve(item.Content[j+1]); o != nil && o.Kind == yaml.MappingNode {
-				if r := field(o, "responses"); r != nil && r.Kind == yaml.MappingNode {
+				r, err := look(o, "responses")
+				if err != nil {
+					return rawDoc{}, err
+				}
+				if r != nil && r.Kind == yaml.MappingNode {
 					if b.spend(len(r.Content)/2) != nil {
 						return rawDoc{}, tooMuch(name)
 					}
@@ -352,11 +432,12 @@ func normalize(p string) string {
 // written with or without a prefix of the document.
 func (d Document) Lookup(method, route string) Match {
 	var m Match
-	want := normalize(route)
-	for _, op := range d.Operations {
-		if !d.reaches(op.Path, want) {
-			continue
-		}
+	idx := d.index
+	if idx == nil || idx.ops != len(d.Operations) {
+		idx = buildIndex(d.Prefixes, d.Operations)
+	}
+	for _, i := range idx.routes[normalize(route)] {
+		op := d.Operations[i]
 		m.PathKnown = true
 		if !slices.Contains(m.Methods, op.Method) {
 			m.Methods = append(m.Methods, op.Method)
@@ -368,18 +449,6 @@ func (d Document) Lookup(method, route string) Match {
 	}
 	sort.Strings(m.Methods)
 	return m
-}
-
-func (d Document) reaches(path, want string) bool {
-	if normalize(path) == want {
-		return true
-	}
-	for _, p := range d.Prefixes {
-		if normalize(p+path) == want {
-			return true
-		}
-	}
-	return false
 }
 
 // Declares reports whether the operation lists the status code, its range
