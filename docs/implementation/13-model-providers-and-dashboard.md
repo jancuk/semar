@@ -81,11 +81,18 @@ Rules:
 
 ## Which provider plans
 
-In this order: the flag `--provider`, then `plan.provider` of `semar.yaml`, then `default` of the person's file, then the built-in `claude`.
+In this order:
 
-An ID is looked up in the person's file first and in `providers` of `semar.yaml` second. The person's definition wins. A provider from `semar.yaml` of a harness kind gets the default setup (both switches on). `--no-setup` turns both switches off for the run.
+1. The flag `--provider`.
+2. `default` of the person's file, when that file exists.
+3. `plan.provider` of `semar.yaml`.
+4. The built-in `claude`.
 
-The model: the flag `--model`, then the provider's `model`, then the harness's default. An API kind needs a model.
+The person's file comes before `semar.yaml` because `semar.yaml` is committed in the repository under test. Once a person has a file of their own, a repository cannot choose where that person's source goes.
+
+An ID is looked up in the person's file first and in `providers` of `semar.yaml` second. The person's definition wins. A provider from `semar.yaml` of a harness kind gets the default setup (both switches on). A provider from `semar.yaml` of an API kind is refused, because `semar.yaml` can set neither an address nor a key. `--no-setup` clears the setup for the run, the deny list included.
+
+The model: the flag `--model`, then the provider's `model`, then the harness's default. An API kind needs a model, and a missing one is an error before any job starts.
 
 ## Contract
 
@@ -152,15 +159,17 @@ A record never holds a path, a repository name, a prompt, or model output.
 
 | Setup | Flags |
 |---|---|
-| Both off | As today: `--tools Read,Grep,Glob --strict-mcp-config --setting-sources ""`, and the short environment |
-| MCP on | `--setting-sources user --settings '{"disableAllHooks":true}'`, no `--strict-mcp-config` |
-| Skills on | `--setting-sources user --settings '{"disableAllHooks":true}'`, and `Skill` joins `--tools` |
-| MCP off, skills on | The two lines above with `--strict-mcp-config` |
-| `deny` | `--disallowedTools` with each entry, after validation that no entry starts with `-` |
+| Both off | As today: `--tools Read,Grep,Glob --strict-mcp-config --setting-sources ""`, the `json` output, and the short environment |
+| MCP on | `--setting-sources user`, the settings below, no `--strict-mcp-config` |
+| Skills on | `--setting-sources user`, the settings below, and `Skill` joins `--tools` |
+| MCP off, skills on | The line above with `--strict-mcp-config` |
+| `deny` | `--disallowedTools` with each entry. An entry that is empty, starts with `-`, or holds a comma or a control character is refused |
 
-With any switch on, the child gets the person's environment without the model vendors' variables and without the variables that `semar.yaml` names as secrets. The driver passes no permission mode: the person's rules apply.
+The settings with any switch on: `--settings '{"disableAllHooks":true,"permissions":{"blockReadsOutsideWorkingDirectories":true}}'`. The second key is needed: a live test showed that under a person's permission mode `auto` the file tools read a file outside the working directory without it.
 
-The output format becomes `stream-json`. The driver reads the `init` event (MCP server names, number of skills, permission mode), each tool call of an assistant message, the `rate_limit_event`, and the `result` event (as today, plus `total_cost_usd`, the cache token counts, and the permission denials).
+With any switch on, the child gets the person's environment without the model vendors' variables, without `SEMAR_*`, without the variables that `semar.yaml` names as secrets, and without the markers of an enclosing harness session. Two variables are added: `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`, because the person's own instruction file loads with `--setting-sources user`, and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. The driver passes no permission mode: the person's rules apply.
+
+With any switch on, the output format is `stream-json`. The driver reads the `init` event (MCP server names, number of skills, permission mode), each tool call of an assistant message, the `rate_limit_event`, and the `result` event (as today, plus `total_cost_usd`, the cache token counts, and the permission denials).
 
 The driver implements `provider.Account`: `Status` runs `claude auth status --json` and keeps `loggedIn`, `authMethod`, and `subscriptionType` only. `LoginCommand` is `claude auth login`.
 
@@ -220,7 +229,7 @@ The page uses `internal/dashboard/ui/style.css` as given and does not change its
 * The order of [Which provider plans](#which-provider-plans), with `--provider` and `--no-setup` on `semar plan`.
 * The registry gets the `codex`, `anthropic`, and `openai` kinds.
 * After a job, one usage record is appended. A failure to append is one notice on standard error and never fails the command.
-* `plan.md` names the provider, its kind and model, what was loaded, every tool with its number of calls, and the number of refused calls.
+* `plan.md` names the provider, its kind and model, the number of MCP servers and skills that were loaded, the file tools with their number of calls, the number of calls of MCP tools, and the number of refused calls.
 * The start line says what the planner may use, for example "with your MCP servers and skills (`--no-setup` turns them off)".
 * `semar providers` prints the providers, the default, and the path of the file.
 
@@ -232,8 +241,23 @@ The page uses `internal/dashboard/ui/style.css` as given and does not change its
 * `semar dashboard --no-open` answers `GET /api/state` with the token and refuses it without the token, with another `Host`, and with another `Origin`.
 * One live plan with Claude Code and the setup on, in a scratch clone.
 
+## What the live tests found
+
+| Kind | Finding |
+|---|---|
+| Claude Code | Nothing inside the working directory loads with the setup on: a settings directory with a hook and a permission rule, an MCP file, a skill directory, and an instruction file were all planted, and none took effect |
+| Claude Code | The person's permission mode decides which MCP tools run. Under the mode `auto`, a classifier approves them. Only `setup.deny` stops a tool for certain |
+| Claude Code | The person's plugins load with the setup on. Hooks stay off |
+| Claude Code | A job with the setup on costs more: on a machine with many plugins, one run wrote about 195,000 tokens to the cache, against about 17,000 with MCP off |
+| Codex | The read-only sandbox of the tool lets a command read the whole disk. The driver defines its own permission profile, which reads the system's files and the working directory only. Proven on macOS only |
+| Codex | The person's own instruction file loads in every mode. No switch keeps it out and keeps the sign-in |
+| Codex | The tool sends the schema in a strict mode that refuses the plan schema. The driver then puts the schema in the prompt and checks that the answer is one JSON object. The plan stage's own checks still run |
+| Codex | `setup.deny` cannot be honoured, so the driver refuses a provider that has one. There is no turn limit; the timeout works |
+| API kinds | No vendor was called. The adapters are tested against local servers only |
+
 ## Open points
 
 * The subscription windows are known only after a run. There is no command that returns them without a model turn.
 * An API kind cannot use MCP servers. The person's MCP servers reach the planner through a harness kind only.
 * Codex and each API vendor report usage in their own way. The usage record holds what each reports and leaves the rest at zero.
+* `plan.md` counts the calls of MCP tools and withholds their names, because a name holds the name of a server on the person's machine and the file may be committed.

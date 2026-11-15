@@ -18,7 +18,6 @@ import (
 	"github.com/jancuk/semar/internal/dashboard"
 	"github.com/jancuk/semar/internal/keychain"
 	"github.com/jancuk/semar/internal/provider"
-	"github.com/jancuk/semar/internal/userconfig"
 )
 
 // dashboardSystem is what the dashboard takes from the machine beyond options, so that a
@@ -30,7 +29,7 @@ type dashboardSystem struct {
 }
 
 func newDashboardCmd(o options) *cobra.Command {
-	return dashboardCommand(o, dashboardSystem{keys: keychain.OS(), environ: os.Environ, open: openBrowser})
+	return dashboardCommand(o, dashboardSystem{keys: o.Keychain, environ: o.Environ, open: openBrowser})
 }
 
 func dashboardCommand(o options, sys dashboardSystem) *cobra.Command {
@@ -53,7 +52,7 @@ func runDashboard(ctx context.Context, stdout, stderr io.Writer, o options, sys 
 	if port < 0 || port > 65535 {
 		return errors.New("--port must be from 0 to 65535, and 0 means any free port")
 	}
-	home, err := userconfig.Home(o.LookupEnv)
+	home, err := o.home()
 	if err != nil {
 		return err
 	}

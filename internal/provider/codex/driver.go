@@ -119,7 +119,7 @@ func (d *Driver) setupOn() bool { return d.cfg.Setup.MCP || d.cfg.Setup.Skills }
 // the variable that moves the Codex home, where the sign-in lives.
 func (d *Driver) env() []string {
 	if d.setupOn() {
-		return setupEnv(d.o.Environ(), d.o.DropEnv)
+		return provider.SetupEnv(d.o.Environ(), d.o.DropEnv)
 	}
 	env := provider.ChildEnv(d.o.Lookup)
 	if v, ok := d.o.Lookup("CODEX_HOME"); ok {
