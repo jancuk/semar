@@ -3,17 +3,58 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Semar models</title>
+<meta name="color-scheme" content="light dark" />
+<title>Semar · Models</title>
 <link rel="icon" href="data:," />
 <link rel="stylesheet" href="style.css" />
 <script src="app.js" defer="defer"></script>
 </head>
 <body>
-<main class="page">
-  <header class="masthead">
-    <h1>Semar <span class="muted">Models</span></h1>
-    <p class="path mono" id="file-path"></p>
+<main class="shell">
+  <header class="topbar">
+    <span class="brand"><span class="brand-mark" aria-hidden="true">S</span>Semar</span>
+    <span class="crumb">Models</span>
   </header>
+
+  <div class="intro">
+    <h1>Models</h1>
+    <p>Choose the model that plans your tests, and see what it used.</p>
+  </div>
+
+  <div class="banner" id="banner" role="alert" hidden="hidden"></div>
+
+  <div class="empty" id="start" hidden="hidden">
+    <b>Open this page from Semar</b>
+    <span>Run <code>semar dashboard</code> in a terminal and open the address it prints.</span>
+  </div>
+
+  <div id="hero" aria-busy="true">
+    <div class="skeleton hero-h" aria-hidden="true"></div>
+  </div>
+
+  <section class="section" id="providers" aria-labelledby="providers-title">
+    <div class="section-head">
+      <h2 id="providers-title">Providers</h2>
+      <button type="button" class="btn" id="add-toggle" aria-expanded="false" aria-controls="add-panel" disabled="disabled">Add provider</button>
+    </div>
+    <div class="stack" id="provider-list" aria-busy="true">
+      <div class="skeleton row-h" aria-hidden="true"></div>
+      <div class="skeleton row-h" aria-hidden="true"></div>
+    </div>
+    <div class="panel" id="add-panel" hidden="hidden"></div>
+  </section>
+
+  <section class="section" id="usage" aria-labelledby="usage-title">
+    <div class="section-head">
+      <h2 id="usage-title">Usage</h2>
+      <div class="tabs" id="usage-tabs" role="group" aria-label="Period"></div>
+    </div>
+    <div class="stack" id="usage-body" aria-live="polite"></div>
+  </section>
+
+  <footer class="footer" id="footer"></footer>
 </main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="sr-only" id="live" role="status" aria-live="polite"></div>
 </body>
 </html>
