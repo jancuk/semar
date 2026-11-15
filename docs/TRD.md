@@ -709,13 +709,14 @@ A QA engineer does not plan from the diff alone. They remember what was tested b
 
 ### Sources
 
-A team lists its sources in configuration. Every source is read-only.
+A team lists its sources in configuration. Every source is read-only. [Plan 14](implementation/14-knowledge-documents.md) builds the kinds `files` and `openapi`. They read from the repository only, at the commit that is planned, and never from a network. The other kinds are specified and not built.
 
 | Kind | Reads | How | Milestone |
 | --- | --- | --- | --- |
 | `semar` | Semar's own past scenarios, runs, findings, and approved memory notes | The repository and the evidence branch | M1 |
 | `jira` | The linked ticket, earlier tickets on the same feature, and their comments | Jira's REST interface | M1 |
-| `files` | A folder of Markdown or text files, such as test plans kept in the repository | The file system | M1 |
+| `files` | A file or a folder of documents in the repository, such as test plans or the notes of a service | The copy of the source at the head commit. Built by Plan 14 | M1 |
+| `openapi` | One OpenAPI 3 or Swagger 2 document in the repository. Code compares every drafted request with it | The copy of the source at the head commit. Built by Plan 14 | M1 |
 | `testrail` | Test cases, test runs, and results for the sections mapped to a feature | TestRail's REST interface | M1.1 |
 | `mcp` | Anything an MCP server exposes: Confluence pages, a team memory service, another tracker | The MCP gateway below | M1.1 |
 
@@ -2113,26 +2114,9 @@ tickets:
   pattern: "[A-Z][A-Z0-9]+-[0-9]+"
   required: true
 
-knowledge:
-  sources:
-    - { id: history, kind: semar }
-    - { id: jira, kind: jira, projects: [SHOP] }
-    - { id: qa-docs, kind: files, path: docs/qa }
-    - id: testrail
-      kind: testrail
-      url: https://example.testrail.io
-      token: "env:SEMAR_TESTRAIL_TOKEN"
-      project: 12
-    - id: wiki
-      kind: mcp
-      server: atlassian
-      tools: [search_pages, get_page]   # listed by name; every other tool is denied
-      sendToModel: true
-    - id: team-memory
-      kind: mcp
-      server: memory
-      tools: [search, read]
-  cache: 24h
+knowledge:                            # built by Plan 14: the kinds files and openapi
+  - { id: api, kind: openapi, path: docs/openapi.yaml }
+  - { id: docs, kind: files, path: docs }
 
 mcpServers:
   atlassian: { command: [atlassian-mcp], env: { ATLASSIAN_TOKEN: "env:SEMAR_ATLASSIAN_TOKEN" } }
@@ -2173,6 +2157,8 @@ trust:
 ```
 
 The `providers`, `deciders`, and `roles` blocks are shown in [Instances and third-party vendors](#instances-and-third-party-vendors).
+
+The `knowledge` key is a list of at most 16 sources, and the built loader refuses a kind other than `files` and `openapi`. The kinds `semar`, `jira`, `testrail`, and `mcp`, and a `cache` setting, are specified and not built. Their shape in the file will be decided when they are built. [Plan 14](implementation/14-knowledge-documents.md) describes the built kinds.
 
 ## Commands
 
