@@ -2,13 +2,13 @@
 
 Semar is an open-source tool in which an AI agent tests a service the way a QA engineer does: it calls the API, uses the web app, uses the Android app, and reads logs and traces. Everything the agent does is recorded as evidence. Code, not the model, computes each outcome. A recorded script replays with no model.
 
-It is built for developer-led teams, including teams with no dedicated QA.
+It helps QA engineers, developers, and product managers run integration tests in a UAT or a production environment, under rules that the team configures.
 
 ## What Semar is for
 
 Semar has two aims.
 
-1. **Depend less on QA.** A change should not wait in a queue for a QA engineer to test it by hand. With Semar, the developer who made the change gets it tested: an AI agent plans the tests from the change, runs them against the test environment, and records the evidence. A team with no QA can verify its own work, and a team with QA frees those people for the decisions that need them: what the product must do, which risks are acceptable, and what to explore next.
+1. **Depend less on QA for manual testing.** A change should not wait in a queue for a person to test it by hand. With Semar, an AI agent plans the tests from the change, runs them against the environment, and records the evidence. Semar does not replace the QA engineer. It moves the QA engineer's work to automation: the scenarios, the rules, and the tools that let an agent test any change.
 2. **Give AI-agent testing one standard.** An agent that tests on its own is hard to trust and hard to compare: each run tests something different and reports it differently. Semar makes every test follow the same path, whoever starts it and whichever model runs it.
 
 | What is standard | How |
@@ -24,7 +24,27 @@ Semar does not remove people from the decision. A person still confirms an expec
 
 ## The problem
 
-Developers divide their time between building, checking changes by hand, and maintaining tests. Verification may be incomplete or skipped, and expected behavior may exist only in conversations. Teams with QA face a verification queue. Both need useful tests and trustworthy evidence without a new full-time maintenance job.
+Teams divide their time between building, checking changes by hand, and maintaining tests. Verification may be incomplete or skipped, expected behavior may exist only in conversations, and a change waits in a queue for a manual pass. A team needs useful tests and trustworthy evidence without a new full-time maintenance job.
+
+## What the agent needs to know
+
+An agent that knows nothing about the product cannot choose a good scenario, add a step, or explain a result. Semar gives the agent context from three sources. It uses them to choose scenarios, to run the tests, and to understand the product.
+
+| Source | What it gives the agent | Today |
+| --- | --- | --- |
+| The source code | The routes, the request and response types, and what a change touched | Built. The planner reads a copy of the source |
+| MCP servers | The team's own tools, such as the tracker, the logs, and the documents | Built for a harness provider, which loads your MCP servers. The planner is not yet told to read the ticket through them |
+| A knowledge base and memory | Earlier tickets, decisions, test cases, and team documents | Specified, not built |
+
+## Who it is for
+
+| Role | What Semar gives them |
+| --- | --- |
+| QA engineer | Automation in place of manual passes. The QA engineer owns the scenarios, the rules, and the configuration, and reviews what the agent drafted |
+| Developer | A change tested from its diff, with evidence, without waiting for a manual pass |
+| Product manager | A record of what was tested for each ticket, and the questions about intent that only a person can answer |
+
+Semar keeps every run with its evidence. A view of the testing history per ticket, team, and scenario, with metrics, is specified and not built yet.
 
 ## How a result can be trusted
 
@@ -37,10 +57,13 @@ If the expected behavior is written nowhere outside the code, no tool can detect
 
 ## Status
 
-Two parts are implemented in Go.
+Three parts are implemented in Go.
 
 * **The model-free core:** replay of accepted scripts against an HTTP API, an effects policy that limits what a test may change, redaction, an evidence store, the verdict, and the report.
-* **A test plan from a diff:** `semar plan --diff` reads the difference between two branches, finds the tickets in the commits, and has a model draft scenarios and requests from the source. Code validates the draft. The model has read-only tools and a copy of the source, and it never reaches the test environment.
+* **A test plan from a diff:** `semar plan --diff` reads the difference between two branches, finds the tickets in the commits, and has a model draft scenarios and requests from the source. Code validates the draft. The model has read-only tools and a copy of the source, and it never reaches the environment.
+* **Model providers and the dashboard:** `semar plan` works with Claude Code, Codex, the Anthropic API, or any server with the OpenAI chat format. `semar dashboard` manages the providers and shows usage. A harness provider can load your MCP servers and skills.
+
+An environment is declared as `test` or `production`, and Semar acts in it only as its rules allow.
 
 Live recording of scripts by an agent, the tracker and risk levels, security probes, providers and agents, data stores, team mode, web, and Android are specified in `docs/implementation/` and are not built yet. [docs/implementation/README.md](docs/implementation/README.md) gives the sequence of plans and what each one adds. Plans 01 to 04 are the first usable version, from a plan to a report for one API ticket.
 
@@ -92,7 +115,7 @@ There are two ways to get scenarios. Both end with the same `semar run`.
 
 | Way | When to use it | A model is needed |
 | --- | --- | --- |
-| [From a change](#from-a-change) | A change is deployed to a test environment, and you want tests for what changed | Yes, to draft the scenarios |
+| [From a change](#from-a-change) | A change is deployed to an environment, and you want tests for what changed | Yes, to draft the scenarios |
 | [Hand-written](#hand-written-scenarios) | You know what to test, or you want no model at all | No |
 
 The examples use a service named `orders` and a ticket named `SHOP-482`.
@@ -132,7 +155,7 @@ semar plan --diff main..release \
 What `plan` does:
 
 1. It copies the source at the head commit to a temporary directory.
-2. It starts the planner in that copy. The planner can read a file, search, and list files. It cannot read a file outside the copy, and it cannot reach your test environment. With a harness provider it can also use your own MCP servers and skills, unless you turn them off. See [Choose the model](#choose-the-model).
+2. It starts the planner in that copy. The planner can read a file, search, and list files. It cannot read a file outside the copy, and it cannot reach your environment. With a harness provider it can also use your own MCP servers and skills, unless you turn them off. See [Choose the model](#choose-the-model).
 3. The model returns one draft. Code validates it. Problems go back to the model, for at most three attempts.
 4. It writes the files below and removes the copy.
 
@@ -157,7 +180,7 @@ next:
 
 Read `plan.md` and the scenario files before you run them. The model read them from the code, and nothing was sent yet.
 
-**3. Run against the test environment.**
+**3. Run against the environment.**
 
 ```bash
 export ORDERS_UAT_TOKEN='<the token of a test account>'
@@ -182,10 +205,10 @@ semar activity latest        # every request that was sent, in order
 **What `plan` does not do yet:**
 
 * It does not read the tracker. A ticket is its key and the commits that name it.
-* It does not invent data of the test environment. A scenario that needs an existing record, such as the ID of an order that the test account may read, is listed in `plan.md` under "Not drafted" with what it needs.
+* It does not invent data of the environment. A scenario that needs an existing record, such as the ID of an order that the test account may read, is listed in `plan.md` under "Not drafted" with what it needs.
 * It drafts requests from the source. It does not try them against the service first.
 
-**What leaves your machine.** `plan` sends parts of your source and the diff to the model provider that you chose, through your own account or key. The line that `plan` prints at its start names the provider. It sends no token, no address of your test environment, and no file outside the copy. `changes`, `run`, `confirm`, and `activity` send nothing to a model.
+**What leaves your machine.** `plan` sends parts of your source and the diff to the model provider that you chose, through your own account or key. The line that `plan` prints at its start names the provider. It sends no token, no address of your environment, and no file outside the copy. `changes`, `run`, `confirm`, and `activity` send nothing to a model.
 
 ### Choose the model
 
@@ -333,13 +356,14 @@ semar run --scenario SHOP-482-01 --build 9f3c2ab41d07; echo "exit $?"
 
 ### Configuration
 
-`.semar/semar.yaml` describes the test environment. `semar init` and the first `semar plan` write it from these flags:
+`.semar/semar.yaml` describes the environment to test, a UAT or a production one. `semar init` and the first `semar plan` write it from these flags:
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--base-url` | none, required | The address of the service in the test environment |
+| `--base-url` | none, required | The address of the service in the environment |
 | `--service` | The name of the repository directory | The name that scripts use for the service |
-| `--env` | `uat` | The name of the environment |
+| `--env` | `uat`, or `production` with `--kind production` | The name of the environment |
+| `--kind` | `test` | `test` or `production`. A production environment is written as read only, with the methods `GET` and `HEAD` |
 | `--auth-header` | `Authorization` | The header that carries the session |
 | `--auth-value` | `Bearer {{secret.TOKEN}}` | The value of that header. `{{secret.TOKEN}}` is replaced at run time |
 | `--token-env` | `SEMAR_TOKEN` | The environment variable that holds the token |
@@ -352,7 +376,7 @@ The file that they write:
 version: 1
 environments:
   uat:
-    kind: test
+    kind: test                                 # test or production
     hosts: ["orders.uat.example.com"]         # a request to any other host is refused
     methods: [GET, POST, PUT, PATCH, DELETE]   # remove the methods your tests must not use
     effects:
@@ -370,9 +394,18 @@ authProfiles:
     secrets: {TOKEN: "env:ORDERS_UAT_TOKEN"}
 ```
 
+**Production.** The same file can declare a production environment. What Semar may do there is what the file says: the hosts, the methods, and the effects mode.
+
+```bash
+semar init --kind production --base-url https://orders.example.com
+semar run --all --env production --build <commit>
+```
+
+`semar init --kind production` writes a read-only environment: the methods `GET` and `HEAD`, and `effects.mode: read_only`, which refuses every request that changes data. Edit the file to allow more, for example a method and a path that a test account may use. A run against a production environment must name it with `--env`, even when it is the only environment, so that no run reaches production by habit. The line that `run` prints at its start, and the report, say which environment and which kind was tested.
+
 Three rules to know:
 
-* **The token is never in a file.** The configuration names an environment variable. Semar reads it at run time and removes its value from everything it stores. Use a test account, never a personal or a production credential.
+* **The token is never in a file.** The configuration names an environment variable. Semar reads it at run time and removes its value from everything it stores. Use an account made for testing, never a personal one.
 * **A result belongs to a build.** A run with no recorded build ends as `inconclusive`. With a build probe, Semar asks the service which commit it runs, before and after the run, and a change between the two makes the results `stale`. Without one, declare the build with `semar run --build <commit>`. The report then says that the build was declared and not read from the service.
 * **The harness is yours.** `semar plan` starts the `claude` or the `codex` on your `PATH`, or the absolute path in the environment variable `SEMAR_CLAUDE_BIN` or `SEMAR_CODEX_BIN`. The configuration cannot name a program to start, because it is a file of the repository under test.
 
@@ -437,7 +470,7 @@ The layout of `.semar/`:
   store/                accepted scripts and confirmations
 ```
 
-Commit `semar.yaml` and `scenarios/` so that the team shares them. `runs/` holds recorded requests and responses of your test environment, with secrets redacted. Decide with your team whether it belongs in the repository.
+Commit `semar.yaml` and `scenarios/` so that the team shares them. `runs/` holds recorded requests and responses of your environment, with secrets redacted. Decide with your team whether it belongs in the repository.
 
 ### When something goes wrong
 

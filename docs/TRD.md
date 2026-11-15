@@ -1961,7 +1961,7 @@ version: 1
 
 environments:
   uat:
-    kind: test                      # Semar refuses any kind other than test
+    kind: test                      # test or production; any other kind is refused
     hosts: [api.uat.example.com]
     methods: [GET, POST, PUT, PATCH, DELETE]
     effects:
@@ -2225,7 +2225,7 @@ The `providers`, `deciders`, and `roles` blocks are shown in [Instances and thir
 
 | Threat | Control |
 | --- | --- |
-| A wrong base URL points at production | An environment must declare `kind: test`. Requests go only to listed hosts. The API engine enforces both and follows no redirect off the list. The web engine blocks other hosts inside the browser |
+| A run reaches production by mistake | An environment declares its kind, `test` or `production`, and its hosts. A run against a production environment must name it with `--env`, and the environment written by `semar init --kind production` is read only. Requests go only to listed hosts. The API engine enforces both and follows no redirect off the list. The web engine blocks other hosts inside the browser |
 | Text in a diff, ticket, response, page, or log line instructs the agent | In an unattended job the agent has no shell, no network, and no write tool. Its only side effects are Semar's surface tools, which are limited by host, method, count, and the environment's `effects` settings. The test account's own permissions are the last limit, so a test account must reach test data only. In an interactive session the user's own agent permissions apply, and the report says so |
 | The agent reports a call it never made | The agent's text is never evidence. Evidence is what the recorder stored |
 | The agent changes an expected result to make a run pass | Expectations come from the Scenario file, which the agent cannot write |
@@ -2358,7 +2358,7 @@ Candidate dependencies. Confirm each one's current version and maintenance state
 | M1 | The daemon, `semar mcp`, the Claude Code plugin, the `api`, `observe`, and `db` engines, the recorder, replay, verdict, `claude` and `codex` drivers, the ticket gate with Jira read, the `semar`, `jira`, and `files` knowledge sources with `kb_search`, the feature map, Plan with earlier testing, the impact map, and recommendations, Gate, sign-in, Author, Explore, `regression run` and `regression coverage`, local report, `init`, `doctor`, `egress` | One real ticket runs from plan to a local report on UAT, in both the interactive and the unattended way. A local regression run replays the scenarios that ticket left behind. The sample-app suite passes |
 | M1.1 | Code host adapter, evidence branch, `publish` with the Jira result comment, the `testrail` source and TestRail results, the MCP gateway, memory notes, decisions in the merge request, `sync`, `status`, pipeline templates, promotion on sign-off, `regression bootstrap` with bulk confirmation, the regression comparison report, Postman import, `rollup`, `acp` driver | A ticket goes from an opened merge request to a signed-off report and a Jira comment with no person starting a command, and the nightly regression run publishes its report |
 | M2 | The `web` engine on brojev, `web_run` with the pilot, locators, script repair, the object-storage evidence store | One real web ticket runs from plan to a published report |
-| M3 | Native Android adapter, app/device identity, evidence artifacts, and connected API/web/Android journeys; completes the initial platform scope | Required checks run across each applicable surface on one target manifest and connected fixture; a no-QA team can review the evidence |
+| M3 | Native Android adapter, app/device identity, evidence artifacts, and connected API/web/Android journeys; completes the initial platform scope | Required checks run across each applicable surface on one target manifest and connected fixture; a QA engineer, a developer, or a product manager can review the evidence |
 | M4 | Native iOS adapter and separately validated runner/device capabilities; extend the existing Android support | iOS journeys pass the same evidence/permission contracts without borrowing Android results |
 | Shadow | Compare with the team's existing checks from M1 onward; developers, leads, or product owners perform independent checks when QA is absent | Reliability and total human effort are measured; absent/skipped prior testing is disclosed rather than treated as zero-cost equivalent quality |
 

@@ -1,11 +1,11 @@
 # Semar product requirements
 
-* **Status:** Draft 1 with updated product scope and no-QA workflow. The model-free core (Plan 01) is implemented.
+* **Status:** Draft 1 with updated product scope and roles. The model-free core (Plan 01), the test plan from a diff (Plan 12), and the model providers with the dashboard (Plan 13) are implemented.
 * **Author:** azhar
 * **Date:** 2026-11-14
 * **Related:** [user scenarios](USER_SCENARIOS.md), [technical requirements](TRD.md), [test workflow](WORKFLOW.md), [workflow diagram](workflow.html)
 
-**Scope (2026-11-14):** The scope, the workflow for teams without QA, and decisions D26 to D31 below set what Semar is for. No claim here says that Semar is the first or the only tool of its kind.
+**Scope (2026-11-14):** The scope, the roles of the people who use it, and decisions D26 to D31 below set what Semar is for. No claim here says that Semar is the first or the only tool of its kind.
 
 ## Current scope
 
@@ -22,17 +22,19 @@ These are support boundaries for delivery, not claims that every company uses al
 
 Grafana and read-only database access are supporting evidence integrations. They are required only where a check depends on them. Jira is the initial work source; existing test management and a prebuilt knowledge base are optional. Start from approved requirements, developer explanations, API specifications, and previous evidence when there is no TestRail or QA-owned suite.
 
-## Teams without dedicated QA
+## Who uses Semar and who decides
 
-The primary workflow must work without a QA job title, QA account, or test-management installation. Verification responsibilities map to existing people: developer, peer developer, tech lead, product owner, or founder. QA remains an optional participant. Automation does not supply missing business intent or silently accept release risk.
+Semar serves three roles: the QA engineer, the developer, and the product manager. It does not replace the QA engineer, and it is not built to run a team with no QA. It changes what the QA engineer spends time on: less testing by hand and more automation. The QA engineer owns the scenarios, the rules, and the configuration that let an agent test any change, and builds on them with AI. The developer gets a change tested without waiting for a manual pass. The product manager sees what was tested and decides on intent.
+
+Verification responsibilities are configured by capability and are not tied to a job title: a QA engineer, a peer developer, a tech lead, or a product owner can hold one. Automation does not supply missing business intent or silently accept release risk.
 
 | Situation | Decision path |
 | --- | --- |
-| Unchanged approved expectations, complete clean evidence, permitted low-risk scope | Reuse the approved checks; mark verified under the preconfigured policy without a new QA acceptance step. Normal release authorization still applies. |
+| Unchanged approved expectations, complete clean evidence, permitted low-risk scope | Reuse the approved checks; mark verified under the preconfigured policy without a new acceptance step. Normal release authorization still applies. |
 | New or changed business rule | Ask a focused question in the existing issue/MR. An eligible peer developer, lead, or product owner confirms the expectation and source revision. |
-| Unknown intent, incomplete evidence, flaky behavior, or high-risk change | Route to the named owner with evidence and the exact unresolved decision. Do not wait on a nonexistent QA role. |
+| Unknown intent, incomplete evidence, flaky behavior, or high-risk change | Route to the named owner with evidence and the exact unresolved decision. Never leave it without an owner. |
 | Solo developer with no independent reviewer | Allow diagnostic testing and author confirmation, labeled `author_confirmed`. Preserve factual check results, but do not call this independent intent validation. A permitted low-risk release requires explicit owner risk acceptance; high-risk policies may remain blocked. |
-| Team has QA | QA can fulfill the same verification-owner role; it is not a separate mandatory gate on every run. |
+| QA engineer | Owns the scenarios, the rules, and the automation. Reviews what the agent drafted and confirms expected results. A manual pass by the QA engineer is not a gate on every run. |
 
 Risk policy must define high-risk areas such as authorization, tenant boundaries, money movement, irreversible deletion, and migrations. A second AI agent is not an independent business approver. Existing approved assertions can be reused without repetitive questions; new generated translations are reviewed under the source-trust contract.
 
@@ -40,13 +42,17 @@ A new team can bootstrap critical journeys from its product descriptions and san
 
 ## Positioning
 
-Semar offers evidence-backed change verification across API, web, and Android for developer-led teams without dedicated QA. A pilot must show lower total human effort, useful defect detection, and acceptable maintenance and cost before broad delivery. "First," "only," and "no QA means no human judgment" are not supported claims.
+Semar helps QA engineers, developers, and product managers run integration tests in a UAT or a production environment, across API, web, and Android, under rules that the team configures, with recorded evidence. It keeps a history of what was tested, per ticket, team, and scenario. A pilot must show lower total human effort, useful defect detection, and acceptable maintenance and cost before broad delivery. "First" and "only" are not supported claims, and Semar does not remove human judgment.
 
 ## Summary
 
-Semar has two aims. The first is to make a team depend less on QA: a change does not wait for a QA engineer to test it by hand, because the developer who made it gets it tested by an AI agent, with recorded evidence. The second is to give testing by an AI agent one standard: the same scenario format, the same labels for where an expected result comes from, the same recorded evidence, the same verdict rules, and the same report, whoever starts the run and whichever model does the work. A person still decides what the product must do and which risk to accept.
+Semar has two aims. The first is to make a team depend less on QA for manual testing: a change does not wait for a person to test it by hand, because an AI agent tests it, with recorded evidence. This does not replace the QA engineer. The QA engineer's work moves to automation: the scenarios, the rules, and the tools that let an agent test any change. The second is to give testing by an AI agent one standard: the same scenario format, the same labels for where an expected result comes from, the same recorded evidence, the same verdict rules, and the same report, whoever starts the run and whichever model does the work. A person still decides what the product must do and which risk to accept.
 
-Semar is a planned open-source behavior-verification tool for developer-led teams, including teams without dedicated QA. It verifies changes in an authorized test environment and produces evidence tied to requirements and the exact deployed target. On UAT it creates and changes test data only through the application, signed in as a test account, as a QA engineer does. It never writes to a database directly.
+Semar is a planned open-source behavior-verification tool for QA engineers, developers, and product managers. It runs integration tests in a UAT or a production environment and produces evidence tied to requirements and the exact deployed target. What Semar may do in an environment depends on how the configuration declares it: its kind, its hosts, its methods, and what a test may change. On UAT it creates and changes test data only through the application, signed in as a test account, as a QA engineer does. It never writes to a database directly.
+
+Semar keeps the history of testing. For each ticket, team, and scenario it shows what was tested, on which build, with which outcome, and who confirmed it.
+
+An agent that knows nothing about the product cannot choose a good scenario, add a step, or explain a result. Semar therefore gives the agent context from three sources: the team's tools through MCP servers, a knowledge base and memory of earlier tickets and decisions, and the source code of the change. The agent uses them to choose scenarios, to run the tests, and to understand the product.
 
 Semar gives an AI agent the hands of a QA engineer. The agent can call the API as a person would in Postman, use the web app in a browser, use the Android app on an emulator or device, and read logs, traces, and dashboards in Grafana. Every action goes through Semar, which records it.
 
@@ -54,7 +60,7 @@ The agent is the tester, and it does four jobs. It drafts test scenarios from a 
 
 Semar also keeps a regression suite. Each ticket that goes through Semar leaves its scenarios behind, and a regression run replays all of them, with evidence for every one and no model call.
 
-Developers and reviewers are already busy, so Semar automates execution and evidence collection and asks people only for unresolved intent and risk decisions. Pipeline jobs can start runs; decisions stay in the existing issue/MR workflow. A dedicated QA engineer is not required.
+Developers and reviewers are already busy, so Semar automates execution and evidence collection and asks people only for unresolved intent and risk decisions. Pipeline jobs can start runs; decisions stay in the existing issue/MR workflow.
 
 Every change verification has a traceable work identity, initially a Jira ticket. Before drafting, the agent reads available requirements and prior testing. TestRail, team documents, and prior runs enrich this when present; their absence does not prevent onboarding. Missing business intent remains an explicit question. Publication writes are separately configured and authorized.
 
@@ -62,7 +68,7 @@ Semar reaches AI providers through agent harnesses that are installed on the mac
 
 ## Problem
 
-A developer-led team without QA must build features, choose checks, prepare data, run API/web/Android tests, investigate failures, and maintain the resulting scripts. Checks can be skipped or limited to the happy path. Teams with QA face a similar verification queue, but a QA department cannot be an adoption prerequisite.
+A team must build features, choose checks, prepare data, run API/web/Android tests, investigate failures, and maintain the resulting scripts. Much of that work is done by hand, by a QA engineer or by a developer. Checks can be skipped or limited to the happy path, and each change waits in a queue for a manual pass.
 
 Two things make the queue worse:
 
@@ -74,8 +80,8 @@ Two things make the queue worse:
 | User | What they need from Semar |
 | --- | --- |
 | Developer, including solo developer | Useful checks without writing a suite first, actionable evidence, reproducible failures, and visible uncertainty |
-| Verification owner: peer developer, tech lead, product owner, or founder | Focused intent questions and exception review within existing tools, without needing a QA account |
-| QA engineer, when present | The same scenario/evidence workflow, with optional deeper exploration and suite ownership |
+| Verification owner: peer developer, tech lead, product owner, or founder | Focused intent questions and exception review within existing tools |
+| QA engineer | Ownership of the scenarios, the rules, and the regression suite. Automation in place of manual passes, and deeper exploration |
 | Merge request reviewer | A short list of expected results to confirm while reviewing the code |
 | Manager or PM | A roll-up of what was tested per ticket, team, and service, and how each result was reached |
 | Open-source adopter | A tool that works with their code host, ticket tracker, observability stack, and AI provider without code changes to Semar |
@@ -100,7 +106,7 @@ You did not answer these directly, so this draft picks the option it judges best
 | D12 | A feature map in the repository lists each feature, its URLs, paths, and screens, and its source files. The agent drafts it once and people correct it | It lets a plan name the exact targets a change affects, and it makes "all features" a number for regression | Each plan guesses the affected URLs from the diff alone, and regression coverage cannot be measured |
 | D13 | The regression suite fills by itself: a signed-off ticket's scenarios join it. For features no ticket has touched, Semar records current behaviour as a baseline | No one has time to write a suite by hand | A suite that someone must write and maintain |
 | D14 | A baseline pass is reported as "unchanged since the baseline", not as "correct" | Recorded behaviour includes the defects the system has today | A regression report that claims more than it knows |
-| D15 | Decisions use existing issue/MR roles; unchanged approved assertions are reused. New/changed business assertions need source-appropriate confirmation; no dedicated QA acceptance is mandatory | Owner's no-QA-team use case and the source-trust review | Excessive repeated questions remove the time saving; absent intent cannot be automated away |
+| D15 | Decisions use existing issue/MR roles; unchanged approved assertions are reused. New/changed business assertions need source-appropriate confirmation; no manual acceptance by one fixed role is mandatory | The owner's instruction that a change must not wait on one role and the source-trust review | Excessive repeated questions remove the time saving; absent intent cannot be automated away |
 | D16 | The UAT database is an evidence source of last resort. Semar only reads from it, through an account that the database itself limits to reading | Your instruction. A defect in Semar then cannot change UAT data | An ordinary account, with safety resting on Semar's own checks |
 | D17 | The ticket is the unit of work. A change with no ticket is not planned and not run | Your instruction. It also settles where a result is posted and how the roll-up groups | Results with no home, and a roll-up that cannot group |
 | D18 | Semar's code posts the result comment on the Jira ticket, built from the recorded actions. The agent does not write it and holds no Jira credential | You asked for the agent to post it. Built by code, the comment says what ran, and text hidden in a page or a ticket cannot make the agent post to Jira | A comment that reports what the agent says it did |
@@ -143,14 +149,14 @@ You did not answer these directly, so this draft picks the option it judges best
 
 The first two goals are the reason Semar exists. The numbered goals after them say how.
 
-* **Depend less on QA.** Manual verification by a QA engineer is no longer the step that every change waits for. Developers verify their own changes with an agent, and QA, where a team has it, spends its time on intent, risk, and exploration.
+* **Depend less on QA for manual testing.** A manual pass by a QA engineer is no longer the step that every change waits for. Semar does not replace the QA engineer. The QA engineer's time moves to automation: the scenarios, the rules, and the tools that let an agent test any change, and to intent, risk, and exploration.
 * **One standard for testing with an AI agent.** Every run follows the same workflow and produces the same kind of scenario, evidence, verdict, and report, so that results can be trusted, repeated, and compared across people, teams, and models.
 
 1. Shorten the time between "the build is on UAT" and "the evidence is accepted" for a batch of tickets, by testing tickets in parallel.
 2. Produce test scenarios when the ticket is blank.
 3. Make a "passed" result trustworthy: recorded by the tool, computed by code, tied to a named build, and labelled with where each expected result came from.
 4. Give every failure a recorded request and response, or a screenshot, plus a script that reproduces it.
-5. Leave behind reusable regression scripts owned by the development team, with QA participation when available.
+5. Leave behind reusable regression scripts owned by the team, QA engineers and developers together.
 6. Give managers and PMs a roll-up that shows outcomes, not only counts.
 7. Work with more than one AI provider through one adapter contract.
 8. Let the agent test the way a QA engineer does, across the API, the web app, the Android app, and Grafana, with every action recorded.
@@ -168,12 +174,15 @@ The first two goals are the reason Semar exists. The numbered goals after them s
 20. Fit a company with other tools: another tracker, another code host, another observability stack, with configuration and no change to Semar's code.
 21. Let developers and QA change tests, rules, and models by editing YAML, with no knowledge of Semar's code.
 22. Let a team choose which model does which job, run agents in parallel, and use a cheap, fast model wherever a job is a simple choice.
+23. Keep a history of testing and show metrics from it: which tickets, teams, and scenarios were tested, on which build, and with which outcome.
+24. Give the agent the context it needs to choose scenarios and explain results: the team's tools through MCP servers, a knowledge base and memory, and the source code.
+25. Run in a UAT or a production environment under the rules that the configuration of that environment sets.
 
 ## Non-goals
 
 * Semar does not detect a misunderstood requirement when the expected behaviour is written nowhere outside the code. A person must supply or confirm it.
 * Semar does not replace unit tests, integration tests in CI, or load tests.
-* Semar does not run against production. It refuses any environment that is not declared as a test environment.
+* Semar does not act outside the rules of an environment. Every environment declares its kind, test or production, its hosts, its methods, and what a test may change. Semar refuses a request outside them, and a run against production must name the environment.
 * The standalone runner needs no hosted account. Managed cloud is a separate staged delivery, with explicit tenant/security/operations gates.
 * Native iOS is outside the initial API/web/Android scope and follows it; native Android is included from the first product scope.
 * Semar does not claim exhaustive interaction coverage across a release. Declared critical cross-service and cross-surface journeys are in scope; untested combinations remain explicit.
@@ -190,7 +199,7 @@ These rules hold in every milestone. A feature that breaks one is out of scope.
 1. **The tool records the evidence.** Only an action that goes through Semar's recorder counts as evidence. In an unattended run the agent has no other path to the test environment.
 2. **Code computes the verdict.** The same evidence always gives the same verdict.
 3. **Every expected result names its source:** the ticket, an existing test case, a person, the diff, a baseline, or an invariant such as "no server error".
-4. **Expected behavior has authenticated provenance and policy-appropriate review.** Reuse unchanged approved checks. New/changed business assertions need an eligible independent reviewer, who may be a developer, lead, or product owner. A quote alone does not validate its executable translation. Solo author confirmation is explicitly labeled and does not count as independent validation; release handling follows the no-QA policy above. Registered invariants are assigned by trusted code, not by the model.
+4. **Expected behavior has authenticated provenance and policy-appropriate review.** Reuse unchanged approved checks. New/changed business assertions need an eligible independent reviewer, who may be a developer, lead, or product owner. A quote alone does not validate its executable translation. Solo author confirmation is explicitly labeled and does not count as independent validation; release handling follows the role policy above. Registered invariants are assigned by trusted code, not by the model.
 5. **Every result names the build it ran against.** A result for a different build is stale.
 6. **The agent never sees a password, a token, or an OTP.**
 7. **Secrets and personal data are removed before evidence is stored or shown to the model.**
@@ -222,11 +231,11 @@ These rules hold in every milestone. A feature that breaks one is out of scope.
 
 Delivery sequence: **M1** is an API pilot, **M1.1** adds shared team operation, **M2** adds web, and **M3** adds native Android and completes the initial surface scope. **M4** adds native iOS. These are implementation increments, not a reduction of the first product scope. All applicable surfaces and at least one connected journey must meet the common evidence contract before claiming initial scope complete.
 
-### Team adoption without QA
+### Team adoption
 
 | ID | Requirement | Milestone |
 | --- | --- | --- |
-| FR-130 | Setup and verification work without a QA account, TestRail, or an existing automation suite | M1 |
+| FR-130 | Setup and verification need no test-management installation and no existing automation suite | M1 |
 | FR-131 | Configure verification and release responsibilities by capability; peer developers, leads, and product owners may fulfill them | M1 local; authenticated shared roles in M1.1 |
 | FR-132 | Reuse approved unchanged expectations without repeated confirmation; show only unresolved decisions | M1 |
 | FR-133 | Solo-team mode records author confirmation separately from independent review; it cannot silently satisfy high-risk separation-of-duty policy | M1 |
@@ -327,8 +336,8 @@ Delivery sequence: **M1** is an API pilot, **M1.1** adds shared team operation, 
 
 | ID | Requirement | Milestone |
 | --- | --- | --- |
-| FR-32 | The configured verification owner records acceptance when policy requires human review; QA is optional | M1.1 |
-| FR-33 | The authorized release owner signs off under team policy. The decision names the target manifest and scenario versions; no QA job title is required | M1.1 |
+| FR-32 | The configured verification owner records acceptance when policy requires human review; any configured role can hold it | M1.1 |
+| FR-33 | The authorized release owner signs off under team policy. The decision names the target manifest and scenario versions; the role is configured and is not tied to a job title | M1.1 |
 | FR-34 | An acceptance or sign-off lapses as soon as the build or the recorded configuration on UAT differs from the one it names, whether or not a newer run exists | M1.1 |
 | FR-35 | The roll-up lists, per ticket, team, and service: the build, the count of each outcome, how many expected results came only from the diff, and who confirmed, accepted, and signed | M1.1 |
 
