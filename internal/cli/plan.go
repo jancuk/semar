@@ -16,14 +16,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jancuk/semar/internal/atomicfile"
 	"github.com/jancuk/semar/internal/changeset"
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
-	"github.com/jancuk/semar/internal/evidence"
-	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/provider"
-	"github.com/jancuk/semar/internal/scenario"
 	"github.com/jancuk/semar/internal/stage/plan"
 	"github.com/jancuk/semar/internal/vcs"
 )
@@ -237,7 +233,7 @@ func pickAuthProfile(cfg config.Config, name string) (string, error) {
 // table and the diff under .semar-plan.
 func prepareSource(ctx context.Context, g *vcs.Git, cs domain.ChangeSet, tmp string) (string, error) {
 	src := filepath.Join(tmp, "src")
-	if err := g.Archive(ctx, cs.HeadCommit, src); err != nil {
+	if _, err := g.Archive(ctx, cs.HeadCommit, src); err != nil {
 		return "", err
 	}
 	if err := removeAgentFiles(src); err != nil {
@@ -318,131 +314,6 @@ func planFailed(ctx context.Context, stderr io.Writer, err error) error {
 		return exitError{ExitError}
 	}
 	return err
-}
-
-type planFile struct {
-	path string
-	data []byte
-}
-
-// writePlan writes every file or none (R21). Every byte is made, and every target is checked,
-// before the first write. Scenario files come before scripts, and a failure removes the
-// scenario files and the plan directory that this call created.
-func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.ScenarioID]bool) (string, error) {
-	var scenarioFiles []planFile
-	var scripts []domain.Script
-	if len(out.Scripts) != len(out.Scenarios) {
-		return "", fmt.Errorf("the plan has %d scenarios and %d scripts", len(out.Scenarios), len(out.Scripts))
-	}
-	for i, sc := range out.Scenarios {
-		if err := idcheck.Check("ticket", sc.Ticket); err != nil {
-			return "", fmt.Errorf("scenario %s: %w", sc.ID, err)
-		}
-		if err := idcheck.Check("scenario ID", string(sc.ID)); err != nil {
-			return "", err
-		}
-		if known[sc.ID] {
-			return "", fmt.Errorf("scenario %s exists already; nothing was written", sc.ID)
-		}
-		p := filepath.Join(scenariosDir(dir), sc.Ticket, string(sc.ID)+".yaml")
-		if _, err := os.Lstat(p); !errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("%s exists already; nothing was written", p)
-		}
-		data, err := scenario.Marshal(sc)
-		if err != nil {
-			return "", err
-		}
-		scenarioFiles = append(scenarioFiles, planFile{p, data})
-		s := out.Scripts[i]
-		s.ExpectHash = domain.ExpectHash(sc)
-		s.AuthoredBy = domain.ProviderRef{Instance: out.PlannerID, Model: out.Result.Model, Harness: out.PlannerKind}
-		scripts = append(scripts, s)
-	}
-	var md bytes.Buffer
-	if err := plan.Render(&md, in, out); err != nil {
-		return "", err
-	}
-	draft, err := atomicfile.EncodeJSON(out.Draft)
-	if err != nil {
-		return "", fmt.Errorf("encode the draft: %w", err)
-	}
-	store, err := evidence.Open(semarDir(dir))
-	if err != nil {
-		return "", err
-	}
-
-	var created []string
-	var planDir string
-	undo := func(cause error) (string, error) {
-		errs := []error{cause}
-		for _, p := range created {
-			if err := os.Remove(p); err != nil {
-				errs = append(errs, err)
-			}
-		}
-		if planDir != "" {
-			if err := os.RemoveAll(planDir); err != nil {
-				errs = append(errs, err)
-			}
-		}
-		return "", fmt.Errorf("the plan was not written, and the scenario files it had written were removed: %w", errors.Join(errs...))
-	}
-	for _, f := range scenarioFiles {
-		if err := writeNewFile(f.path, f.data); err != nil {
-			return undo(err)
-		}
-		created = append(created, f.path)
-	}
-	for _, s := range scripts {
-		if err := store.PutScript(s); err != nil {
-			return undo(err)
-		}
-	}
-	if planDir, err = newPlanDir(dir, in.Change.HeadCommit); err != nil {
-		return undo(err)
-	}
-	for _, f := range []planFile{{filepath.Join(planDir, "plan.md"), md.Bytes()}, {filepath.Join(planDir, "draft.json"), draft}} {
-		if err := writeNewFile(f.path, f.data); err != nil {
-			return undo(err)
-		}
-	}
-	return filepath.Join(planDir, "plan.md"), nil
-}
-
-// writeNewFile never replaces a file. A plan is read and committed by people, so it is not private.
-func writeNewFile(path string, data []byte) error {
-	if err := atomicfile.WriteNew(path, data); err != nil {
-		return err
-	}
-	return os.Chmod(path, 0o644)
-}
-
-// newPlanDir claims .semar/plans/<first 12 characters of the head>, or the first free -2, -3, ...
-func newPlanDir(dir, head string) (string, error) {
-	if len(head) > 12 {
-		head = head[:12]
-	}
-	if err := idcheck.Check("commit", head); err != nil {
-		return "", err
-	}
-	parent := filepath.Join(semarDir(dir), "plans")
-	if err := os.MkdirAll(parent, atomicfile.DirMode); err != nil {
-		return "", fmt.Errorf("create %s: %w", parent, err)
-	}
-	for n := 1; n <= 1000; n++ {
-		p := filepath.Join(parent, head)
-		if n > 1 {
-			p = fmt.Sprintf("%s-%d", p, n)
-		}
-		err := os.Mkdir(p, atomicfile.DirMode)
-		if err == nil {
-			return p, nil
-		}
-		if !errors.Is(err, fs.ErrExist) {
-			return "", fmt.Errorf("create %s: %w", p, err)
-		}
-	}
-	return "", fmt.Errorf("%s holds 1000 plans of commit %s already", parent, head)
 }
 
 func printPlanDone(w io.Writer, out plan.Output, planFile string) {

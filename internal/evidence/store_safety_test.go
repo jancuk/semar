@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/evidence"
 )
 
@@ -190,5 +191,79 @@ func writeMode(t *testing.T, path string, data []byte, mode os.FileMode) {
 	}
 	if err := os.Chmod(path, mode); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestScriptsRefuseALinkedOrNonDirectoryComponent(t *testing.T) {
+	tests := []struct {
+		name string
+		at   string
+		link bool
+		want string
+	}{
+		{name: "linked scripts", at: "scripts", link: true, want: "symbolic link"},
+		{name: "linked scenario directory", at: filepath.Join("scripts", "refund"), link: true, want: "symbolic link"},
+		{name: "file as scripts", at: "scripts", want: "not a directory"},
+		{name: "file as scenario directory", at: filepath.Join("scripts", "refund"), want: "not a directory"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := openStore(t)
+			bad := filepath.Join(s.Root(), "store", tt.at)
+			if err := os.MkdirAll(filepath.Dir(bad), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			target := t.TempDir()
+			if tt.link {
+				symlinkOrSkip(t, target, bad)
+			} else if err := os.WriteFile(bad, []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			check := func(what string, err error) {
+				t.Helper()
+				if err == nil || !strings.Contains(err.Error(), bad) || !strings.Contains(err.Error(), tt.want) {
+					t.Errorf("%s: err = %v, want it to name %s and say %q", what, err, bad, tt.want)
+				}
+			}
+			check("PutScript", s.PutScript(scriptFixture("refund", "aaa")))
+			_, _, err := s.Script("refund", "aaa")
+			check("Script", err)
+			check("RemoveScript", s.RemoveScript("refund", "aaa"))
+			entries, err := os.ReadDir(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Errorf("a script was written at the link's target: %v", entries)
+			}
+		})
+	}
+}
+
+func TestRemoveScript(t *testing.T) {
+	s := openStore(t)
+	for _, h := range []domain.Hash{"aaa", "bbb"} {
+		if err := s.PutScript(scriptFixture("refund", string(h))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := filepath.Join(s.Root(), "store", "scripts", "refund")
+	if err := s.RemoveScript("refund", "aaa"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := s.Script("refund", "aaa"); ok || err != nil {
+		t.Errorf("Script(aaa) after RemoveScript = %v, %v", ok, err)
+	}
+	if _, ok, err := s.Script("refund", "bbb"); !ok || err != nil {
+		t.Errorf("Script(bbb) = %v, %v; the other script must stay", ok, err)
+	}
+	if err := s.RemoveScript("refund", "bbb"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+		t.Errorf("the empty directory of the scenario stays: %v", err)
+	}
+	if err := s.RemoveScript("refund", "bbb"); err != nil {
+		t.Errorf("removing a script that is not stored: %v", err)
 	}
 }

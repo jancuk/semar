@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -19,20 +20,40 @@ func semarDir(repo string) string { return filepath.Join(repo, ".semar") }
 func scenariosDir(repo string) string { return filepath.Join(semarDir(repo), "scenarios") }
 
 // scenarioFiles maps each scenario ID to its files: .semar/scenarios/**/<id>.yaml or <id>.yml.
-// A .yaml or .yml entry that is not a regular file, such as a symlink, is an error and not skipped.
+// .semar and .semar/scenarios must be real directories, and an entry below them that is a link
+// or a special file is an error and not skipped: a linked directory would hide its scenarios
+// from a plan, which would then reuse their IDs and titles.
 func scenarioFiles(repo string) (map[domain.ScenarioID][]string, error) {
 	dir := scenariosDir(repo)
 	files := map[domain.ScenarioID][]string{}
+	for _, d := range []string{semarDir(repo), dir} {
+		info, err := os.Lstat(d)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return files, nil
+		case err != nil:
+			return nil, fmt.Errorf("list scenarios in %s: %w", dir, err)
+		case info.Mode()&fs.ModeSymlink != 0:
+			return nil, fmt.Errorf("%s is a symbolic link, and Semar reads scenarios only from real directories: replace it with a directory", d)
+		case !info.IsDir():
+			return nil, fmt.Errorf("%s is not a directory, and Semar reads scenarios from a directory there", d)
+		}
+	}
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		ext := filepath.Ext(p)
-		if d.IsDir() || (ext != ".yaml" && ext != ".yml") {
+		switch {
+		case d.Type()&fs.ModeSymlink != 0:
+			return fmt.Errorf("%s is a symbolic link, and Semar reads scenarios only from real files and directories", p)
+		case d.IsDir():
 			return nil
+		case !d.Type().IsRegular():
+			return fmt.Errorf("%s is not a regular file (%s), and .semar/scenarios may hold only files and directories", p, d.Type())
 		}
-		if !d.Type().IsRegular() {
-			return fmt.Errorf("%s is not a regular file (%s), and a scenario file must be one", p, d.Type())
+		ext := filepath.Ext(p)
+		if ext != ".yaml" && ext != ".yml" {
+			return nil
 		}
 		id := domain.ScenarioID(strings.TrimSuffix(d.Name(), ext))
 		files[id] = append(files[id], p)

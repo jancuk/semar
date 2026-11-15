@@ -91,18 +91,39 @@ func (s *Store) runDir(id domain.RunID) (string, error) {
 	return join(s.root, "runs", string(id))
 }
 
-func (s *Store) scriptPath(id domain.ScenarioID, h domain.Hash) (string, error) {
+// scriptRel is the path of a stored script below the root.
+func scriptRel(id domain.ScenarioID, h domain.Hash) (string, error) {
 	if err := idcheck.Check("scenario ID", string(id)); err != nil {
 		return "", err
 	}
 	if err := idcheck.Check("expectation hash", string(h)); err != nil {
 		return "", err
 	}
-	return join(s.root, "store", "scripts", string(id), string(h)+".yaml")
+	return join("", "store", "scripts", string(id), string(h)+".yaml")
+}
+
+// openScripts opens the root for the script at rel. A repository can commit a link at
+// store/scripts or at a scenario's directory below it, so each directory on the way must be
+// a real one, and every access goes through the root so that a link cannot lead out of it.
+func (s *Store) openScripts(rel string, create bool) (*os.Root, error) {
+	root, err := os.OpenRoot(s.root)
+	if err != nil {
+		return nil, err
+	}
+	if create {
+		_, err = atomicfile.MkdirIn(root, filepath.Dir(rel))
+	} else {
+		err = atomicfile.CheckDirIn(root, filepath.Dir(rel))
+	}
+	if err != nil {
+		_ = root.Close()
+		return nil, err
+	}
+	return root, nil
 }
 
 func (s *Store) PutScript(sc domain.Script) error {
-	p, err := s.scriptPath(sc.Scenario, sc.ExpectHash)
+	rel, err := scriptRel(sc.Scenario, sc.ExpectHash)
 	if err != nil {
 		return fmt.Errorf("store script: %w", err)
 	}
@@ -115,17 +136,60 @@ func (s *Store) PutScript(sc domain.Script) error {
 	if err := enc.Close(); err != nil {
 		return fmt.Errorf("encode script %s: %w", sc.Scenario, err)
 	}
-	return atomicfile.Write(p, []byte(buf.String()))
+	root, err := s.openScripts(rel, true)
+	if err != nil {
+		return fmt.Errorf("store script %s: %w", sc.Scenario, err)
+	}
+	defer root.Close()
+	return atomicfile.WriteIn(root, rel, []byte(buf.String()), atomicfile.FileMode)
+}
+
+// RemoveScript removes a stored script, and its scenario's directory when nothing else is
+// left in it. A script that is not stored is not an error.
+func (s *Store) RemoveScript(id domain.ScenarioID, h domain.Hash) error {
+	rel, err := scriptRel(id, h)
+	if err != nil {
+		return fmt.Errorf("remove script: %w", err)
+	}
+	root, err := s.openScripts(rel, false)
+	if err != nil {
+		return fmt.Errorf("remove script %s: %w", id, err)
+	}
+	defer root.Close()
+	if err := root.Remove(rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove script %s: %w", id, err)
+	}
+	dir, err := root.Open(filepath.Dir(rel))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("remove script %s: %w", id, err)
+	}
+	names, err := dir.Readdirnames(1)
+	_ = dir.Close()
+	if len(names) == 0 && errors.Is(err, io.EOF) {
+		if err := root.Remove(filepath.Dir(rel)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove script %s: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // Script reports false when no script is stored for the scenario and hash.
 // A stored file that does not parse, or that belongs to another scenario or hash, is an error.
 func (s *Store) Script(id domain.ScenarioID, h domain.Hash) (domain.Script, bool, error) {
-	p, err := s.scriptPath(id, h)
+	rel, err := scriptRel(id, h)
 	if err != nil {
 		return domain.Script{}, false, fmt.Errorf("load script: %w", err)
 	}
-	data, err := os.ReadFile(p)
+	p := filepath.Join(s.root, rel)
+	root, err := s.openScripts(rel, false)
+	if err != nil {
+		return domain.Script{}, false, fmt.Errorf("load script %s: %w", id, err)
+	}
+	defer root.Close()
+	data, err := root.ReadFile(rel)
 	if errors.Is(err, fs.ErrNotExist) {
 		return domain.Script{}, false, nil
 	}
