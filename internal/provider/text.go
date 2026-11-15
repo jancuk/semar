@@ -3,6 +3,7 @@ package provider
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 const maxDetailRunes = 300
@@ -41,4 +42,21 @@ func LastLine(stderr []byte) string {
 		return "no message on standard error"
 	}
 	return Truncate(Redact(line))
+}
+
+// MaxToolName bounds the tool name of a progress report, so that a hostile stream cannot make
+// the reports large.
+const MaxToolName = 200
+
+// ProgressTool is a tool name as a harness gave it, cut to MaxToolName bytes at the start of a
+// character. The reporter makes it safe to show.
+func ProgressTool(name string) string {
+	if len(name) <= MaxToolName {
+		return name
+	}
+	cut := MaxToolName
+	for cut > 0 && !utf8.RuneStart(name[cut]) {
+		cut--
+	}
+	return name[:cut]
 }

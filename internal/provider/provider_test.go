@@ -45,3 +45,21 @@ func TestErrorText(t *testing.T) {
 		t.Fatalf("got %q", e.Error())
 	}
 }
+
+func TestProgressTool(t *testing.T) {
+	long := strings.Repeat("a", provider.MaxToolName-1) + "é" + "tail"
+	cases := []struct{ name, in, want string }{
+		{"short", "Read", "Read"},
+		{"empty", "", ""},
+		{"exactly the limit", strings.Repeat("a", provider.MaxToolName), strings.Repeat("a", provider.MaxToolName)},
+		{"longer", strings.Repeat("a", provider.MaxToolName+5), strings.Repeat("a", provider.MaxToolName)},
+		{"a character across the limit", long, strings.Repeat("a", provider.MaxToolName-1)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := provider.ProgressTool(c.in); got != c.want {
+				t.Fatalf("got %d bytes %.20q", len(got), got)
+			}
+		})
+	}
+}
