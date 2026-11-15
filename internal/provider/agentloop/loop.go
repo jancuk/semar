@@ -138,6 +138,7 @@ func Run(ctx context.Context, client Client, job provider.Job) (provider.Result,
 		Tools:    toolDefs(job.Schema),
 	}
 	var res provider.Result
+	var progress provider.Progress
 	calls := map[string]int{}
 	resultBytes := 0
 	reminded := false
@@ -168,6 +169,12 @@ func Run(ctx context.Context, client Client, job provider.Job) (provider.Result,
 				name = "unknown"
 			}
 			calls[name]++
+			progress.ToolCalls++
+			progress.Tool = name
+		}
+		progress.Turns = res.Turns
+		if job.Progress != nil {
+			job.Progress(progress)
 		}
 		if out, ok := submitted(msg.Calls); ok {
 			finish()

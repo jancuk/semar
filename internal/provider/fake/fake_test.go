@@ -113,3 +113,16 @@ func TestFactory(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFakeReportsNoProgress(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "a.json", `{"n": 1}`)
+	f, err := fake.New(config.Provider{ID: "f", Kind: "fake", Outputs: []string{"a.json"}}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reports := 0
+	if _, err := f.Run(context.Background(), provider.Job{Prompt: "p", Progress: func(provider.Progress) { reports++ }}); err != nil || reports != 0 {
+		t.Fatalf("%d reports, %v", reports, err)
+	}
+}

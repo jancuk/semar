@@ -370,3 +370,72 @@ func TestRunResultBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRunReportsProgress(t *testing.T) {
+	answer := func(r Response) func(Request) (Response, error) {
+		return func(Request) (Response, error) { return r, nil }
+	}
+	cases := []struct {
+		name    string
+		turns   int
+		steps   []func(Request) (Response, error)
+		want    []provider.Progress
+		wantErr bool
+	}{
+		{"until submit", 5, []func(Request) (Response, error){
+			answer(calls(call("c1", "read_file", `{"path":"orders/handler.go"}`), call("c2", "list_files", `{"glob":"**"}`))),
+			answer(Response{Message: Message{Role: RoleAssistant, Text: "thinking"}, Stop: StopEnd}),
+			answer(calls(call("c3", "delete_file", `{}`), call("c4", "search", `{"pattern":"Refund"}`))),
+			answer(calls(call("c5", "submit", `{"summary":"done"}`))),
+		}, []provider.Progress{
+			{Turns: 1, ToolCalls: 2, Tool: "list_files"},
+			{Turns: 2, ToolCalls: 2, Tool: "list_files"},
+			{Turns: 3, ToolCalls: 4, Tool: "search"},
+			{Turns: 4, ToolCalls: 5, Tool: "submit"},
+		}, false},
+		{"the turn limit", 2, []func(Request) (Response, error){
+			answer(calls(call("c1", "rm -rf", `{}`))),
+			answer(calls(call("c2", "read_file", `{"path":"orders/handler.go"}`))),
+		}, []provider.Progress{
+			{Turns: 1, ToolCalls: 1, Tool: "unknown"},
+			{Turns: 2, ToolCalls: 2, Tool: "read_file"},
+		}, true},
+		{"a client error ends the reports", 5, []func(Request) (Response, error){
+			answer(calls(call("c1", "list_files", `{"glob":"**"}`))),
+			func(Request) (Response, error) {
+				return Response{}, &provider.Error{Class: provider.ProviderError, Detail: "boom"}
+			},
+		}, []provider.Progress{
+			{Turns: 1, ToolCalls: 1, Tool: "list_files"},
+		}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			job := newJob(t)
+			job.MaxTurns = c.turns
+			var got []provider.Progress
+			returned := false
+			job.Progress = func(p provider.Progress) {
+				if returned {
+					t.Error("a report after Run returned")
+				}
+				got = append(got, p)
+			}
+			res, err := Run(context.Background(), &script{t: t, steps: c.steps}, job)
+			returned = true
+			if (err != nil) != c.wantErr {
+				t.Fatalf("error = %v", err)
+			}
+			if !slices.Equal(got, c.want) {
+				t.Fatalf("reports = %+v\nwant      %+v", got, c.want)
+			}
+			sum := 0
+			for _, u := range res.Tools {
+				sum += u.Calls
+			}
+			if last := got[len(got)-1]; last.Turns != res.Turns || last.ToolCalls != sum {
+				t.Fatalf("the last report is %+v, the result has %d turns and %d tool calls", last, res.Turns, sum)
+			}
+		})
+	}
+}

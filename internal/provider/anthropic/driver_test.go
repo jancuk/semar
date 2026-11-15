@@ -199,6 +199,8 @@ func TestTwoStepToolConversation(t *testing.T) {
 				`"usage":{"input_tokens":30,"output_tokens":40,"cache_creation_input_tokens":100,"cache_read_input_tokens":900}}`
 		},
 	)
+	var reports []provider.Progress
+	job.Progress = func(p provider.Progress) { reports = append(reports, p) }
 	d := newDriver(t, srv.URL, "env:ACME_KEY")
 	res, err := d.Run(context.Background(), job)
 	if err != nil {
@@ -215,6 +217,10 @@ func TestTwoStepToolConversation(t *testing.T) {
 	}
 	if fmt.Sprint(res.Tools) != "[{read_file 1} {submit 1}]" {
 		t.Errorf("tools = %v", res.Tools)
+	}
+	// The driver passes the job's progress function on to the loop.
+	if fmt.Sprint(reports) != "[{1 1 read_file} {2 2 submit}]" {
+		t.Errorf("reports = %+v", reports)
 	}
 }
 
