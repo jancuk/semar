@@ -63,13 +63,17 @@ make build            # writes bin/semar
 bin/semar version     # prints "semar dev"
 ```
 
-**Put it on your `PATH`.** Either copy the binary or add an alias:
+**Put it on your `PATH`.** Run one of these from the root of this repository:
 
 ```bash
+# copy the binary to a directory that is already on PATH
 sudo install -m 0755 bin/semar /usr/local/bin/semar
-# or
-alias semar="$PWD/bin/semar"
+
+# or keep it here and add an alias to your shell's startup file
+echo "alias semar=\"$(pwd)/bin/semar\"" >> ~/.zshrc   # ~/.bashrc for bash
 ```
+
+The second command writes the full path of the binary into the file, so the alias works from any directory. Open a new terminal afterwards. Do not write `$PWD` in the startup file itself: the shell would replace it with the directory each terminal starts in.
 
 **Other ways to build:**
 
