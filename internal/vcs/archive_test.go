@@ -329,3 +329,68 @@ func TestPlanCopy(t *testing.T) {
 		})
 	}
 }
+
+func TestArchiveLeavesOutEveryDotGitEntry(t *testing.T) {
+	r := gittest.New(t)
+	blob := func(content string) string {
+		id, err := gitStdin(t, r.Dir, []byte(content), "hash-object", "-w", "--stdin")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	tree := func(entries string) string {
+		id, err := gitStdin(t, r.Dir, []byte(entries), "mktree")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	config := blob("[core]\n\tfsmonitor = \"touch pwned; false\"\n")
+	dotgit := tree("100644 blob " + config + "\tconfig\n100644 blob " + blob("ref: refs/heads/main\n") + "\tHEAD\n")
+	readme := blob("hi\n")
+	sub := tree("040000 tree " + dotgit + "\t.git\n100644 blob " + readme + "\tkeep.txt\n")
+	names := []string{".git", ".GIT", ".g\u200cit", ".git.", "GIT~1"}
+	var root strings.Builder
+	for _, n := range names {
+		root.WriteString("040000 tree " + dotgit + "\t" + n + "\n")
+	}
+	root.WriteString("040000 tree " + sub + "\tsub\n")
+	root.WriteString("100644 blob " + readme + "\tREADME\n")
+	commit := r.Git("commit-tree", tree(root.String()), "-m", "crafted")
+
+	dest := filepath.Join(t.TempDir(), "copy")
+	skipped, err := open(t, r.Dir).Archive(context.Background(), commit, dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := listFiles(t, dest), map[string]string{"README": "hi\n", "sub/keep.txt": "hi\n"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("copied %q, want %q", got, want)
+	}
+	reasons := map[string]string{}
+	for _, s := range skipped {
+		reasons[s.Path] = s.Reason
+	}
+	for _, n := range append(names, "sub/.git") {
+		for _, f := range []string{"config", "HEAD"} {
+			if p := n + "/" + f; reasons[p] != "inside a .git directory" {
+				t.Errorf("%q: reason %q, skipped %v", p, reasons[p], skipped)
+			}
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(dest, ".git")); err == nil {
+		t.Fatal("the copy holds .git")
+	}
+}
+
+func TestIsDotGit(t *testing.T) {
+	for name, want := range map[string]bool{
+		".git": true, ".GiT": true, ".git.": true, ".git . ": true, "git~1": true, "Git~1.": true,
+		".g\u200cit": true, "\u206a.git\ufeff": true, ".\u202eGIT": true,
+		"git": false, ".gitmodules": false, ".gitignore": false, "..git": false, ".git~1": false, "x.git": false,
+	} {
+		if got := isDotGit(name); got != want {
+			t.Errorf("isDotGit(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

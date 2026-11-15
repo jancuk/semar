@@ -24,6 +24,7 @@ const (
 	reasonCase     = "its name differs from another file only in case"
 	reasonNotLocal = "its path is not local"
 	reasonNotFile  = "not a regular file"
+	reasonDotGit   = "inside a .git directory"
 )
 
 type treeBlob struct {
@@ -73,6 +74,9 @@ func (g *Git) Archive(ctx context.Context, commit, dest string) (skipped []Skipp
 	if err != nil {
 		return nil, fmt.Errorf("archive %s: %w", commit, err)
 	}
+	if _, statErr := os.Lstat(filepath.Join(dest, ".git")); !errors.Is(statErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("archive %s: the copy holds a .git entry", commit)
+	}
 	skipped = append(skipped, collided...)
 	slices.SortFunc(skipped, func(a, b Skipped) int { return strings.Compare(a.Path, b.Path) })
 	return skipped, nil
@@ -103,6 +107,9 @@ func (g *Git) planCopy(entries []string) ([]treeBlob, []Skipped, error) {
 			continue
 		case !filepath.IsLocal(filepath.FromSlash(path)):
 			skipped = append(skipped, Skipped{path, reasonNotLocal})
+			continue
+		case hasDotGitComponent(path):
+			skipped = append(skipped, Skipped{path, reasonDotGit})
 			continue
 		}
 		size, err := strconv.ParseInt(sizeText, 10, 64)
@@ -235,4 +242,38 @@ func createFile(target string) (*os.File, error) {
 // already written: the create finds it, or a parent directory turns out to be a file.
 func isCollision(err error) bool {
 	return errors.Is(err, os.ErrExist) || errors.Is(err, syscall.ENOTDIR)
+}
+
+// hasDotGitComponent reports a path with a component that some file system resolves
+// to .git, so that the copy can never become a repository whose configuration the
+// repository under test chose. It follows the checks of git's is_hfs_dotgit and
+// is_ntfs_dotgit.
+func hasDotGitComponent(path string) bool {
+	for _, c := range strings.Split(path, "/") {
+		if isDotGit(c) {
+			return true
+		}
+	}
+	return false
+}
+
+func isDotGit(name string) bool {
+	name = strings.ToLower(strings.Map(func(r rune) rune {
+		if hfsIgnored(r) {
+			return -1
+		}
+		return r
+	}, name))
+	name = strings.TrimRight(name, ". ")
+	return name == ".git" || name == "git~1"
+}
+
+func hfsIgnored(r rune) bool {
+	switch {
+	case r == 0x200c, r == 0x200d, r == 0x200e, r == 0x200f, r == 0xfeff:
+		return true
+	case r >= 0x202a && r <= 0x202e, r >= 0x206a && r <= 0x206f:
+		return true
+	}
+	return false
 }

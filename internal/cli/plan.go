@@ -35,9 +35,10 @@ type planFlags struct {
 	initGiven    bool
 }
 
-// agentFiles are read by an agent harness as instructions or tools. They are removed from the
-// copy at every depth before the planner starts (R5).
-var agentFiles = []string{"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".mcp.json", ".claude", ".codex", ".cursor"}
+// agentFiles are read by an agent harness as instructions or tools, and a .git directory would
+// make the copy a repository whose configuration the repository under test chose. They are
+// removed from the copy at every depth before the planner starts (R5).
+var agentFiles = []string{"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".mcp.json", ".claude", ".codex", ".cursor", ".git"}
 
 func newPlanCommand(o options) *cobra.Command {
 	var f planFlags
