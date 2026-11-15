@@ -46,7 +46,9 @@ func (r *recorder) run(t *testing.T, d interface {
 	return res, err
 }
 
-func (r *recorder) check(t *testing.T, want []provider.Progress, res provider.Result) {
+// check compares the reports with the result. skipped is the number of tool calls that the result
+// counts and the live reports do not, because they were on a line above the limit.
+func (r *recorder) check(t *testing.T, want []provider.Progress, res provider.Result, skipped int) {
 	t.Helper()
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -60,7 +62,7 @@ func (r *recorder) check(t *testing.T, want []provider.Progress, res provider.Re
 	for _, u := range res.Tools {
 		calls += u.Calls
 	}
-	if last := r.reports[len(r.reports)-1]; last.ToolCalls != calls {
+	if last := r.reports[len(r.reports)-1]; last.ToolCalls+skipped != calls {
 		t.Fatalf("the last report has %d tool calls, the result %d", last.ToolCalls, calls)
 	}
 }
@@ -89,8 +91,9 @@ const (
 )
 
 func TestProgress(t *testing.T) {
-	bigResult := `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"` +
-		strings.Repeat("x", provider.MaxStdoutLine+10) + `"}]}}`
+	// A long line that would change the totals if it were parsed: a new message and a new call.
+	bigAssistant := `{"type":"assistant","message":{"id":"m-long","content":[{"type":"tool_use","id":"t-long","name":"Edit","input":{"pad":"` +
+		strings.Repeat("x", provider.MaxStdoutLine+10) + `"}}]}}`
 	longName := strings.Repeat("n", 300)
 	cases := []struct {
 		name      string
@@ -99,6 +102,7 @@ func TestProgress(t *testing.T) {
 		want      []provider.Progress
 		wantTurns int
 		wantTools []provider.ToolUse
+		skipped   int // tool calls in the result that no live report counted
 	}{
 		{"without the setup", config.Setup{}, func(*testing.T) string { return "success.jsonl" }, []provider.Progress{
 			{Turns: 1},
@@ -107,7 +111,7 @@ func TestProgress(t *testing.T) {
 			{Turns: 2, ToolCalls: 3, Tool: "Glob"},
 			{Turns: 3, ToolCalls: 4, Tool: "Read"},
 			{Turns: 4, ToolCalls: 4, Tool: "Read"},
-		}, 4, []provider.ToolUse{{Name: "Glob", Calls: 1}, {Name: "Grep", Calls: 1}, {Name: "Read", Calls: 2}}},
+		}, 4, []provider.ToolUse{{Name: "Glob", Calls: 1}, {Name: "Grep", Calls: 1}, {Name: "Read", Calls: 2}}, 0},
 		// The harness reports four turns for three messages, and its number is the result's.
 		{"with the setup", config.Setup{MCP: true, Skills: true}, func(*testing.T) string { return "stream_success.jsonl" }, []provider.Progress{
 			{Turns: 1},
@@ -115,19 +119,21 @@ func TestProgress(t *testing.T) {
 			{Turns: 1, ToolCalls: 2, Tool: "Read"},
 			{Turns: 2, ToolCalls: 5, Tool: "mcp__orders__delete"},
 			{Turns: 3, ToolCalls: 5, Tool: "mcp__orders__delete"},
-		}, 4, []provider.ToolUse{{Name: "Grep", Calls: 1}, {Name: "Read", Calls: 2}, {Name: "mcp__orders__delete", Calls: 1}, {Name: "mcp__orders__list", Calls: 1}}},
+		}, 4, []provider.ToolUse{{Name: "Grep", Calls: 1}, {Name: "Read", Calls: 2}, {Name: "mcp__orders__delete", Calls: 1}, {Name: "mcp__orders__list", Calls: 1}}, 0},
 		{"a line above the limit", config.Setup{}, func(t *testing.T) string {
-			return writeStream(t, initLine, assistant("m1", "t1:Read"), bigResult, assistant("m2", "t2:Grep"), assistant("m3", "t3:StructuredOutput"), resultLine)
+			return writeStream(t, initLine, assistant("m1", "t1:Read"), bigAssistant, assistant("m2", "t2:Grep"), assistant("m3", "t3:StructuredOutput"), resultLine)
 		}, []provider.Progress{
 			{Turns: 1, ToolCalls: 1, Tool: "Read"},
 			{Turns: 2, ToolCalls: 2, Tool: "Grep"},
 			{Turns: 3, ToolCalls: 2, Tool: "Grep"},
-		}, 3, []provider.ToolUse{{Name: "Grep", Calls: 1}, {Name: "Read", Calls: 1}}},
+			// The final parse reads the whole output, so it counts the call on the long line, and
+			// the last live report has one call fewer than the result.
+		}, 3, []provider.ToolUse{{Name: "Edit", Calls: 1}, {Name: "Grep", Calls: 1}, {Name: "Read", Calls: 1}}, 1},
 		{"a long tool name is cut", config.Setup{}, func(t *testing.T) string {
 			return writeStream(t, initLine, assistant("m1", "t1:"+longName), resultLine)
 		}, []provider.Progress{
 			{Turns: 1, ToolCalls: 1, Tool: longName[:provider.MaxToolName]},
-		}, 3, []provider.ToolUse{{Name: longName, Calls: 1}}},
+		}, 3, []provider.ToolUse{{Name: longName, Calls: 1}}, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -140,7 +146,7 @@ func TestProgress(t *testing.T) {
 			if res.Turns != c.wantTurns || !slices.Equal(res.Tools, c.wantTools) {
 				t.Fatalf("turns %d, tools %+v", res.Turns, res.Tools)
 			}
-			r.check(t, c.want, res)
+			r.check(t, c.want, res, c.skipped)
 		})
 	}
 }
@@ -171,5 +177,5 @@ func TestProgressArrivesWhileTheJobRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the first report did not arrive while the job ran: %v", err)
 	}
-	r.check(t, []provider.Progress{{Turns: 1, ToolCalls: 1, Tool: "Read"}, {Turns: 2, ToolCalls: 1, Tool: "Read"}}, res)
+	r.check(t, []provider.Progress{{Turns: 1, ToolCalls: 1, Tool: "Read"}, {Turns: 2, ToolCalls: 1, Tool: "Read"}}, res, 0)
 }

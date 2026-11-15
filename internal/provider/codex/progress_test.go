@@ -39,7 +39,9 @@ func (r *recorder) markReturned() {
 	r.returned = true
 }
 
-func (r *recorder) check(t *testing.T, want []provider.Progress, res provider.Result) {
+// check compares the reports with the result. skipped is the number of tool calls that the result
+// counts and the live reports do not, because they were on a line above the limit.
+func (r *recorder) check(t *testing.T, want []provider.Progress, res provider.Result, skipped int) {
 	t.Helper()
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -54,7 +56,7 @@ func (r *recorder) check(t *testing.T, want []provider.Progress, res provider.Re
 		calls += u.Calls
 	}
 	last := r.reports[len(r.reports)-1]
-	if last.ToolCalls != calls || last.Turns != res.Turns {
+	if last.ToolCalls+skipped != calls || last.Turns != res.Turns {
 		t.Fatalf("the last report is %+v, the result has %d turns and %d tool calls", last, res.Turns, calls)
 	}
 }
@@ -84,6 +86,7 @@ func TestProgress(t *testing.T) {
 		fixture   func(t *testing.T) string
 		want      []provider.Progress
 		wantTools []provider.ToolUse
+		skipped   int // tool calls in the result that no live report counted
 	}{
 		{"the success fixture", func(*testing.T) string { return "success.jsonl" }, []provider.Progress{
 			{ToolCalls: 1, Tool: "shell"},
@@ -91,7 +94,7 @@ func TestProgress(t *testing.T) {
 			{ToolCalls: 3, Tool: "mcp__orders__list_orders"},
 			{ToolCalls: 4, Tool: "mcp__orders__list_orders"},
 			{Turns: 1, ToolCalls: 4, Tool: "mcp__orders__list_orders"},
-		}, []provider.ToolUse{{Name: "mcp__orders__list_orders", Calls: 2}, {Name: "shell", Calls: 2}}},
+		}, []provider.ToolUse{{Name: "mcp__orders__list_orders", Calls: 2}, {Name: "shell", Calls: 2}}, 0},
 		{"the latest tool is the call that started last", func(t *testing.T) string {
 			return writeEvents(t,
 				shellItem("item.started", "item_1", ""),
@@ -102,18 +105,20 @@ func TestProgress(t *testing.T) {
 			{ToolCalls: 1, Tool: "shell"},
 			{ToolCalls: 2, Tool: "web_search"},
 			{Turns: 1, ToolCalls: 2, Tool: "web_search"},
-		}, []provider.ToolUse{{Name: "shell", Calls: 1}, {Name: "web_search", Calls: 1}}},
+		}, []provider.ToolUse{{Name: "shell", Calls: 1}, {Name: "web_search", Calls: 1}}, 0},
 		{"a line above the limit", func(t *testing.T) string {
 			return writeEvents(t,
 				shellItem("item.started", "item_1", ""),
-				shellItem("item.completed", "item_1", strings.Repeat("x", provider.MaxStdoutLine+10)),
+				shellItem("item.completed", "item_long", strings.Repeat("x", provider.MaxStdoutLine+10)),
 				shellItem("item.started", "item_2", ""),
 				answerLine, turnLine)
 		}, []provider.Progress{
 			{ToolCalls: 1, Tool: "shell"},
 			{ToolCalls: 2, Tool: "shell"},
 			{Turns: 1, ToolCalls: 2, Tool: "shell"},
-		}, []provider.ToolUse{{Name: "shell", Calls: 2}}},
+			// The final parse reads the whole output, so it counts the item on the long line, and
+			// the last live report has one call fewer than the result.
+		}, []provider.ToolUse{{Name: "shell", Calls: 3}}, 1},
 		{"a long tool name is cut", func(t *testing.T) string {
 			return writeEvents(t,
 				fmt.Sprintf(`{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"s","tool":%q,"status":"in_progress"}}`, longTool),
@@ -121,7 +126,7 @@ func TestProgress(t *testing.T) {
 		}, []provider.Progress{
 			{ToolCalls: 1, Tool: ("mcp__s__" + longTool)[:provider.MaxToolName]},
 			{Turns: 1, ToolCalls: 1, Tool: ("mcp__s__" + longTool)[:provider.MaxToolName]},
-		}, []provider.ToolUse{{Name: "mcp__s__" + longTool, Calls: 1}}},
+		}, []provider.ToolUse{{Name: "mcp__s__" + longTool, Calls: 1}}, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -137,7 +142,7 @@ func TestProgress(t *testing.T) {
 			if !slices.Equal(res.Tools, c.wantTools) {
 				t.Fatalf("tools = %+v", res.Tools)
 			}
-			r.check(t, c.want, res)
+			r.check(t, c.want, res, c.skipped)
 		})
 	}
 }
@@ -169,5 +174,5 @@ func TestProgressArrivesWhileTheJobRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the first report did not arrive while the job ran: %v", err)
 	}
-	r.check(t, []provider.Progress{{ToolCalls: 1, Tool: "shell"}, {Turns: 1, ToolCalls: 1, Tool: "shell"}}, res)
+	r.check(t, []provider.Progress{{ToolCalls: 1, Tool: "shell"}, {Turns: 1, ToolCalls: 1, Tool: "shell"}}, res, 0)
 }
