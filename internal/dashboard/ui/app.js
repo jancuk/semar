@@ -29,6 +29,10 @@
   let usageDays = 30;
   let uid = 0;
   const logins = new Map(); // provider ID to its sign-in box
+  const modelLists = new Map(); // provider ID to the last answer of its models route
+  const modelPending = new Map(); // provider ID to the request in flight
+  const modelControls = new Map(); // provider ID to the model control on its card now
+  const OTHER = '__other__'; // no model name can start with an underscore
 
   const nodes = {};
 
@@ -245,6 +249,10 @@
     return p.keyReady ? ['ok', 'Key ready'] : ['bad', 'Key missing'];
   }
 
+  function signedIn(p) {
+    return Boolean(p.account && p.account.signedIn);
+  }
+
   function details(p) {
     const out = [];
     if (isHarness(p.kind)) {
@@ -285,15 +293,16 @@
     if (!isHarness(p.kind)) card.append(keyForm(p));
     card.append(actions(p, isDefault));
     const box = logins.get(p.id);
-    if (box) card.append(box.node);
+    if (box && signedIn(p)) logins.delete(p.id);
+    else if (box) card.append(box.node);
     return card;
   }
 
   function editForm(p) {
     const note = slot();
     const harness = isHarness(p.kind);
-    const model = textInput({ value: p.model || '', placeholder: harness ? "The harness's default" : 'Required, for example a model name of the vendor' });
-    const form = el('form', { class: 'form', novalidate: true, 'aria-label': 'Settings of ' + p.id }, [field('Model', model)]);
+    const model = modelControl(p);
+    const form = el('form', { class: 'form', novalidate: true, 'aria-label': 'Settings of ' + p.id }, model.nodes);
     let mcp, skills, deny, address, keyRef;
     if (harness) {
       const setup = p.setup || { mcp: true, skills: true, deny: [] };
@@ -322,7 +331,7 @@
     form.append(el('div', { class: 'actions wide' }, [save]), el('div', { class: 'wide' }, [note]));
     form.addEventListener('submit', (ev) => {
       ev.preventDefault();
-      const body = { id: p.id, kind: p.kind, model: model.value.trim() };
+      const body = { id: p.id, kind: p.kind, model: model.value() };
       if (harness) {
         const list = deny ? deny.value.split(',').map((s) => s.trim()).filter(Boolean) : (p.setup && p.setup.deny) || [];
         body.setup = { mcp: mcp.input.checked, skills: skills.input.checked, deny: list };
@@ -337,6 +346,7 @@
       busy(save, async () => {
         try {
           await api('PUT', '/api/providers/' + encodeURIComponent(p.id), body);
+          if (!harness) modelLists.delete(p.id);
           await loadState();
         } catch (err) {
           report(note, err);
@@ -344,6 +354,94 @@
       });
     });
     return form;
+  }
+
+  // --- the model ---
+
+  function modelText(m) {
+    return m.label && m.label !== m.id ? m.label + ' (' + m.id + ')' : m.id;
+  }
+
+  // modelControl is a list to choose from and, behind "Another model...", a text field. Until
+  // the list arrives it shows the saved value, so the page never waits for a harness.
+  function modelControl(p) {
+    const harness = isHarness(p.kind);
+    const select = el('select', {});
+    const custom = textInput({ placeholder: harness ? "Empty means the harness's default" : 'The name of the model' });
+    const note = slot();
+    const wrap = el('div', { class: 'wide', hidden: true }, [el('div', { class: 'section' }, [field('Model name', custom), note])]);
+    let chosen = p.model || '';
+
+    function value() {
+      return (select.value === OTHER ? custom.value : select.value).trim();
+    }
+
+    function sync() {
+      wrap.hidden = select.value !== OTHER;
+    }
+
+    function option(v, text, props) {
+      return el('option', Object.assign({ value: v, text: text }, props));
+    }
+
+    // show fills the list from an answer of the models route, or, with null, shows the wait.
+    function show(data) {
+      if (select.options.length) chosen = value();
+      const models = data ? data.models || [] : [];
+      const used = data ? data.used || [] : [];
+      const listed = new Set(models.concat(used.map((id) => ({ id }))).map((m) => m.id));
+      select.replaceChildren(harness
+        ? option('', "The harness's default")
+        : option('', 'Choose a model', { disabled: true }));
+      for (const m of models) select.append(option(m.id, modelText(m)));
+      if (used.length) select.append(el('optgroup', { label: 'Used before' }, used.map((id) => option(id, id))));
+      if (!data) {
+        if (chosen) select.append(option(chosen, chosen));
+        select.append(option('', 'Loading the models\u2026', { disabled: true }));
+      }
+      select.append(option(OTHER, 'Another model\u2026'));
+      let target = chosen;
+      if (data) {
+        if (data.error || !listed.size) target = OTHER;
+        else if (chosen && !listed.has(chosen)) target = OTHER;
+      }
+      select.value = target;
+      if (target === OTHER) custom.value = chosen;
+      say(note, data && data.error ? data.error : '');
+      sync();
+    }
+
+    select.addEventListener('change', sync);
+    modelControls.set(p.id, { show });
+    const known = modelLists.get(p.id);
+    show(known || null);
+    if (!known) loadModels(p.id);
+    return { nodes: [field('Model', select), wrap], value };
+  }
+
+  function loadModels(id) {
+    if (modelPending.has(id)) return;
+    const req = api('GET', '/api/providers/' + encodeURIComponent(id) + '/models').catch((err) => (
+      err instanceof TokenError ? null : { models: [], used: [], error: err.message }
+    ));
+    modelPending.set(id, req);
+    req.then((data) => {
+      if (modelPending.get(id) !== req) return;
+      modelPending.delete(id);
+      if (!data) return;
+      modelLists.set(id, data);
+      const control = modelControls.get(id);
+      if (control) control.show(data);
+    });
+  }
+
+  // refreshModels asks again, for example after a sign-in, and drops an answer still on its way.
+  function refreshModels(id) {
+    modelLists.delete(id);
+    modelPending.delete(id);
+    const control = modelControls.get(id);
+    if (control) control.show(null);
+    loadModels(id);
   }
 
   function keyForm(p) {
@@ -390,8 +488,9 @@
       }));
       row.append(b);
     }
-    if (isHarness(p.kind) && p.loginCommand && p.loginCommand.length) {
-      const b = el('button', { type: 'button', text: 'Sign in' });
+    if (isHarness(p.kind) && p.account && !p.account.signedIn && p.loginCommand && p.loginCommand.length) {
+      const running = logins.get(p.id);
+      const b = el('button', { type: 'button', text: 'Sign in', disabled: Boolean(running && running.running) });
       b.addEventListener('click', () => busy(b, async () => {
         say(note, '');
         try {
@@ -404,7 +503,10 @@
       row.append(b);
     }
     const check = el('button', { type: 'button', text: 'Check again' });
-    check.addEventListener('click', () => busy(check, loadState));
+    check.addEventListener('click', () => busy(check, () => {
+      modelLists.clear();
+      return loadState();
+    }));
     row.append(check);
     const remove = el('button', {
       type: 'button',
@@ -419,6 +521,9 @@
         try {
           await api('DELETE', '/api/providers/' + encodeURIComponent(p.id));
           logins.delete(p.id);
+          modelLists.delete(p.id);
+          modelPending.delete(p.id);
+          modelControls.delete(p.id);
           await loadState();
         } catch (err) {
           report(note, err);
@@ -443,7 +548,7 @@
         el('code', { text: p.loginCommand.map(quoteArg).join(' ') }),
       ]);
       const node = el('div', { class: 'section' }, [el('h3', { text: 'Sign in' }), log, status, el('div', { class: 'actions' }, [cancel]), note, command]);
-      box = { node, log, status, cancel, note, job: null, timer: null };
+      box = { node, log, status, cancel, note, job: null, timer: null, running: false, finished: null };
       cancel.addEventListener('click', () => busy(cancel, async () => {
         try {
           updateLogin(p.id, await api('DELETE', '/api/logins/' + encodeURIComponent(box.job)));
@@ -471,7 +576,9 @@
     const words = { running: 'Running.', done: 'Finished.', failed: 'Failed.', cancelled: 'Cancelled.' }[job.state] || job.state;
     box.status.textContent = job.detail ? job.detail : words;
     box.cancel.disabled = job.state !== 'running';
+    box.running = job.state === 'running';
     clearTimeout(box.timer);
+    if (box.running) say(box.note, '');
     if (job.state === 'running') {
       box.timer = setTimeout(async () => {
         try {
@@ -480,8 +587,26 @@
           report(box.note, err);
         }
       }, 1000);
-    } else {
-      loadState();
+    } else if (box.finished !== job.id) {
+      box.finished = job.id;
+      finishLogin(id, job);
+    }
+  }
+
+  // finishLogin asks the state again. A provider that is signed in now drops the sign-in panel
+  // when the card is drawn, and gets its model list again. After a failure or a cancel the
+  // panel stays, and the card offers "Sign in" again, because the account is still signed out.
+  async function finishLogin(id, job) {
+    await loadState();
+    if (!state) return;
+    const p = state.providers.find((x) => x.id === id);
+    if (p && signedIn(p)) {
+      refreshModels(id);
+      return;
+    }
+    const box = logins.get(id);
+    if (box && job.state === 'done') {
+      say(box.note, (KIND_LABELS[p ? p.kind : ''] || 'The provider') + ' still reports that it is not signed in.');
     }
   }
 
