@@ -48,12 +48,42 @@ type Job struct {
 	Timeout  time.Duration
 }
 
+// Result is what one job returned. InputTokens counts every input token, and the two cache
+// fields say how many of them were read from or written to the provider's cache.
 type Result struct {
-	Output       json.RawMessage // one JSON object
-	Model        string
-	Turns        int
-	InputTokens  int
-	OutputTokens int
+	Output           json.RawMessage // one JSON object
+	Model            string
+	Turns            int
+	InputTokens      int
+	OutputTokens     int
+	CacheReadTokens  int
+	CacheWriteTokens int
+	CostUSD          float64   // 0 when the provider reports no cost
+	Tools            []ToolUse // calls by tool name, sorted by name; the file tools included
+	Denied           int       // tool calls that were refused
+	Limits           []Limit   // subscription windows, when the provider reports them
+	Loaded           Loaded    // what of the person's setup the job could use
+}
+
+// ToolUse counts the calls of one tool in a job.
+type ToolUse struct {
+	Name  string `json:"name"`
+	Calls int    `json:"calls"`
+}
+
+// Limit is one usage window of a subscription, as the provider reported it after a job.
+type Limit struct {
+	Window      string    `json:"window"`      // for example "five_hour" or "seven_day"
+	Utilization float64   `json:"utilization"` // 0 to 1
+	ResetsAt    time.Time `json:"resetsAt"`
+	Status      string    `json:"status"` // for example "allowed"
+}
+
+// Loaded names what a harness loaded from the person's setup for a job.
+type Loaded struct {
+	MCPServers     []string `json:"mcpServers,omitempty"` // sorted names
+	Skills         int      `json:"skills,omitempty"`
+	PermissionMode string   `json:"permissionMode,omitempty"`
 }
 
 type Instance interface {
@@ -62,6 +92,35 @@ type Instance interface {
 	Health(ctx context.Context) Health                // no model turn (H6)
 	Run(ctx context.Context, job Job) (Result, error) // a failure is a *Error
 }
+
+// Account is implemented by an Instance whose sign-in another program owns, or whose key
+// can be checked. No method starts a model turn, and no value holds an e-mail address, a
+// key, or a token.
+type Account interface {
+	Status(ctx context.Context) AccountStatus
+	// LoginCommand is the command a person runs to sign in. It is nil for a kind with a key.
+	LoginCommand() []string
+}
+
+type AccountStatus struct {
+	SignedIn bool   `json:"signedIn"`
+	Method   string `json:"method,omitempty"` // for example "subscription" or "api key"
+	Plan     string `json:"plan,omitempty"`   // for example "max"; "" when unknown
+	Detail   string `json:"detail,omitempty"` // one line for a person
+}
+
+// The kinds of provider. A harness kind starts a program that the person installed and
+// signed in. An API kind calls a model API with a key.
+const (
+	KindClaude    = "claude"
+	KindCodex     = "codex"
+	KindAnthropic = "anthropic"
+	KindOpenAI    = "openai"
+	KindFake      = "fake"
+)
+
+func IsHarness(kind string) bool { return kind == KindClaude || kind == KindCodex }
+func IsAPI(kind string) bool     { return kind == KindAnthropic || kind == KindOpenAI }
 
 type Factory func(cfg config.Provider) (Instance, error)
 

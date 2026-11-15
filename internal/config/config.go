@@ -79,11 +79,29 @@ type Replay struct {
 }
 
 // Provider's Kind names a factory in the provider registry. Outputs is for the fake kind only.
+//
+// The repository's semar.yaml sets the first four fields only. The others come from the
+// person's own providers file, because an address, a key, or a setup switch from a
+// repository under test could send the source and the key elsewhere, or widen what the
+// planner may call.
 type Provider struct {
 	ID      string   `yaml:"id"`
 	Kind    string   `yaml:"kind"`
 	Model   string   `yaml:"model"`
 	Outputs []string `yaml:"outputs"`
+
+	BaseURL string `yaml:"-"` // API kinds: the address of the model API
+	APIKey  string `yaml:"-"` // API kinds: a reference such as env:NAME or keychain:NAME, never the key
+	Setup   Setup  `yaml:"-"` // harness kinds: what of the person's own harness setup is loaded
+	User    bool   `yaml:"-"` // true when the person's own file defines this provider
+}
+
+// Setup says which parts of the person's own harness setup a job may use. The zero value
+// loads nothing.
+type Setup struct {
+	MCP    bool     // the person's MCP servers
+	Skills bool     // the person's skills
+	Deny   []string // tool names or patterns the job may never call
 }
 
 type Tickets struct {
