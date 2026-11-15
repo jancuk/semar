@@ -3,9 +3,11 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
@@ -201,4 +203,64 @@ func TestEnvironment(t *testing.T) {
 			t.Fatal("want an error")
 		}
 	})
+}
+
+func TestPlanBlocks(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		cfg, err := loadText(t, "version: 1\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []config.Provider{{ID: "claude", Kind: "claude"}}
+		if !reflect.DeepEqual(cfg.Providers, want) {
+			t.Fatalf("providers = %+v", cfg.Providers)
+		}
+		wantPlan := config.Plan{MaxScenarios: 12, MaxTurns: 60, Timeout: 15 * time.Minute}
+		if cfg.Plan != wantPlan || cfg.Tickets.Pattern != "[A-Z][A-Z0-9]+-[0-9]+" {
+			t.Fatalf("plan = %+v tickets = %+v", cfg.Plan, cfg.Tickets)
+		}
+		if cfg.PlanProvider().ID != "claude" {
+			t.Fatal("want the first provider")
+		}
+	})
+	t.Run("explicit", func(t *testing.T) {
+		cfg, err := loadText(t, `version: 1
+providers:
+  - {id: claude, kind: claude, model: m1}
+  - {id: fake, kind: fake, outputs: [a/b.json]}
+tickets: {pattern: "X-[0-9]+"}
+plan: {provider: fake, maxScenarios: 3, maxTurns: 7, timeout: 90s}
+`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.PlanProvider().ID != "fake" || cfg.Plan.MaxScenarios != 3 || cfg.Plan.MaxTurns != 7 || cfg.Plan.Timeout != 90*time.Second || cfg.Tickets.Pattern != "X-[0-9]+" {
+			t.Fatalf("got %+v", cfg)
+		}
+	})
+	cases := []struct{ name, text, want string }{
+		{"unknown provider key", "version: 1\nproviders:\n  - id: a\n    kind: claude\n    bogus: 1\n", "semar.yaml:5"},
+		{"unknown plan key", "version: 1\nplan:\n  maxTurn: 1\n", "semar.yaml:3"},
+		{"unknown tickets key", "version: 1\ntickets:\n  regex: x\n", "semar.yaml:3"},
+		{"plan provider names none", "version: 1\nplan: {provider: nope}\n", `plan.provider: "nope" names no provider`},
+		{"duplicate id", "version: 1\nproviders: [{id: a, kind: x}, {id: a, kind: x}]\n", "used twice"},
+		{"unsafe id", "version: 1\nproviders: [{id: ../a, kind: x}]\n", "invalid provider id"},
+		{"empty id", "version: 1\nproviders: [{kind: x}]\n", "id is required"},
+		{"no kind", "version: 1\nproviders: [{id: a}]\n", "kind is required"},
+		{"bad pattern", "version: 1\ntickets: {pattern: \"[\"}\n", "tickets.pattern"},
+		{"negative turns", "version: 1\nplan: {maxTurns: -1}\n", "plan.maxTurns must be positive"},
+		{"negative scenarios", "version: 1\nplan: {maxScenarios: -1}\n", "plan.maxScenarios must be positive"},
+		{"negative timeout", "version: 1\nplan: {timeout: -1m}\n", "plan.timeout must be positive"},
+		{"bad timeout", "version: 1\nplan: {timeout: soon}\n", "semar.yaml:2"},
+		{"output escapes", "version: 1\nproviders: [{id: a, kind: fake, outputs: [../x.json]}]\n", "outputs[0]"},
+		{"output absolute", "version: 1\nproviders: [{id: a, kind: fake, outputs: [/x.json]}]\n", "outputs[0]"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := loadText(t, c.text)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("want an error with %q, got %v", c.want, err)
+			}
+		})
+	}
 }

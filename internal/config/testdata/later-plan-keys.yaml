@@ -24,6 +24,6 @@ authProfiles:
 redact:
   jsonPaths: [$.password]
   headers: [Authorization]
-providers: {anything: [1, 2]}
+agents: {anything: [1, 2]}
 observe: {grafana: {url: "http://x"}}
 web: {}

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	yaml "go.yaml.in/yaml/v4"
 
@@ -20,6 +21,9 @@ type Config struct {
 	Redact       Redact                 `yaml:"redact"`
 	Policy       Policy                 `yaml:"policy"`
 	Replay       Replay                 `yaml:"replay"`
+	Providers    []Provider             `yaml:"providers"`
+	Tickets      Tickets                `yaml:"tickets"`
+	Plan         Plan                   `yaml:"plan"`
 }
 
 type Environment struct {
@@ -74,18 +78,45 @@ type Replay struct {
 	Workers int `yaml:"workers"`
 }
 
+// Provider's Kind names a factory in the provider registry. Outputs is for the fake kind only.
+type Provider struct {
+	ID         string   `yaml:"id"`
+	Kind       string   `yaml:"kind"`
+	BinaryPath string   `yaml:"binaryPath"`
+	Model      string   `yaml:"model"`
+	Outputs    []string `yaml:"outputs"`
+}
+
+type Tickets struct {
+	Pattern string `yaml:"pattern"`
+}
+
+type Plan struct {
+	Provider     string        `yaml:"provider"`
+	MaxScenarios int           `yaml:"maxScenarios"`
+	MaxTurns     int           `yaml:"maxTurns"`
+	Timeout      time.Duration `yaml:"timeout"`
+}
+
 const (
-	fileName       = "semar.yaml"
-	defaultWorkers = 4
+	fileName             = "semar.yaml"
+	defaultWorkers       = 4
+	defaultTicketPattern = `[A-Z][A-Z0-9]+-[0-9]+`
+	defaultMaxScenarios  = 12
+	defaultMaxTurns      = 60
+	defaultPlanTimeout   = 15 * time.Minute
 )
 
-var topLevelKeys = []string{"version", "environments", "authProfiles", "redact", "policy", "replay"}
+var topLevelKeys = []string{
+	"version", "environments", "authProfiles", "redact", "policy", "replay",
+	"providers", "tickets", "plan",
+}
 
 // laterPlanKeys belong to plans that are not built yet. They are accepted and ignored.
 var laterPlanKeys = []string{
-	"observe", "web", "android", "access", "databases", "repos", "risk", "tickets",
-	"knowledge", "mcpServers", "mcpTools", "publish", "plan", "regression", "security",
-	"explore", "notify", "decisions", "providers", "agents", "assign", "passes", "limits",
+	"observe", "web", "android", "access", "databases", "repos", "risk",
+	"knowledge", "mcpServers", "mcpTools", "publish", "regression", "security",
+	"explore", "notify", "decisions", "agents", "assign", "passes", "limits",
 	"evidence", "change",
 }
 
@@ -133,10 +164,39 @@ func parse(data []byte, name string) (Config, error) {
 	if cfg.Replay.Workers == 0 {
 		cfg.Replay.Workers = defaultWorkers
 	}
+	applyPlanDefaults(&cfg)
 	if err := validate(cfg, name); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func applyPlanDefaults(cfg *Config) {
+	if len(cfg.Providers) == 0 {
+		cfg.Providers = []Provider{{ID: "claude", Kind: "claude"}}
+	}
+	if cfg.Tickets.Pattern == "" {
+		cfg.Tickets.Pattern = defaultTicketPattern
+	}
+	if cfg.Plan.MaxScenarios == 0 {
+		cfg.Plan.MaxScenarios = defaultMaxScenarios
+	}
+	if cfg.Plan.MaxTurns == 0 {
+		cfg.Plan.MaxTurns = defaultMaxTurns
+	}
+	if cfg.Plan.Timeout == 0 {
+		cfg.Plan.Timeout = defaultPlanTimeout
+	}
+}
+
+// PlanProvider returns the provider that plan.provider names, or the first one.
+func (c Config) PlanProvider() Provider {
+	for _, p := range c.Providers {
+		if p.ID == c.Plan.Provider {
+			return p
+		}
+	}
+	return c.Providers[0]
 }
 
 // Environment returns the named environment. An empty name selects the only

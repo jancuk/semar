@@ -4,11 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/hostrule"
+	"github.com/jancuk/semar/internal/idcheck"
 )
 
 var sources = []domain.Source{
@@ -33,6 +36,7 @@ func validate(c Config, name string) error {
 			add("policy.trust.confirm: %s is not a source", s)
 		}
 	}
+	validatePlan(c, add)
 	envNames := make([]string, 0, len(c.Environments))
 	for n := range c.Environments {
 		envNames = append(envNames, n)
@@ -90,4 +94,43 @@ func originHost(u *url.URL) string {
 		return host
 	}
 	return host + ":" + port
+}
+
+func validatePlan(c Config, add func(string, ...any)) {
+	ids := map[string]bool{}
+	for i, p := range c.Providers {
+		pp := fmt.Sprintf("providers[%d]", i)
+		switch err := idcheck.Check("provider id", p.ID); {
+		case p.ID == "":
+			add("%s.id is required", pp)
+		case err != nil:
+			add("%s.id: %v", pp, err)
+		case ids[p.ID]:
+			add("%s.id: %q is used twice", pp, p.ID)
+		}
+		ids[p.ID] = true
+		if p.Kind == "" {
+			add("%s.kind is required", pp)
+		}
+		for j, o := range p.Outputs {
+			if !filepath.IsLocal(o) {
+				add("%s.outputs[%d]: %q must be a relative path inside the repository", pp, j, o)
+			}
+		}
+	}
+	if _, err := regexp.Compile(c.Tickets.Pattern); err != nil {
+		add("tickets.pattern: %v", err)
+	}
+	if c.Plan.Provider != "" && !ids[c.Plan.Provider] {
+		add("plan.provider: %q names no provider", c.Plan.Provider)
+	}
+	if c.Plan.MaxScenarios < 0 {
+		add("plan.maxScenarios must be positive")
+	}
+	if c.Plan.MaxTurns < 0 {
+		add("plan.maxTurns must be positive")
+	}
+	if c.Plan.Timeout < 0 {
+		add("plan.timeout must be positive")
+	}
 }
