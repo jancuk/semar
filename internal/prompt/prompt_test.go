@@ -66,7 +66,7 @@ func TestPlanNamesTheDocumentsOnlyWhenThereAreSome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	section := "## What the team wrote down\n\nThe repository holds documents about this service. Read the ones that apply to the change before you draft. " +
+	section := "## What the team wrote down\n\nThe repository holds documents about this service. Before you draft, find the ones that apply to the change: list the files of a folder, and search the documents for the routes, the field names, and the error texts that the change touches. Read every document that mentions them. " +
 		"A document says what the service should do, and the code says what it does.\n\n" + d.Knowledge + "\n\n- Use a document to find the routes"
 	for _, want := range []string{
 		"the full difference. It can be large. Search it and read the parts you need.\n\n" + section,
