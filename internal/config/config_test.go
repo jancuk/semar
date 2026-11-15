@@ -254,6 +254,14 @@ plan: {provider: fake, maxScenarios: 3, maxTurns: 7, timeout: 90s}
 		{"bad timeout", "version: 1\nplan: {timeout: soon}\n", "semar.yaml:2"},
 		{"output escapes", "version: 1\nproviders: [{id: a, kind: fake, outputs: [../x.json]}]\n", "outputs[0]"},
 		{"output absolute", "version: 1\nproviders: [{id: a, kind: fake, outputs: [/x.json]}]\n", "outputs[0]"},
+		{
+			"binary path", "version: 1\nproviders:\n  - id: a\n    kind: fake\n  - id: b\n    kind: claude\n    binaryPath: ./tools/claude\n",
+			"semar.yaml:7: providers[1].binaryPath: the path of a provider binary is not read from the repository's configuration; set the environment variable SEMAR_CLAUDE_BIN to an absolute path instead",
+		},
+		{
+			"binary path through an alias", "version: 1\nx: &p {id: b, kind: claude, binaryPath: /bin/sh}\nproviders: [*p]\n",
+			"providers[0].binaryPath",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

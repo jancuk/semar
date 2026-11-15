@@ -22,7 +22,7 @@ import (
 const schema = `{"type":"object","properties":{"method":{"type":"string"}}}`
 
 type fakeBinary struct {
-	path, args, cwd, env, stdin string
+	path, args, cwd, env, stdin, zero string
 }
 
 // newBinary writes a shell script that records how it was started and then prints a fixture.
@@ -35,8 +35,9 @@ func newBinary(t *testing.T, fixture string, exit int, stderr string) fakeBinary
 		cwd:   filepath.Join(dir, "cwd"),
 		env:   filepath.Join(dir, "env"),
 		stdin: filepath.Join(dir, "stdin"),
+		zero:  filepath.Join(dir, "zero"),
 	}
-	body := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\0' \"$@\" > %q\npwd -P > %q\nenv > %q\ncat > %q\n", b.args, b.cwd, b.env, b.stdin)
+	body := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\0' \"$@\" > %q\nprintf '%%s' \"$0\" > %q\npwd -P > %q\nenv > %q\ncat > %q\n", b.args, b.zero, b.cwd, b.env, b.stdin)
 	if fixture != "" {
 		abs, err := filepath.Abs(filepath.Join("testdata", fixture))
 		if err != nil {
@@ -63,9 +64,20 @@ func read(t *testing.T, path string) string {
 	return string(data)
 }
 
-func newDriver(t *testing.T, cfg config.Provider) *claude.Driver {
+// envWith is the environment of the test process with SEMAR_CLAUDE_BIN set to bin,
+// or unset when bin is empty.
+func envWith(bin string) func(string) (string, bool) {
+	return func(name string) (string, bool) {
+		if name == claude.BinaryEnv {
+			return bin, bin != ""
+		}
+		return os.LookupEnv(name)
+	}
+}
+
+func newDriver(t *testing.T, cfg config.Provider, bin string) *claude.Driver {
 	t.Helper()
-	d, err := claude.New(cfg)
+	d, err := claude.New(cfg, envWith(bin))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +102,7 @@ func TestRunSuccess(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-do-not-pass")
 	t.Setenv("CLAUDECODE", "1")
 	t.Setenv("SEMAR_RANDOM", "x")
-	d := newDriver(t, config.Provider{ID: "c", Kind: "claude", BinaryPath: b.path})
+	d := newDriver(t, config.Provider{ID: "c", Kind: "claude"}, b.path)
 	j := job(t)
 	res, err := d.Run(context.Background(), j)
 	if err != nil {
@@ -142,7 +154,7 @@ func TestRunModelFlag(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			b := newBinary(t, "success.json", 0, "")
-			d := newDriver(t, config.Provider{BinaryPath: b.path, Model: c.cfgModel})
+			d := newDriver(t, config.Provider{Model: c.cfgModel}, b.path)
 			j := job(t)
 			j.Model = c.jobModel
 			if _, err := d.Run(context.Background(), j); err != nil {
@@ -168,7 +180,7 @@ func TestRunModelFlag(t *testing.T) {
 
 func TestRunModelTie(t *testing.T) {
 	b := newBinary(t, "tie.json", 0, "")
-	res, err := newDriver(t, config.Provider{BinaryPath: b.path}).Run(context.Background(), job(t))
+	res, err := newDriver(t, config.Provider{}, b.path).Run(context.Background(), job(t))
 	if err != nil || res.Model != "aa-model" {
 		t.Fatalf("got %+v %v", res, err)
 	}
@@ -195,7 +207,7 @@ func TestRunFailureClasses(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			b := newBinary(t, c.fixture, c.exit, c.stderr)
-			_, err := newDriver(t, config.Provider{BinaryPath: b.path}).Run(context.Background(), job(t))
+			_, err := newDriver(t, config.Provider{}, b.path).Run(context.Background(), job(t))
 			if got := classOf(t, err); got != c.class {
 				t.Fatalf("class = %s, err = %v", got, err)
 			}
@@ -212,7 +224,7 @@ func TestRunFailureClasses(t *testing.T) {
 func TestRunStderrIsRedactedAndCut(t *testing.T) {
 	stderr := "token=abcdef0123 Bearer sk-ant-abcdefghijklmnopqrstuvwxyz0123456789 " + strings.Repeat("x ", 400)
 	b := newBinary(t, "", 1, stderr)
-	_, err := newDriver(t, config.Provider{BinaryPath: b.path}).Run(context.Background(), job(t))
+	_, err := newDriver(t, config.Provider{}, b.path).Run(context.Background(), job(t))
 	text := err.Error()
 	if strings.Contains(text, "abcdef0123") || strings.Contains(text, "sk-ant") {
 		t.Fatalf("a secret leaked: %s", text)
@@ -223,15 +235,8 @@ func TestRunStderrIsRedactedAndCut(t *testing.T) {
 }
 
 func TestRunNotInstalled(t *testing.T) {
-	t.Run("configured path", func(t *testing.T) {
-		missing := filepath.Join(t.TempDir(), "nope")
-		_, err := newDriver(t, config.Provider{BinaryPath: missing}).Run(context.Background(), job(t))
-		if classOf(t, err) != provider.NotInstalled || !strings.Contains(err.Error(), missing) {
-			t.Fatalf("got %v", err)
-		}
-	})
 	t.Run("on PATH at run time", func(t *testing.T) {
-		d := newDriver(t, config.Provider{})
+		d := newDriver(t, config.Provider{}, "")
 		t.Setenv("PATH", t.TempDir())
 		_, err := d.Run(context.Background(), job(t))
 		if classOf(t, err) != provider.NotInstalled || !strings.Contains(err.Error(), `"claude"`) || !strings.Contains(err.Error(), "PATH") {
@@ -241,6 +246,130 @@ func TestRunNotInstalled(t *testing.T) {
 			t.Fatalf("health = %+v", h)
 		}
 	})
+	t.Run("relative PATH entry", func(t *testing.T) {
+		b := newBinary(t, "success.json", 0, "")
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "bin"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(b.path, filepath.Join(dir, "bin", "claude")); err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(dir)
+		t.Setenv("PATH", "bin")
+		_, err := newDriver(t, config.Provider{}, "").Run(context.Background(), job(t))
+		if classOf(t, err) != provider.NotInstalled || !strings.Contains(err.Error(), "relative") {
+			t.Fatalf("got %v", err)
+		}
+		if _, statErr := os.Stat(b.args); statErr == nil {
+			t.Fatal("the child started")
+		}
+	})
+}
+
+func TestBinaryFromEnvironmentIsChecked(t *testing.T) {
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "plain")
+	if err := os.WriteFile(plain, []byte("#!/bin/sh\nexit 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ name, bin, detail string }{
+		{"relative", "tools/claude", "is \"tools/claude\", which is not an absolute path"},
+		{"directory", dir, "which is not a regular file"},
+		{"not executable", plain, "which is not executable"},
+		{"missing", filepath.Join(dir, "nope"), "which cannot be read"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d := newDriver(t, config.Provider{}, c.bin)
+			_, err := d.Run(context.Background(), job(t))
+			if classOf(t, err) != provider.NotInstalled || !strings.Contains(err.Error(), claude.BinaryEnv) || !strings.Contains(err.Error(), c.detail) {
+				t.Fatalf("got %v", err)
+			}
+			h := d.Health(context.Background())
+			if h.Installed || !strings.Contains(h.Detail, claude.BinaryEnv) || !strings.Contains(h.Detail, c.detail) {
+				t.Fatalf("health = %+v", h)
+			}
+		})
+	}
+}
+
+func TestRunRefusesABinaryInsideTheWorkdir(t *testing.T) {
+	b := newBinary(t, "success.json", 0, "")
+	body, err := os.ReadFile(b.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name  string
+		place func(t *testing.T, workdir string) string
+	}{
+		{"a file of the copy", func(t *testing.T, workdir string) string {
+			p := filepath.Join(workdir, "tools", "claude")
+			if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, body, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}},
+		{"a link outside that points into the copy", func(t *testing.T, workdir string) string {
+			p := filepath.Join(workdir, "claude")
+			if err := os.WriteFile(p, body, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			link := filepath.Join(t.TempDir(), "claude")
+			if err := os.Symlink(p, link); err != nil {
+				t.Fatal(err)
+			}
+			return link
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			j := job(t)
+			bin := c.place(t, j.Workdir)
+			_, err := newDriver(t, config.Provider{}, bin).Run(context.Background(), j)
+			if classOf(t, err) != provider.PermissionError || !strings.Contains(err.Error(), "inside the working directory") {
+				t.Fatalf("got %v", err)
+			}
+			if _, statErr := os.Stat(b.args); statErr == nil {
+				t.Fatal("the child started")
+			}
+		})
+	}
+}
+
+func TestRunStartsTheAbsolutePathFromPATH(t *testing.T) {
+	b := newBinary(t, "success.json", 0, "")
+	dir := t.TempDir()
+	want := filepath.Join(dir, "claude")
+	if err := os.Symlink(b.path, want); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	childPath := func(name string) (string, bool) {
+		if name == "PATH" {
+			return "/usr/bin:/bin", true
+		}
+		return envWith("")(name)
+	}
+	d, err := claude.New(config.Provider{}, childPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := job(t)
+	if _, err := d.Run(context.Background(), j); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, b.zero); got != want {
+		t.Fatalf("started %q, want %q", got, want)
+	}
+	wantCwd, _ := filepath.EvalSymlinks(j.Workdir)
+	if got := strings.TrimSpace(read(t, b.cwd)); got != wantCwd {
+		t.Fatalf("cwd = %q, want %q", got, wantCwd)
+	}
 }
 
 func TestRunTimeoutAndCancel(t *testing.T) {
@@ -249,7 +378,7 @@ func TestRunTimeoutAndCancel(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat > /dev/null\nsleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	d := newDriver(t, config.Provider{BinaryPath: script})
+	d := newDriver(t, config.Provider{}, script)
 	t.Run("job timeout", func(t *testing.T) {
 		j := job(t)
 		j.Timeout = 300 * time.Millisecond
@@ -304,7 +433,7 @@ func TestRunRefusesBadJobs(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			j := job(t)
 			c.mutate(&j)
-			_, err := newDriver(t, config.Provider{BinaryPath: b.path}).Run(context.Background(), j)
+			_, err := newDriver(t, config.Provider{}, b.path).Run(context.Background(), j)
 			if classOf(t, err) != provider.ValidationError {
 				t.Fatalf("got %v", err)
 			}
@@ -323,7 +452,7 @@ func TestHealth(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	h := newDriver(t, config.Provider{BinaryPath: script}).Health(context.Background())
+	h := newDriver(t, config.Provider{}, script).Health(context.Background())
 	if !h.Installed || h.Version != "2.1.325 (Claude Code)" || h.Detail != "" {
 		t.Fatalf("health = %+v", h)
 	}
@@ -332,7 +461,7 @@ func TestHealth(t *testing.T) {
 	}
 	t.Run("a failing binary", func(t *testing.T) {
 		b := newBinary(t, "", 2, "broken install")
-		h := newDriver(t, config.Provider{BinaryPath: b.path}).Health(context.Background())
+		h := newDriver(t, config.Provider{}, b.path).Health(context.Background())
 		if h.Installed || !strings.Contains(h.Detail, "broken install") {
 			t.Fatalf("health = %+v", h)
 		}
@@ -340,7 +469,7 @@ func TestHealth(t *testing.T) {
 }
 
 func TestFactory(t *testing.T) {
-	in, err := claude.Factory()(config.Provider{ID: "x", Kind: "claude"})
+	in, err := claude.Factory(os.LookupEnv)(config.Provider{ID: "x", Kind: "claude"})
 	if err != nil || in.Kind() != "claude" || in.ID() != "x" {
 		t.Fatalf("got %v %v", in, err)
 	}

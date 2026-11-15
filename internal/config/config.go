@@ -80,11 +80,10 @@ type Replay struct {
 
 // Provider's Kind names a factory in the provider registry. Outputs is for the fake kind only.
 type Provider struct {
-	ID         string   `yaml:"id"`
-	Kind       string   `yaml:"kind"`
-	BinaryPath string   `yaml:"binaryPath"`
-	Model      string   `yaml:"model"`
-	Outputs    []string `yaml:"outputs"`
+	ID      string   `yaml:"id"`
+	Kind    string   `yaml:"kind"`
+	Model   string   `yaml:"model"`
+	Outputs []string `yaml:"outputs"`
 }
 
 type Tickets struct {
@@ -150,6 +149,11 @@ func parse(data []byte, name string) (Config, error) {
 			unknown = append(unknown, fmt.Errorf("%s:%d: unknown key %s", name, key.Line, key.Value))
 		}
 	}
+	for i := 0; i+1 < len(known); i += 2 {
+		if known[i].Value == "providers" {
+			unknown = append(unknown, binaryPathKeys(known[i+1], name)...)
+		}
+	}
 	if len(unknown) > 0 {
 		return Config{}, joinErrors(unknown)
 	}
@@ -169,6 +173,36 @@ func parse(data []byte, name string) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// binaryPathKeys refuses providers[].binaryPath: the configuration is committed in the
+// repository under test, so a path there would let that repository choose the program
+// that semar starts.
+func binaryPathKeys(providers *yaml.Node, name string) []error {
+	providers = resolveAlias(providers)
+	if providers.Kind != yaml.SequenceNode {
+		return nil
+	}
+	var errs []error
+	for i, item := range providers.Content {
+		item = resolveAlias(item)
+		if item.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j+1 < len(item.Content); j += 2 {
+			if key := item.Content[j]; key.Value == "binaryPath" {
+				errs = append(errs, fmt.Errorf("%s:%d: providers[%d].binaryPath: the path of a provider binary is not read from the repository's configuration; set the environment variable SEMAR_CLAUDE_BIN to an absolute path instead", name, key.Line, i))
+			}
+		}
+	}
+	return errs
+}
+
+func resolveAlias(n *yaml.Node) *yaml.Node {
+	if n.Kind == yaml.AliasNode && n.Alias != nil {
+		return n.Alias
+	}
+	return n
 }
 
 func applyPlanDefaults(cfg *Config) {

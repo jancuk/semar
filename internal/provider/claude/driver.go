@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -17,38 +19,87 @@ import (
 )
 
 const (
-	Kind          = "claude"
+	Kind = "claude"
+	// BinaryEnv names the variable that holds the absolute path of the harness binary.
+	// The path is never read from the configuration, which the repository under test owns.
+	BinaryEnv     = "SEMAR_CLAUDE_BIN"
 	defaultBinary = "claude"
 	healthTimeout = 10 * time.Second
 )
 
 type Driver struct {
-	cfg config.Provider
+	cfg    config.Provider
+	lookup func(string) (string, bool)
 }
 
-func New(cfg config.Provider) (*Driver, error) { return &Driver{cfg: cfg}, nil }
+// New takes lookup, normally os.LookupEnv, for BinaryEnv and the child's environment.
+func New(cfg config.Provider, lookup func(string) (string, bool)) (*Driver, error) {
+	if lookup == nil {
+		return nil, errors.New("claude: no environment lookup")
+	}
+	return &Driver{cfg: cfg, lookup: lookup}, nil
+}
 
-func Factory() provider.Factory {
-	return func(cfg config.Provider) (provider.Instance, error) { return New(cfg) }
+func Factory(lookup func(string) (string, bool)) provider.Factory {
+	return func(cfg config.Provider) (provider.Instance, error) {
+		d, err := New(cfg, lookup)
+		if err != nil {
+			return nil, err
+		}
+		return d, nil
+	}
 }
 
 func (d *Driver) ID() string   { return d.cfg.ID }
 func (d *Driver) Kind() string { return Kind }
 
 func (d *Driver) binary() (string, *provider.Error) {
-	name := d.cfg.BinaryPath
-	if name == "" {
-		name = defaultBinary
+	notInstalled := func(format string, args ...any) (string, *provider.Error) {
+		return "", &provider.Error{Class: provider.NotInstalled, Detail: fmt.Sprintf(format, args...)}
 	}
-	path, err := exec.LookPath(name)
-	if err != nil {
-		where := "on PATH"
-		if d.cfg.BinaryPath != "" {
-			where = "at the configured binaryPath"
+	if p, ok := d.lookup(BinaryEnv); ok && p != "" {
+		if !filepath.IsAbs(p) {
+			return notInstalled("%s is %q, which is not an absolute path", BinaryEnv, p)
 		}
-		return "", &provider.Error{Class: provider.NotInstalled, Detail: fmt.Sprintf("the binary %q was not found %s", name, where)}
+		info, err := os.Stat(p)
+		switch {
+		case err != nil:
+			return notInstalled("%s names %q, which cannot be read: %v", BinaryEnv, p, errors.Unwrap(err))
+		case !info.Mode().IsRegular():
+			return notInstalled("%s names %q, which is not a regular file", BinaryEnv, p)
+		case runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0:
+			return notInstalled("%s names %q, which is not executable", BinaryEnv, p)
+		}
+		return p, nil
 	}
-	return path, nil
+	path, err := exec.LookPath(defaultBinary)
+	switch {
+	case errors.Is(err, exec.ErrDot):
+		return notInstalled("the binary %q was found on PATH only through a relative directory; set %s to an absolute path", defaultBinary, BinaryEnv)
+	case err != nil:
+		return notInstalled("the binary %q was not found on PATH, and %s is not set", defaultBinary, BinaryEnv)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return notInstalled("the binary %q on PATH has no absolute path: %v", path, err)
+	}
+	return abs, nil
+}
+
+// insideWorkdir refuses a binary that the copy of the repository under test could have supplied.
+func insideWorkdir(bin, workdir string) *provider.Error {
+	realBin, err := filepath.EvalSymlinks(bin)
+	if err != nil {
+		return &provider.Error{Class: provider.NotInstalled, Detail: fmt.Sprintf("the binary %q cannot be resolved: %v", bin, errors.Unwrap(err))}
+	}
+	realDir, err := filepath.EvalSymlinks(workdir)
+	if err != nil {
+		return &provider.Error{Class: provider.ValidationError, Detail: fmt.Sprintf("the working directory %q cannot be resolved", workdir)}
+	}
+	if rel, err := filepath.Rel(realDir, realBin); err == nil && filepath.IsLocal(rel) {
+		return &provider.Error{Class: provider.PermissionError, Detail: fmt.Sprintf("the binary %q lies inside the working directory of the job", bin)}
+	}
+	return nil
 }
 
 // Health starts the binary with --version only, never a model turn.
@@ -62,7 +113,7 @@ func (d *Driver) Health(ctx context.Context) provider.Health {
 	res, err := provider.RunProcess(ctx, provider.ProcessSpec{
 		Path: path,
 		Args: []string{"--version"},
-		Env:  provider.ChildEnv(os.LookupEnv),
+		Env:  provider.ChildEnv(d.lookup),
 	})
 	switch {
 	case err != nil:
@@ -79,6 +130,9 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 		return provider.Result{}, err
 	}
 	path, perr := d.binary()
+	if perr == nil {
+		perr = insideWorkdir(path, job.Workdir)
+	}
 	if perr != nil {
 		return provider.Result{}, perr
 	}
@@ -92,7 +146,7 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 		Path:  path,
 		Args:  buildArgs(job, d.cfg.Model),
 		Dir:   job.Workdir,
-		Env:   provider.ChildEnv(os.LookupEnv),
+		Env:   provider.ChildEnv(d.lookup),
 		Stdin: strings.NewReader(job.Prompt),
 	})
 	switch {
