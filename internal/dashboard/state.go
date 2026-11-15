@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sync"
@@ -26,23 +27,25 @@ var kinds = []kindInfo{
 }
 
 type stateBody struct {
-	Home      string          `json:"home"`
-	File      string          `json:"file"`
-	Exists    bool            `json:"exists"`
-	FileError string          `json:"fileError,omitempty"`
-	Default   string          `json:"default"`
-	Kinds     []kindInfo      `json:"kinds"`
-	Providers []providerState `json:"providers"`
+	Home        string          `json:"home"`
+	File        string          `json:"file"`
+	FileDisplay string          `json:"fileDisplay"` // File with the home directory of the person shown as ~
+	Exists      bool            `json:"exists"`
+	FileError   string          `json:"fileError,omitempty"`
+	Default     string          `json:"default"`
+	Kinds       []kindInfo      `json:"kinds"`
+	Providers   []providerState `json:"providers"`
 }
 
 // definition is one provider as the file holds it. APIKey is a reference, never a key.
 type definition struct {
-	ID      string     `json:"id"`
-	Kind    string     `json:"kind"`
-	Model   string     `json:"model"`
-	BaseURL string     `json:"baseUrl,omitempty"`
-	APIKey  string     `json:"apiKey,omitempty"`
-	Setup   *setupBody `json:"setup,omitempty"`
+	ID        string     `json:"id"`
+	Kind      string     `json:"kind"`
+	Model     string     `json:"model"`
+	Reasoning string     `json:"reasoning"`
+	BaseURL   string     `json:"baseUrl,omitempty"`
+	APIKey    string     `json:"apiKey,omitempty"`
+	Setup     *setupBody `json:"setup,omitempty"`
 }
 
 type setupBody struct {
@@ -68,11 +71,13 @@ type healthBody struct {
 
 func (s *Server) getState(w http.ResponseWriter, r *http.Request) {
 	f, exists, err := userconfig.Load(s.d.Home)
+	file := filepath.Join(s.d.Home, userconfig.FileName)
 	body := stateBody{
-		Home:   s.d.Home,
-		File:   filepath.Join(s.d.Home, userconfig.FileName),
-		Exists: exists,
-		Kinds:  kinds,
+		Home:        s.d.Home,
+		File:        file,
+		FileDisplay: s.tildePath(file),
+		Exists:      exists,
+		Kinds:       kinds,
 	}
 	if err != nil {
 		body.FileError = scrub(err.Error())
@@ -181,7 +186,7 @@ func merge(st *providerState, local providerState) {
 }
 
 func toDefinition(p userconfig.Provider) definition {
-	d := definition{ID: p.ID, Kind: p.Kind, Model: p.Model, BaseURL: p.BaseURL, APIKey: p.APIKey}
+	d := definition{ID: p.ID, Kind: p.Kind, Model: p.Model, Reasoning: p.Reasoning, BaseURL: p.BaseURL, APIKey: p.APIKey}
 	if provider.IsHarness(p.Kind) {
 		yes := true
 		d.Setup = &setupBody{MCP: &yes, Skills: &yes, Deny: []string{}}
@@ -216,4 +221,21 @@ func scrub(s string) string {
 		s = re.ReplaceAllString(s, "${1}[redacted]")
 	}
 	return s
+}
+
+// tildePath shows path with the person's home directory as ~, so that a page does not print
+// the name of the account.
+func (s *Server) tildePath(path string) string {
+	home, _ := s.d.LookupEnv("HOME")
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if home == "" || !filepath.IsAbs(home) {
+		return path
+	}
+	rel, err := filepath.Rel(filepath.Clean(home), path)
+	if err != nil || !filepath.IsLocal(rel) {
+		return path
+	}
+	return filepath.Join("~", rel)
 }

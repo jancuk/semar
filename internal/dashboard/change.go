@@ -101,7 +101,7 @@ func (s *Server) putProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	onlyCreate := r.Header.Get("If-None-Match") == "*"
-	p := userconfig.Provider{ID: body.ID, Kind: body.Kind, Model: strings.TrimSpace(body.Model), BaseURL: strings.TrimSpace(body.BaseURL), APIKey: strings.TrimSpace(body.APIKey)}
+	p := userconfig.Provider{ID: body.ID, Kind: body.Kind, Model: strings.TrimSpace(body.Model), Reasoning: strings.TrimSpace(body.Reasoning), BaseURL: strings.TrimSpace(body.BaseURL), APIKey: strings.TrimSpace(body.APIKey)}
 	if body.Setup != nil {
 		p.Setup = &userconfig.Setup{MCP: body.Setup.MCP, Skills: body.Setup.Skills}
 		for _, d := range body.Setup.Deny {

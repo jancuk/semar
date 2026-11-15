@@ -162,3 +162,37 @@ func TestModelsInstanceThatCannotBeBuilt(t *testing.T) {
 		t.Fatalf("error = %q", b.Error)
 	}
 }
+
+func TestModelsCarryLevelsAndTheLastUse(t *testing.T) {
+	fx := newFixture(t)
+	fx.writeFile(twoProviders)
+	fx.lister("claude", func(cfg config.Provider) *fakeLister {
+		return &fakeLister{models: []provider.Model{{ID: "acme-large", Label: "Acme Large", Description: "For hard problems.", Reasoning: []string{"low", "medium", "high"}, DefaultReasoning: "medium"}}}
+	})
+	// The newest record is the last use, whatever its model and age, and it is not cut at 90 days.
+	rec := func(model, level string, ago time.Duration) {
+		if err := usage.Append(fx.home, usage.Record{At: fx.s.d.Now().Add(-ago), Provider: "claude", Model: model, Reasoning: level, Command: "plan", Outcome: "failed:usage_limit"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec("acme-old", "low", 5*time.Hour)
+	rec("acme-large", "high", time.Hour)
+	rec("acme-older", "max", 200*24*time.Hour)
+	a := fx.call("GET", "/api/providers/claude/models", "")
+	want(t, a, 200)
+	for _, w := range []string{
+		`"models":[{"id":"acme-large","label":"Acme Large","description":"For hard problems.","reasoning":["low","medium","high"],"defaultReasoning":"medium"}]`,
+		`"used":["acme-old"]`,
+		`"lastUsed":{"model":"acme-large","reasoning":"high","at":"2026-11-14T`,
+	} {
+		if !strings.Contains(a.body, w) {
+			t.Errorf("body lacks %s:\n%s", w, a.body)
+		}
+	}
+
+	none := fx.call("GET", "/api/providers/deepseek/models", "")
+	want(t, none, 200)
+	if strings.Contains(none.body, "lastUsed") {
+		t.Fatalf("a provider that never ran has a last use: %s", none.body)
+	}
+}

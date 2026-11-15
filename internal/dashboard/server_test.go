@@ -707,3 +707,49 @@ func TestPutKeyRefusesAnEntryOfAnotherProvider(t *testing.T) {
 		t.Fatalf("provider %+v", p)
 	}
 }
+
+func TestStateShowsReasoningAndTheFileWithATilde(t *testing.T) {
+	fx := newFixture(t)
+	fx.writeFile("version: 1\ndefault: claude\nproviders:\n  - id: claude\n    kind: claude\n    reasoning: high\n  - id: codex\n    kind: codex\n")
+	fx.setEnv("HOME", filepath.Dir(fx.home))
+	a := fx.call("GET", "/api/state", "")
+	want(t, a, 200)
+	var raw struct {
+		File        string `json:"file"`
+		FileDisplay string `json:"fileDisplay"`
+		Providers   []map[string]any
+	}
+	a.json(t, &raw)
+	if raw.File != filepath.Join(fx.home, "providers.yaml") || raw.FileDisplay != filepath.Join("~", "semar", "providers.yaml") {
+		t.Fatalf("file %q, shown as %q", raw.File, raw.FileDisplay)
+	}
+	if raw.Providers[0]["reasoning"] != "high" || raw.Providers[1]["reasoning"] != "" {
+		t.Fatalf("providers %v", raw.Providers)
+	}
+
+	fx.setEnv("HOME", "/srv/elsewhere")
+	st := fx.state()
+	if st.FileDisplay != st.File {
+		t.Fatalf("a file outside the home directory is shown as %q", st.FileDisplay)
+	}
+}
+
+func TestPutProviderTakesReasoning(t *testing.T) {
+	fx := newFixture(t)
+	want(t, fx.call("PUT", "/api/providers/codex", `{"id":"codex","kind":"codex","reasoning":" high "}`), http.StatusCreated)
+	if f, _, _ := userconfig.Load(fx.home); f.Providers[1].Reasoning != "high" {
+		t.Fatalf("saved %+v", f.Providers)
+	}
+	if !strings.Contains(fx.readFile(), "reasoning: high") {
+		t.Fatalf("file:\n%s", fx.readFile())
+	}
+	a := fx.call("PUT", "/api/providers/codex", `{"id":"codex","kind":"codex","reasoning":"High"}`)
+	want(t, a, 400)
+	if !strings.Contains(a.body, "lower-case letters") {
+		t.Fatalf("body = %s", a.body)
+	}
+	want(t, fx.call("PUT", "/api/providers/codex", `{"id":"codex","kind":"codex"}`), http.StatusOK)
+	if strings.Contains(fx.readFile(), "reasoning") {
+		t.Fatalf("the key stayed after it was cleared:\n%s", fx.readFile())
+	}
+}

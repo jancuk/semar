@@ -22,7 +22,15 @@ const (
 type modelsBody struct {
 	Models []provider.Model `json:"models"`
 	Used   []string         `json:"used"`
-	Error  string           `json:"error,omitempty"`
+	// LastUsed is the newest usage record of the provider, and is left out when there is none.
+	LastUsed *lastUsed `json:"lastUsed,omitempty"`
+	Error    string    `json:"error,omitempty"`
+}
+
+type lastUsed struct {
+	Model     string    `json:"model"`
+	Reasoning string    `json:"reasoning"`
+	At        time.Time `json:"at"`
 }
 
 // getModels names the models to choose from. A lister that fails is not a failed request: the
@@ -60,7 +68,26 @@ func (s *Server) getModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	body.Used = s.usedModels(id, body.Models)
+	body.LastUsed = s.lastUsed(id)
 	reply(w, http.StatusOK, body)
+}
+
+// lastUsed is the newest record of the provider in the whole log.
+func (s *Server) lastUsed(id string) *lastUsed {
+	recs, err := usage.Read(s.d.Home, time.Time{})
+	if err != nil {
+		return nil
+	}
+	var newest *usage.Record
+	for i := range recs {
+		if recs[i].Provider == id && (newest == nil || recs[i].At.After(newest.At)) {
+			newest = &recs[i]
+		}
+	}
+	if newest == nil {
+		return nil
+	}
+	return &lastUsed{Model: newest.Model, Reasoning: newest.Reasoning, At: newest.At}
 }
 
 // usedModels are the models that a provider ran in the last 90 days and the list lacks,
