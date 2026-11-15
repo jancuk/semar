@@ -38,6 +38,9 @@ type options struct {
 	Home      string          // where providers.yaml and usage.jsonl live; "" is $SEMAR_HOME or ~/.config/semar
 	Keychain  keychain.Store  // nil is the keychain of the operating system
 
+	StderrTerminal func() bool // whether standard error is a terminal that takes a status line
+	Tick           ticker      // the ticks of the progress line; nil is a real ticker
+
 	drop *envDrop
 }
 
@@ -68,6 +71,13 @@ func (o options) withDefaults() options {
 	}
 	if o.LookupEnv == nil {
 		o.LookupEnv = os.LookupEnv
+	}
+	if o.StderrTerminal == nil {
+		lookup := o.LookupEnv
+		o.StderrTerminal = func() bool { return stderrIsTerminal(lookup) }
+	}
+	if o.Tick == nil {
+		o.Tick = realTicker
 	}
 	if o.Environ == nil {
 		o.Environ = os.Environ

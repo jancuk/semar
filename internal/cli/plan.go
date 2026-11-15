@@ -215,7 +215,13 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	fmt.Fprintln(stderr, startLine(pc, cs.Head, model, pc.Reasoning))
 
 	started := time.Now()
+	rep := startProgress(stderr, o.Clock, o.StderrTerminal(), o.Tick)
+	in.Progress = rep.Report
 	out, err := plan.Run(ctx, inst, in)
+	rep.Stop()
+	if err == nil {
+		fmt.Fprintf(stderr, "semar: the planner finished in %s\n", formatElapsed(rep.Elapsed()))
+	}
 	if err != nil {
 		o.recordUsage(stderr, inst, model, pc.Reasoning, out, usageOutcome(ctx, err), "", time.Since(started))
 		return planFailed(ctx, stderr, err)

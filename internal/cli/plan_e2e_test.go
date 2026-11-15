@@ -150,6 +150,8 @@ func newPlanRepo(t *testing.T, app sampleapp.Options) *planRepo {
 		TempRoot: p.temp,
 		Home:     t.TempDir(),
 		Keychain: keychain.Memory(),
+		// A test never has a status line, whatever its standard error is.
+		StderrTerminal: func() bool { return false },
 	}}
 	return p
 }
@@ -347,6 +349,31 @@ authProfiles:
 }
 
 // semar init writes a build probe from --build-url, and a run then reads the build from the service.
+func TestPlanSaysHowLongThePlannerTook(t *testing.T) {
+	p := newPlanRepo(t, sampleapp.Options{})
+	outputs := p.drafts(t, goodDraft)
+	p.opts.Providers = func(root string) *provider.Registry {
+		r := provider.NewRegistry()
+		r.Register(claude.Kind, func(cfg config.Provider) (provider.Instance, error) {
+			cfg.Outputs = outputs
+			return fake.New(cfg, root)
+		})
+		return r
+	}
+	res := p.must(t, cli.ExitOK, "plan", "--diff", "main..release", "--base-url", "http://"+p.host, "--service", "orders", "--token-env", planTokenEnv)
+	start := strings.Index(res.stderr, "this can take several minutes")
+	done := strings.Index(res.stderr, "semar: the planner finished in ")
+	if start < 0 || done < start {
+		t.Errorf("the planner line is not after the start line:\n%s", res.stderr)
+	}
+	if strings.Contains(res.stderr, "still planning") || strings.Contains(res.stderr, "\x1b") || strings.Contains(res.stderr, "\r") {
+		t.Errorf("a progress line appeared in plain mode:\n%q", res.stderr)
+	}
+	if strings.Contains(res.stdout, "the planner finished") {
+		t.Errorf("the line is on standard output:\n%s", res.stdout)
+	}
+}
+
 func TestPlanWithABuildProbeFromInit(t *testing.T) {
 	p := newPlanRepo(t, sampleapp.Options{})
 	outputs := p.drafts(t, goodDraft)
