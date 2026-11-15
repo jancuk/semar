@@ -12,6 +12,10 @@
 - Builds at the end: {{ .BuildsEnd }}
 - Outcomes: {{ .Counts }}
 
+{{ if .OnlyDeclared -}}
+A declared build cannot show that the service was redeployed during the run.
+
+{{ end -}}
 {{ if not .Attention }}{{ if not .Passed }}No scenario has a result in this run.
 
 {{ end }}{{ end -}}

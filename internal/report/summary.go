@@ -85,7 +85,8 @@ func countLine(results []domain.ScenarioResult) string {
 	return strings.Join(parts, ", ")
 }
 
-// Summary writes one line per scenario, then one line with the count of each outcome.
+// Summary writes one line per scenario, one line with the count of each outcome, and one line
+// for each build that was declared rather than read from the service.
 func Summary(w io.Writer, run domain.Run) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, r := range ordered(run.Results) {
@@ -107,8 +108,17 @@ func Summary(w io.Writer, run domain.Run) error {
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintln(w, countLine(run.Results))
-	return err
+	if _, err := fmt.Fprintln(w, countLine(run.Results)); err != nil {
+		return err
+	}
+	for _, b := range run.BuildsStart {
+		if b.Declared {
+			if _, err := fmt.Fprintf(w, "build: %s\n", plain(declaredBuild(b))); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // plain keeps text on one line and drops control and format characters, so a service cannot

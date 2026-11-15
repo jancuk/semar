@@ -763,3 +763,63 @@ func TestCommandsStopWhenTheirContextIsDone(t *testing.T) {
 		}
 	})
 }
+
+func TestRunWithADeclaredBuild(t *testing.T) {
+	addServices := func(s string) string {
+		return strings.Replace(s, "    services:\n", "    services:\n      - name: billing\n        baseUrl: http://127.0.0.1:9\n      - name: ledger\n        baseUrl: http://127.0.0.1:9\n", 1)
+	}
+	cases := []struct {
+		name   string
+		config func(string) string
+		args   []string
+		want   string
+	}{
+		{"a service with a probe", nil, []string{"--build", "orders=abcdef0"}, "service orders has a build probe"},
+		{"the bare form when every service has a probe", nil, []string{"--build", "abcdef0"}, "every service of the environment has a build probe"},
+		{"the bare form with two services with no probe", addServices, []string{"--build", "abcdef0"}, "billing, ledger have no build probe"},
+		{"an unknown service", addServices, []string{"--build", "payments=abcdef0"}, `no service "payments"`},
+		{"the same service twice", addServices, []string{"--build", "billing=abcdef0", "--build", "billing=abcdef1"}, "names service billing more than once"},
+		{"a commit that is not hex", addServices, []string{"--build", "billing=release"}, "7 to 40 lower-case hexadecimal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRepo(t, repoOptions{offline: true})
+			if tc.config != nil {
+				r.rewriteConfig(t, tc.config)
+			}
+			res := r.must(t, cli.ExitError, append([]string{"run", "--all"}, tc.args...)...)
+			contains(t, "stderr", res.stderr, tc.want)
+			if dirs := r.runDirs(t); len(dirs) != 0 {
+				t.Errorf("a usage error created runs %v", dirs)
+			}
+		})
+	}
+
+	t.Run("a service with no probe passes with a declared build", func(t *testing.T) {
+		r := newRepo(t, repoOptions{})
+		r.rewriteConfig(t, func(s string) string {
+			i, j := strings.Index(s, "        build:\n"), strings.Index(s, "authProfiles:")
+			return s[:i] + s[j:]
+		})
+		r.addScriptAndConfirm(t)
+		res := r.must(t, cli.ExitUndecided, "run", "--all")
+		contains(t, "a run with no build", res.stdout, "no build was recorded")
+		res = r.must(t, cli.ExitOK, "run", "--all", "--build", "0123456789abcdef")
+		contains(t, "a run with a declared build", res.stdout, "passed", "build: orders 0123456789abcdef (declared")
+		data, err := os.ReadFile(filepath.Join(r.latestRun(t), "run.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var run domain.Run
+		if err := json.Unmarshal(data, &run); err != nil {
+			t.Fatal(err)
+		}
+		want := []domain.BuildRef{{Service: "orders", Commit: "0123456789abcdef", Declared: true}}
+		if !slices.Equal(run.BuildsStart, want) || !slices.Equal(run.BuildsEnd, want) {
+			t.Errorf("builds %+v and %+v, want %+v at the start and the end", run.BuildsStart, run.BuildsEnd, want)
+		}
+		if n := r.app.Requests("GET", "/version"); n != 0 {
+			t.Errorf("the service was asked for its build %d times", n)
+		}
+	})
+}

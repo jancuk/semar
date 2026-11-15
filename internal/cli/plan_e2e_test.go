@@ -197,14 +197,6 @@ providers:
 `, p.host, p.host, planTokenEnv, outputs))
 }
 
-func (p *planRepo) addBuildProbe(t *testing.T) {
-	t.Helper()
-	p.rewriteConfig(t, func(s string) string {
-		return strings.Replace(s, "        baseUrl: http://"+p.host+"\n",
-			"        baseUrl: http://"+p.host+"\n        build: {probe: http, url: \"http://"+p.host+"/version\", commit: $.commit}\n", 1)
-	})
-}
-
 // noProvider fails the test when a command builds a provider.
 func noProvider(t *testing.T) func(string) *provider.Registry {
 	return func(string) *provider.Registry {
@@ -334,10 +326,49 @@ authProfiles:
 	// A run passes only with a recorded build, and the file of semar init has no build probe.
 	unprobed := p.must(t, cli.ExitUndecided, "run", "--all")
 	contains(t, "a run with no build probe", unprobed.stdout, "no build was recorded")
-	p.addBuildProbe(t)
-	second := p.must(t, cli.ExitOK, "run", "--all")
-	contains(t, "the second run", second.stdout, "passed")
+	head := p.head(t)[:12]
+	second := p.must(t, cli.ExitOK, "run", "--all", "--build", head)
+	contains(t, "the second run", second.stdout, "passed",
+		"build: orders "+head+" (declared on the command line, not read from the service)")
+	report, err := os.ReadFile(filepath.Join(p.latestRun(t), "report.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, "report.md", string(report), "Builds at the start: orders "+head+" (declared on the command line",
+		"A declared build cannot show that the service was redeployed during the run.")
 	p.assertNoSecret(t, []string{token})
+}
+
+// semar init writes a build probe from --build-url, and a run then reads the build from the service.
+func TestPlanWithABuildProbeFromInit(t *testing.T) {
+	p := newPlanRepo(t, sampleapp.Options{})
+	outputs := p.drafts(t, goodDraft)
+	p.opts.Providers = func(root string) *provider.Registry {
+		r := provider.NewRegistry()
+		r.Register(claude.Kind, func(cfg config.Provider) (provider.Instance, error) {
+			cfg.Outputs = outputs
+			return fake.New(cfg, root)
+		})
+		return r
+	}
+	p.must(t, cli.ExitOK, "plan", "--diff", "main..release", "--base-url", "http://"+p.host, "--service", "orders",
+		"--token-env", planTokenEnv, "--build-url", "http://"+p.host+"/version")
+	cfg, err := config.Load(p.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := config.BuildProbe{Probe: "http", URL: "http://" + p.host + "/version", Commit: "$.commit"}
+	if b := cfg.Environments["uat"].Services[0].Build; b == nil || *b != want {
+		t.Fatalf("build probe = %+v, want %+v", b, want)
+	}
+	p.must(t, cli.ExitOK, "confirm", "--all", "--yes")
+	res := p.must(t, cli.ExitOK, "run", "--all")
+	contains(t, "the run", res.stdout, "passed")
+	if strings.Contains(res.stdout, "declared") {
+		t.Errorf("a probed build is shown as declared:\n%s", res.stdout)
+	}
+	res = p.must(t, cli.ExitError, "run", "--all", "--build", "0123456789ab")
+	contains(t, "--build for a probed service", res.stderr, "every service of the environment has a build probe")
 }
 
 type counted struct {
@@ -353,10 +384,9 @@ func (c counted) Run(ctx context.Context, job provider.Job) (provider.Result, er
 func TestPlanFindsTheSeededDefect(t *testing.T) {
 	p := newPlanRepo(t, sampleapp.Options{Defects: map[sampleapp.Defect]bool{sampleapp.RefundOverTotal: true}})
 	p.configure(t, goodDraft)
-	p.addBuildProbe(t)
 	p.must(t, cli.ExitOK, "plan", "--diff", "main..release")
 	p.must(t, cli.ExitOK, "confirm", "--all", "--yes")
-	res := p.must(t, cli.ExitFailed, "run", "--all")
+	res := p.must(t, cli.ExitFailed, "run", "--all", "--build", p.head(t)[:12])
 	contains(t, "the run", res.stdout, "failed")
 }
 
@@ -562,6 +592,12 @@ func TestInit(t *testing.T) {
 		{"--base-url", "https://x.example", "--auth-value", "{{secret.TOKEN}} {{secret.TOKEN}}"},
 		{"--base-url", "https://x.example", "--token-env", "A-B"},
 		{"--base-url", "https://x.example", "--service", "../x"},
+		{"--base-url", "https://x.example", "--build-commit", "$.sha"},
+		{"--base-url", "https://x.example", "--build-url", "https://other.example/version"},
+		{"--base-url", "https://x.example", "--build-url", "https://x.example:8443/version"},
+		{"--base-url", "https://x.example", "--build-url", "ftp://x.example/version"},
+		{"--base-url", "https://x.example", "--build-url", "https://u:p@x.example/version"},
+		{"--base-url", "https://x.example", "--build-url", "https://x.example/version", "--build-commit", "$.["},
 		{},
 	} {
 		p.must(t, cli.ExitError, append([]string{"init"}, bad...)...)
@@ -588,6 +624,31 @@ func TestInit(t *testing.T) {
 	}
 	res = p.must(t, cli.ExitError, "init", "--base-url", "https://x.example")
 	contains(t, "stderr", res.stderr, "exists")
+}
+
+func TestInitWritesABuildProbe(t *testing.T) {
+	p := newPlanRepo(t, sampleapp.Options{})
+	p.opts.Providers = noProvider(t)
+	res := p.must(t, cli.ExitError, "init", "--base-url", "https://orders.example", "--build-url", "https://version.example/v")
+	contains(t, "stderr", res.stderr, `--build-url "https://version.example/v" must be on the host of --base-url, orders.example`)
+	res = p.must(t, cli.ExitError, "init", "--base-url", "https://orders.example", "--build-commit", "$.sha")
+	contains(t, "stderr", res.stderr, "--build-commit needs --build-url")
+
+	p.must(t, cli.ExitOK, "init", "--base-url", "https://Orders.example:443/api", "--service", "orders",
+		"--build-url", "https://orders.example/api/version", "--build-commit", "$.build.sha")
+	data, err := os.ReadFile(p.path(".semar", "semar.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, "semar.yaml", string(data), "        build: {probe: http, url: \"https://orders.example/api/version\", commit: \"$.build.sha\"}\n")
+	cfg, err := config.Load(p.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := config.BuildProbe{Probe: "http", URL: "https://orders.example/api/version", Commit: "$.build.sha"}
+	if b := cfg.Environments["uat"].Services[0].Build; b == nil || *b != want {
+		t.Errorf("build probe = %+v, want %+v", b, want)
+	}
 }
 
 func TestConfirmAllRefusesAScenarioID(t *testing.T) {

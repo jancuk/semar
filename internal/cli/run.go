@@ -35,6 +35,7 @@ type runFlags struct {
 	scenarios []string
 	all       bool
 	env       string
+	builds    []string
 	dir       string
 }
 
@@ -51,6 +52,7 @@ func newRunCommand(o options) *cobra.Command {
 	cmd.Flags().StringArrayVar(&f.scenarios, "scenario", nil, "the ID of a scenario to run; repeat for more")
 	cmd.Flags().BoolVar(&f.all, "all", false, "run every scenario in .semar/scenarios")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to run against; needed when there are several")
+	cmd.Flags().StringArrayVar(&f.builds, "build", nil, "the commit that a service with no build probe runs, as <commit> or <service>=<commit>; repeat for more")
 	addDirFlag(cmd, &f.dir)
 	return cmd
 }
@@ -67,6 +69,10 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 	if err != nil {
 		return err
 	}
+	declared, err := build.ParseDeclared(f.builds, env.Services)
+	if err != nil {
+		return err
+	}
 	scenarios, err := selectScenarios(f)
 	if err != nil {
 		return err
@@ -76,7 +82,7 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 		return exitError{ExitUndecided}
 	}
 
-	r, err := newReplay(ctx, o, f.dir, cfg, env, scenarios)
+	r, err := newReplay(ctx, o, f.dir, cfg, env, declared, scenarios)
 	if err != nil {
 		return err
 	}
@@ -167,7 +173,7 @@ type replayRig struct {
 // newReplay builds every dependency of one run. The secrets come before anything
 // is created or sent, so a missing secret leaves no trace. The redactor follows
 // the store, which holds its key.
-func newReplay(ctx context.Context, o options, repo string, cfg config.Config, env config.Environment, scenarios []domain.Scenario) (*replayRig, error) {
+func newReplay(ctx context.Context, o options, repo string, cfg config.Config, env config.Environment, declared map[string]string, scenarios []domain.Scenario) (*replayRig, error) {
 	secrets := secret.NewEnv(o.LookupEnv)
 	sessions, err := loadSessions(ctx, cfg, secrets, scenarios)
 	if err != nil {
@@ -208,7 +214,7 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 	var probed []string
 	for _, s := range env.Services {
 		services[s.Name] = s.BaseURL
-		if s.Build != nil {
+		if _, ok := declared[s.Name]; ok || s.Build != nil {
 			probed = append(probed, s.Name)
 		}
 	}
@@ -231,7 +237,7 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 	runner := replay.New(replay.Deps{
 		Engine:   engine,
 		Scripts:  store,
-		Builds:   build.NewHTTP(env.Services, nil),
+		Builds:   build.NewDeclared(declared, build.NewHTTP(env.Services, nil)),
 		Services: probed,
 		Confirm:  confirm.NewLocal(store.Root()),
 		Trust:    cfg.Policy.Trust.Confirm,

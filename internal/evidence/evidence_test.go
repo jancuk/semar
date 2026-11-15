@@ -586,3 +586,48 @@ func TestRedactKeyWrongLength(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestARunStoredBeforeDeclaredBuildsLoads(t *testing.T) {
+	s := openStore(t)
+	dir := filepath.Join(s.Root(), "runs", "r-old")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := `{"schema": 1, "id": "r-old", "environment": "uat", "startedAt": "2026-11-14T10:00:00Z", "endedAt": "2026-11-14T10:01:00Z",
+  "buildsStart": [{"service": "orders", "commit": "a1b2c3d", "configHash": ""}],
+  "buildsEnd": [{"service": "orders", "commit": "a1b2c3d", "configHash": ""}],
+  "results": [], "files": {}}`
+	if err := os.WriteFile(filepath.Join(dir, "run.json"), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := s.LoadRun("r-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (domain.BuildRef{Service: "orders", Commit: "a1b2c3d"}); len(run.BuildsStart) != 1 || run.BuildsStart[0] != want {
+		t.Errorf("builds at the start = %+v, want %+v", run.BuildsStart, want)
+	}
+}
+
+func TestADeclaredBuildIsStored(t *testing.T) {
+	s := openStore(t)
+	r, err := s.NewRun("r-declared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	builds := []domain.BuildRef{{Service: "orders", Commit: "0123456789ab", Declared: true}}
+	if err := r.Close(domain.Run{ID: "r-declared", StartedAt: t0, EndedAt: t0, BuildsStart: builds, BuildsEnd: builds}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(s.Root(), "runs", "r-declared", "run.json"))
+	if err != nil || !bytes.Contains(data, []byte(`"declared": true`)) {
+		t.Errorf("run.json = %s, %v", data, err)
+	}
+	run, _, err := s.LoadRun("r-declared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.BuildsEnd[0] != builds[0] {
+		t.Errorf("builds at the end = %+v", run.BuildsEnd)
+	}
+}

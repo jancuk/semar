@@ -13,10 +13,12 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/theory/jsonpath"
 	yaml "go.yaml.in/yaml/v4"
 
 	"github.com/jancuk/semar/internal/atomicfile"
 	"github.com/jancuk/semar/internal/config"
+	"github.com/jancuk/semar/internal/hostrule"
 	"github.com/jancuk/semar/internal/idcheck"
 )
 
@@ -26,14 +28,16 @@ const (
 	tokenPlaceholder  = "{{secret.TOKEN}}"
 	defaultAuthValue  = "Bearer " + tokenPlaceholder
 	defaultTokenEnv   = "SEMAR_TOKEN"
+	defaultBuildPath  = "$.commit"
 )
 
 // initFlags are the flags of semar init. plan takes the same flags.
 type initFlags struct {
 	baseURL, env, service, authHeader, authValue, tokenEnv string
+	buildURL, buildCommit                                  string
 }
 
-var initFlagNames = []string{"base-url", "service", "auth-header", "auth-value", "token-env"}
+var initFlagNames = []string{"base-url", "service", "auth-header", "auth-value", "token-env", "build-url", "build-commit"}
 
 func addInitFlags(cmd *cobra.Command, f *initFlags) {
 	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "the address of the service in the test environment, such as https://orders.uat.example.com")
@@ -41,6 +45,8 @@ func addInitFlags(cmd *cobra.Command, f *initFlags) {
 	cmd.Flags().StringVar(&f.authHeader, "auth-header", defaultAuthHeader, "the header that carries the session")
 	cmd.Flags().StringVar(&f.authValue, "auth-value", defaultAuthValue, "the value of that header; it must hold "+tokenPlaceholder)
 	cmd.Flags().StringVar(&f.tokenEnv, "token-env", defaultTokenEnv, "the environment variable that holds the token")
+	cmd.Flags().StringVar(&f.buildURL, "build-url", "", "an address on the host of --base-url that answers with the commit the service runs, such as https://orders.uat.example.com/version")
+	cmd.Flags().StringVar(&f.buildCommit, "build-commit", "", "the JSONPath of the commit in the answer of --build-url (default "+defaultBuildPath+")")
 }
 
 // initFlagGiven reports whether any flag that only init needs was set.
@@ -134,6 +140,10 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 	if !envVarPattern.MatchString(f.tokenEnv) {
 		return nil, fmt.Errorf("--token-env %q is not the name of an environment variable", f.tokenEnv)
 	}
+	probe, err := buildProbe(u, f)
+	if err != nil {
+		return nil, err
+	}
 
 	flow := func(n *yaml.Node) *yaml.Node { n.Style = yaml.FlowStyle; return n }
 	doc := mapping(
@@ -144,7 +154,7 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 				"hosts", flow(sequence(quoted(strings.ToLower(u.Host)))),
 				"methods", flow(sequence(text("GET"), text("POST"), text("PUT"), text("PATCH"), text("DELETE"))),
 				"effects", mapping("mode", text("test_data")),
-				"services", sequence(mapping("name", text(service), "baseUrl", text(f.baseURL))),
+				"services", sequence(serviceNode(service, f.baseURL, probe)),
 			),
 		),
 		"authProfiles", mapping(
@@ -164,6 +174,45 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 		return nil, fmt.Errorf("write the configuration: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// buildProbe checks --build-url and --build-commit, and returns nil when no probe was asked for.
+// The probe must be on the host of --base-url, the only host that init lists for the environment.
+func buildProbe(base *url.URL, f initFlags) (*config.BuildProbe, error) {
+	if f.buildURL == "" {
+		if f.buildCommit != "" {
+			return nil, errors.New("--build-commit needs --build-url: the address that answers with the commit the service runs")
+		}
+		return nil, nil
+	}
+	u, err := url.Parse(f.buildURL)
+	switch {
+	case err != nil:
+		return nil, fmt.Errorf("--build-url %q is not a URL: %w", f.buildURL, err)
+	case u.Scheme != "http" && u.Scheme != "https" || u.Hostname() == "":
+		return nil, fmt.Errorf("--build-url %q must be an absolute http:// or https:// URL", f.buildURL)
+	case u.User != nil:
+		return nil, errors.New("--build-url must not hold a user name or a password")
+	case !hostrule.Allowed(u, []string{strings.ToLower(base.Host)}):
+		return nil, fmt.Errorf("--build-url %q must be on the host of --base-url, %s, because Semar reaches only the hosts of the environment", f.buildURL, strings.ToLower(base.Host))
+	}
+	commit := f.buildCommit
+	if commit == "" {
+		commit = defaultBuildPath
+	}
+	if _, err := jsonpath.Parse(commit); err != nil {
+		return nil, fmt.Errorf("--build-commit %q is not a JSONPath: %w", commit, err)
+	}
+	return &config.BuildProbe{Probe: "http", URL: f.buildURL, Commit: commit}, nil
+}
+
+func serviceNode(name, baseURL string, probe *config.BuildProbe) *yaml.Node {
+	if probe == nil {
+		return mapping("name", text(name), "baseUrl", text(baseURL))
+	}
+	build := mapping("probe", text(probe.Probe), "url", quoted(probe.URL), "commit", quoted(probe.Commit))
+	build.Style = yaml.FlowStyle
+	return mapping("name", text(name), "baseUrl", text(baseURL), "build", build)
 }
 
 // writeInitConfig writes the configuration only when none exists, and keeps it only when it loads.

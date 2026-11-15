@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -43,7 +44,7 @@ type ledgerView struct {
 type markdownView struct {
 	RunID, Environment, Started, Ended string
 	BuildsStart, BuildsEnd, Counts     string
-	Interrupted                        bool
+	Interrupted, OnlyDeclared          bool
 	Attention, Passed                  []scenarioView
 	Ledger                             []ledgerView
 }
@@ -59,14 +60,15 @@ func Markdown(w io.Writer, d Data) error {
 func buildView(d Data) markdownView {
 	run := d.Run
 	v := markdownView{
-		RunID:       shown(string(run.ID)),
-		Environment: shown(run.Environment),
-		Started:     utc(run.StartedAt),
-		Ended:       utc(run.EndedAt),
-		BuildsStart: builds(run.BuildsStart),
-		BuildsEnd:   builds(run.BuildsEnd),
-		Counts:      countLine(run.Results),
-		Interrupted: run.EndedAt.IsZero(),
+		RunID:        shown(string(run.ID)),
+		Environment:  shown(run.Environment),
+		Started:      utc(run.StartedAt),
+		Ended:        utc(run.EndedAt),
+		BuildsStart:  builds(run.BuildsStart),
+		BuildsEnd:    builds(run.BuildsEnd),
+		Counts:       countLine(run.Results),
+		Interrupted:  run.EndedAt.IsZero(),
+		OnlyDeclared: onlyDeclared(run),
 	}
 	for _, r := range ordered(run.Results) {
 		sv := scenarioView{
@@ -146,9 +148,23 @@ func builds(bs []domain.BuildRef) string {
 	}
 	parts := make([]string, len(bs))
 	for i, b := range bs {
-		parts[i] = shown(fmt.Sprintf("%s %s config %s", b.Service, b.Commit, b.ConfigHash))
+		if b.Declared {
+			parts[i] = shown(declaredBuild(b))
+		} else {
+			parts[i] = shown(fmt.Sprintf("%s %s config %s", b.Service, b.Commit, b.ConfigHash))
+		}
 	}
 	return strings.Join(parts, "; ")
+}
+
+func declaredBuild(b domain.BuildRef) string {
+	return fmt.Sprintf("%s %s (declared on the command line, not read from the service)", b.Service, b.Commit)
+}
+
+// onlyDeclared reports whether the run recorded a build and every build it recorded was declared.
+func onlyDeclared(run domain.Run) bool {
+	all := append(slices.Clone(run.BuildsStart), run.BuildsEnd...)
+	return len(all) > 0 && !slices.ContainsFunc(all, func(b domain.BuildRef) bool { return !b.Declared })
 }
 
 func utc(t time.Time) string {

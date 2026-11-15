@@ -2,10 +2,13 @@ package domain
 
 import "time"
 
+// BuildRef is the build of one service. Declared is true when a person named the commit on the
+// command line, so nothing read it from the service.
 type BuildRef struct {
 	Service    string `json:"service"`
 	Commit     string `json:"commit"`
 	ConfigHash string `json:"configHash"`
+	Declared   bool   `json:"declared,omitempty"`
 }
 
 type Reason struct {

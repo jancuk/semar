@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -121,6 +122,43 @@ func render(t *testing.T, d report.Data) string {
 
 func TestMarkdownGolden(t *testing.T) {
 	compareGolden(t, "report.golden.md", []byte(render(t, fixture())))
+}
+
+func declaredFixture() report.Data {
+	d := fixture()
+	declared := []domain.BuildRef{{Service: "orders", Commit: "0123456789ab", Declared: true}}
+	d.Run.BuildsStart, d.Run.BuildsEnd = declared, slices.Clone(declared)
+	return d
+}
+
+func TestMarkdownWithADeclaredBuildGolden(t *testing.T) {
+	compareGolden(t, "report.declared.golden.md", []byte(render(t, declaredFixture())))
+}
+
+func TestMarkdownSaysWhatADeclaredBuildCannotShow(t *testing.T) {
+	const sentence = "A declared build cannot show that the service was redeployed during the run."
+	d := declaredFixture()
+	if got := render(t, d); !strings.Contains(got, sentence) {
+		t.Errorf("a run with only declared builds lacks the sentence:\n%s", got)
+	}
+	d.Run.BuildsEnd = append(d.Run.BuildsEnd, domain.BuildRef{Service: "billing", Commit: "c0ffee1"})
+	if got := render(t, d); strings.Contains(got, sentence) || !strings.Contains(got, "billing c0ffee1 config") {
+		t.Errorf("a run with a probed build:\n%s", got)
+	}
+	if got := render(t, fixture()); strings.Contains(got, sentence) || strings.Contains(got, "declared") {
+		t.Errorf("a run with no declared build:\n%s", got)
+	}
+}
+
+func TestSummaryShowsADeclaredBuild(t *testing.T) {
+	var b bytes.Buffer
+	if err := report.Summary(&b, declaredFixture().Run); err != nil {
+		t.Fatal(err)
+	}
+	want := "build: orders 0123456789ab (declared on the command line, not read from the service)\n"
+	if !strings.HasSuffix(b.String(), want) {
+		t.Errorf("summary ends with %q, want %q", b.String(), want)
+	}
 }
 
 func TestMarkdownDeterministic(t *testing.T) {
