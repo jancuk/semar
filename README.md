@@ -4,6 +4,24 @@ Semar is an open-source tool in which an AI agent tests a service the way a QA e
 
 It is built for developer-led teams, including teams with no dedicated QA.
 
+## What Semar is for
+
+Semar has two aims.
+
+1. **Depend less on QA.** A change should not wait in a queue for a QA engineer to test it by hand. With Semar, the developer who made the change gets it tested: an AI agent plans the tests from the change, runs them against the test environment, and records the evidence. A team with no QA can verify its own work, and a team with QA frees those people for the decisions that need them: what the product must do, which risks are acceptable, and what to explore next.
+2. **Give AI-agent testing one standard.** An agent that tests on its own is hard to trust and hard to compare: each run tests something different and reports it differently. Semar makes every test follow the same path, whoever starts it and whichever model runs it.
+
+| What is standard | How |
+| --- | --- |
+| The test | A scenario file with steps and expected results, in one format |
+| The source of each expected result | A label on every expected result: the ticket, a test case, a person, the diff, or a baseline |
+| The evidence | Every request and response, recorded by Semar and not by the agent |
+| The verdict | Computed by code from the evidence, with the same rules and the same six outcomes everywhere |
+| The report | One layout, tied to the build that was tested |
+| The rerun | A stored script that replays with no model, so a result can be repeated |
+
+Semar does not remove people from the decision. A person still confirms an expected result that came only from the code, and still accepts the risk of a release.
+
 ## The problem
 
 Without dedicated QA, developers divide their time between building, checking changes by hand, and maintaining tests. Verification may be incomplete or skipped, and expected behavior may exist only in conversations. Teams with QA face a verification queue. Both need useful tests and trustworthy evidence without a new full-time maintenance job.

@@ -44,6 +44,8 @@ Semar offers evidence-backed change verification across API, web, and Android fo
 
 ## Summary
 
+Semar has two aims. The first is to make a team depend less on QA: a change does not wait for a QA engineer to test it by hand, because the developer who made it gets it tested by an AI agent, with recorded evidence. The second is to give testing by an AI agent one standard: the same scenario format, the same labels for where an expected result comes from, the same recorded evidence, the same verdict rules, and the same report, whoever starts the run and whichever model does the work. A person still decides what the product must do and which risk to accept.
+
 Semar is a planned open-source behavior-verification tool for developer-led teams, including teams without dedicated QA. It verifies changes in an authorized test environment and produces evidence tied to requirements and the exact deployed target. On UAT it creates and changes test data only through the application, signed in as a test account, as a QA engineer does. It never writes to a database directly.
 
 Semar gives an AI agent the hands of a QA engineer. The agent can call the API as a person would in Postman, use the web app in a browser, use the Android app on an emulator or device, and read logs, traces, and dashboards in Grafana. Every action goes through Semar, which records it.
@@ -138,6 +140,11 @@ You did not answer these directly, so this draft picks the option it judges best
 | D52 | Configuration can add rules. It cannot turn off a fixed rule, change what an outcome means, or let an agent confirm its own expected result | The freedom of D49 and D50 must not weaken a result | A "passed" that depends on each company's settings |
 
 ## Goals
+
+The first two goals are the reason Semar exists. The numbered goals after them say how.
+
+* **Depend less on QA.** Manual verification by a QA engineer is no longer the step that every change waits for. Developers verify their own changes with an agent, and QA, where a team has it, spends its time on intent, risk, and exploration.
+* **One standard for testing with an AI agent.** Every run follows the same workflow and produces the same kind of scenario, evidence, verdict, and report, so that results can be trusted, repeated, and compared across people, teams, and models.
 
 1. Shorten the time between "the build is on UAT" and "the evidence is accepted" for a batch of tickets, by testing tickets in parallel.
 2. Produce test scenarios when the ticket is blank.
