@@ -7,7 +7,9 @@
 // and nothing else. Writing and the network are refused. Hooks, memories, the computer, browser
 // and image tools, sub-agents, and the execpolicy rule files are always off. The instruction
 // files of the working directory are not read, and the working directory is marked as an
-// untrusted project, so a .codex directory inside it does not load.
+// untrusted project, so a .codex directory inside it does not load. The commands that the model
+// runs inherit only the core variables of Codex's shell_environment_policy, such as PATH and
+// HOME, whatever environment Codex itself has.
 //
 // The setup switches:
 //
@@ -115,8 +117,9 @@ func (d *Driver) binary(workdir string) (string, *provider.Error) {
 
 func (d *Driver) setupOn() bool { return d.cfg.Setup.MCP || d.cfg.Setup.Skills }
 
-// env is the child's environment. With the setup off, it is the short list of every harness and
-// the variable that moves the Codex home, where the sign-in lives.
+// env is the environment of Codex itself, not of the commands that the model runs. With the setup
+// on, it is the person's, which their MCP servers may need. With the setup off, it is the short
+// list of every harness and the variable that moves the Codex home, where the sign-in lives.
 func (d *Driver) env() []string {
 	if d.setupOn() {
 		return provider.SetupEnv(d.o.Environ(), d.o.DropEnv)

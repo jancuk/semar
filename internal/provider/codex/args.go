@@ -71,6 +71,9 @@ func buildArgs(s argSpec) ([]string, error) {
 		`approval_policy="never"`,
 		`web_search="disabled"`,
 		`allow_login_shell=false`,
+		// The commands that the model runs get only the core variables, such as PATH and HOME,
+		// even when Codex itself has the person's environment for its MCP servers.
+		`shell_environment_policy={inherit="core", experimental_use_profile=false}`,
 		`project_doc_max_bytes=0`,
 		`project_root_markers=[]`,
 		`projects={` + dir + `={trust_level="untrusted"}}`,

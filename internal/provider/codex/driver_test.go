@@ -164,6 +164,7 @@ func TestRunSetupOff(t *testing.T) {
 		"--config", `approval_policy="never"`,
 		"--config", `web_search="disabled"`,
 		"--config", `allow_login_shell=false`,
+		"--config", `shell_environment_policy={inherit="core", experimental_use_profile=false}`,
 		"--config", `project_doc_max_bytes=0`,
 		"--config", `project_root_markers=[]`,
 		"--config", `projects={` + q + `={trust_level="untrusted"}}`,
@@ -296,6 +297,9 @@ func TestEnvWithSetupOn(t *testing.T) {
 	}
 	if _, err := d.Run(context.Background(), job(t)); err != nil {
 		t.Fatal(err)
+	}
+	if !slices.Contains(argsOf(t, b), `shell_environment_policy={inherit="core", experimental_use_profile=false}`) {
+		t.Errorf("the commands of the model would inherit the environment of Codex: args = %q", argsOf(t, b))
 	}
 	env := envNames(t, b)
 	for _, name := range []string{"PATH", "HOME", "EDITOR", "CODEX_HOME", "HTTPS_PROXY"} {
