@@ -104,6 +104,14 @@ const (
 		"or call another tool if you still need to read something."
 )
 
+const maxCallsPerResponse = 32
+
+// maxJobResultBytes caps the tool results of one job, so the model cannot read without end
+// within its turns. Tests lower it.
+var maxJobResultBytes = 64 << 20
+
+const budgetText = "error: the tool results of this job reached 64 MiB, so no more tools run; call submit with the result now"
+
 // Run sends job.Prompt and runs the tools the model calls until it calls submit, until
 // job.MaxTurns responses were used, or until job.Timeout passed. The output is the argument
 // object of submit.
@@ -131,6 +139,7 @@ func Run(ctx context.Context, client Client, job provider.Job) (provider.Result,
 	}
 	var res provider.Result
 	calls := map[string]int{}
+	resultBytes := 0
 	reminded := false
 	finish := func() {
 		res.Tools = toolUses(calls)
@@ -183,8 +192,21 @@ func Run(ctx context.Context, client Client, job provider.Job) (provider.Result,
 			continue
 		}
 		results := make([]ToolResult, 0, len(msg.Calls))
-		for _, c := range msg.Calls {
-			text, isErr := ws.call(runCtx, c)
+		for i, c := range msg.Calls {
+			var text string
+			var isErr bool
+			switch {
+			case i >= maxCallsPerResponse:
+				text, isErr = fmt.Sprintf("error: at most %d tool calls run per response; this call was not run", maxCallsPerResponse), true
+			case resultBytes >= maxJobResultBytes:
+				text, isErr = budgetText, true
+			default:
+				text, isErr = ws.call(runCtx, c)
+				resultBytes += len(text)
+				if resultBytes > maxJobResultBytes {
+					text, isErr = budgetText, true
+				}
+			}
 			results = append(results, ToolResult{CallID: c.ID, Text: text, IsError: isErr})
 		}
 		if err := runCtx.Err(); err != nil {

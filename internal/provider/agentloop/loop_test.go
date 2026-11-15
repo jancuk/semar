@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -305,5 +306,67 @@ func TestRunChecksTheJob(t *testing.T) {
 				t.Fatalf("error = %v", err)
 			}
 		})
+	}
+}
+
+func TestRunCallsPerResponse(t *testing.T) {
+	job := newJob(t)
+	s := &script{t: t}
+	s.steps = append(s.steps,
+		func(Request) (Response, error) {
+			var cs []ToolCall
+			for i := range 40 {
+				cs = append(cs, call(fmt.Sprint("r", i), "read_file", `{"path":"orders/handler.go"}`))
+			}
+			return calls(cs...), nil
+		},
+		func(req Request) (Response, error) {
+			results := req.Messages[len(req.Messages)-1].Results
+			if len(results) != 40 {
+				t.Fatalf("%d results", len(results))
+			}
+			for i, r := range results {
+				refused := strings.Contains(r.Text, "at most 32 tool calls run per response")
+				if refused != (i >= 32) || refused != r.IsError || (!refused && !strings.Contains(r.Text, "func Refund")) {
+					t.Errorf("result %d = %q, error %v", i, r.Text, r.IsError)
+				}
+			}
+			return calls(call("ok", "submit", `{"summary":"s"}`)), nil
+		},
+	)
+	if _, err := Run(context.Background(), s, job); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunResultBudget(t *testing.T) {
+	old := maxJobResultBytes
+	maxJobResultBytes = 50
+	t.Cleanup(func() { maxJobResultBytes = old })
+	job := newJob(t)
+	read := call("r", "read_file", `{"path":"orders/handler.go"}`)
+	s := &script{t: t}
+	s.steps = append(s.steps,
+		func(Request) (Response, error) { return calls(read, read), nil },
+		func(req Request) (Response, error) {
+			results := req.Messages[len(req.Messages)-1].Results
+			if results[0].IsError || !strings.Contains(results[0].Text, "func Refund") {
+				t.Errorf("first result = %q", results[0].Text)
+			}
+			if !results[1].IsError || !strings.Contains(results[1].Text, "reached 64 MiB") {
+				t.Errorf("second result = %q", results[1].Text)
+			}
+			return calls(read), nil
+		},
+		func(req Request) (Response, error) {
+			r := req.Messages[len(req.Messages)-1].Results[0]
+			if !r.IsError || !strings.Contains(r.Text, "call submit") {
+				t.Errorf("result after the budget = %q", r.Text)
+			}
+			return calls(call("ok", "submit", `{"summary":"s"}`)), nil
+		},
+	)
+	if _, err := Run(context.Background(), s, job); err != nil {
+		t.Fatal(err)
 	}
 }

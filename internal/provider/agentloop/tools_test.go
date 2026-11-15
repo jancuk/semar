@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newWorkspace(t *testing.T) (*workspace, string) {
@@ -243,7 +245,7 @@ func TestGlob(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%q: %v", c.pattern, err)
 		}
-		if got := g.match(c.path); got != c.want {
+		if got := g.match(context.Background(), c.path); got != c.want {
 			t.Errorf("glob %q on %q = %v", c.pattern, c.path, got)
 		}
 	}
@@ -253,5 +255,67 @@ func TestCapResult(t *testing.T) {
 	s := capResult(strings.Repeat("é", maxResultBytes))
 	if len(s) > maxResultBytes || !strings.HasSuffix(s, "[the result was cut at 256 KiB]\n") {
 		t.Errorf("capped to %d bytes", len(s))
+	}
+}
+
+func TestGlobLimits(t *testing.T) {
+	ws, dir := newWorkspace(t)
+	write(t, filepath.Join(dir, "a.go"), "needle\n")
+	cases := map[string]string{
+		strings.Repeat("a", 257):              "longer than 256 bytes",
+		strings.Repeat("**/", 5) + "*.go":     "more than 4",
+		strings.Repeat("{a,b}", 7) + "/*.go":  "more than 64 alternatives",
+		"{" + strings.Repeat("x,", 64) + "y}": "more than 64 alternatives",
+	}
+	for glob, want := range cases {
+		for _, tool := range []string{"list_files", "search"} {
+			args := fmt.Sprintf(`{"pattern":"needle","glob":%q}`, glob)
+			text, isErr := run(t, ws, tool, args)
+			if !isErr || !strings.Contains(text, want) {
+				t.Errorf("%s with glob %.40q = %q, error %v; want %q", tool, glob, text, isErr, want)
+			}
+		}
+	}
+	text, isErr := run(t, ws, "list_files", `{"glob":"{a,b}/**/x/**/y/**/*.{go,md}"}`)
+	if isErr || text != "no file matches\n" {
+		t.Errorf("a glob within the limits = %q, error %v", text, isErr)
+	}
+}
+
+func TestMatchSegsIsNotExponential(t *testing.T) {
+	segs := append(slices.Repeat([]string{"**"}, 12), "nomatch")
+	parts := make([]string, 26)
+	for i := range parts {
+		parts[i] = fmt.Sprintf("d%02d", i)
+	}
+	done := make(chan bool, 1)
+	go func() { done <- matchSegs(segs, parts) }()
+	select {
+	case got := <-done:
+		if got {
+			t.Error("twelve ** and nomatch matched a path without nomatch")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("matching twelve ** against 26 segments took more than 2 s")
+	}
+	if !matchSegs([]string{"**", "a", "**", "b", "**"}, []string{"x", "a", "y", "b"}) {
+		t.Error("** a ** b ** did not match x/a/y/b")
+	}
+}
+
+func TestToolCallsHonourTheContext(t *testing.T) {
+	ws, dir := newWorkspace(t)
+	write(t, filepath.Join(dir, "a.go"), "needle\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, c := range []ToolCall{
+		call("1", "read_file", `{"path":"a.go"}`),
+		call("2", "search", `{"pattern":"needle"}`),
+		call("3", "list_files", `{}`),
+	} {
+		text, isErr := ws.call(ctx, c)
+		if !isErr || !strings.Contains(text, "time of the job ran out") {
+			t.Errorf("%s after the deadline = %q, error %v", c.Name, text, isErr)
+		}
 	}
 }

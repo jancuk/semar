@@ -33,6 +33,11 @@ const (
 	maxSearchFileBytes = 2 << 20
 	maxListPaths       = 2000
 	sniffBytes         = 8 << 10
+
+	// The glob comes from the model, which the repository's text can steer.
+	maxGlobBytes        = 256
+	maxGlobStars        = 4
+	maxGlobAlternatives = 64
 )
 
 // maxVisited is how many entries one walk of the tree may visit. Tests lower it.
@@ -103,8 +108,13 @@ func openWorkspace(dir string) (*workspace, error) {
 
 func (w *workspace) close() { _ = w.root.Close() }
 
+var errRanOut = errors.New("the time of the job ran out before this call finished")
+
 // call runs one tool call. A failure is text for the model, never a failure of the job.
 func (w *workspace) call(ctx context.Context, c ToolCall) (string, bool) {
+	if ctx.Err() != nil {
+		return "error: " + errRanOut.Error(), true
+	}
 	var text string
 	var err error
 	switch c.Name {
@@ -130,6 +140,9 @@ func (w *workspace) call(ctx context.Context, c ToolCall) (string, bool) {
 		err = errors.New("submit needs the complete result as one JSON object")
 	default:
 		err = fmt.Errorf("there is no tool named %q; the tools are read_file, search, list_files, and submit", cutText(c.Name, 100))
+	}
+	if ctx.Err() != nil {
+		err = errRanOut
 	}
 	if err != nil {
 		return capResult("error: " + err.Error()), true
@@ -287,7 +300,7 @@ func (w *workspace) search(ctx context.Context, pattern, glob string) (string, e
 	var out strings.Builder
 	hits, large := 0, 0
 	walkNote, err := w.walk(ctx, func(p string, info fs.FileInfo) bool {
-		if !m.match(p) {
+		if !m.match(ctx, p) {
 			return true
 		}
 		if info.Size() > maxSearchFileBytes {
@@ -299,6 +312,9 @@ func (w *workspace) search(ctx context.Context, pattern, glob string) (string, e
 			return true
 		}
 		for n, line := range bytes.Split(data, []byte("\n")) {
+			if n%1000 == 999 && ctx.Err() != nil {
+				return false
+			}
 			if !re.Match(line) {
 				continue
 			}
@@ -333,7 +349,7 @@ func (w *workspace) listFiles(ctx context.Context, glob string) (string, error) 
 	}
 	var paths []string
 	walkNote, err := w.walk(ctx, func(p string, _ fs.FileInfo) bool {
-		if m.match(p) {
+		if m.match(ctx, p) {
 			paths = append(paths, p)
 		}
 		return true
@@ -396,6 +412,9 @@ func (w *workspace) walk(ctx context.Context, fn func(p string, info fs.FileInfo
 		}
 		return nil
 	})
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", ctxErr
+	}
 	if err != nil {
 		return "", fmt.Errorf("the working directory could not be read: %v", err)
 	}
@@ -434,13 +453,23 @@ func newGlob(pattern string) (glob, error) {
 	if pattern == "" {
 		return glob{}, nil
 	}
+	if len(pattern) > maxGlobBytes {
+		return glob{}, fmt.Errorf("the glob is longer than %d bytes; use a shorter one", maxGlobBytes)
+	}
+	alts, ok := expandBraces(pattern, nil)
+	if !ok {
+		return glob{}, fmt.Errorf("the glob %q has more than %d alternatives after its braces are expanded; use fewer braces", pattern, maxGlobAlternatives)
+	}
 	var g glob
-	for _, alt := range expandBraces(pattern) {
+	for _, alt := range alts {
 		alt = strings.TrimPrefix(alt, "/")
 		if !strings.Contains(alt, "/") {
 			alt = "**/" + alt
 		}
 		segs := strings.Split(alt, "/")
+		if countStars(segs) > maxGlobStars {
+			return glob{}, fmt.Errorf("the glob %q has more than %d ** parts; use fewer", pattern, maxGlobStars)
+		}
 		for _, s := range segs {
 			if _, err := path.Match(s, ""); err != nil {
 				return glob{}, fmt.Errorf("the glob %q is not valid", pattern)
@@ -451,12 +480,15 @@ func newGlob(pattern string) (glob, error) {
 	return g, nil
 }
 
-func (g glob) match(p string) bool {
+func (g glob) match(ctx context.Context, p string) bool {
 	if g.alts == nil {
 		return true
 	}
 	parts := strings.Split(p, "/")
 	for _, segs := range g.alts {
+		if ctx.Err() != nil {
+			return false
+		}
 		if matchSegs(segs, parts) {
 			return true
 		}
@@ -464,40 +496,68 @@ func (g glob) match(p string) bool {
 	return false
 }
 
-func matchSegs(segs, parts []string) bool {
-	for len(segs) > 0 {
-		if segs[0] == "**" {
-			for i := 0; i <= len(parts); i++ {
-				if matchSegs(segs[1:], parts[i:]) {
-					return true
-				}
-			}
-			return false
+func countStars(segs []string) int {
+	n := 0
+	for _, s := range segs {
+		if s == "**" {
+			n++
 		}
-		if len(parts) == 0 {
-			return false
-		}
-		if ok, _ := path.Match(segs[0], parts[0]); !ok {
-			return false
-		}
-		segs, parts = segs[1:], parts[1:]
 	}
-	return len(parts) == 0
+	return n
 }
 
-func expandBraces(p string) []string {
+// matchSegs keeps the set of positions in parts that the segments so far can reach, so its
+// cost grows with len(segs) times len(parts) whatever the number of "**".
+func matchSegs(segs, parts []string) bool {
+	reach := make([]bool, len(parts)+1)
+	next := make([]bool, len(parts)+1)
+	reach[0] = true
+	for _, s := range segs {
+		clear(next)
+		found := false
+		for i, ok := range reach {
+			if !ok {
+				continue
+			}
+			if s == "**" {
+				for j := i; j <= len(parts); j++ {
+					next[j] = true
+				}
+				found = true
+				break
+			}
+			if i < len(parts) {
+				if m, _ := path.Match(s, parts[i]); m {
+					next[i+1] = true
+					found = true
+				}
+			}
+		}
+		if !found {
+			return false
+		}
+		reach, next = next, reach
+	}
+	return reach[len(parts)]
+}
+
+// expandBraces appends the expansions of p to out. It stops and returns false as soon as
+// there would be more than maxGlobAlternatives, so a short pattern cannot expand to millions.
+func expandBraces(p string, out []string) ([]string, bool) {
 	open := strings.IndexByte(p, '{')
 	if open < 0 {
-		return []string{p}
+		return append(out, p), len(out) < maxGlobAlternatives
 	}
 	end := strings.IndexByte(p[open:], '}')
 	if end < 0 {
-		return []string{p}
+		return append(out, p), len(out) < maxGlobAlternatives
 	}
 	end += open
-	var out []string
 	for _, word := range strings.Split(p[open+1:end], ",") {
-		out = append(out, expandBraces(p[:open]+word+p[end+1:])...)
+		var ok bool
+		if out, ok = expandBraces(p[:open]+word+p[end+1:], out); !ok {
+			return out, false
+		}
 	}
-	return out
+	return out, true
 }
