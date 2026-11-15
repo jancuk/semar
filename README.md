@@ -26,57 +26,296 @@ Two parts are implemented in Go.
 
 Live recording of scripts by an agent, the tracker and risk levels, security probes, providers and agents, data stores, team mode, web, and Android are specified in `docs/implementation/` and are not built yet. [docs/implementation/README.md](docs/implementation/README.md) gives the sequence of plans and what each one adds. Plans 01 to 04 are the first usable version, from a plan to a report for one API ticket.
 
-## Quick start
+## Build the binary
 
-Semar needs the Go toolchain named in `go.mod`.
+Semar is one static binary with no runtime dependency.
 
-```
-make build     # writes bin/semar
-make check     # gofmt, go vet, staticcheck, govulncheck, and the tests
-```
+**You need:**
 
-From a deployed change to a result, inside a clone of the service's repository:
+* Go 1.26 or later. The build uses the toolchain named in `go.mod`, and Go downloads it on the first build.
+* `git` and `make`.
+* For `semar plan` only: [Claude Code](https://claude.com/claude-code) installed and signed in, with `claude` on your `PATH`. The other commands need no model.
 
-```
-semar plan --diff 'https://bitbucket.org/<workspace>/<repo>/branches/compare/<head>%0D<base>' \
-  --base-url https://<host of the test environment> --token-env MY_TOKEN
-export MY_TOKEN=<the token of a test account>
-semar run --all --build <head commit>   # shows whether the drafted requests fit
-semar confirm --all                     # a person accepts the expected results
-semar run --all --build <head commit>   # the result
-```
+**Build:**
 
-`--diff` also takes a GitHub or GitLab compare link, or a plain range such as `main..release`. `--base-url` and `--token-env` are needed only the first time: they write `.semar/semar.yaml`. Planning starts the Claude Code binary on `PATH` with read-only tools. `--build` declares the build under test when the service has no endpoint for its version.
-
-Every command takes `--dir <path>`, the root of the repository that holds `.semar/`. It defaults to the current directory.
-
-```
-semar plan --diff <link or range>   # write scenarios, scripts, and plan.md for a change
-semar changes --diff <link or range>  # print the tickets, commits, and files of a change; no model
-semar init --base-url <url>    # write .semar/semar.yaml
-semar run --scenario <id>      # replay one scenario; repeat the flag for more
-semar run --all                # replay every scenario in .semar/scenarios
-semar script add <file>        # check a script against its scenario and store it
-semar confirm <scenario id> --yes   # confirm the expected results that need a person; --all for every scenario
-semar activity <run id|latest> # print what a run did, in order
+```bash
+git clone https://github.com/jancuk/semar.git
+cd semar
+make build            # writes bin/semar
+bin/semar version     # prints "semar dev"
 ```
 
-`semar run` also takes `--env <name>`, which is needed when `semar.yaml` defines several environments. `semar activity` takes `--writes`, `--scenario <id>`, and `--pass <name>` to narrow the output.
+**Put it on your `PATH`.** Either copy the binary or add an alias:
 
-The layout of `.semar/`:
-
-```
-.semar/
-  semar.yaml          environments, services, auth profiles, redaction, policy
-  scenarios/          one YAML file per scenario, for example SHOP-482/SHOP-482-01.yaml
-  plans/<head commit>/  plan.md and the accepted draft of one planned change
-  runs/<run id>/      run.json, report.md, activity.jsonl, and the recorded exchanges of one run
-  store/              accepted scripts and confirmations
+```bash
+sudo install -m 0755 bin/semar /usr/local/bin/semar
+# or
+alias semar="$PWD/bin/semar"
 ```
 
-A working example is in `testdata/e2e/`: a `semar.yaml`, a scenario, and a script.
+**Other ways to build:**
 
-Exit codes of `semar run`:
+| Goal | Command |
+| --- | --- |
+| Set the version that `semar version` prints | `make build VERSION=0.1.0` |
+| Build without `make` | `CGO_ENABLED=0 go build -trimpath -o bin/semar ./cmd/semar` |
+| Build for another system | `GOOS=linux GOARCH=amd64 make build`. Linux, macOS, and Windows on `amd64` and `arm64` compile. Only Linux and macOS are tested |
+| Run every check before a change | `make check`: `gofmt`, `go vet`, `staticcheck`, `govulncheck`, and the tests with the race detector |
+
+Build again after every update of the source: `git pull && make build`.
+
+## Use it
+
+There are two ways to get scenarios. Both end with the same `semar run`.
+
+| Way | When to use it | A model is needed |
+| --- | --- | --- |
+| [From a change](#from-a-change) | A change is deployed to a test environment, and you want tests for what changed | Yes, to draft the scenarios |
+| [Hand-written](#hand-written-scenarios) | You know what to test, or you want no model at all | No |
+
+The examples use a service named `orders` and a ticket named `SHOP-482`.
+
+### From a change
+
+Run these commands inside a clone of the repository of the service under test.
+
+**1. Look at the change.** This step starts no model and writes nothing.
+
+```bash
+semar changes --diff main..release
+```
+
+`--diff` takes a range, `<base>..<head>`, or the compare link of a code host:
+
+| Code host | Link |
+| --- | --- |
+| Bitbucket Cloud | `https://bitbucket.org/<workspace>/<repo>/branches/compare/<head>%0D<base>` |
+| GitHub | `https://github.com/<owner>/<repo>/compare/<base>...<head>` |
+| GitLab | `https://<host>/<group>/<repo>/-/compare/<base>...<head>` |
+
+The base is what runs in production, and the head is what runs in the test environment. Semar fetches both branches from `origin` with your own git, so it needs no token of the code host. It prints the tickets it found in the commit messages, the commits with no ticket, and the changed files.
+
+A link to one pull request is not accepted. Pass the compare link of its two branches, or a range.
+
+**2. Draft the scenarios.**
+
+```bash
+semar plan --diff main..release \
+  --base-url https://orders.uat.example.com \
+  --token-env ORDERS_UAT_TOKEN
+```
+
+`--base-url` and `--token-env` are needed only the first time. They write `.semar/semar.yaml`, and later runs read that file. See [Configuration](#configuration) for the other flags.
+
+What `plan` does:
+
+1. It copies the source at the head commit to a temporary directory.
+2. It starts Claude Code in that copy with three read-only tools: read a file, search, and list files. The model has no shell and no network, and it cannot reach your test environment or read a file outside the copy.
+3. The model returns one draft. Code validates it. Problems go back to the model, for at most three attempts.
+4. It writes the files below and removes the copy.
+
+| File | Content |
+| --- | --- |
+| `.semar/scenarios/<ticket>/<ticket>-NN.yaml` | One scenario: its steps and expected results |
+| `.semar/store/scripts/...` | The exact request of each step |
+| `.semar/plans/<head commit>/plan.md` | What changed, the scenarios per ticket, what was not drafted and what it needs, and the files that no scenario covers |
+
+The output ends with the commands of the next steps:
+
+```text
+SHOP-482 (behaviour): 2 scenarios
+SHOP-490 (config): 1 scenario
+not drafted: 1
+plan: .semar/plans/9f3c2ab41d07/plan.md
+next:
+  semar run --all --build 9f3c2ab41d07
+  semar confirm --all
+  semar run --all --build 9f3c2ab41d07
+```
+
+Read `plan.md` and the scenario files before you run them. The model read them from the code, and nothing was sent yet.
+
+**3. Run against the test environment.**
+
+```bash
+export ORDERS_UAT_TOKEN='<the token of a test account>'
+semar run --all --build 9f3c2ab41d07
+```
+
+The first run shows whether the drafted requests fit the service. Every scenario ends as `inconclusive`, because nobody confirmed the expected results yet.
+
+**4. Confirm the expected results.** A model's reading of a diff is not a requirement, so a person accepts each expected result before it counts.
+
+```bash
+semar confirm --all          # lists every expected result, then asks
+```
+
+**5. Run again for the result.**
+
+```bash
+semar run --all --build 9f3c2ab41d07; echo "exit $?"
+semar activity latest        # every request that was sent, in order
+```
+
+**What `plan` does not do yet:**
+
+* It does not read the tracker. A ticket is its key and the commits that name it.
+* It does not invent data of the test environment. A scenario that needs an existing record, such as the ID of an order that the test account may read, is listed in `plan.md` under "Not drafted" with what it needs.
+* It drafts requests from the source. It does not try them against the service first.
+
+**What leaves your machine.** `plan` sends parts of your source and the diff to the model provider, through your own Claude Code and its account. It sends no token, no address of your test environment, and no file outside the copy. `changes`, `run`, `confirm`, and `activity` send nothing to a model.
+
+### Hand-written scenarios
+
+**1. Write the configuration,** or let `init` write it:
+
+```bash
+semar init --base-url https://orders.uat.example.com --token-env ORDERS_UAT_TOKEN
+```
+
+**2. Write a scenario** in `.semar/scenarios/SHOP-482/SHOP-482-01.yaml`. It says what must be true, and where each expected result comes from:
+
+```yaml
+apiVersion: semar/v1
+kind: Scenario
+id: SHOP-482-01
+title: Refund above the order total is rejected
+ticket: SHOP-482
+intent: >
+  Before: a refund larger than the order total was accepted.
+  Now: the API rejects it with 422 and leaves the order unchanged.
+surface: api
+authProfile: default
+steps:
+  - id: create-order
+    setup: true
+    action: Create a paid order for 100000
+    hint: { method: POST, path: /v1/orders }
+  - id: refund-too-much
+    action: Request a refund of 150000 for that order
+    hint: { method: POST, path: "/v1/orders/{id}/refunds" }
+    expect:
+      - check: { status: 422 }
+        source: ticket
+        cite: "SHOP-482: a refund above the order total must be rejected"
+      - check: { jsonpath: "$.error.code", equals: REFUND_EXCEEDS_TOTAL }
+        source: diff
+```
+
+**3. Write its script** in any file, for example `scripts/SHOP-482-01.yaml`. It holds the exact request of each step:
+
+```yaml
+apiVersion: semar/v1
+kind: Script
+scenario: SHOP-482-01
+authoredBy: { instance: hand, model: none, harness: none }
+steps:
+  - step: create-order
+    request: { service: orders, method: POST, path: /v1/orders, json: { amount: 100000 } }
+    captures: [{ name: order_id, jsonpath: "$.data.id" }]
+  - step: refund-too-much
+    request: { service: orders, method: POST, path: "/v1/orders/{{order_id}}/refunds", json: { amount: 150000 } }
+```
+
+A capture takes a value from a response, and `{{order_id}}` uses it in a later step.
+
+**4. Store the script, run, and confirm:**
+
+```bash
+semar script add scripts/SHOP-482-01.yaml     # checks the script against the scenario
+export ORDERS_UAT_TOKEN='<the token of a test account>'
+semar run --scenario SHOP-482-01 --build 9f3c2ab41d07
+semar confirm SHOP-482-01                      # needed because one result has the source "diff"
+semar run --scenario SHOP-482-01 --build 9f3c2ab41d07; echo "exit $?"
+```
+
+`testdata/e2e/` holds these files as a working example. Its configuration points at an address where nothing listens, so a run there ends as `blocked`. The tests in `internal/cli` run the same files against a sample service.
+
+### Configuration
+
+`.semar/semar.yaml` describes the test environment. `semar init` and the first `semar plan` write it from these flags:
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--base-url` | none, required | The address of the service in the test environment |
+| `--service` | The name of the repository directory | The name that scripts use for the service |
+| `--env` | `uat` | The name of the environment |
+| `--auth-header` | `Authorization` | The header that carries the session |
+| `--auth-value` | `Bearer {{secret.TOKEN}}` | The value of that header. `{{secret.TOKEN}}` is replaced at run time |
+| `--token-env` | `SEMAR_TOKEN` | The environment variable that holds the token |
+| `--build-url` | none | An address of the service that answers with the commit it runs, such as `https://orders.uat.example.com/version` |
+| `--build-commit` | `$.commit` | Where that answer holds the commit, as a JSONPath |
+
+The file that they write:
+
+```yaml
+version: 1
+environments:
+  uat:
+    kind: test
+    hosts: ["orders.uat.example.com"]         # a request to any other host is refused
+    methods: [GET, POST, PUT, PATCH, DELETE]   # remove the methods your tests must not use
+    effects:
+      mode: test_data                          # read_only refuses every request that changes data
+    services:
+      - name: orders
+        baseUrl: https://orders.uat.example.com
+        build:                                 # only with --build-url
+          probe: http
+          url: https://orders.uat.example.com/version
+          commit: $.commit
+authProfiles:
+  default:
+    session: {header: Authorization, value: "Bearer {{secret.TOKEN}}"}
+    secrets: {TOKEN: "env:ORDERS_UAT_TOKEN"}
+```
+
+Three rules to know:
+
+* **The token is never in a file.** The configuration names an environment variable. Semar reads it at run time and removes its value from everything it stores. Use a test account, never a personal or a production credential.
+* **A result belongs to a build.** A run with no recorded build ends as `inconclusive`. With a build probe, Semar asks the service which commit it runs, before and after the run, and a change between the two makes the results `stale`. Without one, declare the build with `semar run --build <commit>`. The report then says that the build was declared and not read from the service.
+* **The harness is yours.** `semar plan` starts the `claude` on your `PATH`, or the absolute path in the environment variable `SEMAR_CLAUDE_BIN`. The configuration cannot name a program to start, because it is a file of the repository under test.
+
+The file also takes `redact`, `policy`, `replay`, `providers`, `tickets`, and `plan` blocks. The [technical requirements](docs/TRD.md) and [Plan 12](docs/implementation/12-plan-from-a-diff.md) describe them.
+
+### Commands
+
+Every command takes `--dir <path>`, the root of the repository that holds `.semar/`. It defaults to the current directory. `semar <command> --help` lists every flag.
+
+| Command | What it does |
+| --- | --- |
+| `semar changes --diff <link or range>` | Prints the tickets, commits, and files of a change. No model |
+| `semar plan --diff <link or range>` | Drafts scenarios and scripts for a change, and writes `plan.md`. Also takes `--model <name>`, `--max-scenarios <n>`, and `--no-fetch` |
+| `semar init --base-url <url>` | Writes `.semar/semar.yaml` |
+| `semar script add <file>` | Checks a script against its scenario and stores it |
+| `semar run --all` | Replays every scenario in `.semar/scenarios` |
+| `semar run --scenario <id>` | Replays one scenario. Repeat the flag for more |
+| `semar confirm <scenario id>` | Lists the expected results that need a person, and stores the confirmation. `--all` for every scenario, `--yes` to skip the question |
+| `semar activity <run id\|latest>` | Prints what a run did, in order. `--writes` shows only the requests that change data |
+| `semar version` | Prints the version |
+
+`semar run` also takes `--env <name>`, which is needed when `semar.yaml` defines several environments, and `--build <commit>` or `--build <service>=<commit>`.
+
+### Results
+
+`semar run` prints one line per scenario, a line with the count of each outcome, and the path of the report:
+
+```text
+SHOP-482-01  failed  refund-too-much: expected 422, got 201
+failed 1, blocked 0, inconclusive 0, stale 0, not_run 0, passed 0
+report: .semar/runs/r-20261115T032840Z-d50b/report.md
+```
+
+| Outcome | Meaning |
+| --- | --- |
+| `passed` | Every expected result held, each one is confirmed where it needs to be, and the evidence is recorded |
+| `failed` | An expected result did not hold |
+| `blocked` | The scenario could not start or continue: no script, a setup step failed, or the environment refused a request |
+| `inconclusive` | The run gives no verdict: a result is not confirmed, no build was recorded, or a write timed out |
+| `stale` | The build of the service changed during the run |
+| `not_run` | The run stopped before the scenario started |
+
+The exit code of `semar run`:
 
 | Code | Meaning |
 | --- | --- |
@@ -84,6 +323,32 @@ Exit codes of `semar run`:
 | 1 | At least one scenario failed |
 | 2 | Nothing failed, but a scenario could not be judged, or no scenario ran |
 | 3 | An error: bad configuration, a bad file, or a run that stopped |
+
+The layout of `.semar/`:
+
+```text
+.semar/
+  semar.yaml            environments, services, auth profiles, redaction, policy
+  scenarios/            one YAML file per scenario, for example SHOP-482/SHOP-482-01.yaml
+  plans/<head commit>/  plan.md and the accepted draft of one planned change
+  runs/<run id>/        run.json, report.md, activity.jsonl, and the recorded exchanges of one run
+  store/                accepted scripts and confirmations
+```
+
+Commit `semar.yaml` and `scenarios/` so that the team shares them. `runs/` holds recorded requests and responses of your test environment, with secrets redacted. Decide with your team whether it belongs in the repository.
+
+### When something goes wrong
+
+| What you see | What to do |
+| --- | --- |
+| `inconclusive` with "no build was recorded" | Pass `--build <commit>` to `semar run`, or add a build probe with `--build-url` |
+| `inconclusive` with "an expected result is not confirmed" | Run `semar confirm --all`, then run again |
+| `blocked` with "no script was accepted" | The scenario has no stored script. Run `semar script add <file>`, or `semar plan` again |
+| `blocked` with "the environment does not allow a step" | The request uses a host or a method that `semar.yaml` does not list, or `effects.mode` is `read_only` |
+| Exit 3 that names an environment variable | Export the token variable that `semar.yaml` names |
+| `semar plan` says that the binary `claude` was not found on `PATH` | Install Claude Code, or set `SEMAR_CLAUDE_BIN` to the absolute path of its binary |
+| `semar plan` says that the link names another repository | Run the command inside a clone of the repository in the link |
+| A fetch fails | Check that `git fetch origin` works in this clone, or pass `--no-fetch` to use the branches as they are |
 
 ## Documents
 
