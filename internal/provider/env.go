@@ -24,11 +24,15 @@ func ChildEnv(lookup func(string) (string, bool)) []string {
 var (
 	setupDropPrefixes = []string{
 		"ANTHROPIC_", "OPENAI_", "AZURE_OPENAI_", "DEEPSEEK_", "GEMINI_", "GOOGLE_GENAI_",
-		"OPENROUTER_", "MISTRAL_", "GROQ_", "XAI_",
+		"OPENROUTER_", "MISTRAL_", "GROQ_", "XAI_", "HUGGINGFACE_", "TOGETHER_", "COHERE_", "PERPLEXITY_",
+		"FIREWORKS_", "REPLICATE_", "CEREBRAS_",
 		"SEMAR_",
 		"CLAUDE_CODE_", "CLAUDE_AGENT_SDK_", "CLAUDE_PLUGIN_",
 	}
-	setupDropNames = []string{"GOOGLE_API_KEY", "CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "AI_AGENT"}
+	setupDropNames = []string{
+		"GOOGLE_API_KEY", "AWS_BEARER_TOKEN_BEDROCK", "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN",
+		"CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "AI_AGENT",
+	}
 )
 
 // SetupEnv returns the environment of a harness that runs with the person's setup: environ,

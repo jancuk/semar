@@ -17,6 +17,7 @@ import (
 	"github.com/jancuk/semar/internal/provider/codex"
 	"github.com/jancuk/semar/internal/provider/fake"
 	"github.com/jancuk/semar/internal/provider/openai"
+	"github.com/jancuk/semar/internal/userconfig"
 	"github.com/jancuk/semar/internal/vcs"
 )
 
@@ -60,6 +61,18 @@ func secretEnvNames(cfg config.Config) []string {
 			if name, ok := strings.CutPrefix(ref, "env:"); ok && name != "" {
 				names = append(names, name)
 			}
+		}
+	}
+	return names
+}
+
+// keyEnvNames lists the variables that the providers of the person's own file name as keys.
+// A harness drops them too, whichever provider names them.
+func keyEnvNames(f userconfig.File) []string {
+	var names []string
+	for _, p := range f.Providers {
+		if name, ok := strings.CutPrefix(p.APIKey, "env:"); ok && name != "" {
+			names = append(names, name)
 		}
 	}
 	return names

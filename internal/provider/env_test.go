@@ -42,10 +42,13 @@ func TestSetupEnv(t *testing.T) {
 		"CLAUDECODE=1", "CLAUDE_CODE_ENTRYPOINT=cli", "CLAUDE_CODE_SESSION_ID=s", "CLAUDE_CODE_OAUTH_TOKEN=t",
 		"CLAUDE_AGENT_SDK_VERSION=1", "CLAUDE_PLUGIN_DATA=/p", "CLAUDE_PID=1", "CLAUDE_EFFORT=high", "AI_AGENT=x",
 		"ACME_TOKEN=secret", "acme_password=secret",
+		"AWS_BEARER_TOKEN_BEDROCK=k", "AWS_REGION=eu-west-1", "HF_TOKEN=k", "HF_HOME=/h/.hf", "HUGGINGFACE_HUB_TOKEN=k",
+		"HUGGING_FACE_HUB_TOKEN=k", "TOGETHER_API_KEY=k", "COHERE_API_KEY=k", "PERPLEXITY_API_KEY=k", "FIREWORKS_API_KEY=k",
+		"REPLICATE_API_TOKEN=k", "CEREBRAS_API_KEY=k", "CODEX_HOME=/h/.codex",
 		"=C:=C:\\", "BROKEN",
 	}
 	got := provider.SetupEnv(environ, []string{"ACME_TOKEN", "ACME_PASSWORD"})
-	want := []string{"PATH=/bin", "HOME=/h", "CLAUDE_CONFIG_DIR=/h/.claude", "EDITOR=vi", "ORDERS_DB_URL=postgres://db.example.com", "GOOGLE_CLOUD_PROJECT=acme"}
+	want := []string{"PATH=/bin", "HOME=/h", "CLAUDE_CONFIG_DIR=/h/.claude", "EDITOR=vi", "ORDERS_DB_URL=postgres://db.example.com", "GOOGLE_CLOUD_PROJECT=acme", "AWS_REGION=eu-west-1", "HF_HOME=/h/.hf", "CODEX_HOME=/h/.codex"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got  %q\nwant %q", got, want)
 	}
