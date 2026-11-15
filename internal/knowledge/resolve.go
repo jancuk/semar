@@ -62,6 +62,9 @@ func resolve(root *os.Root, k config.Knowledge) Source {
 	s := Source{ID: k.ID, Kind: k.Kind, Path: k.Path, Service: k.Service}
 	native := filepath.FromSlash(k.Path)
 	info, err := root.Lstat(native)
+	if err == nil && !exactNames(root, k.Path) {
+		err = fs.ErrNotExist
+	}
 	switch {
 	case err != nil:
 		s.Problem = k.Path + " is not in the copy of the source"
@@ -96,6 +99,47 @@ func resolve(root *os.Root, k config.Knowledge) Source {
 	}
 	s.API = &doc
 	return s
+}
+
+// exactNames reports whether every name of the slash path is an entry of its folder with
+// exactly that name, and every folder on the way is a real folder. A file system that
+// ignores case would find INTERNAL for internal, and Holds compares exactly. The last
+// name may be a link: the caller reports it.
+func exactNames(root *os.Root, rel string) bool {
+	names := strings.Split(rel, "/")
+	dir := "."
+	for i, n := range names {
+		t, ok := entryType(root, dir, n)
+		if !ok {
+			return false
+		}
+		if i == len(names)-1 {
+			return true
+		}
+		if !t.IsDir() {
+			return false
+		}
+		dir = path.Join(dir, n)
+	}
+	return false
+}
+
+func entryType(root *os.Root, dir, name string) (fs.FileMode, bool) {
+	f, err := root.Open(filepath.FromSlash(dir))
+	if err != nil {
+		return 0, false
+	}
+	defer f.Close()
+	entries, err := f.ReadDir(-1)
+	if err != nil {
+		return 0, false
+	}
+	for _, e := range entries {
+		if e.Name() == name {
+			return e.Type(), true
+		}
+	}
+	return 0, false
 }
 
 var errEnough = errors.New("enough files")

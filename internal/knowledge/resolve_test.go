@@ -190,3 +190,54 @@ func TestHolds(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveRefusesALinkInAFolderName(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "real/openapi.yaml", apiDoc)
+	write(t, dir, "real/guide.md", "x")
+	// The target is inside the copy, so a root alone would follow the link.
+	if err := os.Symlink("real", filepath.Join(dir, "linked")); err != nil {
+		t.Skip("symlinks are not available:", err)
+	}
+	got, err := knowledge.Resolve(dir, []config.Knowledge{
+		{ID: "api", Kind: config.KnowledgeOpenAPI, Path: "linked/openapi.yaml"},
+		{ID: "guide", Kind: config.KnowledgeFiles, Path: "linked/guide.md"},
+		{ID: "docs", Kind: config.KnowledgeFiles, Path: "linked"},
+		{ID: "real", Kind: config.KnowledgeFiles, Path: "real/guide.md"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := got[2]; s.Usable() || s.Folder {
+		t.Errorf("docs = %+v, want a link that is not followed", s)
+	}
+	for _, s := range got[:2] {
+		if s.Usable() || s.API != nil || !strings.Contains(s.Problem, "is not in the copy of the source") {
+			t.Errorf("%s = %+v, want the problem of a path that is not in the copy", s.ID, s)
+		}
+	}
+	if !got[3].Usable() {
+		t.Errorf("real = %+v, want a usable source", got[3])
+	}
+}
+
+func TestResolveComparesNamesExactly(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "internal/refunds.md", "x")
+	got, err := knowledge.Resolve(dir, []config.Knowledge{
+		{ID: "dir", Kind: config.KnowledgeFiles, Path: "INTERNAL/refunds.md"},
+		{ID: "file", Kind: config.KnowledgeFiles, Path: "internal/Refunds.md"},
+		{ID: "exact", Kind: config.KnowledgeFiles, Path: "internal/refunds.md"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range got[:2] {
+		if s.Usable() || !strings.Contains(s.Problem, "is not in the copy of the source") {
+			t.Errorf("%s = %+v, want a path that is not in the copy: a file system may ignore case, Holds does not", s.ID, s)
+		}
+	}
+	if !got[2].Usable() {
+		t.Errorf("exact = %+v", got[2])
+	}
+}
