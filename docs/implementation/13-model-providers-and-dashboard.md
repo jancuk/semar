@@ -216,6 +216,7 @@ The server listens on `127.0.0.1`. It prints the address with the token, opens t
 | `PUT /api/providers/{id}/key` | Stores a pasted key in the keychain and sets `apiKey` to `keychain:<id>` |
 | `POST /api/providers/{id}/login` | Starts the harness's sign-in command and returns a job |
 | `GET /api/logins/{job}`, `DELETE /api/logins/{job}` | The output lines and state of the job; cancels it |
+| `GET /api/providers/{id}/models` | The models a person may choose: from Codex's own catalog, from the models route of an API vendor, or the fixed aliases of Claude Code, which has no command that lists models. Also the models that the usage log holds for the provider. No model turn |
 | `GET /api/usage?days=n` | The rows, the latest limits, and the last 50 records |
 
 Every `/api/` call needs the token in the header `X-Semar-Token`, a `Host` of `127.0.0.1:<port>` or `localhost:<port>`, and, when `Origin` is present, the same origin. A change needs the content type `application/json`. The file is read on every `GET /api/state`, so a hand edit shows on reload.

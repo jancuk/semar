@@ -231,7 +231,7 @@ The page lists your providers and shows for each one whether it is installed and
 
 * add a provider, and paste an API key, which goes to the keychain of your operating system;
 * start the sign-in of Claude Code or Codex;
-* set the default provider and the model of each provider;
+* set the default provider, and choose the model of each provider from a list;
 * turn your MCP servers and skills on or off for a harness provider;
 * see the usage: runs, turns, tokens, and cost per provider and model, and for Claude Code the subscription windows that it reported after the last run.
 
