@@ -161,6 +161,8 @@ What `plan` does:
 3. The model returns one draft. Code validates it. Problems go back to the model, for at most three attempts.
 4. It writes the files below and removes the copy.
 
+While the planner works, a status line on standard error shows the elapsed time, the draft number, and the responses and tool calls of the planner. When standard error is not a terminal, a log gets one line every 30 seconds instead. When the planner ends, `semar` prints how long it took.
+
 | File | Content |
 | --- | --- |
 | `.semar/scenarios/<ticket>/<ticket>-NN.yaml` | One scenario: its steps and expected results |

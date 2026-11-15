@@ -16,7 +16,7 @@
 | D2 | A provider reports progress through a function of the job. A job with no function runs as before | A stage decides what to do with progress. A provider only says what happened |
 | D3 | Claude Code always writes the stream format. The single-object format and its parser are removed | The stream is the only format that reports while the job runs. One parser is less code than two |
 | D4 | The line never shows text of the model, a file name, or the arguments of a tool. It shows the name of the latest tool, and an MCP tool is shown as `an MCP tool` | The names of a person's MCP servers stay out of logs, as in `plan.md`. A file name or an argument is untrusted text |
-| D5 | No new dependency. A terminal is a character device whose `TERM` is not `dumb`. The line is at most 78 characters, because the width of the terminal is not read | G18 |
+| D5 | No new dependency. A terminal is a character device, other than the null device, whose `TERM` is set and is not `dumb`. The line is at most 78 characters, because the width of the terminal is not read | G18 |
 | D6 | No flag turns the progress off. A pipe gets one line per 30 seconds, and nothing else changes | A flag is added when someone needs it |
 
 ## Trust
@@ -94,8 +94,12 @@ After the planner ends, in both cases, when the plan succeeded:
 semar: the planner finished in 1m24s
 ```
 
+* The text of the line is cut to 78 characters by dropping parts from the end, never the spinner or the elapsed time. The name of the tool is cut to 24 characters, and a newline or a tab in it becomes a space.
+* Not on a terminal, there is no status line. Every 30 seconds one line is printed, as above. It always names the draft, shows a count only when it is above zero, and never names a tool. The rejected-draft line is printed in this mode too.
+* On an error or an interrupt, no line is added, and the failure lines follow the erased line.
 * The elapsed time is `45s`, `1m24s`, or `1h02m03s`.
-* The clock and the ticker are injected (G8), so a test does not sleep.
+* The clock and the ticker are injected (G8), so a test does not sleep. `options` has `StderrTerminal func() bool`, decided once from the real standard error and `TERM` in `withDefaults`, and `Tick`, a function from an interval to a channel of ticks and a stop function.
+* The reporter writes under one mutex and owns one goroutine. `Stop` erases the line, ends the goroutine, and waits for it. A report after `Stop` writes nothing.
 * The reporter is safe for calls from several goroutines, and `Stop` can be called more than once.
 
 ## Tasks
