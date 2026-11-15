@@ -247,3 +247,95 @@ func TestGetUnitesTheSourcesOfEveryUser(t *testing.T) {
 		t.Errorf("record = %+v, want the sources %v of alice and bob", got, want)
 	}
 }
+
+func TestNoLinkIsFollowed(t *testing.T) {
+	components := []string{"store", "store/confirmations", "store/confirmations/refund", "store/confirmations/refund/abc123"}
+	const hashDir = "store/confirmations/refund/abc123"
+	record := `{"schema": 1, "scenario": "refund", "expectHash": "abc123", "user": "mallory", "identity": "x", "at": "2026-01-01T00:00:00Z", "sources": ["diff"]}`
+	for _, c := range components {
+		for _, inside := range []bool{true, false} {
+			name := c + " to a directory outside the store"
+			if inside {
+				name = c + " to a directory inside the store"
+			}
+			t.Run(name, func(t *testing.T) {
+				root := filepath.Join(t.TempDir(), ".semar")
+				target := filepath.Join(t.TempDir(), "elsewhere")
+				if inside {
+					target = filepath.Join(root, "elsewhere")
+				}
+				below, _ := filepath.Rel(c, hashDir)
+				if err := os.MkdirAll(filepath.Join(target, below), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(target, below, "mallory.json"), []byte(record), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				link := filepath.Join(root, filepath.FromSlash(c))
+				if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, link); err != nil {
+					t.Skip("symlinks are not available:", err)
+				}
+				l := confirm.NewLocal(root)
+				if _, _, err := l.Get("refund", "abc123"); err == nil || !strings.Contains(err.Error(), link) || !strings.Contains(err.Error(), "symbolic link") {
+					t.Errorf("Get: %v, want an error that names %s", err, link)
+				}
+				if err := l.Put(rec("alice", time.Now())); err == nil || !strings.Contains(err.Error(), link) || !strings.Contains(err.Error(), "symbolic link") {
+					t.Errorf("Put: %v, want an error that names %s", err, link)
+				}
+				entries, err := os.ReadDir(filepath.Join(target, below))
+				if err != nil || len(entries) != 1 {
+					t.Errorf("the link's target holds %v (%v)", entries, err)
+				}
+			})
+		}
+	}
+
+	t.Run("a record that is a link", func(t *testing.T) {
+		root := t.TempDir()
+		dir := filepath.Join(root, filepath.FromSlash(hashDir))
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		other := filepath.Join(root, "other.json")
+		if err := os.WriteFile(other, []byte(record), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(other, filepath.Join(dir, "mallory.json")); err != nil {
+			t.Skip("symlinks are not available:", err)
+		}
+		_, _, err := confirm.NewLocal(root).Get("refund", "abc123")
+		if err == nil || !strings.Contains(err.Error(), "mallory.json is a symbolic link") {
+			t.Errorf("Get: %v, want a refusal of the link", err)
+		}
+	})
+}
+
+func TestGetReadsARecordThatAnEarlierVersionWrote(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "store", "confirmations", "refund", "abc123")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	written := `{
+  "schema": 1,
+  "scenario": "refund",
+  "expectHash": "abc123",
+  "user": "alice",
+  "identity": "local, unverified identity",
+  "at": "2026-11-14T10:00:00Z",
+  "sources": [
+    "diff"
+  ]
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "alice.json"), []byte(written), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, ok, err := confirm.NewLocal(root).Get("refund", "abc123")
+	if err != nil || !ok || r.User != "alice" || !slices.Equal(r.Sources, []domain.Source{domain.SourceDiff}) {
+		t.Fatalf("Get = %+v, %v, %v", r, ok, err)
+	}
+}

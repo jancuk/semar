@@ -143,3 +143,34 @@ func TestAPlanThatCannotBeWrittenLeavesNothing(t *testing.T) {
 		}
 	})
 }
+
+func TestInitRefusesALinkOrAFileAtSemar(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		args []string
+	}{
+		{"init", []string{"init", "--base-url", "https://orders.example"}},
+		{"plan --base-url", []string{"plan", "--diff", "main..release", "--base-url", "https://orders.example"}},
+	} {
+		t.Run(c.name+" through a link", func(t *testing.T) {
+			p := newPlanRepo(t, sampleapp.Options{})
+			p.opts.Providers = noProvider(t)
+			target := t.TempDir()
+			if err := os.Symlink(target, p.path(".semar")); err != nil {
+				t.Skip("symlinks are not available:", err)
+			}
+			res := p.must(t, cli.ExitError, c.args...)
+			contains(t, "stderr", res.stderr, p.path(".semar"), "symbolic link")
+			if entries, err := os.ReadDir(target); err != nil || len(entries) != 0 {
+				t.Errorf("the link's target holds %v (%v)", entries, err)
+			}
+		})
+		t.Run(c.name+" with a file", func(t *testing.T) {
+			p := newPlanRepo(t, sampleapp.Options{})
+			p.opts.Providers = noProvider(t)
+			p.write(t, ".semar", "a file\n")
+			res := p.must(t, cli.ExitError, c.args...)
+			contains(t, "stderr", res.stderr, p.path(".semar"), "not a directory")
+		})
+	}
+}

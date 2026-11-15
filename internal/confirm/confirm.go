@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -51,7 +52,8 @@ func NewLocal(root string) *Local { return &Local{root: root} }
 
 var userCleaner = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 
-func (l *Local) dir(id domain.ScenarioID, h domain.Hash) (string, error) {
+// rel is the directory of a scenario's confirmations below the root.
+func rel(id domain.ScenarioID, h domain.Hash) (string, error) {
 	if err := idcheck.Check("scenario ID", string(id)); err != nil {
 		return "", err
 	}
@@ -62,7 +64,7 @@ func (l *Local) dir(id domain.ScenarioID, h domain.Hash) (string, error) {
 	if !filepath.IsLocal(rel) {
 		return "", fmt.Errorf("path %q is not local", rel)
 	}
-	return filepath.Join(l.root, rel), nil
+	return rel, nil
 }
 
 // fileName turns a user name into a safe file name. Characters outside [A-Za-z0-9._-]
@@ -76,23 +78,33 @@ func fileName(user string) string {
 }
 
 // Put keeps the first confirmation of a user: a later one for the same user changes nothing.
-// A record that names no source confirms nothing, so Put refuses it.
+// A record that names no source confirms nothing, so Put refuses it. Every access goes through
+// a root at the store, and every directory from store down must be a real one, because the
+// repository under test can commit a link there.
 func (l *Local) Put(r Record) error {
 	r.Sources = slices.Compact(slices.Sorted(slices.Values(r.Sources)))
 	if len(r.Sources) == 0 {
 		return errors.New("store confirmation: the record names no source")
 	}
-	dir, err := l.dir(r.Scenario, r.ExpectHash)
+	dir, err := rel(r.Scenario, r.ExpectHash)
 	if err != nil {
 		return fmt.Errorf("store confirmation: %w", err)
 	}
-	p := filepath.Join(dir, fileName(r.User))
+	name := filepath.Join(dir, fileName(r.User))
 	r.Schema = schema
 	data, err := atomicfile.EncodeJSON(r)
 	if err != nil {
-		return fmt.Errorf("encode confirmation %s: %w", p, err)
+		return fmt.Errorf("encode confirmation %s: %w", filepath.Join(l.root, name), err)
 	}
-	if err := atomicfile.WriteNew(p, data); err != nil && !errors.Is(err, fs.ErrExist) {
+	root, err := os.OpenRoot(l.root)
+	if err != nil {
+		return fmt.Errorf("store confirmation: %w", err)
+	}
+	defer root.Close()
+	if _, err := atomicfile.MkdirIn(root, dir); err != nil {
+		return fmt.Errorf("store confirmation: %w", err)
+	}
+	if err := atomicfile.WriteNewIn(root, name, data, atomicfile.FileMode); err != nil && !errors.Is(err, fs.ErrExist) {
 		return fmt.Errorf("store confirmation: %w", err)
 	}
 	return nil
@@ -101,17 +113,35 @@ func (l *Local) Put(r Record) error {
 // Get returns the earliest confirmation of the scenario and hash. Its Sources are
 // those of every user's confirmation, because each user's record counts.
 func (l *Local) Get(id domain.ScenarioID, h domain.Hash) (Record, bool, error) {
-	dir, err := l.dir(id, h)
+	dir, err := rel(id, h)
 	if err != nil {
 		return Record{}, false, fmt.Errorf("load confirmation: %w", err)
 	}
-	entries, err := os.ReadDir(dir)
+	root, err := os.OpenRoot(l.root)
 	if errors.Is(err, fs.ErrNotExist) {
 		return Record{}, false, nil
 	}
 	if err != nil {
-		return Record{}, false, fmt.Errorf("read confirmations in %s: %w", dir, err)
+		return Record{}, false, fmt.Errorf("load confirmation: %w", err)
 	}
+	defer root.Close()
+	if err := atomicfile.CheckDirIn(root, dir); err != nil {
+		return Record{}, false, fmt.Errorf("load confirmation: %w", err)
+	}
+	shown := filepath.Join(l.root, dir)
+	d, err := root.Open(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return Record{}, false, nil
+	}
+	if err != nil {
+		return Record{}, false, fmt.Errorf("read confirmations in %s: %w", shown, err)
+	}
+	entries, err := d.ReadDir(-1)
+	_ = d.Close()
+	if err != nil {
+		return Record{}, false, fmt.Errorf("read confirmations in %s: %w", shown, err)
+	}
+	slices.SortFunc(entries, func(a, b fs.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
 	var best Record
 	var sources []domain.Source
 	found := false
@@ -119,13 +149,12 @@ func (l *Local) Get(id domain.ScenarioID, h domain.Hash) (Record, bool, error) {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
-		p := filepath.Join(dir, e.Name())
-		r, err := read(p)
+		r, err := read(root, filepath.Join(dir, e.Name()))
 		if err != nil {
 			return Record{}, false, err
 		}
 		if r.Scenario != id || r.ExpectHash != h {
-			return Record{}, false, fmt.Errorf("confirmation %s is for scenario %q and hash %q, want %q and %q", p, r.Scenario, r.ExpectHash, id, h)
+			return Record{}, false, fmt.Errorf("confirmation %s is for scenario %q and hash %q, want %q and %q", filepath.Join(shown, e.Name()), r.Scenario, r.ExpectHash, id, h)
 		}
 		sources = append(sources, r.Sources...)
 		if !found || r.At.Before(best.At) {
@@ -136,8 +165,33 @@ func (l *Local) Get(id domain.ScenarioID, h domain.Hash) (Record, bool, error) {
 	return best, found, nil
 }
 
-func read(p string) (Record, error) {
-	data, err := os.ReadFile(p)
+// read refuses a record that is a link or not a regular file, and one that was swapped
+// between the check and the open.
+func read(root *os.Root, name string) (Record, error) {
+	p := filepath.Join(root.Name(), name)
+	info, err := root.Lstat(name)
+	if err != nil {
+		return Record{}, fmt.Errorf("read confirmation %s: %w", p, err)
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return Record{}, fmt.Errorf("confirmation %s is a symbolic link, and Semar reads only real files: replace it with the record", p)
+	}
+	if !info.Mode().IsRegular() {
+		return Record{}, fmt.Errorf("confirmation %s is not a regular file", p)
+	}
+	f, err := root.Open(name)
+	if err != nil {
+		return Record{}, fmt.Errorf("read confirmation %s: %w", p, err)
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil {
+		return Record{}, fmt.Errorf("read confirmation %s: %w", p, err)
+	}
+	if !os.SameFile(info, opened) {
+		return Record{}, fmt.Errorf("confirmation %s changed while it was read", p)
+	}
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return Record{}, fmt.Errorf("read confirmation %s: %w", p, err)
 	}

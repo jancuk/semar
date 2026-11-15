@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -216,16 +217,35 @@ func serviceNode(name, baseURL string, probe *config.BuildProbe) *yaml.Node {
 }
 
 // writeInitConfig writes the configuration only when none exists, and keeps it only when it loads.
-func writeInitConfig(dir string, data []byte) (string, error) {
-	path := configPath(dir)
-	if err := atomicfile.WriteNew(path, data); err != nil {
+// It writes through a root at the repository, so a .semar that the repository commits as a link
+// cannot carry the file elsewhere.
+func writeInitConfig(dir string, data []byte) (path string, err error) {
+	path = configPath(dir)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	rel := filepath.Join(".semar", "semar.yaml")
+	created, err := atomicfile.MkdirIn(root, filepath.Dir(rel))
+	defer func() {
+		if err != nil {
+			for _, d := range slices.Backward(created) {
+				_ = root.Remove(d)
+			}
+		}
+	}()
+	if err != nil {
+		return "", err
+	}
+	if err := atomicfile.WriteNewIn(root, rel, data, atomicfile.FileMode); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return "", fmt.Errorf("%s exists; edit it instead", path)
 		}
 		return "", err
 	}
 	if _, err := config.Load(dir); err != nil {
-		if rerr := os.Remove(path); rerr != nil {
+		if rerr := root.Remove(rel); rerr != nil {
 			return "", errors.Join(fmt.Errorf("the configuration that init wrote is not valid: %w", err), rerr)
 		}
 		return "", fmt.Errorf("the configuration that init wrote is not valid, so it was removed: %w", err)
