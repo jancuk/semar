@@ -62,7 +62,7 @@ Four parts are implemented in Go.
 
 * **The model-free core:** replay of accepted scripts against an HTTP API, an effects policy that limits what a test may change, redaction, an evidence store, the verdict, and the report.
 * **A test plan from a diff:** `semar plan --diff` reads the difference between two branches, finds the tickets in the commits, and has a model draft scenarios and requests from the source. Code validates the draft. The model has read-only tools and a copy of the source, and it never reaches the environment.
-* **Documents of the repository:** `.semar/semar.yaml` can name an API document and a folder of documents. The planner reads them before it drafts, and code compares every drafted request with the API document.
+* **Documents of the repository:** `.semar/semar.yaml` can name an API document and a folder of documents. The planner is told to read them before it drafts, and code compares every drafted request with the API document.
 * **Model providers and the dashboard:** `semar plan` works with Claude Code, Codex, the Anthropic API, or any server with the OpenAI chat format. `semar dashboard` manages the providers and shows usage. A harness provider can load your MCP servers and skills.
 
 An environment is declared as `test` or `production`, and Semar acts in it only as its rules allow.
@@ -165,7 +165,7 @@ What `plan` does:
 | --- | --- |
 | `.semar/scenarios/<ticket>/<ticket>-NN.yaml` | One scenario: its steps and expected results |
 | `.semar/store/scripts/...` | The exact request of each step |
-| `.semar/plans/<head commit>/plan.md` | What changed, the scenarios per ticket, what was not drafted and what it needs, the files that no scenario covers, and the documents that the planner read |
+| `.semar/plans/<head commit>/plan.md` | What changed, the scenarios per ticket, what was not drafted and what it needs, the files that no scenario covers, and the documents that the planner was told to read |
 
 The output ends with the commands of the next steps:
 
@@ -296,11 +296,11 @@ Codex differs in three ways: it always reads your own instruction file, it does 
 
 The planner reads the code, and the code says what the service does. A document says what the service should do. When the planner reads both, it can find a route that the API document does not list, and a rule that the code does not follow.
 
-**The convention.** Keep the API document at `docs/openapi.yaml` (or `docs/swagger.yaml`), and the other documents of the service under `docs/`. `semar init` finds these paths and writes the entries with the IDs `api` and `docs`. The planner uses only what the file lists. These names of an API document are found, and the first one in this order is used:
+**The convention.** Keep the API document at `docs/openapi.yaml` (or `docs/swagger.yaml`), and the other documents of the service under `docs/`. `semar init` finds these paths, writes the entries with the IDs `api` and `docs`, and prints a line such as `added knowledge: api (docs/openapi.yaml), docs (docs)`. The planner uses only what the file lists. These names of an API document are found, and the first one in this order is used:
 
 `docs/openapi.{yaml,yml,json}`, `docs/swagger.{yaml,yml,json}`, `api/openapi.{yaml,yml,json}`, `api/swagger.{yaml,yml,json}`, `openapi.{yaml,yml,json}`, `swagger.{yaml,yml,json}`
 
-The folder `docs` is found when it exists. A link is never followed.
+The folder `docs` is found when it exists. A link is never followed. When Semar is set up in a folder below the root of the repository, it looks in that folder and writes each path from the root, for example `services/orders/docs/openapi.yaml`.
 
 **The file.** The `knowledge` section of `.semar/semar.yaml` is a list:
 
@@ -322,7 +322,7 @@ knowledge:
 
 A source needs a unique `id`. A `path` is relative to the root of the repository, and it cannot leave the repository. A list holds at most 16 sources.
 
-**What `plan.md` shows.** When the file lists a source, `plan.md` has a section "Documents" after "Files that no scenario covers". It has two lists. The first list names each source and what Semar found:
+**What `plan.md` shows.** When the file lists a source, `plan.md` has a section "Documents" after "Files that no scenario covers". It has three parts. The first part names each source and what Semar found:
 
 ```text
 - api: the API document docs/openapi.yaml (OpenAPI 3.0.3, 42 operations)
@@ -330,13 +330,13 @@ A source needs a unique `id`. A `path` is relative to the root of the repository
 - old: docs/old is not in the copy of the source
 ```
 
-The second list is "Compared with the API document". Code writes one line for each difference between a drafted request and the API document:
+The second part is "Compared with the API document". Code writes one line for each difference between a drafted request and the API document: a route that the document does not have, a method that it does not have on that route, or an expected status that it does not declare.
 
 ```text
 - SHOP-482-01, step refund: status 422 is not declared for POST /v1/orders/{id}/refunds; the document declares 200 and 400
 ```
 
-A third list, "Where the planner says a document and the code differ", holds what the planner reported. Each line names the ticket, a place in the document, a place in the code, and one sentence. Code checks that both places exist. It does not check that the two texts differ. `semar plan` also prints the number of differences in its summary.
+The third part, "Where the planner says a document and the code differ", holds what the planner reported. Each entry names the ticket, a place in the document, a place in the code, and what differs. Code checks that both places exist. It does not check that the two texts differ. `semar plan` also prints the number of both kinds of difference in its summary, as `differs from the documents: <n>`.
 
 **Limits.**
 
@@ -344,10 +344,17 @@ A third list, "Where the planner says a document and the code differ", holds wha
 * A difference from the API document is reported. It never rejects a draft, because the document can be the stale one. A route that the change adds is often missing from it.
 * Semar does not compare the fields of a request or a response with the schemas of the API document yet.
 * An expected result still comes from the code, and a person still confirms it.
-* Code cannot tell whether the planner and the code really differ. A person decides which one is right.
+* Code cannot tell whether a document and the code really differ. A person decides which one is right.
+* Semar cannot tell whether the planner opened a document. It tells the planner to read it.
+* An API document in YAML can be 2 MiB at most, and one in JSON 5 MiB. A YAML document above its limit is still given to the planner as a document, and no request is compared with it. A file above 5 MiB is left out of the copy.
+* The planner cannot report a difference for a document whose file name holds a space or a colon.
 * A wiki or a tracker outside the repository is not reached through this section. A harness provider reaches it through your MCP servers.
 
-**A repository that has a configuration already.** Add the `knowledge` section to `.semar/semar.yaml` by hand. When the file lists no source and a conventional path exists, `semar plan` prints a hint that names the paths and the `knowledge` key.
+**A repository that has a configuration already.** Add the `knowledge` section to `.semar/semar.yaml` by hand, and commit the documents: a document that is only in your working tree is reported as not in the copy. When the file lists no source and a conventional path exists, `semar plan` prints a hint:
+
+```text
+semar: the repository has docs/openapi.yaml and docs; list them under knowledge in .semar/semar.yaml so that the planner reads them first
+```
 
 ### Hand-written scenarios
 
@@ -479,7 +486,7 @@ Every command takes `--dir <path>`, the root of the repository that holds `.sema
 | Command | What it does |
 | --- | --- |
 | `semar changes --diff <link or range>` | Prints the tickets, commits, and files of a change. No model |
-| `semar plan --diff <link or range>` | Drafts scenarios and scripts for a change, and writes `plan.md`. Reads the documents that `knowledge` lists. Also takes `--provider <id>`, `--model <name>`, `--reasoning <level>`, `--no-setup`, `--max-scenarios <n>`, and `--no-fetch` |
+| `semar plan --diff <link or range>` | Drafts scenarios and scripts for a change, and writes `plan.md`. Tells the planner to read the documents that `knowledge` lists. Also takes `--provider <id>`, `--model <name>`, `--reasoning <level>`, `--no-setup`, `--max-scenarios <n>`, and `--no-fetch` |
 | `semar dashboard` | Opens a page on your machine to manage the model providers and see usage. `--no-open` prints the address only, `--port <n>` sets the port |
 | `semar providers` | Prints your providers and marks the one that would plan here. No model |
 | `semar init --base-url <url>` | Writes `.semar/semar.yaml`, with a `knowledge` entry for each conventional path that it finds |
