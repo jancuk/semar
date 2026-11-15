@@ -28,6 +28,7 @@ func TestRenderGolden(t *testing.T) {
 		{Path: "internal/orders/read.go", Status: "modified", Kind: "source", Added: 2, Deleted: 1, Tickets: []string{"SHOP-483"}},
 		{Path: "internal/refund/handler.go", Status: "modified", Kind: "source", Added: 9, Deleted: 0, Tickets: []string{"SHOP-482"}},
 	}
+	in.LeftOut = []LeftOut{{Path: "assets/logo.png", Reason: "larger than 5 MiB"}, {Path: "vendor/lib", Reason: "a submodule"}}
 	d := draft(t)
 	scs, scripts, ps := Validate(d, in)
 	if len(ps) > 0 {

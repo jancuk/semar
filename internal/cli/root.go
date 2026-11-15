@@ -53,7 +53,8 @@ func (o options) withDefaults() options {
 		o.LookupEnv = os.LookupEnv
 	}
 	if o.Providers == nil {
-		o.Providers = providerRegistry
+		lookup := o.LookupEnv
+		o.Providers = func(repoRoot string) *provider.Registry { return providerRegistry(repoRoot, lookup) }
 	}
 	return o
 }

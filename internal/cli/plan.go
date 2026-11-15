@@ -108,7 +108,12 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 			return err
 		}
 	}
-	in, err := planInput(cfg, f, cs)
+	if len(cs.Tickets) == 0 {
+		fmt.Fprintf(stderr, "semar: no commit between %s and %s names a ticket (pattern %s); set tickets.pattern in %s\n",
+			terminalSafe(cs.Base), terminalSafe(cs.Head), terminalSafe(cfg.Tickets.Pattern), configPath(f.dir))
+		return exitError{ExitUndecided}
+	}
+	in, env, err := planInput(cfg, f, cs)
 	if err != nil {
 		return err
 	}
@@ -143,8 +148,16 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		return fmt.Errorf("create a directory for the copy of the source: %w", err)
 	}
 	defer os.RemoveAll(tmp)
-	if in.SourceDir, err = prepareSource(ctx, g, cs, tmp); err != nil {
+	var leftOut []vcs.Skipped
+	if in.SourceDir, leftOut, err = prepareSource(ctx, g, cs, tmp); err != nil {
 		return err
+	}
+	for _, s := range leftOut {
+		in.LeftOut = append(in.LeftOut, plan.LeftOut{Path: s.Path, Reason: s.Reason})
+	}
+	if len(leftOut) > 0 {
+		fmt.Fprintf(stderr, "semar: %s of %s %s left out of the copy that the planner reads; plan.md lists them\n",
+			plural(len(leftOut), "file"), shortCommit(cs.HeadCommit), map[bool]string{true: "was", false: "were"}[len(leftOut) == 1])
 	}
 
 	model := f.model
@@ -163,7 +176,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if err != nil {
 		return err
 	}
-	printPlanDone(stdout, out, planFile)
+	printPlanDone(stdout, out, planFile, nextRun(env, f.env, cs.HeadCommit))
 	if len(out.Scenarios) == 0 {
 		return exitError{ExitUndecided}
 	}
@@ -178,13 +191,13 @@ func valueOr(s, fallback string) string {
 }
 
 // planInput takes the names the planner may use from the environment that run would pick.
-func planInput(cfg config.Config, f planFlags, cs domain.ChangeSet) (plan.Input, error) {
+func planInput(cfg config.Config, f planFlags, cs domain.ChangeSet) (plan.Input, config.Environment, error) {
 	_, env, err := cfg.Environment(f.env)
 	if err != nil {
-		return plan.Input{}, err
+		return plan.Input{}, env, err
 	}
 	if len(env.Services) == 0 {
-		return plan.Input{}, errors.New("the environment has no service; add one under services in semar.yaml")
+		return plan.Input{}, env, errors.New("the environment has no service; add one under services in semar.yaml")
 	}
 	var services []string
 	for _, s := range env.Services {
@@ -192,7 +205,7 @@ func planInput(cfg config.Config, f planFlags, cs domain.ChangeSet) (plan.Input,
 	}
 	profile, err := pickAuthProfile(cfg, f.authProfile)
 	if err != nil {
-		return plan.Input{}, err
+		return plan.Input{}, env, err
 	}
 	var header string
 	if p := cfg.AuthProfiles[profile].Session; p != nil {
@@ -205,7 +218,7 @@ func planInput(cfg config.Config, f planFlags, cs domain.ChangeSet) (plan.Input,
 	return plan.Input{
 		Change: cs, Services: services, Methods: env.Methods, AuthProfile: profile, SessionHeader: header,
 		Existing: map[string][]domain.Scenario{}, Limits: limits,
-	}, nil
+	}, env, nil
 }
 
 func pickAuthProfile(cfg config.Config, name string) (string, error) {
@@ -230,38 +243,45 @@ func pickAuthProfile(cfg config.Config, name string) (string, error) {
 
 // prepareSource copies the head commit for the planner, without the files that instruct an
 // agent (R5) and without Semar's own configuration, which names hosts (R19). It adds the change
-// table and the diff under .semar-plan.
-func prepareSource(ctx context.Context, g *vcs.Git, cs domain.ChangeSet, tmp string) (string, error) {
+// table and the diff under .semar-plan, and returns the files that the copy left out.
+func prepareSource(ctx context.Context, g *vcs.Git, cs domain.ChangeSet, tmp string) (string, []vcs.Skipped, error) {
 	src := filepath.Join(tmp, "src")
-	if _, err := g.Archive(ctx, cs.HeadCommit, src); err != nil {
-		return "", err
+	leftOut, err := g.Archive(ctx, cs.HeadCommit, src)
+	if err != nil {
+		return "", nil, err
 	}
 	if err := removeAgentFiles(src); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	for _, name := range []string{".semar", plan.PlanDir} {
 		if err := os.RemoveAll(filepath.Join(src, name)); err != nil {
-			return "", fmt.Errorf("prepare the copy of the source: %w", err)
+			return "", nil, fmt.Errorf("prepare the copy of the source: %w", err)
 		}
 	}
 	dir := filepath.Join(src, plan.PlanDir)
 	if err := os.Mkdir(dir, 0o700); err != nil {
-		return "", fmt.Errorf("prepare the copy of the source: %w", err)
+		return "", nil, fmt.Errorf("prepare the copy of the source: %w", err)
 	}
 	var table bytes.Buffer
 	if err := changeset.Table(&table, cs); err != nil {
-		return "", err
+		return "", nil, err
+	}
+	if len(leftOut) > 0 {
+		table.WriteString("\n## Files left out of the copy\n\nThese files of the head commit are not in this copy, so they cannot be read.\n\n")
+		for _, s := range leftOut {
+			fmt.Fprintf(&table, "- %q: %s\n", s.Path, s.Reason)
+		}
 	}
 	diff, err := g.Diff(ctx, cs.MergeBase, cs.HeadCommit)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	for name, data := range map[string][]byte{"changes.md": table.Bytes(), "change.diff": diff} {
 		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
-			return "", fmt.Errorf("prepare the copy of the source: %w", err)
+			return "", nil, fmt.Errorf("prepare the copy of the source: %w", err)
 		}
 	}
-	return src, nil
+	return src, leftOut, nil
 }
 
 // removeAgentFiles matches names without regard to case, because a file system that ignores
@@ -316,7 +336,36 @@ func planFailed(ctx context.Context, stderr io.Writer, err error) error {
 	return err
 }
 
-func printPlanDone(w io.Writer, out plan.Output, planFile string) {
+// nextRun is the run command that can reach passed: a service with no build probe needs its
+// build declared, and the head of the plan is what the test environment is meant to run.
+func nextRun(env config.Environment, envFlag, head string) string {
+	cmd := "semar run --all"
+	if envFlag != "" {
+		cmd += " --env " + terminalSafe(envFlag)
+	}
+	var unprobed []string
+	for _, s := range env.Services {
+		if s.Build == nil {
+			unprobed = append(unprobed, s.Name)
+		}
+	}
+	if len(unprobed) == 1 {
+		return cmd + " --build " + shortCommit(head)
+	}
+	for _, name := range unprobed {
+		cmd += " --build " + terminalSafe(name) + "=<commit>"
+	}
+	return cmd
+}
+
+func shortCommit(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+func printPlanDone(w io.Writer, out plan.Output, planFile, run string) {
 	count := map[string]int{}
 	for _, sc := range out.Scenarios {
 		count[sc.Ticket]++
@@ -327,7 +376,8 @@ func printPlanDone(w io.Writer, out plan.Output, planFile string) {
 	fmt.Fprintf(w, "not drafted: %d\n", len(out.Draft.NotDrafted))
 	fmt.Fprintf(w, "plan: %s\n", planFile)
 	if len(out.Scenarios) > 0 {
-		fmt.Fprintln(w, "next: semar run --all, then semar confirm --all")
+		fmt.Fprintf(w, "next:\n  %s\n  semar confirm --all\n  %s\n", run, run)
+		fmt.Fprintln(w, "The first run shows whether the drafted requests fit the service, and the second gives the result.")
 	}
 }
 

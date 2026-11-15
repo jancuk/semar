@@ -63,6 +63,13 @@ The read must stay the same.
 
 - internal/refund/audit.go: writes a row that no endpoint returns
 
+## Files left out of the copy
+
+The planner could not read these files of the head commit.
+
+- assets/logo.png: larger than 5 MiB
+- vendor/lib: a submodule
+
 ## How this plan was made
 
 - Provider: claude (claude)

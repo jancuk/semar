@@ -16,9 +16,9 @@ func compareParsers() []codehost.LinkParser {
 	return []codehost.LinkParser{bitbucket.Parse, github.Parse, gitlab.Parse}
 }
 
-func providerRegistry(repoRoot string) *provider.Registry {
+func providerRegistry(repoRoot string, lookupEnv func(string) (string, bool)) *provider.Registry {
 	r := provider.NewRegistry()
-	r.Register(claude.Kind, claude.Factory())
+	r.Register(claude.Kind, claude.Factory(lookupEnv))
 	r.Register(fake.Kind, fake.Factory(repoRoot))
 	return r
 }

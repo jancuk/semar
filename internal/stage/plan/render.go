@@ -85,6 +85,13 @@ func Render(w io.Writer, in Input, out Output) error {
 		fmt.Fprintf(&b, "- %s: %s\n", shown(u.File, maxValueShown), shown(u.Reason, maxTextShown))
 	}
 
+	if len(in.LeftOut) > 0 {
+		b.WriteString("\n## Files left out of the copy\n\nThe planner could not read these files of the head commit.\n\n")
+		for _, l := range in.LeftOut {
+			fmt.Fprintf(&b, "- %s: %s\n", shown(l.Path, maxValueShown), shown(l.Reason, maxValueShown))
+		}
+	}
+
 	r := out.Result
 	b.WriteString("\n## How this plan was made\n\n")
 	fmt.Fprintf(&b, "- Provider: %s (%s)\n", shown(out.PlannerID, maxValueShown), shown(out.PlannerKind, maxValueShown))

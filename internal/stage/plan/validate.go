@@ -33,7 +33,11 @@ type Input struct {
 	Existing      map[string][]domain.Scenario // by ticket: scenarios that already exist
 	Limits        config.Plan
 	Model         string
+	LeftOut       []LeftOut // files of the head commit that the copy of the source lacks
 }
+
+// LeftOut is a file that the copy of the source does not hold, and why.
+type LeftOut struct{ Path, Reason string }
 
 // Problem is one reason a draft was refused. Path names the place in the draft, such as
 // scenarios[1].steps[2].expect[0].check, so that the planner can find it.

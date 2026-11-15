@@ -249,7 +249,9 @@ func TestPlanFromADiffEndToEnd(t *testing.T) {
 	res := p.must(t, cli.ExitOK, "plan", "--diff", "main..release", "--base-url", "http://"+p.host, "--service", "orders", "--token-env", planTokenEnv)
 	contains(t, "stdout", res.stdout,
 		"SHOP-482 (behaviour): 1 scenario", "SHOP-483 (behaviour): 1 scenario", "not drafted: 1",
-		"plan: "+p.path(".semar", "plans", p.head(t)[:12], "plan.md"), "next: semar run --all, then semar confirm --all")
+		"plan: "+p.path(".semar", "plans", p.head(t)[:12], "plan.md"),
+		"next:\n  semar run --all --build "+p.head(t)[:12]+"\n  semar confirm --all\n  semar run --all --build "+p.head(t)[:12]+"\n",
+		"The first run shows whether the drafted requests fit the service, and the second gives the result.")
 	contains(t, "stderr", res.stderr, "wrote "+p.path(".semar", "semar.yaml"), "export "+planTokenEnv, "several minutes")
 	if n := jobs.Load(); n != 1 {
 		t.Errorf("the planner ran %d times, want 1", n)
@@ -513,13 +515,49 @@ func TestPlanStopsBeforeTheProvider(t *testing.T) {
 	t.Run("a harness that is not installed", func(t *testing.T) {
 		p := newPlanRepo(t, sampleapp.Options{})
 		p.configure(t, goodDraft)
-		p.rewriteConfig(t, func(s string) string {
-			return strings.Replace(s, "kind: fake\n", "kind: claude\n    binaryPath: "+filepath.Join(t.TempDir(), "no-claude")+"\n", 1)
-		})
+		p.rewriteConfig(t, func(s string) string { return strings.Replace(s, "kind: fake\n", "kind: claude\n", 1) })
+		missing := filepath.Join(t.TempDir(), "no-claude")
+		p.opts.LookupEnv = func(k string) (string, bool) {
+			if k == claude.BinaryEnv {
+				return missing, true
+			}
+			return os.LookupEnv(k)
+		}
 		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
-		contains(t, "stderr", res.stderr, "cannot plan", "was not found")
+		contains(t, "stderr", res.stderr, "cannot plan", missing, "cannot be read")
 		p.assertNothingPlanned(t)
 		p.assertNoTempCopy(t)
+	})
+	t.Run("no commit names a ticket", func(t *testing.T) {
+		p := newPlanRepo(t, sampleapp.Options{})
+		p.configure(t, goodDraft)
+		p.rewriteConfig(t, func(s string) string { return s + "tickets:\n  pattern: \"ORD-[0-9]+\"\n" })
+		p.opts.Providers = noProvider(t)
+		res := p.must(t, cli.ExitUndecided, "plan", "--diff", "main..release")
+		contains(t, "stderr", res.stderr, "no commit between main and release names a ticket (pattern ORD-[0-9]+); set tickets.pattern in "+p.path(".semar", "semar.yaml"))
+		p.assertNothingPlanned(t)
+		p.assertNoTempCopy(t)
+	})
+	t.Run("no commit names a ticket and there is no configuration yet", func(t *testing.T) {
+		p := newPlanRepo(t, sampleapp.Options{})
+		p.git.Git("checkout", "--quiet", "main")
+		p.git.Commit("tidy the readme", map[string]*string{"README.md": gittest.S("orders\n")})
+		p.opts.Providers = noProvider(t)
+		res := p.must(t, cli.ExitUndecided, "plan", "--diff", "release..main", "--base-url", "http://"+p.host)
+		contains(t, "stderr", res.stderr, "no commit between release and main names a ticket", "set tickets.pattern in "+p.path(".semar", "semar.yaml"))
+		if !exists(t, p.path(".semar", "semar.yaml")) {
+			t.Error("the configuration that the message names was not written")
+		}
+		p.assertNothingPlanned(t)
+	})
+	t.Run("a ticket key that is not a name", func(t *testing.T) {
+		p := newPlanRepo(t, sampleapp.Options{})
+		p.configure(t, goodDraft)
+		p.rewriteConfig(t, func(s string) string { return s + "tickets:\n  pattern: \"SHOP-48[0-9] [a-z]+\"\n" })
+		p.opts.Providers = noProvider(t)
+		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
+		contains(t, "stderr", res.stderr, "cannot be used as a name", "tickets.pattern")
+		p.assertNothingPlanned(t)
 	})
 	t.Run("several auth profiles", func(t *testing.T) {
 		p := newPlanRepo(t, sampleapp.Options{})
