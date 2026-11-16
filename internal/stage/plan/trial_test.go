@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/knowledge"
 	"github.com/jancuk/semar/internal/openapi"
 	"github.com/jancuk/semar/internal/provider"
 )
@@ -454,3 +455,127 @@ func TestTrialContextErrorEndsPlan(t *testing.T) {
 }
 
 func intp(n int) *int { return &n }
+
+// trialPlan is a plan with a given entry, a read with a capture, and a read of a route that the
+// change adds, as the golden plan.md of a trial shows.
+func trialPlan(t *testing.T) (Input, Output) {
+	t.Helper()
+	in := goldenInput(t)
+	in.Fixtures = catalogue()
+	d := givenDraft(t)
+	d.Scenarios[1].Steps[1].Captures = []CaptureDraft{{Name: "status", JSONPath: "$.data.status"}}
+	summary := d.Scenarios[1]
+	summary.Title = "The summary of an order can be read"
+	summary.Steps = []StepDraft{summary.Steps[0], summary.Steps[1]}
+	summary.Steps[1].ID, summary.Steps[1].Hint, summary.Steps[1].Path = "summary", "/v1/orders/{id}/summary", "/v1/orders/{{order_id}}/summary"
+	summary.Steps[1].Captures = nil
+	d.Scenarios = append(d.Scenarios, summary)
+	out := goldenOutput(t, in, d)
+	out.UsedAttempt = out.Attempts
+	out.Trial = &Trial{
+		Run: "r-20261117T081500Z-1a2b", Env: "local",
+		Builds: []domain.BuildRef{{Service: "orders", Commit: "9f3c2ab0000000000000000000000000000000aa"}},
+		Steps: []TrialStep{
+			{Scenario: "SHOP-482-01", Given: "order", Result: TrialSent, Found: true},
+			{Scenario: "SHOP-482-01", Step: "refund-too-much", Result: TrialNotTried, Why: "writes", Method: "POST", Route: "/v1/orders/{id}/refunds"},
+			{Scenario: "SHOP-483-01", Step: "create-order", Result: TrialNotTried, Why: "writes", Method: "POST", Route: "/v1/orders"},
+			sent("SHOP-483-01", "read-order", "GET", "/v1/orders/{id}", 200),
+			{Scenario: "SHOP-483-02", Step: "create-order", Result: TrialNotTried, Why: "writes", Method: "POST", Route: "/v1/orders"},
+			sent("SHOP-483-02", "summary", "GET", "/v1/orders/{id}/summary", 404),
+		},
+	}
+	out.AfterTrial = []domain.ScenarioID{"SHOP-483-02"}
+	return in, out
+}
+
+func TestPlanMarkdownTrial(t *testing.T) {
+	in, out := trialPlan(t)
+	in.Trial = &fakeTrialer{}
+	got := render(t, in, out)
+	for _, want := range []string{
+		"- Prompt version: 5\n",
+		"The read-only requests were tried once. The others were not sent before the first run.\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("plan.md lacks %q", want)
+		}
+	}
+	if strings.Contains(got, "drafted from the source and were not sent") {
+		t.Error("plan.md says that nothing was sent")
+	}
+	if strings.Index(got, "## Trial run") < strings.Index(got, "## Files that no scenario covers") || strings.Index(got, "## Trial run") > strings.Index(got, "## How this plan was made") {
+		t.Error("the trial section is not between the uncovered files and how the plan was made")
+	}
+	golden(t, "plan-trial.golden.md", got)
+
+	// With a document, the section stays between the uncovered files and the documents.
+	in.Knowledge = []knowledge.Source{docsSource}
+	if got := render(t, in, out); strings.Index(got, "## Trial run") > strings.Index(got, "## Documents") {
+		t.Error("the trial section comes after the documents")
+	}
+}
+
+func TestPlanMarkdownTrialProblemsSkipAndOff(t *testing.T) {
+	t.Run("problems that remain, and a draft that was kept", func(t *testing.T) {
+		in, out := trialPlan(t)
+		out.Trial.Steps[3] = sent("SHOP-483-01", "read-order", "GET", "/v1/orders/{id}", 200, "status")
+		out.Attempts, out.UsedAttempt = 3, 1
+		got := render(t, in, out)
+		for _, want := range []string{
+			"The last draft had problems, so this plan is draft 1 of 3, which passed.\n",
+			"- read-order: GET /v1/orders/{id} answered 200, capture status found no value\n",
+			"### Problems that remain\n",
+			`- scenarios\[1\].steps\[1\]: trial: capture status found no value in the response of GET /v1/orders/{id}: the JSONPath is likely wrong`,
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("plan.md lacks %q:\n%s", want, got)
+			}
+		}
+	})
+	t.Run("skipped", func(t *testing.T) {
+		in, out := trialPlan(t)
+		out.Trial = &Trial{Skipped: "the environment did not answer", Run: "r-1", Steps: out.Trial.Steps}
+		out.AfterTrial = nil
+		got := render(t, in, out)
+		if !strings.Contains(got, "## Trial run\n\nThe trial run was skipped: the environment did not answer.\n") {
+			t.Errorf("plan.md lacks the skip line:\n%s", got)
+		}
+		for _, unwanted := range []string{"Code sent the read-only steps", "answered 404", "Needs a second look", "were tried once"} {
+			if strings.Contains(got, unwanted) {
+				t.Errorf("a skipped trial shows %q", unwanted)
+			}
+		}
+		if !strings.Contains(got, "The requests were drafted from the source and were not sent before the first run.") {
+			t.Error("a skipped trial changes the line about what was sent")
+		}
+	})
+	t.Run("off", func(t *testing.T) {
+		in, out := trialPlan(t)
+		out.Trial, out.AfterTrial = nil, nil
+		in.TrialOff = "turned off with --no-trial"
+		got := render(t, in, out)
+		if !strings.Contains(got, "## Trial run\n\nThe trial run was turned off with --no-trial.\n") {
+			t.Errorf("plan.md lacks the off line:\n%s", got)
+		}
+	})
+	t.Run("no trial and no reason leaves no section", func(t *testing.T) {
+		in, out := trialPlan(t)
+		out.Trial, out.AfterTrial = nil, nil
+		if got := render(t, in, out); strings.Contains(got, "Trial run") || strings.Contains(got, "First drafted after") {
+			t.Errorf("plan.md has a trial section:\n%s", got)
+		}
+	})
+	t.Run("an error and a route are escaped, and no rendered path or error text is shown", func(t *testing.T) {
+		in, out := trialPlan(t)
+		out.Trial.Steps[5].Route = "/v1/*[x](https://x.example)"
+		out.Trial.Steps[5].Err = `Get "http://127.0.0.1/v1/orders/81234": connection refused`
+		out.Trial.Steps[1].Why = "denied: <b>host</b>"
+		got := render(t, in, out)
+		if !strings.Contains(got, `GET /v1/\*\[x\](https\://x.example) answered 404`) || !strings.Contains(got, "not tried: denied: &lt;b&gt;host&lt;/b&gt;") {
+			t.Errorf("plan.md does not escape the trial texts:\n%s", got)
+		}
+		if strings.Contains(got, "81234") || strings.Contains(got, "127.0.0.1") {
+			t.Error("plan.md shows a rendered path or an error text")
+		}
+	})
+}

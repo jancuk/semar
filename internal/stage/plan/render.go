@@ -47,6 +47,10 @@ func Render(w io.Writer, in Input, out Output) error {
 	b.WriteString("\n\n## Tickets\n")
 
 	fixtures := fixtureIndex(in.Fixtures)
+	after := map[domain.ScenarioID]bool{}
+	for _, id := range out.AfterTrial {
+		after[id] = true
+	}
 	tickets := slices.Clone(d.Tickets)
 	slices.SortStableFunc(tickets, func(a, b TicketDraft) int { return strings.Compare(a.Key, b.Key) })
 	for _, t := range tickets {
@@ -65,7 +69,7 @@ func Render(w io.Writer, in Input, out Output) error {
 				continue
 			}
 			drafted++
-			writeScenario(&b, sc, fixtures)
+			writeScenario(&b, sc, fixtures, after[sc.ID])
 		}
 		if drafted == 0 {
 			b.WriteString("\nNo scenario was drafted for this ticket.\n")
@@ -89,6 +93,8 @@ func Render(w io.Writer, in Input, out Output) error {
 	for _, u := range d.Uncovered {
 		fmt.Fprintf(&b, "- %s: %s\n", shown(u.File, maxValueShown), shown(u.Reason, maxTextShown))
 	}
+
+	writeTrial(&b, in, out)
 
 	if len(in.Knowledge) > 0 {
 		writeDocuments(&b, in, out)
@@ -115,7 +121,11 @@ func Render(w io.Writer, in Input, out Output) error {
 	fmt.Fprintf(&b, "- Refused tool calls: %d\n", r.Denied)
 	fmt.Fprintf(&b, "- Prompt version: %s\n", shown(prompt.PlanVersion(), maxValueShown))
 	b.WriteString("\nEvery expected result here was read from the code by a model. Confirm each scenario before its result counts.\n")
-	b.WriteString("\nThe requests were drafted from the source and were not sent before the first run.\n")
+	if trialRan(out) {
+		b.WriteString("\nThe read-only requests were tried once. The others were not sent before the first run.\n")
+	} else {
+		b.WriteString("\nThe requests were drafted from the source and were not sent before the first run.\n")
+	}
 	b.WriteString("\nA request uses a literal ID only when the same scenario captured it or the source holds it as a fixed test value. " +
 		"The planner was told to list every other case under \"Not drafted\". Code cannot check this, so read the requests before the first run.\n")
 
@@ -238,10 +248,13 @@ func writeFixturesNeeded(b *strings.Builder, needed []FixtureNeeded) {
 	}
 }
 
-func writeScenario(b *strings.Builder, sc domain.Scenario, fixtures map[domain.FixtureID]fixture.Entry) {
+func writeScenario(b *strings.Builder, sc domain.Scenario, fixtures map[domain.FixtureID]fixture.Entry, afterTrial bool) {
 	fmt.Fprintf(b, "\n#### %s: %s\n\n", shown(string(sc.ID), maxValueShown), shown(sc.Title, maxValueShown))
 	if s := strings.TrimSpace(sc.Intent); s != "" {
 		fmt.Fprintf(b, "%s\n\n", paragraph(shown(s, maxTextShown)))
+	}
+	if afterTrial {
+		b.WriteString("First drafted after the trial run. Check that its expected results come from the code.\n\n")
 	}
 	for _, g := range sc.Given {
 		note := ""
@@ -341,3 +354,136 @@ func escape(s string) string {
 }
 
 func isWordRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
+
+func trialRan(out Output) bool { return out.Trial != nil && out.Trial.Skipped == "" }
+
+// writeTrial shows each trial result beside its step. It shows the route template and the
+// status, never a rendered path, an error text, or a value of a response (D11).
+func writeTrial(b *strings.Builder, in Input, out Output) {
+	tr := out.Trial
+	switch {
+	case tr == nil && in.TrialOff == "":
+		return
+	case tr == nil:
+		fmt.Fprintf(b, "\n## Trial run\n\nThe trial run was %s.\n", shown(in.TrialOff, maxTextShown))
+		return
+	case tr.Skipped != "":
+		fmt.Fprintf(b, "\n## Trial run\n\nThe trial run was skipped: %s.\n", shown(strings.TrimRight(tr.Skipped, "."), maxTextShown))
+		return
+	}
+	value := func(s string) string { return shown(s, maxValueShown) }
+	b.WriteString("\n## Trial run\n\n")
+	fmt.Fprintf(b, "Code sent the read-only steps once to %s before the plan was written. %s ", value(tr.Env), buildsSentence(tr.Builds, value))
+	b.WriteString("A trial result is evidence about a request. It is not a test result, and no expected result was compared.")
+	if tr.Run != "" {
+		fmt.Fprintf(b, " Run %s holds every request: semar activity %s.", value(string(tr.Run)), value(string(tr.Run)))
+	}
+	b.WriteString("\n")
+	if len(out.AfterTrial) > 0 {
+		b.WriteString("\nThe planner kept the expected results of each scenario that it kept, matched by ticket and title. A scenario that was renamed counts as a new one.\n")
+	}
+	if out.UsedAttempt != 0 && out.UsedAttempt != out.Attempts {
+		fmt.Fprintf(b, "\nThe last draft had problems, so this plan is draft %d of %d, which passed.\n", out.UsedAttempt, out.Attempts)
+	}
+
+	for i, sc := range out.Scenarios {
+		var steps []TrialStep
+		for _, ts := range tr.Steps {
+			if ts.Scenario == sc.ID {
+				steps = append(steps, ts)
+			}
+		}
+		if len(steps) == 0 {
+			continue
+		}
+		fmt.Fprintf(b, "\n### %s %s\n\n", value(string(sc.ID)), value(sc.Title))
+		for _, ts := range steps {
+			fmt.Fprintf(b, "- %s\n", trialLine(ts, sc, scriptCaptures(out.Scripts, i, ts.Step), value))
+		}
+	}
+
+	back, second := trialProblems(*tr, out.Scenarios, in.BaseAPI, headDocuments(in.Knowledge), in.AuthProfile)
+	if len(second) > 0 {
+		b.WriteString("\n### Needs a second look\n\n")
+		for _, ts := range second {
+			fmt.Fprintf(b, "- %s, step %s: %s %s answered %s\n", value(string(ts.Scenario)), value(string(ts.Step)), value(ts.Method), value(ts.Route), shown(secondLookText(ts.Status), maxValueShown))
+		}
+	}
+	if len(back) > 0 {
+		b.WriteString("\n### Problems that remain\n\nThe planner had no attempt left to fix these.\n\n")
+		for _, p := range back {
+			if p.Path == "" {
+				fmt.Fprintf(b, "- %s\n", shown(p.Message, maxTextShown))
+				continue
+			}
+			fmt.Fprintf(b, "- %s: %s\n", value(p.Path), shown(p.Message, maxTextShown))
+		}
+	}
+}
+
+func buildsSentence(builds []domain.BuildRef, value func(string) string) string {
+	if len(builds) == 0 {
+		return "The build that the environment runs is not known."
+	}
+	parts := make([]string, len(builds))
+	for i, bl := range builds {
+		parts[i] = value(bl.Service) + " " + value(bl.Commit[:min(len(bl.Commit), 7)])
+	}
+	return "The environment ran " + strings.Join(parts, ", ") + "."
+}
+
+// scriptCaptures are the names of the captures of one step of the script of scenario i.
+func scriptCaptures(scripts []domain.Script, i int, step domain.StepID) []string {
+	if i >= len(scripts) || step == "" {
+		return nil
+	}
+	for _, s := range scripts[i].Steps {
+		if s.Step == step {
+			names := make([]string, len(s.Captures))
+			for k, c := range s.Captures {
+				names[k] = c.Name
+			}
+			return names
+		}
+	}
+	return nil
+}
+
+func trialLine(ts TrialStep, sc domain.Scenario, captures []string, value func(string) string) string {
+	if ts.Given != "" {
+		fixtureID := ""
+		for _, g := range sc.Given {
+			if g.As == ts.Given {
+				fixtureID = " (" + value(string(g.Fixture)) + ")"
+			}
+		}
+		head := fmt.Sprintf("given %s%s:", value(ts.Given), fixtureID)
+		switch {
+		case ts.Result == TrialNotTried:
+			return head + " not tried: " + shown(ts.Why, maxValueShown)
+		case ts.Found:
+			return head + " find found a record"
+		}
+		return head + " find found no record"
+	}
+	head := value(string(ts.Step)) + ":"
+	if ts.Result == TrialNotTried {
+		return head + " not tried: " + shown(ts.Why, maxValueShown)
+	}
+	on := value(ts.Method) + " " + value(ts.Route)
+	if ts.Status == 0 {
+		return head + " " + on + " got no answer"
+	}
+	line := fmt.Sprintf("%s %s answered %d", head, on, ts.Status)
+	if ts.Status >= 400 {
+		return line
+	}
+	for _, name := range captures {
+		found := " found"
+		if slices.Contains(ts.Missing, name) {
+			found = " found no value"
+		}
+		line += ", capture " + value(name) + found
+	}
+	return line
+}
