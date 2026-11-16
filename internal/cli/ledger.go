@@ -190,15 +190,25 @@ func deriveEntries(stderr io.Writer, o options, repo string, obs []obligation.Lo
 
 func deriveWith(o options, repo string, obs []obligation.Located, res obligation.Results) ([]obligation.Entry, error) {
 	store := obligation.NewStore(semarDir(repo))
-	deferrals, err := store.Deferrals()
+	now := o.Clock()
+	deferrals, problems, err := store.Deferrals(now)
 	if err != nil {
 		return nil, err
 	}
-	manual, err := store.Manual()
+	manual, more, err := store.Manual(now)
 	if err != nil {
 		return nil, err
 	}
-	return obligation.Derive(obs, res, deferrals, manual, o.Clock()), nil
+	// The store is in the repository under test. A record that the commands would have refused is
+	// never counted, and it stops the derivation as a problem in an obligations file does.
+	if problems = append(problems, more...); len(problems) > 0 {
+		lines := make([]string, len(problems))
+		for i, p := range problems {
+			lines[i] = oneLine(terminalSafe(p))
+		}
+		return nil, fmt.Errorf("%s\nfix or remove those records; nothing was derived", strings.Join(lines, "\n"))
+	}
+	return obligation.Derive(obs, res, deferrals, manual, now), nil
 }
 
 // storedResults reads the newest result of each scenario that an obligation covers from the

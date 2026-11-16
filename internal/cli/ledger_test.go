@@ -559,3 +559,28 @@ func TestRunWithAnInvalidObligationsFileLeavesTheLineOut(t *testing.T) {
 		t.Errorf("a line was written from a file with a problem")
 	}
 }
+
+func TestLedgerRefusesStoredRecordsThatTheCommandsWouldRefuse(t *testing.T) {
+	deferral := func(user, reason, until string) string {
+		return `{"schema": 1, "obligation": "SHOP-482/a", "user": "` + user + `", "identity": "i", "at": "2026-11-13T09:00:00Z", "reason": "` + reason + `", "until": "` + until + `"}`
+	}
+	cases := []struct {
+		name, kind, file, body, want string
+	}{
+		{"a deferral to year 9999 with no name and no reason", "deferral", "-1794560400.json", deferral("", "", "9999-01-01T23:59:59Z"), "is not counted"},
+		{"a manual result from 2099", "manual", "x-4070908800.json",
+			`{"schema": 1, "obligation": "SHOP-482/a", "result": "passed", "user": "x", "identity": "i", "at": "2099-01-01T00:00:00Z", "notes": "n"}`, "after now"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			r := ledgerRepo(t)
+			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Left for later", `gap: "not drafted"`)))
+			r.writeRel(t, ".semar/store/obligations/SHOP-482/a/"+tt.kind+"/"+tt.file, tt.body)
+			res := r.must(t, cli.ExitError, "ledger")
+			contains(t, "stderr", res.stderr, tt.kind+" record", tt.file, tt.want)
+			if res.stdout != "" {
+				t.Errorf("a table was printed from a record that cannot be trusted:\n%s", res.stdout)
+			}
+		})
+	}
+}

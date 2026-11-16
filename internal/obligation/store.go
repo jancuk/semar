@@ -28,6 +28,7 @@ const (
 
 	maxReason     = 300
 	maxNotes      = 2000
+	maxDeferDays  = 180
 	maxRecordSize = 64 << 10
 
 	kindDeferral = "deferral"
@@ -116,15 +117,7 @@ func oneLineText(field, s string, limit int, required bool) error {
 
 // Defer stores a deferral. It needs a name, a reason, and an expiry (L7).
 func (s *Store) Defer(d Deferral) error {
-	switch {
-	case strings.TrimSpace(d.User) == "":
-		return errors.New("store deferral: the user is required")
-	case d.Until.IsZero():
-		return errors.New("store deferral: until is required")
-	case d.At.IsZero():
-		return errors.New("store deferral: at is required")
-	}
-	if err := oneLineText("reason", d.Reason, maxReason, true); err != nil {
+	if err := checkDeferral(d); err != nil {
 		return fmt.Errorf("store deferral: %w", err)
 	}
 	if d.Identity == "" {
@@ -136,21 +129,66 @@ func (s *Store) Defer(d Deferral) error {
 
 // Record stores a manual result. It never changes a state (L5).
 func (s *Store) Record(m ManualResult) error {
-	switch {
-	case m.Result != "passed" && m.Result != "failed":
-		return errors.New("store manual result: the result must be passed or failed")
-	case strings.TrimSpace(m.User) == "":
-		return errors.New("store manual result: the user is required")
-	case m.At.IsZero():
-		return errors.New("store manual result: at is required")
-	case utf8.RuneCountInString(m.Notes) > maxNotes:
-		return fmt.Errorf("store manual result: the notes are longer than %d characters", maxNotes)
+	if err := checkManual(m); err != nil {
+		return fmt.Errorf("store manual result: %w", err)
 	}
 	if m.Identity == "" {
 		m.Identity = LocalIdentity
 	}
 	m.Schema = recordSchema
 	return s.put(m.Obligation, kindManual, m.User, m.At, m)
+}
+
+// checkDeferral is what a deferral needs, when it is written and when it is read: a name, a
+// reason, a day to end it, and no more than maxDeferDays after the day it was made.
+func checkDeferral(d Deferral) error {
+	switch {
+	case strings.TrimSpace(d.User) == "":
+		return errors.New("the user is required")
+	case d.Until.IsZero():
+		return errors.New("until is required")
+	case d.At.IsZero():
+		return errors.New("at is required")
+	}
+	if err := oneLineText("reason", d.Reason, maxReason, true); err != nil {
+		return err
+	}
+	if limit := d.At.UTC().Truncate(24*time.Hour).AddDate(0, 0, maxDeferDays).Add(24*time.Hour - time.Second); d.Until.After(limit) {
+		return fmt.Errorf("until %s is more than %d days after the deferral was made", d.Until.UTC().Format(time.RFC3339), maxDeferDays)
+	}
+	return nil
+}
+
+// checkManual is what a manual result needs, when it is written and when it is read.
+func checkManual(m ManualResult) error {
+	switch {
+	case m.Result != "passed" && m.Result != "failed":
+		return errors.New("the result must be passed or failed")
+	case strings.TrimSpace(m.User) == "":
+		return errors.New("the user is required")
+	case m.At.IsZero():
+		return errors.New("at is required")
+	case utf8.RuneCountInString(m.Notes) > maxNotes:
+		return fmt.Errorf("the notes are longer than %d characters", maxNotes)
+	}
+	return nil
+}
+
+// checkRecordName refuses a record whose file name was not made by put from its user and its time:
+// <user>-<unix seconds>.json, or with -<n> before the extension.
+func checkRecordName(file, user string, at time.Time) error {
+	want := userFile(user) + "-" + strconv.FormatInt(at.Unix(), 10)
+	base := strings.TrimSuffix(file, ".json")
+	rest, ok := strings.CutPrefix(base, want)
+	if ok && rest != "" {
+		n, found := strings.CutPrefix(rest, "-")
+		_, err := strconv.ParseUint(n, 10, 16)
+		ok = found && err == nil
+	}
+	if !ok {
+		return fmt.Errorf("its name does not say its time: want %s.json for at %s", want, at.UTC().Format(time.RFC3339))
+	}
+	return nil
 }
 
 // put writes <user>-<unix seconds>.json, or the first free <user>-<seconds>-2.json, and so on.
@@ -193,71 +231,106 @@ func (s *Store) put(id, kind, user string, at time.Time, rec any) error {
 	return fmt.Errorf("store %s: %d records of %s were made in one second already", kind, 1000, id)
 }
 
-// Deferrals returns the newest deferral of each obligation, even one that has expired.
-func (s *Store) Deferrals() (map[string]Deferral, error) {
-	return readAll[Deferral](s, kindDeferral, func(d Deferral) (string, time.Time, int) { return d.Obligation, d.At, d.Schema })
+// maxClockSkew is how far after now a record may say it was made: the clock of the machine that
+// wrote it is not ours.
+const maxClockSkew = 5 * time.Minute
+
+// recordHead is what readAll needs from a record, and check is the rules that the writer applied.
+type recordHead struct {
+	obligation string
+	user       string
+	at         time.Time
+	schema     int
+	check      error
 }
 
-// Manual returns the newest manual result of each obligation.
-func (s *Store) Manual() (map[string]ManualResult, error) {
-	return readAll[ManualResult](s, kindManual, func(m ManualResult) (string, time.Time, int) { return m.Obligation, m.At, m.Schema })
+// Deferrals returns the newest valid deferral of each obligation, even one that has expired. The
+// store is not trusted: a record that the writer would have refused, one that says it was made
+// after now, and one whose file name does not say its time are left out, and each is a problem line
+// of the second result. A record that cannot be read at all is an error.
+func (s *Store) Deferrals(now time.Time) (map[string]Deferral, []string, error) {
+	return readAll[Deferral](s, kindDeferral, now, func(d Deferral) recordHead {
+		return recordHead{d.Obligation, d.User, d.At, d.Schema, checkDeferral(d)}
+	})
 }
 
-func readAll[T any](s *Store, kind string, head func(T) (string, time.Time, int)) (map[string]T, error) {
+// Manual returns the newest valid manual result of each obligation, with the problems of the
+// records that it left out, as Deferrals does.
+func (s *Store) Manual(now time.Time) (map[string]ManualResult, []string, error) {
+	return readAll[ManualResult](s, kindManual, now, func(m ManualResult) recordHead {
+		return recordHead{m.Obligation, m.User, m.At, m.Schema, checkManual(m)}
+	})
+}
+
+func readAll[T any](s *Store, kind string, now time.Time, head func(T) recordHead) (map[string]T, []string, error) {
 	out := map[string]T{}
+	var problems []string
 	root, err := os.OpenRoot(s.root)
 	if errors.Is(err, fs.ErrNotExist) {
-		return out, nil
+		return out, nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read %ss: %w", kind, err)
+		return nil, nil, fmt.Errorf("read %ss: %w", kind, err)
 	}
 	defer root.Close()
 	base := filepath.Join("store", "obligations")
 	if err := atomicfile.CheckDirIn(root, base); err != nil {
-		return nil, fmt.Errorf("read %ss: %w", kind, err)
+		return nil, nil, fmt.Errorf("read %ss: %w", kind, err)
 	}
 	newest := map[string]time.Time{}
 	newestName := map[string]string{}
 	groups, err := subdirs(root, base)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, g := range groups {
 		names, err := subdirs(root, filepath.Join(base, g))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, n := range names {
 			dir := filepath.Join(base, g, n, kind)
 			files, err := jsonFiles(root, dir)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			for _, f := range files {
 				name := filepath.Join(dir, f)
+				path := filepath.Join(root.Name(), name)
 				data, err := readRecord(root, name)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				var rec T
 				if err := decodeStrict(data, &rec); err != nil {
-					return nil, fmt.Errorf("parse %s %s: %w", kind, filepath.Join(root.Name(), name), err)
+					return nil, nil, fmt.Errorf("parse %s %s: %w", kind, path, err)
 				}
-				id, at, schema := head(rec)
-				if schema != recordSchema {
-					return nil, fmt.Errorf("%s %s has schema %d, want %d", kind, filepath.Join(root.Name(), name), schema, recordSchema)
+				h := head(rec)
+				if h.schema != recordSchema {
+					return nil, nil, fmt.Errorf("%s %s has schema %d, want %d", kind, path, h.schema, recordSchema)
 				}
-				if id != g+"/"+n {
-					return nil, fmt.Errorf("%s %s is for obligation %q, and its directory says %q", kind, filepath.Join(root.Name(), name), id, g+"/"+n)
+				if h.obligation != g+"/"+n {
+					return nil, nil, fmt.Errorf("%s %s is for obligation %q, and its directory says %q", kind, path, h.obligation, g+"/"+n)
 				}
+				problem := h.check
+				if problem == nil && h.at.After(now.Add(maxClockSkew)) {
+					problem = fmt.Errorf("it says it was made at %s, which is after now", h.at.UTC().Format(time.RFC3339))
+				}
+				if problem == nil {
+					problem = checkRecordName(f, h.user, h.at)
+				}
+				if problem != nil {
+					problems = append(problems, fmt.Sprintf("%s record %s is not counted: %v", kind, path, problem))
+					continue
+				}
+				id, at := h.obligation, h.at
 				if prev, ok := newest[id]; !ok || at.After(prev) || (at.Equal(prev) && strings.TrimSuffix(f, ".json") > strings.TrimSuffix(newestName[id], ".json")) {
 					newest[id], newestName[id], out[id] = at, f, rec
 				}
 			}
 		}
 	}
-	return out, nil
+	return out, problems, nil
 }
 
 func decodeStrict(data []byte, v any) error {
