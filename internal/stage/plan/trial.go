@@ -153,6 +153,30 @@ func notFound(ts TrialStep, base, head []openapi.Document) notFoundKind {
 	return routeNowhere
 }
 
+// TrialCounts says what the trial of an accepted plan did, for the line that semar plan prints.
+// Steps counts the script steps that the trial listed, sent or not. Back is how many problems went
+// back to the planner over all attempts, and SecondLook how many steps of the accepted draft need a person.
+type TrialCounts struct{ Sent, Steps, Back, SecondLook int }
+
+func (o Output) TrialCounts(in Input) TrialCounts {
+	var c TrialCounts
+	if o.Trial == nil || o.Trial.Skipped != "" {
+		return c
+	}
+	for _, ts := range o.Trial.Steps {
+		if ts.Step == "" {
+			continue
+		}
+		c.Steps++
+		if ts.Result == TrialSent {
+			c.Sent++
+		}
+	}
+	_, second := trialProblems(*o.Trial, o.Scenarios, in.BaseAPI, headDocuments(in.Knowledge), in.AuthProfile)
+	c.Back, c.SecondLook = o.TrialReturned, len(second)
+	return c
+}
+
 // secondLookText is what plan.md says beside a step that needs a person.
 func secondLookText(status int) string {
 	if status == 404 {

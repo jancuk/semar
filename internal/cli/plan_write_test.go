@@ -136,7 +136,7 @@ func TestAPlanThatCannotBeWrittenLeavesNothing(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
 		before := tree(t, p.path(".semar"))
-		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
+		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release", "--no-trial")
 		contains(t, "stderr", res.stderr, "the plan was not written, and what it had written was removed")
 		if after := tree(t, p.path(".semar")); !slices.Equal(after, before) {
 			t.Errorf(".semar changed:\nbefore %q\nafter  %q", before, after)
@@ -221,7 +221,7 @@ func TestARefusedPlanLeavesSemarAsItWas(t *testing.T) {
 			t.Fatal(err)
 		}
 		before := tree(t, p.path(".semar"))
-		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
+		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release", "--no-trial")
 		contains(t, "stderr", res.stderr, "SHOP-482-01.yaml exists already; nothing was written")
 		if after := tree(t, p.path(".semar")); !slices.Equal(after, before) {
 			t.Errorf(".semar changed:\nbefore %q\nafter  %q", before, after)
@@ -238,7 +238,7 @@ func TestARefusedPlanLeavesSemarAsItWas(t *testing.T) {
 			}
 		}
 		before := tree(t, p.path(".semar"))
-		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
+		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release", "--no-trial")
 		contains(t, "stderr", res.stderr, "is stored already; nothing was written")
 		if after := tree(t, p.path(".semar")); !slices.Equal(after, before) {
 			t.Errorf(".semar changed:\nbefore %q\nafter  %q", before, after)
@@ -322,7 +322,7 @@ func TestWritePlanRestoresReplacedFile(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
 	before := tree(t, p.path(".semar"))
-	res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
+	res := p.must(t, cli.ExitError, "plan", "--diff", "main..release", "--no-trial")
 	contains(t, "stderr", res.stderr, "the plan was not written, and what it had written was removed")
 	if got := string(mustRead(t, p.path(".semar", "obligations", "SHOP-482.plan.yaml"))); got != existingObligations {
 		t.Errorf("the replaced file was not put back:\n%s", got)
@@ -346,7 +346,7 @@ func TestWritePlanStopsOnBadExistingFile(t *testing.T) {
 			p.configure(t, goodDraft)
 			p.write(t, ".semar/obligations/SHOP-482.plan.yaml", tt.content)
 			before := tree(t, p.path(".semar"))
-			res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
+			res := p.must(t, cli.ExitError, "plan", "--diff", "main..release", "--no-trial")
 			contains(t, "stderr", res.stderr, ".semar/obligations/SHOP-482.plan.yaml", tt.want, "fix or remove it, and plan again; nothing was written")
 			if after := tree(t, p.path(".semar")); !slices.Equal(after, before) {
 				t.Errorf(".semar changed:\nbefore %q\nafter  %q", before, after)

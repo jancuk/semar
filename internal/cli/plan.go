@@ -34,6 +34,7 @@ type planFlags struct {
 	reasoning    string
 	provider     string
 	noSetup      bool
+	noTrial      bool
 	maxScenarios int
 	env          string
 	authProfile  string
@@ -65,6 +66,7 @@ func newPlanCommand(o options) *cobra.Command {
 	cmd.Flags().StringVar(&f.reasoning, "reasoning", "", "the reasoning level of the planner, such as high (default: the provider's reasoning, else its own default)")
 	cmd.Flags().StringVar(&f.provider, "provider", "", "the provider that plans (default: see semar providers)")
 	cmd.Flags().BoolVar(&f.noSetup, "no-setup", false, "plan without your MCP servers and skills, for this run")
+	cmd.Flags().BoolVar(&f.noTrial, "no-trial", false, "do not send the read-only steps of the draft to the environment before the plan is written, for this run")
 	cmd.Flags().IntVar(&f.maxScenarios, "max-scenarios", 0, "the most scenarios to draft (default: plan.maxScenarios)")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to plan for; needed when there are several. With --base-url, the name of the new environment (default uat, or production with --kind production)")
 	cmd.Flags().StringVar(&f.authProfile, "auth-profile", "", "the auth profile of the scenarios; needed when there are several and none is named default")
@@ -147,7 +149,8 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if err != nil {
 		return err
 	}
-	if in.Fixtures, err = planFixtures(stderr, f.dir, cfg); err != nil {
+	var catalogue fixture.Catalogue
+	if in.Fixtures, catalogue, err = planFixtures(stderr, f.dir, cfg); err != nil {
 		return err
 	}
 	scs, err := loadAllScenarios(f.dir)
@@ -218,6 +221,9 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		return err
 	}
 
+	in.BaseAPI = baseDocuments(ctx, g, cs, in.Knowledge)
+	rig := planTrial(ctx, stderr, o, f, cfg, envName, env, &in, &catalogue)
+
 	in.Model = model
 	in.Reasoning = pc.Reasoning
 	in.SetupOn = provider.IsHarness(pc.Kind) && (pc.Setup.MCP || pc.Setup.Skills)
@@ -229,6 +235,9 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	in.Progress = rep.Report
 	out, err := plan.Run(ctx, inst, in)
 	rep.Stop()
+	if rig != nil {
+		rig.close(stderr, o.Clock())
+	}
 	if err == nil {
 		fmt.Fprintf(stderr, "semar: the planner finished in %s\n", formatElapsed(rep.Elapsed()))
 	}
@@ -242,7 +251,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		return err
 	}
 	o.recordUsage(stderr, inst, model, pc.Reasoning, out, "ok", filepath.Base(filepath.Dir(planFile)), time.Since(started))
-	printPlanDone(stdout, out, len(cfg.Knowledge) > 0, planFile, nextRun(env, envName, f.env, cs.HeadCommit))
+	printPlanDone(stdout, out, len(cfg.Knowledge) > 0, trialSummary(in, out), planFile, nextRun(env, envName, f.env, cs.HeadCommit))
 	if len(out.Scenarios) == 0 {
 		return exitError{ExitUndecided}
 	}
@@ -252,10 +261,10 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 // planFixtures is what the planner may name under given: every valid fixture of the repository,
 // marked approved when a person approved it as it is now. A file that cannot be used stays out,
 // and one line for each of its problems says so.
-func planFixtures(stderr io.Writer, repo string, cfg config.Config) ([]fixture.Entry, error) {
+func planFixtures(stderr io.Writer, repo string, cfg config.Config) ([]fixture.Entry, fixture.Catalogue, error) {
 	cat, err := fixture.Load(repo, allServices(cfg))
 	if err != nil {
-		return nil, err
+		return nil, fixture.Catalogue{}, err
 	}
 	for _, p := range cat.Problems {
 		fmt.Fprintf(stderr, "semar: fixture file %s: %s; the planner does not see it\n", terminalSafe(p.File), terminalSafe(oneLine(problemText(p))))
@@ -264,7 +273,7 @@ func planFixtures(stderr io.Writer, repo string, cfg config.Config) ([]fixture.E
 	return cat.Entries(func(f domain.Fixture) bool {
 		ok, err := approvals.FixtureApproved(f.ID, domain.FixtureHash(f))
 		return err == nil && ok
-	}), nil
+	}), cat, nil
 }
 
 func valueOr(s, fallback string) string {
@@ -485,7 +494,7 @@ func shortCommit(id string) string {
 	return id
 }
 
-func printPlanDone(w io.Writer, out plan.Output, listed bool, planFile, run string) {
+func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, planFile, run string) {
 	count := map[string]int{}
 	for _, sc := range out.Scenarios {
 		count[sc.Ticket]++
@@ -498,6 +507,9 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, planFile, run stri
 		fmt.Fprintf(w, "differs from the documents: %d\n", len(out.Notes)+len(out.Draft.Differences))
 	}
 	fmt.Fprintf(w, "plan: %s\n", planFile)
+	if trial != "" {
+		fmt.Fprintln(w, trial)
+	}
 	if len(out.Scenarios) > 0 {
 		fmt.Fprintf(w, "next:\n  %s\n  semar confirm --all\n  %s\n", run, run)
 		fmt.Fprintln(w, "The first run shows whether the drafted requests fit the service, and the second gives the result.")

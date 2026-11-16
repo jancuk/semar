@@ -18,7 +18,7 @@ import (
 
 const latestRun = "latest"
 
-var passes = []domain.Pass{domain.PassSetup, domain.PassScenario, domain.PassExplore, domain.PassSecurity, domain.PassCleanup}
+var passes = []domain.Pass{domain.PassSetup, domain.PassScenario, domain.PassExplore, domain.PassSecurity, domain.PassCleanup, domain.PassTrial}
 
 type activityFlags struct {
 	writes   bool
@@ -39,7 +39,7 @@ func newActivityCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&f.writes, "writes", false, "show only the actions that create, update, or delete")
 	cmd.Flags().StringVar(&f.scenario, "scenario", "", "show only the actions of this scenario")
-	cmd.Flags().StringVar(&f.pass, "pass", "", "show only the actions of this pass: setup, scenario, explore, security, or cleanup")
+	cmd.Flags().StringVar(&f.pass, "pass", "", "show only the actions of this pass: setup, scenario, explore, security, cleanup, or trial")
 	addDirFlag(cmd, &f.dir)
 	return cmd
 }
@@ -52,7 +52,7 @@ func printActivity(ctx context.Context, stdout io.Writer, f activityFlags, arg s
 		}
 	}
 	if f.pass != "" && !slices.Contains(passes, filter.Pass) {
-		return fmt.Errorf("unknown pass %q: use setup, scenario, explore, security, or cleanup", f.pass)
+		return fmt.Errorf("unknown pass %q: use setup, scenario, explore, security, cleanup, or trial", f.pass)
 	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("activity: %w", err)

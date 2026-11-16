@@ -132,7 +132,8 @@ func TestPlanReadsTheListedDocuments(t *testing.T) {
 		t.Fatal(err)
 	}
 	contains(t, "plan.md", string(md),
-		"## Files that no scenario covers\n\nNone.\n\n## Documents\n\nThe planner was told to read these before it drafted.\n\n"+
+		"## Files that no scenario covers\n\nNone.\n\n## Trial run\n\n",
+		"\n## Documents\n\nThe planner was told to read these before it drafted.\n\n"+
 			"- api: the API document docs/openapi.yaml (OpenAPI 3.0.3, 3 operations)\n"+
 			"- docs: the documents under docs (2 files)\n"+
 			"- legacy: the API document docs/refunds.md (code could not read its routes: ",

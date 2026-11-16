@@ -56,6 +56,8 @@ type Output struct {
 	PlannerKind string
 	Trial       *Trial              // the trial of the accepted draft; nil when none ran
 	AfterTrial  []domain.ScenarioID // scenarios first drafted after a trial
+	// TrialReturned counts the trial problems that went back to the planner over all attempts.
+	TrialReturned int
 }
 
 // Rejected is the end of a plan whose every draft had problems. Nothing may be written (R16).
@@ -90,6 +92,7 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 	var previous []byte
 	var passed *accepted
 	frozen := map[string]map[domain.StepID][]domain.Expectation{}
+	returned := 0
 	headAPI := headDocuments(in.Knowledge)
 	finish := func(a *accepted, attempts int) Output {
 		total.Output = a.output
@@ -171,6 +174,7 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 			return finish(cand, attempt), nil
 		}
 		problems = back
+		returned += len(back)
 	}
 	if passed != nil {
 		return finish(passed, MaxAttempts), nil

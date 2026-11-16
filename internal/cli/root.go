@@ -42,6 +42,11 @@ type options struct {
 	StderrTerminal func() bool // whether standard error is a terminal that takes a status line
 	Tick           ticker      // the ticks of the progress line; nil is a real ticker
 
+	// TrialTimeout and TrialLimit bound one request and the whole trial run of semar plan. Zero is
+	// 10 seconds and 2 minutes. A test sets them to meet a service that stalls without waiting.
+	TrialTimeout time.Duration
+	TrialLimit   time.Duration
+
 	drop *envDrop
 }
 
