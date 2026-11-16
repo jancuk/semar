@@ -74,11 +74,12 @@ func fixtureStepLine(phase string, n int, st domain.FixtureStep) string {
 		}
 	}
 	if len(st.Captures) > 0 {
-		names := make([]string, len(st.Captures))
+		// The JSONPath decides which record create captures, and so which one cleanup undoes.
+		caps := make([]string, len(st.Captures))
 		for i, c := range st.Captures {
-			names[i] = c.Name
+			caps[i] = c.Name + "=" + c.JSONPath
 		}
-		b.WriteString(", captures " + strings.Join(names, ", "))
+		b.WriteString(", captures " + strings.Join(caps, ", "))
 	}
 	return b.String()
 }

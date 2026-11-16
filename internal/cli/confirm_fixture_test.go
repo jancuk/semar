@@ -67,8 +67,8 @@ func TestConfirmFixtureApproves(t *testing.T) {
 	h := hashOfFixture(t, orderPaidFixture)
 	contains(t, "stdout", res.stdout,
 		"Fixture order.paid 1.0.0 (owner team-orders), hash "+string(h)+":",
-		"find 1: GET orders /v1/orders query customer={{customer}} status=paid, captures id",
-		"create 1: POST orders /v1/orders json {\"amount\":1000,\"customer\":\"{{customer}}\",\"ref\":\"semar-{{run.id}}\"}, captures id",
+		"find 1: GET orders /v1/orders query customer={{customer}} status=paid, captures id=$.data[0].id\n",
+		"create 1: POST orders /v1/orders json {\"amount\":1000,\"customer\":\"{{customer}}\",\"ref\":\"semar-{{run.id}}\"}, captures id=$.data.id\n",
 		"create 2: POST payments /v1/payments json {\"orderId\":\"{{id}}\"}",
 		"create 3: GET orders /v1/orders/{{id}} until $.data.status equals \"paid\" within 30s every 1s",
 		"cleanup 1: POST orders /v1/orders/{{id}}/cancel",
