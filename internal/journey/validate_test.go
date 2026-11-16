@@ -275,6 +275,8 @@ func TestValidateRules(t *testing.T) {
 		}, path: "invariants[0].equal[1]", want: "{{order.total}} is not an output of fixture order.paid; its outputs are id"},
 
 		// settled is the longest leg: 120 + ".settled" is 128 bytes
+		{rule: "J17", name: "leg as", edit: func(j *domain.Journey) { j.Legs[1].As = "Bob Smith" }, path: "legs[1].as", want: "auth profile name"},
+		{rule: "J17", name: "step as", edit: func(j *domain.Journey) { j.Legs[1].Steps[0].As = "bob smith" }, path: "legs[1].steps[0].as", want: "auth profile name"},
 		{rule: "J16", name: "leg scenario of 128 bytes", edit: func(j *domain.Journey) { j.ID = domain.JourneyID(strings.Repeat("a", 120)) }},
 		{rule: "J16", name: "leg scenario of 129 bytes", edit: func(j *domain.Journey) {
 			j.ID = domain.JourneyID(strings.Repeat("a", 121))

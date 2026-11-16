@@ -40,9 +40,12 @@ type Journey struct {
 }
 
 type Leg struct {
-	ID      LegID     `yaml:"id"`
-	Surface Surface   `yaml:"surface"`
-	Service string    `yaml:"service"`
+	ID      LegID   `yaml:"id"`
+	Surface Surface `yaml:"surface"`
+	Service string  `yaml:"service"`
+	// As names an auth profile: every step of the leg is sent with that profile's session, unless
+	// the step has its own as.
+	As      string    `yaml:"as,omitempty"`
 	Needs   []LegID   `yaml:"needs,omitempty"`
 	Wait    *LegWait  `yaml:"wait,omitempty"`
 	Steps   []LegStep `yaml:"steps"`
@@ -69,6 +72,8 @@ type LegStep struct {
 	Expect   []Expectation `yaml:"expect,omitempty"`
 	Request  APIRequest    `yaml:"request"`
 	Captures []Capture     `yaml:"captures,omitempty"`
+	// As names an auth profile for this step. It wins over the leg's.
+	As string `yaml:"as,omitempty"`
 }
 
 type Invariant struct {

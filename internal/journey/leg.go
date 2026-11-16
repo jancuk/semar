@@ -1,6 +1,7 @@
 package journey
 
 import (
+	"cmp"
 	"maps"
 
 	"github.com/jancuk/semar/internal/domain"
@@ -38,7 +39,8 @@ func legScenario(j domain.Journey, leg domain.Leg, authProfile string) (domain.S
 		Steps:      make([]domain.ScriptStep, len(leg.Steps)),
 	}
 	for i, st := range leg.Steps {
-		sc.Steps[i] = domain.Step{ID: st.ID, Setup: st.Setup, Action: st.Action, Hint: st.Hint, Expect: st.Expect}
+		as := cmp.Or(st.As, leg.As)
+		sc.Steps[i] = domain.Step{ID: st.ID, Setup: st.Setup, Action: st.Action, Hint: st.Hint, Expect: st.Expect, As: as}
 		req := st.Request
 		req.Service = leg.Service
 		req.Query = maps.Clone(req.Query)

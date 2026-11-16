@@ -67,7 +67,7 @@ var (
 
 const unknownVariable = " is not a known variable"
 
-// Validate checks rules J2 to J16 on a parsed journey. outputs gives the outputs of a fixture and
+// Validate checks rules J2 to J17 on a parsed journey. outputs gives the outputs of a fixture and
 // whether the fixture exists; with nil, the fixtures are not looked up and any output of a given
 // entry is accepted. J1 and J9 are checked by Parse. The file name is not known here, so J2 checks
 // the file name only for a journey that Load read.
@@ -321,6 +321,14 @@ func (v *validator) steps(li int, l domain.Leg, reach map[domain.LegID]bool) {
 		}
 	}
 
+	// J17: the name of the leg's account is judged here, with the path of the leg, and not again
+	// as the account of each step.
+	if l.As != "" {
+		if err := idcheck.Check("auth profile name", l.As); err != nil {
+			v.add(base+".as", "%v", err)
+			vl.As = ""
+		}
+	}
 	sc, sr := legScenario(v.j, vl, v.j.AuthProfile)
 	for _, p := range scenario.Validate(sc, scenario.FromFile) {
 		if strings.HasPrefix(p.Path, "steps[") {

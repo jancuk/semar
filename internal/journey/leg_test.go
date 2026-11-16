@@ -123,3 +123,50 @@ func TestLegScenarioDoesNotShareMaps(t *testing.T) {
 		t.Error("a change to the script changed the journey")
 	}
 }
+
+// The hashes of the example legs before steps could act as another account. A journey that does
+// not use `as` keeps them, so no confirmation is lost.
+func TestLegScenarioHashIsUnchangedWithoutAs(t *testing.T) {
+	want := map[domain.LegID]domain.Hash{
+		"place":   "a620a057f45f5305f5d8e048ede11526f141702d98aeadcb99858ee46f5f830c",
+		"pay":     "08f39e3b64ed6c15d058c91331b22c04bd12aa866ccfbacf04950b5e3885610b",
+		"settled": "c69a46f8aa6b5e76d936265d5b864ebd5664c4d3d80b5bf32564228645255507",
+	}
+	j := example(t)
+	for id, h := range want {
+		if _, sr := LegScenario(j, id, "payments-user"); sr.ExpectHash != h {
+			t.Errorf("hash of leg %s = %s, want %s", id, sr.ExpectHash, h)
+		}
+	}
+}
+
+func TestLegAsAppliesToEveryStepAndAStepOverridesIt(t *testing.T) {
+	j := example(t)
+	pay := &j.Legs[1]
+	pay.As = "bob"
+	pay.Steps = append(pay.Steps, domain.LegStep{ID: "again", Hint: pay.Steps[0].Hint, Request: pay.Steps[0].Request, As: "carol"},
+		domain.LegStep{ID: "third", Hint: pay.Steps[0].Hint, Request: pay.Steps[0].Request})
+	sc, _ := LegScenario(j, "pay", "alice")
+	got := []string{sc.Steps[0].As, sc.Steps[1].As, sc.Steps[2].As}
+	if !reflect.DeepEqual(got, []string{"bob", "carol", "bob"}) {
+		t.Errorf("as of the steps = %v", got)
+	}
+	if other, _ := LegScenario(j, "place", "alice"); other.Steps[0].As != "" {
+		t.Errorf("a step of another leg acts as %q", other.Steps[0].As)
+	}
+}
+
+func TestLegAsChangesTheHashOnlyOfItsLeg(t *testing.T) {
+	j := example(t)
+	_, before := LegScenario(j, "pay", "alice")
+	_, otherBefore := LegScenario(j, "place", "alice")
+	j.Legs[1].As = "bob"
+	_, after := LegScenario(j, "pay", "alice")
+	_, otherAfter := LegScenario(j, "place", "alice")
+	if before.ExpectHash == after.ExpectHash {
+		t.Error("the hash of the leg does not cover as")
+	}
+	if otherBefore.ExpectHash != otherAfter.ExpectHash {
+		t.Error("the hash of another leg follows as")
+	}
+}
