@@ -114,9 +114,10 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 	for _, sc := range scenarios {
 		byID[sc.ID] = sc
 	}
+	coverage, tickets := runCoverage(stderr, o, f.dir, scenarios, record)
 	writeReport := func(rec domain.Run) error {
 		var md bytes.Buffer
-		if err := report.Markdown(&md, report.Data{Run: rec, Scenarios: byID, Activity: acts}); err != nil {
+		if err := report.Markdown(&md, report.Data{Run: rec, Scenarios: byID, Activity: acts, Coverage: coverage, CoverageTickets: tickets}); err != nil {
 			return err
 		}
 		return r.run.WriteFile(reportFile, md.Bytes())
@@ -137,7 +138,7 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 		}
 	}
 
-	if err := report.Summary(stdout, record, ""); err != nil {
+	if err := report.Summary(stdout, record, coverage); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "report: %s\n", filepath.Join(r.store.Root(), "runs", string(r.id), reportFile))
