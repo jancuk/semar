@@ -370,7 +370,12 @@ func (r *Runner) wait(ctx context.Context, lr *legRun) error {
 		case err != nil:
 			lr.note(last.ID, fmt.Sprintf("step %s could not be sent or recorded", last.ID))
 			return err
-		case !answered(ev.Action) || ev.Action.Response.Status > 399:
+		case !answered(ev.Action):
+			return nil
+		case ev.Action.Response.Status > 399:
+			// The condition did not hold, and it will not be read again: the leg fails even when its
+			// expectations are met by the error answer.
+			lr.waited = fmt.Sprintf("wait ended: answered %d", ev.Action.Response.Status)
 			return nil
 		}
 	}

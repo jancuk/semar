@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -747,5 +748,34 @@ func TestMissingOutputBlocks(t *testing.T) {
 	}
 	if got := outcomes(jr.Legs); !reflect.DeepEqual(got, []string{"a blocked", "c not_run", "b not_run", "d not_run"}) {
 		t.Errorf("legs = %v", got)
+	}
+}
+
+// A wait that ends on an error answer has not seen its condition hold. A leg whose expectations
+// are met by that answer must not pass for it.
+func TestWaitEndedByAnErrorAnswerFails(t *testing.T) {
+	var reads atomic.Int32
+	r := newRig(t, rigOptions{wrapOrders: func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/v1/orders/") && reads.Add(1) > 1 {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			h.ServeHTTP(w, req)
+		})
+	}})
+	text := edited(t, "        captures: [{ name: amount, jsonpath: \"$.data.amount\" }]\n        expect: [{ check: { jsonpath: \"$.data.status\", equals: paid }, source: person }]",
+		"        expect: [{ check: { status: 503 }, source: person }]")
+	text = strings.Replace(text, "    outputs: [amount]\ninvariants:\n  - equal: [\"{{place.amount}}\", \"{{pay.amount}}\", \"{{settled.amount}}\"]", "invariants:\n  - equal: [\"{{place.amount}}\", \"{{pay.amount}}\"]", 1)
+	jr, results := r.run(t, parsed(t, text))
+
+	if jr.Outcome != domain.JourneyFailed || jr.FirstFailing != "settled" {
+		t.Fatalf("journey %s, first failing %q, reasons %+v, legs %v", jr.Outcome, jr.FirstFailing, jr.Reasons, outcomes(jr.Legs))
+	}
+	if got := jr.Legs[2].Reasons[0]; got.Text != "wait ended: answered 503" || got.Rule != domain.OutcomeFailed {
+		t.Errorf("settled reasons = %+v", jr.Legs[2].Reasons)
+	}
+	if results[2].Outcome != domain.OutcomeFailed {
+		t.Errorf("settled result = %s", results[2].Outcome)
 	}
 }
