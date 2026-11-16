@@ -174,7 +174,7 @@ While the planner works, a status line on standard error shows the elapsed time,
 | `.semar/scenarios/<ticket>/<ticket>-NN.yaml` | One scenario: its steps and expected results |
 | `.semar/store/scripts/...` | The exact request of each step |
 | `.semar/obligations/<ticket>.plan.yaml` | The use cases of the ticket, for the [ledger](#see-that-nothing-is-skipped-the-use-case-ledger) |
-| `.semar/plans/<head commit>/plan.md` | What changed, the scenarios per ticket, what was not drafted and what it needs, the fixtures needed, the journeys to rerun, the files that no scenario covers, the trial run, and the documents that the planner was told to read |
+| `.semar/plans/<head commit>/plan.md` | What changed, the scenarios per ticket, what was not drafted and what it needs, the fixtures needed, the journeys to rerun, the manual checks for a person, the files that no scenario covers, the trial run, the documents that the planner was told to read, and the problems of every draft that went back to the planner |
 
 The output ends with the commands of the next steps:
 
@@ -216,7 +216,7 @@ semar activity latest        # every request that was sent, in order
 
 **What `plan` does not do yet:**
 
-* It does not read the tracker. A ticket is its key and the commits that name it.
+* It does not read the tracker. A ticket is its key and the commits that name it, and the file `docs/tickets/<key>.md` when the repository has one: see [tickets as requirements](#tickets-as-requirements).
 * It does not invent data of the environment. A scenario that needs an existing record, such as the ID of an order that the test account may read, names a [fixture](#prepare-data-with-fixtures) when the repository has one that fits. When none fits, the scenario is listed in `plan.md` under "Not drafted" with what it needs, and under "Fixtures needed" with a proposal. A person writes the fixture.
 * It tries only the read-only steps against the service, once. It never tries a step that writes.
 
@@ -342,7 +342,7 @@ Codex differs in three ways: it always reads your own instruction file, it does 
 
 The planner reads the code, and the code says what the service does. A document says what the service should do. When the planner reads both, it can find a route that the API document does not list, and a rule that the code does not follow.
 
-**The convention.** Keep the API document at `docs/openapi.yaml` (or `docs/swagger.yaml`), and the other documents of the service under `docs/`. `semar init` finds these paths, writes the entries with the IDs `api` and `docs`, and prints a line such as `added knowledge: api (docs/openapi.yaml), docs (docs)`. The planner uses only what the file lists. These names of an API document are found, and the first one in this order is used:
+**The convention.** Keep the API document at `docs/openapi.yaml` (or `docs/swagger.yaml`), and the other documents of the service under `docs/`. `semar init` finds these paths, writes the entries with the IDs `api` and `docs`, and prints a line such as `added knowledge: api (docs/openapi.yaml), docs (docs)`. It also writes `tickets` for the folder `docs/tickets` when that exists (see [tickets as requirements](#tickets-as-requirements)). The planner uses only what the file lists. These names of an API document are found, and the first one in this order is used:
 
 `docs/openapi.{yaml,yml,json}`, `docs/swagger.{yaml,yml,json}`, `api/openapi.{yaml,yml,json}`, `api/swagger.{yaml,yml,json}`, `openapi.{yaml,yml,json}`, `swagger.{yaml,yml,json}`
 
@@ -365,6 +365,7 @@ knowledge:
 | --- | --- | --- |
 | `openapi` | One OpenAPI 3 or Swagger 2 file, in YAML or JSON | The planner is told to read it. Code compares every drafted request with it. `service` is optional: when it is set, only the steps of that service are compared |
 | `files` | A file or a folder of documents | The planner is told to read it before it drafts |
+| `tickets` | A folder of `<ticket key>.md` files | The planner reads the file of each ticket of the change as a requirement. See [tickets as requirements](#tickets-as-requirements) |
 
 A source needs a unique `id`. A `path` is relative to the root of the repository, and it cannot leave the repository. A list holds at most 16 sources.
 
@@ -401,6 +402,35 @@ The third part, "Where the planner says a document and the code differ", holds w
 ```text
 semar: the repository has docs/openapi.yaml and docs; list them under knowledge in .semar/semar.yaml so that the planner reads them first
 ```
+
+### Tickets as requirements
+
+A ticket file is what the team agreed before the code was written. When the code does not do what the file says, a test that expects what the code does cannot find the defect. So the planner expects what the ticket says, and the run fails where the code does not meet it.
+
+```yaml
+knowledge:
+  - id: tickets
+    kind: tickets
+    path: docs/tickets       # holds SHOP-482.md, SHOP-483.md, ...
+```
+
+`semar init` writes this entry when `docs/tickets/` exists. A `tickets` source names a folder, and it has no `service`. Semar reads `<folder>/<ticket key>.md` for each ticket of the change from the copy of the source at the head commit. A ticket with no file there is named in one line on standard error, and its expected results come from the code, as before. A file that is not a regular file is not read, and a file above 64 KiB is cut with a marker that says so.
+
+**What the planner is told.** The prompt (version 6) shows each file as data, numbered by line, inside a fence that its own text cannot end. It cannot change the schema, the rules, or a result: a person still confirms every expected result. The planner is told to:
+
+* give each criterion that a caller of the API can observe at least one expected result with `source: ticket` and a `cite` of the form `<ticket file>:<line> <one sentence>`. Code checks that the file is the ticket file of the scenario's ticket and that the line exists. A scenario whose ticket has no file cannot use `source: ticket`, and the problem goes back to the planner;
+* expect what the criterion says where the code does not meet it, add a `differences` entry, and name the scenario after the requirement. `plan.md` marks that scenario with `This scenario is expected to fail on this build: the code does not meet docs/tickets/SHOP-482.md:14.` The mark is a prediction that a person can check in the run;
+* put a criterion that only a person can check, on a screen, on a device, or by a gesture, under `manualChecks`: the ticket, a title, 1 to 20 steps, the expected result, and the cite of the criterion.
+
+**Manual checks.** Each manual check is listed in `plan.md` under its ticket, and becomes an obligation `<ticket>/manual-<n>` in `.semar/obligations/<ticket>.plan.yaml`, with `source: criterion` and a `manual` reason of the kind `judgement` that is written by `ai`. It derives `needs_a_person`, and `semar ledger --checklist` prints its steps and its expected result. A person records the result with `semar ledger record`.
+
+**Accounts.** When `semar.yaml` has two auth profiles or more, the prompt lists their names and their one-line `description`, and tells the planner to add a scenario for the most likely access mistake, with `as`. The planner may use only these names. An unknown name is a problem that goes back to the planner. A [trial run](#the-trial-run) does not send a step that acts as another account, because it has the session of the plan's account only.
+
+**Expected results from the planner.** Every expected result that the planner drafts is written with `by: model` and the `source` that the planner gave, `diff` unless it cites a ticket. It always needs a person's confirmation.
+
+**What `plan.md` adds.** "How this plan was made" lists the problems of every draft that went back to the planner, at most 30 for each draft, escaped. When a trial sent nothing, the summary line of `semar plan` says why, for example `tried: 0 of 27 steps (every step needs a write or a fixture create, which a trial never sends)`.
+
+Code cannot check that a cited line says what the planner claims. `semar confirm` prints that line next to the result, so a person compares them.
 
 ### Hand-written scenarios
 
