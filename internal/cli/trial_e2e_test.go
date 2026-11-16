@@ -180,9 +180,12 @@ func TestTrialEndToEnd(t *testing.T) {
 		"### Needs a second look\n\n- SHOP-482-01, step summary: GET /v1/orders/{id}/summary answered 500: the service failed; this may be a defect\n",
 		"Attempts: 2 of 3",
 		"The read-only requests were tried once. The others were not sent before the first run.")
-	if strings.Contains(md, "/v1/order/{id}") {
-		t.Errorf("plan.md holds the typo of the first draft:\n%s", md)
+	// The typo of the first draft is only in the list of the drafts that went back to the planner.
+	body, howMade, _ := strings.Cut(md, "## How this plan was made")
+	if strings.Contains(body, "/v1/order/{id}") {
+		t.Errorf("plan.md holds the typo of the first draft outside the list of refused drafts:\n%s", md)
 	}
+	contains(t, "the refused drafts", howMade, "- Drafts that went back to the planner: 1\n  - Draft 1 had 1 problem:\n    - scenarios\\[0\\].steps\\[0\\]: trial: the environment answered 404 for GET /v1/order/{id}")
 	if strings.Contains(md, "o-1") || strings.Contains(md, "SUMMARY_BROKEN") {
 		t.Errorf("plan.md holds a value of a response:\n%s", md)
 	}

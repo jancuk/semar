@@ -222,6 +222,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if in.Knowledge, err = findKnowledge(stderr, in.SourceDir, folderInWorkTree(f.dir), cfg.Knowledge); err != nil {
 		return err
 	}
+	in.Tickets = findTickets(stderr, in.SourceDir, in.Knowledge, cs)
 
 	in.BaseAPI = baseDocuments(ctx, g, cs, in.Knowledge)
 	rig := planTrial(ctx, stderr, o, f, cfg, envName, env, &in, &catalogue)
@@ -258,6 +259,32 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		return exitError{ExitUndecided}
 	}
 	return nil
+}
+
+// findTickets reads the file of each ticket of the change from the tickets sources of the copy of
+// the source. A ticket with no file is one line on standard error, and the plan goes on: its
+// expectations come from the code. Nothing is said when no tickets source is listed.
+func findTickets(stderr io.Writer, sourceDir string, sources []knowledge.Source, cs domain.ChangeSet) []knowledge.Ticket {
+	listed := slices.ContainsFunc(sources, func(s knowledge.Source) bool { return s.Usable() && s.Kind == config.KnowledgeTickets })
+	if !listed {
+		return nil
+	}
+	keys := make([]string, len(cs.Tickets))
+	for i, t := range cs.Tickets {
+		keys[i] = t.Key
+	}
+	tickets := knowledge.ReadTickets(sourceDir, sources, keys)
+	var without []string
+	for _, key := range slices.Sorted(slices.Values(keys)) {
+		if !slices.ContainsFunc(tickets, func(t knowledge.Ticket) bool { return t.Key == key }) {
+			without = append(without, terminalSafe(key))
+		}
+	}
+	if len(without) > 0 {
+		fmt.Fprintf(stderr, "semar: no ticket file in the copy of the source for %s; the expectations of %s come from the code\n",
+			strings.Join(without, ", "), map[bool]string{true: "this ticket", false: "these tickets"}[len(without) == 1])
+	}
+	return tickets
 }
 
 // planFixtures is what the planner may name under given: every valid fixture of the repository,
@@ -326,9 +353,13 @@ func planInput(cfg config.Config, f planFlags, cs domain.ChangeSet) (plan.Input,
 	if f.maxScenarios > 0 {
 		limits.MaxScenarios = f.maxScenarios
 	}
+	var accounts []plan.Account
+	for _, name := range slices.Sorted(maps.Keys(cfg.AuthProfiles)) {
+		accounts = append(accounts, plan.Account{Name: name, Description: cfg.AuthProfiles[name].Description})
+	}
 	return plan.Input{
 		Change: cs, Services: services, Methods: env.Methods, AuthProfile: profile, SessionHeader: header,
-		Existing: map[string][]domain.Scenario{}, Limits: limits,
+		Existing: map[string][]domain.Scenario{}, Limits: limits, Accounts: accounts,
 	}, envName, env, nil
 }
 

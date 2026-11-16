@@ -284,6 +284,9 @@ func obligationsOf(root *os.Root, in plan.Input, out plan.Output) (files []planF
 	for _, df := range d.Differences {
 		tickets[df.Ticket] = true
 	}
+	for _, m := range d.ManualChecks {
+		tickets[m.Ticket] = true
+	}
 	existing := map[string]obligation.File{}
 	old := map[string][]byte{}
 	for _, key := range slices.Sorted(maps.Keys(tickets)) {

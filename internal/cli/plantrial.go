@@ -262,5 +262,59 @@ func trialSummary(in plan.Input, out plan.Output) string {
 		return "trial: skipped"
 	}
 	c := out.TrialCounts(in)
+	if c.Sent == 0 && c.Steps > 0 {
+		reason := nothingTriedReason(out.Trial.Steps)
+		if c.Back == 0 && c.SecondLook == 0 {
+			return fmt.Sprintf("tried: 0 of %d steps (%s)", c.Steps, reason)
+		}
+		return fmt.Sprintf("tried: 0 of %d steps (%s), %d problems returned, %d for a second look", c.Steps, reason, c.Back, c.SecondLook)
+	}
 	return fmt.Sprintf("tried: %d of %d steps, %d problems returned, %d for a second look", c.Sent, c.Steps, c.Back, c.SecondLook)
+}
+
+// nothingTriedReason is the main reason that a trial sent no step, in words, from the fixed reasons
+// that the trial gives. A step that needs a value that an earlier write or a fixture create would give
+// counts with the writes: a trial sends neither.
+func nothingTriedReason(steps []plan.TrialStep) string {
+	var writes, needs, total int
+	counts := map[string]int{}
+	var order []string
+	for _, ts := range steps {
+		if ts.Step == "" {
+			continue
+		}
+		total++
+		switch {
+		case ts.Why == "writes":
+			writes++
+		case strings.HasPrefix(ts.Why, "needs "):
+			needs++
+		}
+		if counts[ts.Why] == 0 {
+			order = append(order, ts.Why)
+		}
+		counts[ts.Why]++
+	}
+	switch {
+	case writes+needs == total && needs == 0:
+		return "every step is a write, which a trial never sends"
+	case writes+needs == total && writes == 0:
+		return "every step needs a value that a write or a fixture create gives, which a trial never sends"
+	case writes+needs == total:
+		return "every step needs a write or a fixture create, which a trial never sends"
+	}
+	main := order[0]
+	for _, why := range order {
+		if counts[why] > counts[main] {
+			main = why
+		}
+	}
+	main = oneLine(terminalSafe(main))
+	if rs := []rune(main); len(rs) > 120 {
+		main = string(rs[:120]) + "…"
+	}
+	if counts[order[0]] == total {
+		return "every step was not tried: " + main
+	}
+	return "most steps were not tried: " + main
 }

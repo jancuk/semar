@@ -126,6 +126,22 @@ func TestTrialSummaryLine(t *testing.T) {
 		want string
 	}{
 		{"ran", plan.Input{}, ran, "tried: 2 of 3 steps, 2 problems returned, 1 for a second look"},
+		{"nothing tried, every step writes or needs a created record", plan.Input{}, plan.Output{Trial: &plan.Trial{Steps: []plan.TrialStep{
+			{Scenario: "SHOP-1-01", Step: "make", Result: plan.TrialNotTried, Why: "writes"},
+			{Scenario: "SHOP-1-01", Step: "read", Result: plan.TrialNotTried, Why: "needs {{order.id}}, and fixture order.paid found no record; a trial never creates one"},
+			{Scenario: "SHOP-1-01", Given: "order", Result: plan.TrialNotTried, Why: "find could not be tried"},
+		}}}, "tried: 0 of 2 steps (every step needs a write or a fixture create, which a trial never sends)"},
+		{"nothing tried, every step writes", plan.Input{}, plan.Output{Trial: &plan.Trial{Steps: []plan.TrialStep{
+			{Scenario: "SHOP-1-01", Step: "make", Result: plan.TrialNotTried, Why: "writes"},
+		}}}, "tried: 0 of 1 steps (every step is a write, which a trial never sends)"},
+		{"nothing tried, another reason", plan.Input{}, plan.Output{Trial: &plan.Trial{Steps: []plan.TrialStep{
+			{Scenario: "SHOP-1-01", Step: "a", Result: plan.TrialNotTried, Why: "the trial budget was reached"},
+			{Scenario: "SHOP-1-01", Step: "b", Result: plan.TrialNotTried, Why: "the trial budget was reached"},
+			{Scenario: "SHOP-1-01", Step: "c", Result: plan.TrialNotTried, Why: "writes"},
+		}}}, "tried: 0 of 3 steps (most steps were not tried: the trial budget was reached)"},
+		{"nothing tried, one reason", plan.Input{}, plan.Output{Trial: &plan.Trial{Steps: []plan.TrialStep{
+			{Scenario: "SHOP-1-01", Step: "a", Result: plan.TrialNotTried, Why: "the trial budget was reached"},
+		}}}, "tried: 0 of 1 steps (every step was not tried: the trial budget was reached)"},
 		{"skipped at the start", plan.Input{TrialOff: "skipped: no account for default: x"}, plan.Output{}, "trial: skipped"},
 		{"stopped", plan.Input{}, plan.Output{Trial: &plan.Trial{Skipped: "the environment did not answer"}}, "trial: skipped"},
 		{"turned off", plan.Input{TrialOff: "turned off with --no-trial"}, plan.Output{}, ""},
