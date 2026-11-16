@@ -90,14 +90,38 @@ func TestTrialSkipLines(t *testing.T) {
 			sums: "trial: skipped\n",
 		},
 		{
+			// The profile that has no account is the one of the fixture's service, not the plan's.
+			name: "no account for a fixture service",
+			change: func(t *testing.T, p *planRepo) {
+				p.rewriteConfig(t, func(s string) string {
+					s = strings.Replace(s, "        baseUrl: http://"+p.host+"\n", "        baseUrl: http://"+p.host+"\n        authProfile: payer\n", 1)
+					return strings.Replace(s, "authProfiles:\n", "authProfiles:\n  payer:\n    session: {header: Authorization, value: \"Bearer {{secret.TOKEN}}\"}\n    secrets: {TOKEN: \"env:SEMAR_TEST_NO_PAYER_TOKEN\"}\n", 1)
+				})
+				p.write(t, ".semar/fixtures/order.open.yaml", `apiVersion: semar/v1
+kind: Fixture
+id: order.open
+description: An open order
+version: 1.0.0
+owner: team-orders
+find:
+  - request: { service: orders, method: GET, path: /v1/orders }
+    captures: [{ name: id, jsonpath: "$.data[0].id" }]
+outputs: [id]
+`)
+			},
+			line: prefix + "no account for payer: auth profile payer: secret TOKEN: ",
+			md:   "The trial run was skipped: no account for payer: ",
+			sums: "trial: skipped\n",
+		},
+		{
 			name: "evidence store",
 			change: func(t *testing.T, p *planRepo) {
 				if err := os.MkdirAll(p.path(".semar", "store", "redact.key"), 0o700); err != nil {
 					t.Fatal(err)
 				}
 			},
-			line: prefix,
-			md:   "The trial run was skipped: ",
+			line: prefix + "redaction key {key} is not a regular file: delete it, and Semar makes a new key on the next run\n",
+			md:   "The trial run was skipped: redaction key {key} is not a regular file: delete it, and Semar makes a new key on the next run.",
 			sums: "trial: skipped\n",
 		},
 	} {
@@ -107,6 +131,10 @@ func TestTrialSkipLines(t *testing.T) {
 			if tc.change != nil {
 				tc.change(t, p)
 			}
+			// {key} stands for the path of the redaction key, which holds the temporary directory.
+			key := p.path(".semar", "store", "redact.key")
+			tc.line = strings.ReplaceAll(tc.line, "{key}", key)
+			tc.md = strings.ReplaceAll(tc.md, "{key}", key)
 			args := append([]string{"plan", "--diff", "main..release"}, tc.args...)
 			res := p.must(t, cli.ExitOK, args...)
 			if tc.line == "" {
@@ -213,6 +241,11 @@ func TestTrialStopsWhenTheServiceStalls(t *testing.T) {
 	}
 	contains(t, "stdout", res.stdout, "trial: skipped\n")
 	contains(t, "plan.md", p.planMD(t), "The trial run was skipped: the environment did not answer.")
+	// A trial that stops while it runs says so in one line, as a trial that cannot start does (T6).
+	contains(t, "stderr", res.stderr, "\nsemar: trial run skipped: the environment did not answer\n")
+	if n := strings.Count(res.stderr, "trial run skipped"); n != 1 {
+		t.Errorf("stderr has %d skip lines, want one:\n%s", n, res.stderr)
+	}
 }
 
 // The trial prints nothing while the status line is up, so the status line is never cut.

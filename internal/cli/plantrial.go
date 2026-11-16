@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -44,16 +46,21 @@ type trialRig struct {
 }
 
 // trialRunner keeps the builds of the latest trial, so that the run of a plan that no draft survived
-// still names the build that the environment ran.
+// still names the build that the environment ran, and why the latest trial sent nothing.
 type trialRunner struct {
 	*trial.Runner
-	builds []domain.BuildRef
+	builds  []domain.BuildRef
+	skipped string
 }
 
 func (t *trialRunner) Try(ctx context.Context, scenarios []domain.Scenario, scripts []domain.Script) (plan.Trial, error) {
 	tr, err := t.Runner.Try(ctx, scenarios, scripts)
 	if len(tr.Builds) > 0 {
 		t.builds = tr.Builds
+	}
+	t.skipped = tr.Skipped
+	if err != nil && ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		t.skipped = "the trial stopped: " + err.Error() // as plan.Run records it
 	}
 	return tr, err
 }
@@ -87,9 +94,15 @@ func planTrial(ctx context.Context, stderr io.Writer, o options, f planFlags, cf
 			addServiceProfiles(needs, env, fx, "of fixture "+string(fx.ID))
 		}
 	}
-	sessions, err := loadSessions(ctx, cfg, secrets, needs)
-	if err != nil {
-		return skip(fmt.Sprintf("no account for %s: %v", in.AuthProfile, err))
+	// One profile at a time, so that the line names the profile that has no account: a fixture's
+	// service may use another profile than the plan.
+	sessions := map[string]session{}
+	for _, name := range slices.Sorted(maps.Keys(needs)) {
+		got, err := loadSessions(ctx, cfg, secrets, map[string]string{name: needs[name]})
+		if err != nil {
+			return skip(fmt.Sprintf("no account for %s: %v", name, err))
+		}
+		maps.Copy(sessions, got)
 	}
 	known := sessionSecrets(sessions)
 
@@ -191,6 +204,10 @@ func planTrial(ctx context.Context, stderr io.Writer, o options, f planFlags, cf
 // close ends the run that holds the trial's requests, whether the plan was accepted or not (D10).
 // The run has no result, so it is never exported or counted. A failure is a line and nothing more.
 func (t *trialRig) close(stderr io.Writer, now time.Time) {
+	// A trial that stopped while it ran gets the one skip line of T6. The status line is down by now.
+	if t.runner.skipped != "" {
+		fmt.Fprintf(stderr, "semar: trial run skipped: %s\n", oneLine(terminalSafe(t.runner.skipped)))
+	}
 	builds := slices.Clone(t.runner.builds)
 	if builds == nil {
 		builds = []domain.BuildRef{}

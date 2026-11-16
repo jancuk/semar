@@ -245,9 +245,10 @@ func (p Plan) TrialOn() bool
 | `--no-trial` | none | `turned off with --no-trial` |
 | `plan.trial: false` | none | `turned off by plan.trial in semar.yaml` |
 | The environment is `production` and `--env` did not name it | `semar: trial run skipped: uat is a production environment; name it with --env to try the reads against it` | the same text |
-| `loadSessions` fails for the auth profile | `semar: trial run skipped: no account for support-agent: <error>` (the error names a reference, never a value) | the same text |
+| `loadSessions` fails for the auth profile of the plan, or for the auth profile of a service that a fixture uses | `semar: trial run skipped: no account for support-agent: <error>`, naming the profile that failed (the error names a reference, never a value) | the same text |
 | The evidence store or the run cannot be created | `semar: trial run skipped: <error>` | the same text |
 
+* A trial that stops while it runs (`Trial.Skipped` is set, for example `the environment did not answer` or `the sign-in for the trial failed`) prints the same one line, `semar: trial run skipped: <reason>`, after the status line stops.
 * Otherwise `planChange` builds the read-only policy, the recorder on a new run (`o.RunID()`), an `api.Engine` with `Budget: 50` and `Timeout: 10*time.Second`, a `fixture.Resolver` when the catalogue of Plan 17 is not empty, and a `trial.Runner`. After `plan.Run` returns, with or without an error, it closes the run with `domain.Run{Purpose: trial, Environment, EnvironmentKind, StartedAt, EndedAt, BuildsStart: trial builds, Results: []}`.
 * `BaseAPI`: for each usable `openapi` knowledge source, the head document when its path is not in `ChangeSet.Files`; else `Show(ctx, cs.MergeBase, path, 5<<20)` parsed with `openapi.Parse`. A document that cannot be read or parsed is left out, with no line.
 * The summary after the plan gains `tried: <sent> of <steps> steps, <back> problems returned, <second> for a second look`. When the trial was skipped: `trial: skipped`.
