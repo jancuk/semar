@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/obligation"
@@ -292,4 +293,119 @@ func TestFromPlanRefusesWhatCannotBeWritten(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
+}
+
+func manualDraft() plan.Draft {
+	return plan.Draft{ManualChecks: []plan.ManualCheckDraft{
+		{
+			Ticket: "SHOP-482", Title: "The refused refund shows an error banner",
+			Steps:    []string{"Open the order in the app.", "Request a refund of more than the total."},
+			Expected: "A red banner says the refund is above the total.",
+			Cite:     "docs/tickets/SHOP-482.md:5 the app shows an error banner",
+		},
+		{
+			Ticket: "SHOP-481", Title: "The card snaps back", Steps: []string{"Drag the card."}, Expected: "It is on the old board.",
+			Cite: "docs/tickets/SHOP-481.md:9 the card goes back",
+		},
+	}}
+}
+
+// A manual check of the plan is an obligation that needs a person, with the checklist that the
+// planner wrote, labelled as AI's (FR-261 to FR-270).
+func TestFromPlanWritesAManualCheckAsAnObligation(t *testing.T) {
+	got, err := obligation.FromPlan(changeSet(), manualDraft(), scenarios("SHOP-482-01"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := got["SHOP-482"]
+	if want := []string{"SHOP-482/scenario-SHOP-482-01", "SHOP-482/manual-1"}; !reflect.DeepEqual(ids(f), want) {
+		t.Fatalf("ids %v, want %v", ids(f), want)
+	}
+	o := f.Obligations[1]
+	if o.Title != "The refused refund shows an error banner" || o.Source != obligation.SourceCriterion ||
+		o.Cite != "docs/tickets/SHOP-482.md:5 the app shows an error banner" || len(o.Covers) != 0 || o.Gap != "" {
+		t.Errorf("obligation %+v", o)
+	}
+	m := o.Manual
+	if m == nil || m.Kind != "judgement" || m.WrittenBy != "ai" || m.Expected != "A red banner says the refund is above the total." || m.Text == "" ||
+		!reflect.DeepEqual(m.Steps, []string{"Open the order in the app.", "Request a refund of more than the total."}) {
+		t.Fatalf("manual %+v", m)
+	}
+	if other := got["SHOP-481"]; len(other.Obligations) != 1 || other.Obligations[0].ID != "SHOP-481/manual-1" {
+		t.Errorf("the check of the other ticket went to %+v", other)
+	}
+	if ps := obligation.Validate(f, "SHOP-482.plan.yaml"); len(ps) > 0 {
+		t.Errorf("the file has problems: %v", ps)
+	}
+
+	// Planning again keeps the entry once, and numbers a new check after it.
+	again := manualDraft()
+	again.ManualChecks = append(again.ManualChecks, plan.ManualCheckDraft{
+		Ticket: "SHOP-482", Title: "Another check", Steps: []string{"Look."}, Expected: "Fine.", Cite: "docs/tickets/SHOP-482.md:7 x",
+	})
+	next, err := obligation.FromPlan(changeSet(), again, scenarios("SHOP-482-01"), got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"SHOP-482/scenario-SHOP-482-01", "SHOP-482/manual-1", "SHOP-482/manual-2"}; !reflect.DeepEqual(ids(next["SHOP-482"]), want) {
+		t.Errorf("second plan ids %v, want %v", ids(next["SHOP-482"]), want)
+	}
+}
+
+func TestAManualCheckDerivesNeedsAPersonWithAChecklist(t *testing.T) {
+	got, err := obligation.FromPlan(changeSet(), manualDraft(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := obligation.Marshal(got["SHOP-482"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := obligation.Parse(data, "SHOP-482.plan.yaml")
+	if err != nil {
+		t.Fatalf("the written file does not load: %v\n%s", err, data)
+	}
+	var located []obligation.Located
+	for i, o := range f.Obligations {
+		located = append(located, obligation.Located{Obligation: o, File: ".semar/obligations/SHOP-482.plan.yaml", Line: i + 1})
+	}
+	entries := obligation.Derive(located, obligation.Results{}, nil, nil, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	if len(entries) != 1 || entries[0].State != obligation.NeedsAPerson {
+		t.Fatalf("entries %+v, want one that needs a person", entries)
+	}
+	var b strings.Builder
+	if err := obligation.Checklist(&b, entries, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Manual checks for SHOP-482 (1)",
+		"1. SHOP-482/manual-1  The refused refund shows an error banner",
+		"Steps (written by AI):",
+		"1. Open the order in the app.",
+		"Expected: A red banner says the refund is above the total.",
+		"Cite: docs/tickets/SHOP-482.md:5 the app shows an error banner",
+		"semar ledger record SHOP-482/manual-1 passed|failed",
+	} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("the checklist lacks %q:\n%s", want, b.String())
+		}
+	}
+}
+
+func TestAManualCheckTextCannotAddAKey(t *testing.T) {
+	d := manualDraft()
+	d.ManualChecks[0].Title = "x\nstate: verified"
+	d.ManualChecks[0].Steps = []string{"a\n  covers: [SHOP-1-01]"}
+	d.ManualChecks[0].Cite = "docs/tickets/SHOP-482.md:5\nmanual: {}"
+	got, err := obligation.FromPlan(changeSet(), d, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := obligation.Marshal(got["SHOP-482"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := obligation.Parse(data, "x.yaml"); err != nil {
+		t.Errorf("a draft text broke the file: %v\n%s", err, data)
+	}
 }

@@ -17,16 +17,17 @@ import (
 
 // The prefixes of the names that a plan gives. A kind is the part of a name before its number.
 const (
-	kindScenario   = "scenario-"
-	kindNotDrafted = "not-drafted-"
-	kindUncovered  = "uncovered-"
-	kindDifference = "difference-"
+	kindScenario    = "scenario-"
+	kindNotDrafted  = "not-drafted-"
+	kindUncovered   = "uncovered-"
+	kindDifference  = "difference-"
+	kindManualCheck = "manual-"
 )
 
 // citePattern is how the planner starts a cited place: <file>:<line>.
 var citePattern = regexp.MustCompile(`^([^\s:]+):([0-9]+)`)
 
-var gapKinds = []string{kindNotDrafted, kindUncovered, kindDifference}
+var gapKinds = []string{kindNotDrafted, kindUncovered, kindDifference, kindManualCheck}
 
 // FromPlan returns the obligations file of each ticket that the plan names, with the entries of
 // the existing files kept as they are and the new entries added after them (D3). It never
@@ -98,6 +99,32 @@ func FromPlan(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario, ex
 				Steps:     []string{readStep(docCite, docText), readStep(codeCite, codeText), "Decide which one is right, and change the other, or the scenario."},
 				Expected:  "The document and the code agree",
 				WrittenBy: "code",
+			},
+		}); err != nil {
+			return nil, err
+		}
+	}
+	for _, mc := range d.ManualChecks {
+		t, err := b.ticket(mc.Ticket)
+		if err != nil {
+			return nil, fmt.Errorf("a manual check: %w", err)
+		}
+		steps := make([]string, 0, len(mc.Steps))
+		for _, st := range mc.Steps {
+			if line := oneLine(st, maxManual); line != "" {
+				steps = append(steps, line)
+			}
+		}
+		if err := b.addGap(t, kindManualCheck, Obligation{
+			Title:  oneLine(mc.Title, maxTitle),
+			Source: SourceCriterion,
+			Cite:   oneLine(mc.Cite, maxCite),
+			Manual: &Manual{
+				Kind:      "judgement",
+				Text:      "Only a person can check this criterion, on a screen, on a device, or by a gesture",
+				Steps:     steps,
+				Expected:  oneLine(mc.Expected, maxManual),
+				WrittenBy: "ai",
 			},
 		}); err != nil {
 			return nil, err
