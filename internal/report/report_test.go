@@ -523,3 +523,84 @@ func TestShown(t *testing.T) {
 		})
 	}
 }
+
+func givenReport() report.Data {
+	t0 := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
+	hash := func(c string) domain.Hash { return domain.Hash(strings.Repeat(c, 64)) }
+	run := domain.Run{
+		Schema: 1, ID: "r-given", Environment: "local", EnvironmentKind: "test",
+		StartedAt: t0, EndedAt: t0.Add(time.Minute),
+		Results: []domain.ScenarioResult{
+			{Scenario: "SHOP-482-05", Outcome: domain.OutcomePassed, Fixtures: []domain.FixtureRecord{{
+				As: "order", Fixture: "order.paid", Version: "1.0.0", Hash: hash("a"), Via: "create", Cleanup: "failed",
+				Left: []string{"order created by fixture order.paid (as order) may still exist: cleanup step 1 (POST /v1/orders/{{id}}/cancel) answered 500"},
+			}}},
+			{Scenario: "SHOP-482-06", Outcome: domain.OutcomePassed, Fixtures: []domain.FixtureRecord{{
+				As: "order", Fixture: "order.paid", Version: "1.0.0", Hash: hash("b"), Via: "find", Cleanup: "not_needed",
+			}}},
+			{Scenario: "SHOP-482-07", Outcome: domain.OutcomeBlocked,
+				Reasons: []domain.Reason{{Rule: domain.OutcomeBlocked, Text: "fixture order.paid is not approved: run semar confirm --fixture order.paid"}},
+				Fixtures: []domain.FixtureRecord{{
+					As: "order", Fixture: "order.paid", Version: "1.0.0", Hash: hash("c"), Via: "none", Cleanup: "not_needed",
+				}}},
+		},
+	}
+	scenarios := map[domain.ScenarioID]domain.Scenario{
+		"SHOP-482-05": {ID: "SHOP-482-05", Title: "Refund of a paid order"},
+		"SHOP-482-06": {ID: "SHOP-482-06", Title: "Refund of a found order"},
+		"SHOP-482-07": {ID: "SHOP-482-07", Title: "Refund before approval"},
+	}
+	return report.Data{Run: run, Scenarios: scenarios}
+}
+
+func TestReportStillExists(t *testing.T) {
+	out := render(t, givenReport())
+	compareGolden(t, "report.given.golden.md", []byte(out))
+	for _, want := range []string{
+		"Given order: order.paid 1.0.0 (hash aaaaaaaaaaaa), made by create; cleanup failed",
+		"Given order: order.paid 1.0.0 (hash bbbbbbbbbbbb), found by find; cleanup not needed",
+		"Given order: order.paid 1.0.0 (hash cccccccccccc), no state was given",
+		"## Still exists",
+		"SHOP-482-05: order created by fixture order.paid",
+		"answered 500",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestReportWithoutLeftRecordsHasNoStillExists(t *testing.T) {
+	d := givenReport()
+	d.Run.Results[0].Fixtures[0].Left = nil
+	d.Run.Results[0].Fixtures[0].Cleanup = "done"
+	out := render(t, d)
+	if strings.Contains(out, "Still exists") {
+		t.Errorf("a run with nothing left shows the section:\n%s", out)
+	}
+	if !strings.Contains(out, "made by create; cleanup done") {
+		t.Errorf("the cleanup word is missing:\n%s", out)
+	}
+	if got := render(t, fixture()); strings.Contains(got, "Still exists") || strings.Contains(got, "Given ") {
+		t.Errorf("a run without given entries shows fixture lines:\n%s", got)
+	}
+}
+
+func TestReportFixtureValuesAreEscaped(t *testing.T) {
+	d := givenReport()
+	rec := &d.Run.Results[0].Fixtures[0]
+	rec.As = "a\n# head"
+	rec.Left = []string{"<script>x</script>\n## Injected [l](http://evil.example/)"}
+	out := render(t, d)
+	for _, bad := range []string{"<script>", "[l](", "http://"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("report contains %q:\n%s", bad, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "# Semar report") && !strings.HasPrefix(line, "### ") &&
+			!strings.HasPrefix(line, "## Data touched") && !strings.HasPrefix(line, "## Still exists") {
+			t.Errorf("a value started a heading: %q", line)
+		}
+	}
+}

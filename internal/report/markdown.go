@@ -34,6 +34,7 @@ type checkView struct {
 type scenarioView struct {
 	ID, Title, Outcome string
 	Reasons            []reasonView
+	Fixtures           []string
 	Checks             []checkView
 }
 
@@ -48,6 +49,7 @@ type markdownView struct {
 	Interrupted, OnlyDeclared          bool
 	Attention, Passed                  []scenarioView
 	Ledger                             []ledgerView
+	StillExists                        []string
 }
 
 // Markdown writes the report: scenarios that need attention first, passed scenarios in one details block.
@@ -78,6 +80,12 @@ func buildView(d Data) markdownView {
 			Title:   shown(d.Scenarios[r.Scenario].Title),
 			Outcome: shown(string(r.Outcome)),
 		}
+		for _, rec := range r.Fixtures {
+			sv.Fixtures = append(sv.Fixtures, fixtureLine(rec))
+			for _, left := range rec.Left {
+				v.StillExists = append(v.StillExists, shown(string(r.Scenario))+": "+shown(left))
+			}
+		}
 		if r.Outcome == domain.OutcomePassed {
 			v.Passed = append(v.Passed, sv)
 			continue
@@ -97,6 +105,27 @@ func buildView(d Data) markdownView {
 		v.Ledger = append(v.Ledger, ledgerViewOf(row))
 	}
 	return v
+}
+
+// fixtureLine says what one given entry did: which fixture, in which version, how it gave its
+// state, and what became of what it made.
+func fixtureLine(r domain.FixtureRecord) string {
+	line := "Given " + shown(r.As) + ": " + shown(string(r.Fixture))
+	if r.Version != "" {
+		line += " " + shown(r.Version)
+	}
+	if r.Hash != "" {
+		line += " (hash " + shown(string(r.Hash[:min(len(r.Hash), 12)])) + ")"
+	}
+	switch r.Via {
+	case "find":
+		line += ", found by find"
+	case "create":
+		line += ", made by create"
+	default:
+		line += ", no state was given"
+	}
+	return line + "; cleanup " + shown(strings.ReplaceAll(r.Cleanup, "_", " "))
 }
 
 func checkViewOf(c domain.CheckResult, s domain.Scenario) checkView {
