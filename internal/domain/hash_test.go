@@ -1,9 +1,12 @@
 package domain_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/scenario"
+	"github.com/jancuk/semar/internal/script"
 )
 
 func base() domain.Scenario {
@@ -103,5 +106,79 @@ func TestExpectHashGolden(t *testing.T) {
 	const want = "a4550ee759d58595b8bcfa7c062711787affe3c3c5065653cf0a574e9a183a26"
 	if got := domain.ExpectHash(base()); string(got) != want {
 		t.Fatalf("ExpectHash(base()) = %s, want %s", got, want)
+	}
+}
+
+// A scenario without given must hash as it did before the field existed, or every stored
+// confirmation and script of such a scenario would lapse.
+func TestExpectHashUnchangedWithoutGiven(t *testing.T) {
+	const dir = "../../testdata/e2e/"
+	sc, err := scenario.Load(dir + ".semar/scenarios/SHOP-482/SHOP-482-01.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir + "scripts/SHOP-482-01.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	sr, err := script.Load(dir + "scripts/SHOP-482-01.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sc.Given != nil {
+		t.Fatalf("the scenario has no given, got %v", sc.Given)
+	}
+	if got := domain.ExpectHash(sc); got != sr.ExpectHash {
+		t.Fatalf("ExpectHash = %s, the stored script says %s", got, sr.ExpectHash)
+	}
+	sc.Given = []domain.Given{}
+	if got := domain.ExpectHash(sc); got != sr.ExpectHash {
+		t.Fatalf("an empty given list must hash as no given, got %s", got)
+	}
+}
+
+func TestExpectHashChangesWithGiven(t *testing.T) {
+	given := func() []domain.Given {
+		return []domain.Given{{Fixture: "order.paid", As: "order", With: map[string]string{"customer": "c1"}, Lease: domain.LeaseExclusive}}
+	}
+	withGiven := base()
+	withGiven.Given = given()
+	h := domain.ExpectHash(withGiven)
+	if h == domain.ExpectHash(base()) {
+		t.Fatal("adding a given entry must change the hash")
+	}
+
+	again := base()
+	again.Given = given()
+	if domain.ExpectHash(again) != h {
+		t.Fatal("the hash must be stable")
+	}
+
+	for name, change := range map[string]func(*domain.Scenario){
+		"fixture":    func(s *domain.Scenario) { s.Given[0].Fixture = "order.refunded" },
+		"as":         func(s *domain.Scenario) { s.Given[0].As = "o" },
+		"with value": func(s *domain.Scenario) { s.Given[0].With["customer"] = "c2" },
+		"with key":   func(s *domain.Scenario) { s.Given[0].With["other"] = "x" },
+		"with gone":  func(s *domain.Scenario) { s.Given[0].With = nil },
+		"lease":      func(s *domain.Scenario) { s.Given[0].Lease = "" },
+		"second":     func(s *domain.Scenario) { s.Given = append(s.Given, domain.Given{Fixture: "c.v", As: "c"}) },
+		"removed":    func(s *domain.Scenario) { s.Given = nil },
+	} {
+		s := base()
+		s.Given = given()
+		change(&s)
+		if domain.ExpectHash(s) == h {
+			t.Errorf("%s must change the hash", name)
+		}
+	}
+}
+
+func TestExpectHashGivenOrderMatters(t *testing.T) {
+	x := domain.Given{Fixture: "order.paid", As: "order"}
+	y := domain.Given{Fixture: "customer.verified", As: "customer"}
+	a, b := base(), base()
+	a.Given = []domain.Given{x, y}
+	b.Given = []domain.Given{y, x}
+	if domain.ExpectHash(a) == domain.ExpectHash(b) {
+		t.Fatal("the order of given entries must change the hash")
 	}
 }

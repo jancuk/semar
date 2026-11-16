@@ -45,12 +45,21 @@ type ScenarioResult struct {
 	Reasons  []Reason      `json:"reasons"`
 	Checks   []CheckResult `json:"checks"`
 	Actions  []ActionID    `json:"actions"`
+	// Fixtures is what each given entry did. It is empty for a scenario without given.
+	Fixtures []FixtureRecord `json:"fixtures,omitempty"`
 }
+
+const (
+	PurposeTrial        = "trial"
+	PurposeFixtureCheck = "fixture-check"
+)
 
 type Run struct {
 	Schema      int    `json:"schema"`
 	ID          RunID  `json:"id"`
 	Environment string `json:"environment"`
+	// Purpose is empty for a run of scenarios.
+	Purpose string `json:"purpose,omitempty"`
 	// EnvironmentKind is empty in records written before the kind was stored.
 	EnvironmentKind string            `json:"environmentKind,omitempty"`
 	StartedAt       time.Time         `json:"startedAt"`

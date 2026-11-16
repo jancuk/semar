@@ -43,6 +43,7 @@ type Scenario struct {
 	Intent      string     `yaml:"intent"`
 	Surface     Surface    `yaml:"surface"`
 	AuthProfile string     `yaml:"authProfile"`
+	Given       []Given    `yaml:"given,omitempty"`
 	Steps       []Step     `yaml:"steps"`
 }
 

@@ -40,10 +40,19 @@ type hashedStep struct {
 	Expect []hashedExpectation `json:"expect,omitempty"`
 }
 
+type hashedGiven struct {
+	Fixture FixtureID         `json:"fixture"`
+	As      string            `json:"as"`
+	With    map[string]string `json:"with,omitempty"`
+	Lease   LeaseMode         `json:"lease,omitempty"`
+}
+
+// Given is last and encoded only when set, so a scenario without it hashes as before.
 type hashedScenario struct {
-	Intent      string       `json:"intent"`
-	AuthProfile string       `json:"authProfile"`
-	Steps       []hashedStep `json:"steps"`
+	Intent      string        `json:"intent"`
+	AuthProfile string        `json:"authProfile"`
+	Steps       []hashedStep  `json:"steps"`
+	Given       []hashedGiven `json:"given,omitempty"`
 }
 
 // ExpectHash covers what a person confirmed. Title and a step's Action text are left out
@@ -65,6 +74,9 @@ func ExpectHash(s Scenario) Hash {
 			})
 		}
 		h.Steps[i] = hs
+	}
+	for _, g := range s.Given {
+		h.Given = append(h.Given, hashedGiven(g))
 	}
 	b, err := json.Marshal(h)
 	if err != nil {

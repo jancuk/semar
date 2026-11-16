@@ -16,6 +16,7 @@ const (
 	PassExplore  Pass = "explore"
 	PassSecurity Pass = "security"
 	PassCleanup  Pass = "cleanup"
+	PassTrial    Pass = "trial"
 )
 
 const (
@@ -38,6 +39,10 @@ type UseCase struct {
 	Pass     Pass       `json:"pass"`
 	Scenario ScenarioID `json:"scenario"`
 	Step     StepID     `json:"step"`
+	// Fixture is set on an action that a fixture sent. Step is then empty.
+	Fixture *FixtureUse `json:"fixture,omitempty"`
+	// Attempt is 1-based for a repeated read and 0 for a single request.
+	Attempt int `json:"attempt,omitempty"`
 }
 
 type Action struct {
