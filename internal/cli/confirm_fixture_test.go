@@ -9,6 +9,7 @@ import (
 	"github.com/jancuk/semar/internal/cli"
 	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/fixture"
 )
 
 const orderPaidFixture = `apiVersion: semar/v1
@@ -237,4 +238,59 @@ func TestConfirmWithoutFixtureStillNeedsAScenarioOrAll(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
 	res := r.must(t, cli.ExitError, "confirm", "--yes")
 	contains(t, "stderr", res.stderr, "pass the ID of one scenario, or --all")
+}
+
+// The hash that confirm --fixture shows and stores is the hash that the catalogue gives for the same
+// file, whatever form a number takes. A run asks the catalogue, so a difference would make every
+// approval miss.
+func TestConfirmFixtureHashIsTheCatalogueHash(t *testing.T) {
+	body := func(amount string) string {
+		return strings.Replace(orderPaidFixture, "amount: 1000", "amount: "+amount, 1)
+	}
+	for _, tc := range []struct{ name, text string }{
+		{"as written", orderPaidFixture},
+		{"exponent in a body", body("1e3")},
+		{"two mebibytes", body("2097152")},
+		{"one above two mebibytes", body("2097153")},
+		{"two mebibytes as a float", body("2097152.0")},
+		{"two mebibytes with an exponent", body("2.097152e6")},
+		{"negative size", body("-2097152")},
+		{"exponent in an until", strings.Replace(orderPaidFixture, "equals: paid", "equals: 1e3", 1)},
+		{"a list and a nested number", strings.Replace(orderPaidFixture, "amount: 1000", "amount: 1000, sizes: [1e3, 2097152, {limit: 2e6}]", 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRepo(t, repoOptions{offline: true})
+			r.writeFixture(t, "order.paid.yaml", tc.text)
+
+			c, err := fixture.Load(r.dir, nil)
+			if err != nil || len(c.Problems) != 0 {
+				t.Fatalf("Load = %v, %v", c.Problems, err)
+			}
+			f, ok := c.Get("order.paid")
+			if !ok {
+				t.Fatal("the catalogue has no order.paid")
+			}
+			want := domain.FixtureHash(f)
+
+			res := r.must(t, cli.ExitOK, "confirm", "--fixture", "order.paid", "--yes")
+			contains(t, "stdout", res.stdout, "hash "+string(want)+":", "approved fixture order.paid 1.0.0 for hash "+string(want))
+			if ok, err := r.approvals(t).FixtureApproved("order.paid", want); !ok || err != nil {
+				t.Fatalf("the hash of the catalogue is not approved: %v, %v", ok, err)
+			}
+			entries, err := os.ReadDir(r.path(".semar", "store", "approvals", "fixtures", "order.paid"))
+			if err != nil || len(entries) != 1 || entries[0].Name() != string(want) {
+				t.Fatalf("stored hashes = %v, %v, want only %s", entries, err, want)
+			}
+		})
+	}
+}
+
+func TestConfirmFixtureRefusesAFixtureThatDoesNotValidate(t *testing.T) {
+	r := newRepo(t, repoOptions{offline: true})
+	r.writeFixture(t, "order.paid.yaml", strings.Replace(orderPaidFixture, "version: 1.0.0", "version: 1", 1))
+	res := r.must(t, cli.ExitError, "confirm", "--fixture", "order.paid", "--yes")
+	contains(t, "stderr", res.stderr, "version 1 must be MAJOR.MINOR.PATCH")
+	if exists(t, r.path(".semar", "store", "approvals")) {
+		t.Error("an approval was stored")
+	}
 }
