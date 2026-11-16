@@ -1,6 +1,6 @@
 # Plan 18: API journeys
 
-Status: Specification, not implemented.
+Status: Implemented. The text describes the code as built.
 
 ## Goal
 
@@ -153,10 +153,10 @@ type LegResult struct {
 }
 
 type InvariantResult struct {
-	Index    int        `json:"index"`
-	State    CheckState `json:"state"`
-	Values   []string   `json:"values"` // redacted, in the order of Equal
-	Detail   string     `json:"detail,omitempty"`
+	Index  int        `json:"index"`
+	State  CheckState `json:"state"`
+	Values []string   `json:"values"` // redacted, in the order of Equal
+	Detail string     `json:"detail,omitempty"`
 }
 
 type JourneyResult struct {
@@ -228,7 +228,7 @@ invariants:
 
 | # | Rule. A problem is `<file>:<line>: <path>: <message>` | Example message |
 | --- | --- | --- |
-| J1 | Strict decode with `yamlfile.Decode` and `yamlfile.ExactNumbers` on `equals` and check operands. One document. At most 256 KiB | `unknown key schedule` |
+| J1 | Strict decode with `yamlfile.Decode` and `yamlfile.ExactNumbers` on `equals` and check operands. One document. At most 256 KiB | `field schedule not found in type domain.Journey` |
 | J2 | `apiVersion: semar/v1`, `kind: Journey`. `id` passes `idcheck.Check`, has no dot, and equals the file name | `id checkout does not match the file name check-out.yaml` |
 | J3 | `title` is one line. `owner` is set and passes `idcheck.Check` | `owner is required: a named product or QA owner owns a journey` |
 | J4 | `criticality` is `critical` or `standard` | `criticality must be critical or standard` |
@@ -299,6 +299,9 @@ func (r *Runner) Run(ctx context.Context, j domain.Journey) (domain.JourneyResul
 
 // Decide is the outcome table. It is pure.
 func Decide(in Outcome) (domain.JourneyOutcome, domain.LegID, []domain.Reason)
+
+// Changes names each service whose build differs between two manifests, such as `orders 9f3c2ab then c0ffee1`.
+func Changes(start, end []domain.BuildRef) []string
 
 type Outcome struct {
 	ManifestProblem string
@@ -384,22 +387,25 @@ It reuses `ratOf` and `hasMarker`. `1000`, `1000.0`, and `1e3` are equal. `90071
 
 | Command | What it does | Exit |
 | --- | --- | --- |
-| `semar journey list [--env <name>] [--build ...]` | One line per journey file: ID, criticality, owner, the number of legs, and its last stored outcome with the run ID and the manifest hash prefix. Then each invalid file with its problems. With `--env`, Semar reads every manifest service now and shows `stale` for a result whose manifest differs, with the part that changed | 0, or 2 when a file is invalid |
-| `semar journey run (<id>... \| --critical \| --all) --env <name> [--build ...]` | Creates a run with `Purpose: journey` and runs the journeys one after the other. Writes `report.md` and `run.json` with the leg results in `Results` and the journey results in `Journeys`. A production environment needs `--env` named | 0 every journey passed, 1 one failed, 2 otherwise |
-| `semar confirm --journey <id>` (repeatable) | Shows the expected results of every leg that need a person and stores one confirmation per leg, under the leg scenario ID and its hash | as `semar confirm` |
+| `semar journey list [--env <name>] [--build ...]` | One line per journey file: ID, criticality, owner, the number of legs, and its last stored outcome with the run ID and the first 12 characters of the manifest hash (`passed in r-20261117T090000Z-1a2b on manifest 69ea2865b0ae`), or `no result yet`. Then one `invalid: <file>:<line>: <path>: <message>` line for each problem of each invalid file. With `--env`, Semar reads every service of the stored manifest and of the journey's legs now and shows `stale (was passed in <run>): orders 9f3c2ab then c0ffee1` for a result whose manifest differs. A build that cannot be read is named (`not checked: the build of payments could not be read`) and does not make a result stale | 0, or 2 when a file is invalid |
+| `semar journey run (<id>... \| --critical \| --all) --env <name> [--build ...]` | Creates a run with `Purpose: journey` and runs the journeys one after the other. Writes `report.md` and `run.json` with the leg results in `Results` and the journey results in `Journeys`. A production environment needs `--env` named | 0 every journey passed, 1 one failed, 2 otherwise, 3 for a usage error such as no selector or an unknown ID |
+| `semar confirm --journey <id> [--env <name>]` (repeatable) | Shows the expected results of every leg that need a person and stores one confirmation per leg, under the leg scenario ID and its hash. The hash covers the leg's auth profile, which comes from the service in the environment (D7), so `--env` is needed when there are several | as `semar confirm` |
 
-* `--critical` selects every journey with `criticality: critical`. `--all` selects every valid journey. With a list of IDs, an unknown ID is an error before anything is sent.
-* `semar journey run` prints one line per journey, such as `checkout  failed  first failing leg settled: waited 30s and $.data.status was never paid (6 attempts)`, then one line per leg.
+* `--critical` selects every journey with `criticality: critical`. `--all` selects every valid journey. With a list of IDs, an unknown ID, or an ID whose file is not valid, is an error (exit 3) before anything is sent. Exactly one of the IDs, `--critical`, and `--all` is given.
+* With `--critical` or `--all`, a journey file that is not valid is skipped with `semar: journey file <file>:<line>: <path>: <message>; this run skips it`, and the exit code is at least 2, because a journey that did not run must not read as a pass.
+* A journey with a leg whose expected results need a person and have no confirmation is `blocked` before anything is sent, builds included: the legs that lack one are `inconclusive` with `an expected result is not confirmed: run semar confirm --journey <id>`, the others are `not_run`, and the journey reason is `leg place ended inconclusive: ...`. A flow of writes never starts with no means to judge it. The runner's own rule for a leg that ends `inconclusive` stays for every other cause.
+* A test sets `options.Sleep` so that a wait takes no time. Text from a journey file or a fixture is shown through `terminalSafe` and on one line.
+* `semar journey run` prints one line per journey, such as `checkout  failed  first failing leg settled: waited 30s and $.data.status was never paid (6 attempts)`, then one line per leg, indented below it. A journey with no failing leg gives its first reason, so `checkout  failed  invariant 1 is false: 1000, 1001, 1000`; one whose first reason is not its leg's, such as a changed build, gives that reason and then `; first failing leg place`. It then prints the count of leg outcomes, the Plan 19 line, and the path of the report.
 
 ### The report (`internal/report`)
 
-`report.Data` gains `Journeys []domain.JourneyResult`. A section `## Journeys` comes first when the run has journeys: per journey, its outcome, the first failing leg, the manifest with each service and commit, each leg with its outcome and first reason, and each invariant with its redacted values. Every text is escaped.
+`report.Data` gains `Journeys []domain.JourneyResult` and `JourneyTitles`, because a result holds no title. A section `## Journeys` follows the Plan 19 line, and comes before the facts of the run, when the run has journeys: per journey, its outcome, the first failing leg, the manifest with each service and commit, each leg with its outcome and first reason, and each invariant with its redacted values. Every text is escaped. A leg that did not pass is reproduced with `semar journey run <id> --env <name>`, because a leg has no scenario file. The summary of the run prints each journey and its legs. `report.JourneyExitCode` gives 0, 1, or 2.
 
 ### `semar plan` (FR-298)
 
-* `plan.Input` gains `Journeys []domain.Journey`, loaded from the repository by `journey.Load`. An invalid file prints one line and is left out.
-* After the draft is accepted, code lists every journey with a leg step whose service is a service of a drafted step and whose hint has the same method and the same path template as that drafted step's hint (`script.MatchPath` in both directions).
-* `plan.md` gains `## Journeys to rerun` after "Fixtures needed": `- checkout (critical, owner team-commerce): leg settled calls GET /v1/orders/{id}, which SHOP-482-05 tests. Run: semar journey run checkout --env local`. With no journey file, the section is left out. With files and no match: `No journey calls a route that this plan tests.`
+* `plan.Input` gains `Journeys []domain.Journey`, loaded from the repository by `journey.Load`, and `Environment`, the name that the run command in `plan.md` carries. Each problem of an invalid file prints one line, `semar: journey file <file>:<line>: <path>: <message>; plan.md does not use it`, and the file is left out. A directory that cannot be read prints one line and leaves the section out; the plan never stops for it.
+* After the draft is accepted, code lists every journey with a leg step whose service is a service of a drafted step (setup steps included, because the plan touches the route with them) and whose hint has the same method and the same path template as that drafted step's hint (`script.MatchPath` in both directions). The service of a drafted step is the service of its request in the script.
+* `plan.md` gains `## Journeys to rerun` after "Fixtures needed": `- checkout (critical, owner team-commerce): leg settled calls GET /v1/orders/{id}, which SHOP-482-05 tests. Run: semar journey run checkout --env local`. A journey is one line. Its legs are joined by `; `, and several scenarios read `SHOP-482-01 and SHOP-483-01 test`. With no journey file, the section is left out. With files and no match: `No journey calls a route that this plan tests.`
 
 ## Rules
 
@@ -423,9 +429,9 @@ It reuses `ratOf` and `hasMarker`. `1000`, `1000.0`, and `1e3` are equal. `90071
 | 3 | Exact comparison | Creates `internal/check/same.go`, `same_test.go` | `check.Same` | `TestSameDecimals`: `1000` and `1e3` equal; two integers above 2^53 that differ by one are not equal. `TestSameText`. `TestSameMarker`: `ok` false |
 | 4 | One scenario with given variables | Creates `internal/replay/single.go`, `single_test.go`. Edits `internal/replay/runner.go` (the shared body) | `RunOne`, `Resend`, `Single`, `Replayed` | `TestRunOnePresetVars`: a path uses `{{place.id}}`. `TestRunOneRefusesUnknownVar`. `TestResendRecordsAttempt`: `Use.Attempt` 2 on the action. `TestRunUnchanged`: every test of `runner_test.go` passes |
 | 5 | The journey runner | Creates `internal/journey/run.go`, `decide.go`, `run_test.go`, `decide_test.go` | `Runner.Run`, `Decide` | `TestDecideTable`: one case per row and the first-match order, with every reason kept. `TestNoInconclusiveJourney`: a leg that ends `inconclusive` gives `blocked`. Against the sample app with its payments service and an injected sleep: `TestPassed`. `TestFailedFirstLegStopsLater`: later legs are `not_run` with `stopped after leg pay`. `TestWaitTimeoutFails` (`PaymentNeverSettles`), with each attempt recorded. `TestInvariantFalse` (`PaymentAmountWrong`) names the three values. `TestInvariantMarkerBlocks`: a redacted capture gives `blocked`. `TestManifestProbeFailsBlocks`, with no request sent. `TestBuildChangesStale` (`BuildChanges`). `TestFixtureBlocks`, never `failed`. `TestPerServiceSession`: the payments leg carries the payments session. `TestCleanupAfterFailedLeg` |
-| 6 | Commands, confirmation, and the report | Creates `internal/cli/journey.go`, `journey_test.go`. Edits `internal/cli/confirm.go`, `root.go` (one line), `internal/report/markdown.go`, `report.md.tmpl`, golden files, and `internal/cli/ledger.go` (Plan 19) to pass the journey results to the ledger | `semar journey list`, `semar journey run`, `semar confirm --journey`, the report section | `TestJourneyListShowsLastOutcome`. `TestJourneyListStaleWithEnv`: a stored result whose commit differs shows `stale` and the part. `TestJourneyRunUnknownIDSendsNothing`. `TestJourneyRunCritical` selects only critical journeys. `TestJourneyRunExitCodes`. `TestConfirmJourneyStoresOnePerLeg`. `TestReportJourneySection` (golden) with an escaped title. `TestLedgerReadsJourneyOutcome`: an obligation that names the journey takes its outcome |
-| 7 | Journeys to rerun in a plan | Edits `internal/stage/plan/validate.go` (`Input.Journeys`), `render.go`, `render_test.go` and golden files, `internal/cli/plan.go` | The `plan.md` section | `TestJourneysToRerunMatchesHint`. `TestJourneysToRerunOtherServiceDoesNotMatch`. `TestNoJourneyFilesNoSection`. `TestInvalidJourneyFileOneLine` |
-| 8 | End-to-end test | Creates `internal/cli/journey_e2e_test.go` and `testdata/e2e-journeys/` (`.semar/semar.yaml` with `orders` and `payments`, each with a build probe and an auth profile, and `.semar/journeys/checkout.yaml` from the example) | Nothing new | Through `cli.Run` against the sample app and its payments service: `semar journey run checkout --env local` is `passed`, exit 0, and `run.json` has `purpose: journey`, three leg results, and one journey result with its manifest. The source `person` needs no confirmation. With one expected result rewritten to `source: diff`, the journey is `blocked` with `leg place ended inconclusive`, and after `semar confirm --journey checkout --yes` it is `passed`. With `PaymentAmountWrong`: `failed`, the invariant line, exit 1. With `PaymentNeverSettles`: `failed`, first failing leg `settled`. A journey file with `surface: web` is refused by `semar journey list` with the J7 message, and `semar journey run --all` skips it with that message. `semar journey list --env local` after a run with `BuildChanges` shows `stale` |
+| 6 | Commands, confirmation, and the report | Creates `internal/cli/journey.go`, `journey_test.go`, `internal/report/journey.go`, `journey_test.go`. Edits `internal/cli/confirm.go`, `root.go` (one command and the `Sleep` option), `internal/report/markdown.go`, `summary.go`, `report.md.tmpl`, golden files, `internal/journey/decide.go` (`Changes` is exported), and `internal/cli/ledger.go` (Plan 19) to pass the journey results to the ledger | `semar journey list`, `semar journey run`, `semar confirm --journey`, the report section | `TestJourneyListShowsLastOutcome`. `TestJourneyListStaleWithEnv`: a stored result whose commit differs shows `stale` and the part. `TestJourneyRunUnknownIDSendsNothing`. `TestJourneyRunCritical` selects only critical journeys. `TestJourneyRunExitCodes`. `TestConfirmJourneyStoresOnePerLeg`. `TestReportJourneySection` (golden) with an escaped title, `TestSummaryJourneyGolden`, and `TestJourneyRunNeedsAnExpectedResultConfirmedBeforeItSendsAnything`. `TestLedgerReadsJourneyOutcome`: an obligation that names the journey takes its outcome |
+| 7 | Journeys to rerun in a plan | Creates `internal/stage/plan/journeys.go`, `journeys_test.go`. Edits `internal/stage/plan/validate.go` (`Input.Journeys`, `Input.Environment`), `render.go`, golden files, `internal/cli/plan.go` | The `plan.md` section | `TestJourneysToRerunMatchesHint`. `TestJourneysToRerunOtherServiceDoesNotMatch`. `TestNoJourneyFilesNoSection`. `TestInvalidJourneyFileOneLine` |
+| 8 | End-to-end test | Creates `internal/cli/journey_e2e_test.go` and `testdata/e2e-journeys/` (`.semar/semar.yaml` with `orders` and `payments`, each with a build probe and an auth profile, and `.semar/journeys/checkout.yaml` from the example) | Nothing new | Through `cli.Run` against the sample app and its payments service: `semar journey run checkout --env local` is `passed`, exit 0, and `run.json` has `purpose: journey`, three leg results, and one journey result with its manifest. The source `person` needs no confirmation. With one expected result rewritten to `source: diff`, the journey is `blocked` with `leg place ended inconclusive` in its reasons and no request sent, and after `semar confirm --journey checkout --yes` it is `passed`. With `PaymentAmountWrong`: `failed`, the invariant line, exit 1. With `PaymentNeverSettles`: `failed`, first failing leg `settled`. A journey file with `surface: web` is refused by `semar journey list` with the J7 message, and `semar journey run --all` skips it with that message. `semar journey list --env local` after a run with `BuildChanges` shows `stale` |
 
 ## Out of scope
 
