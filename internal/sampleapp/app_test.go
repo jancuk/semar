@@ -115,8 +115,8 @@ func TestRoutes(t *testing.T) {
 		{"version needs no token", "GET", "/version", "", "", 200, `{"commit":"9f3c2ab"}`},
 		{"create without token", "POST", "/v1/orders", "", `{"amount":100000}`, 401, `{"error":{"code":"UNAUTHENTICATED"}}`},
 		{"create with unknown token", "POST", "/v1/orders", "nope", `{"amount":100000}`, 401, `{"error":{"code":"UNAUTHENTICATED"}}`},
-		{"create", "POST", "/v1/orders", alice, `{"amount":100000}`, 201, `{"data":{"id":"o-1","amount":100000,"refunded_total":0,"owner":"alice"}}`},
-		{"read", "GET", "/v1/orders/o-1", alice, "", 200, `{"data":{"id":"o-1","amount":100000,"refunded_total":0,"owner":"alice"}}`},
+		{"create", "POST", "/v1/orders", alice, `{"amount":100000}`, 201, `{"data":{"id":"o-1","amount":100000,"refunded_total":0,"owner":"alice","status":"created"}}`},
+		{"read", "GET", "/v1/orders/o-1", alice, "", 200, `{"data":{"id":"o-1","amount":100000,"refunded_total":0,"owner":"alice","status":"created"}}`},
 		{"read without token", "GET", "/v1/orders/o-1", "", "", 401, `{"error":{"code":"UNAUTHENTICATED"}}`},
 		{"read unknown order", "GET", "/v1/orders/o-99", alice, "", 404, `{"error":{"code":"NOT_FOUND"}}`},
 		{"read by another user", "GET", "/v1/orders/o-1", bob, "", 403, `{"error":{"code":"FORBIDDEN"}}`},
@@ -134,10 +134,10 @@ func TestRoutes(t *testing.T) {
 		{"unknown route with token", "GET", "/v2/nothing", alice, "", 404, `{"error":{"code":"NOT_FOUND"}}`},
 		{"unknown route without token", "GET", "/v2/nothing", "", "", 401, `{"error":{"code":"UNAUTHENTICATED"}}`},
 		{"refund of the right size", "POST", "/v1/orders/o-1/refunds", alice, `{"amount":40000}`, 201, `{"data":{"id":"r-1","amount":40000,"order_id":"o-1"}}`},
-		{"read after refund", "GET", "/v1/orders/o-1", alice, "", 200, `{"data":{"id":"o-1","amount":100000,"refunded_total":40000,"owner":"alice"}}`},
+		{"read after refund", "GET", "/v1/orders/o-1", alice, "", 200, `{"data":{"id":"o-1","amount":100000,"refunded_total":40000,"owner":"alice","status":"created"}}`},
 		{"second refund over the rest", "POST", "/v1/orders/o-1/refunds", alice, `{"amount":60001}`, 422, `{"error":{"code":"REFUND_EXCEEDS_TOTAL"}}`},
 		{"second refund of the rest", "POST", "/v1/orders/o-1/refunds", alice, `{"amount":60000}`, 201, `{"data":{"id":"r-2","amount":60000,"order_id":"o-1"}}`},
-		{"order ids count up", "POST", "/v1/orders", bob, `{"amount":5}`, 201, `{"data":{"id":"o-2","amount":5,"refunded_total":0,"owner":"bob"}}`},
+		{"order ids count up", "POST", "/v1/orders", bob, `{"amount":5}`, 201, `{"data":{"id":"o-2","amount":5,"refunded_total":0,"owner":"bob","status":"created"}}`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -465,5 +465,121 @@ func TestEmptyTokensMeansNoTokenIsValid(t *testing.T) {
 	nilMap := newRig(t, sampleapp.Options{})
 	if got := nilMap.createOrder(alice, 10); got.status != 201 {
 		t.Fatalf("nil Tokens, tok-alice = %d, want 201", got.status)
+	}
+}
+
+func TestCreateKeepsCustomerAndRef(t *testing.T) {
+	g := newRig(t, sampleapp.Options{})
+	got := g.do("POST", "/v1/orders", alice, `{"amount":1000,"customer":"c-1","ref":"semar-r-1"}`)
+	const want = `{"data":{"id":"o-1","amount":1000,"refunded_total":0,"owner":"alice","status":"created","customer":"c-1","ref":"semar-r-1"}}`
+	if got.status != 201 || strings.TrimSpace(got.body) != want {
+		t.Fatalf("create = %d %s", got.status, got.body)
+	}
+	for _, body := range []string{`{"amount":1,"customer":5}`, `{"amount":1,"ref":["x"]}`, `{"amount":1,"customer":"` + strings.Repeat("c", 129) + `"}`} {
+		if got := g.do("POST", "/v1/orders", alice, body); got.status != 400 {
+			t.Errorf("body %.40s: status %d, want 400", body, got.status)
+		}
+	}
+}
+
+func listIDs(t *testing.T, r reply) []string {
+	t.Helper()
+	data, ok := r.field(t, "data").([]any)
+	if !ok {
+		t.Fatalf("data is not a list: %s", r.body)
+	}
+	ids := []string{}
+	for _, e := range data {
+		ids = append(ids, e.(map[string]any)["id"].(string))
+	}
+	return ids
+}
+
+func TestListFiltersByStatusAndCustomer(t *testing.T) {
+	g := newRig(t, sampleapp.Options{})
+	for _, body := range []string{
+		`{"amount":10,"customer":"c-1"}`, // o-1
+		`{"amount":20,"customer":"c-2"}`, // o-2
+		`{"amount":30,"customer":"c-1"}`, // o-3
+	} {
+		g.do("POST", "/v1/orders", alice, body)
+	}
+	g.do("POST", "/v1/orders", bob, `{"amount":40,"customer":"c-1"}`) // o-4
+	g.do("POST", "/v1/orders/o-3/cancel", alice, "")
+
+	tests := []struct {
+		name, path, token string
+		want              []string
+	}{
+		{"all of the caller", "/v1/orders", alice, []string{"o-1", "o-2", "o-3"}},
+		{"another caller", "/v1/orders", bob, []string{"o-4"}},
+		{"by customer", "/v1/orders?customer=c-1", alice, []string{"o-1", "o-3"}},
+		{"by status", "/v1/orders?status=created", alice, []string{"o-1", "o-2"}},
+		{"by cancelled status", "/v1/orders?status=cancelled", alice, []string{"o-3"}},
+		{"by both", "/v1/orders?status=created&customer=c-1", alice, []string{"o-1"}},
+		{"nothing paid", "/v1/orders?status=paid", alice, []string{}},
+		{"unknown customer", "/v1/orders?customer=nobody", alice, []string{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := g.do("GET", tc.path, tc.token, "")
+			if got.status != 200 {
+				t.Fatalf("status %d: %s", got.status, got.body)
+			}
+			if ids := listIDs(t, got); fmt.Sprint(ids) != fmt.Sprint(tc.want) {
+				t.Fatalf("ids = %v, want %v", ids, tc.want)
+			}
+		})
+	}
+	if got := g.do("GET", "/v1/orders?status=paid", alice, ""); strings.TrimSpace(got.body) != `{"data":[]}` {
+		t.Fatalf("an empty list must be [], got %s", got.body)
+	}
+	if got := g.do("GET", "/v1/orders", "", ""); got.status != 401 {
+		t.Fatalf("list without a token = %d", got.status)
+	}
+}
+
+func TestCancel(t *testing.T) {
+	g := newRig(t, sampleapp.Options{})
+	g.createOrder(alice, 100)
+	tests := []struct {
+		name, path, token string
+		want              int
+		wantCode          string
+	}{
+		{"without a token", "/v1/orders/o-1/cancel", "", 401, "UNAUTHENTICATED"},
+		{"another user", "/v1/orders/o-1/cancel", bob, 403, "FORBIDDEN"},
+		{"unknown order", "/v1/orders/o-9/cancel", alice, 404, "NOT_FOUND"},
+		{"the owner", "/v1/orders/o-1/cancel", alice, 200, ""},
+		{"twice", "/v1/orders/o-1/cancel", alice, 409, "ALREADY_CANCELLED"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := g.do("POST", tc.path, tc.token, "")
+			if got.status != tc.want {
+				t.Fatalf("status %d, want %d: %s", got.status, tc.want, got.body)
+			}
+			if tc.wantCode != "" && got.field(t, "error", "code") != tc.wantCode {
+				t.Fatalf("body %s", got.body)
+			}
+		})
+	}
+	if v := g.do("GET", "/v1/orders/o-1", alice, "").field(t, "data", "status"); v != "cancelled" {
+		t.Fatalf("status = %v", v)
+	}
+}
+
+func TestCancelFails(t *testing.T) {
+	g := newRig(t, sampleapp.Options{Defects: map[sampleapp.Defect]bool{sampleapp.CancelFails: true}})
+	g.createOrder(alice, 100)
+	got := g.do("POST", "/v1/orders/o-1/cancel", alice, "")
+	if got.status != 500 || got.field(t, "error", "code") != "INTERNAL" {
+		t.Fatalf("cancel = %d %s", got.status, got.body)
+	}
+	if v := g.do("GET", "/v1/orders/o-1", alice, "").field(t, "data", "status"); v != "created" {
+		t.Fatalf("a failed cancel changed the order to %v", v)
+	}
+	if got := g.do("POST", "/v1/orders/o-1/cancel", "", ""); got.status != 401 {
+		t.Fatalf("cancel without a token = %d, want 401 before the defect", got.status)
 	}
 }
