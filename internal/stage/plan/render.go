@@ -69,11 +69,12 @@ func Render(w io.Writer, in Input, out Output) error {
 				continue
 			}
 			drafted++
-			writeScenario(&b, sc, fixtures, after[sc.ID])
+			writeScenario(&b, sc, fixtures, after[sc.ID], d.Differences)
 		}
 		if drafted == 0 {
 			b.WriteString("\nNo scenario was drafted for this ticket.\n")
 		}
+		writeManualChecks(&b, d.ManualChecks, t.Key)
 	}
 
 	b.WriteString("\n## Not drafted\n\n")
@@ -116,6 +117,7 @@ func Render(w io.Writer, in Input, out Output) error {
 		fmt.Fprintf(&b, "- Reasoning: %s\n", shown(level, maxValueShown))
 	}
 	fmt.Fprintf(&b, "- Attempts: %d of %d\n", out.Attempts, MaxAttempts)
+	writeRefused(&b, out.Refused)
 	fmt.Fprintf(&b, "- Tokens: %d input, %d output\n", r.InputTokens, r.OutputTokens)
 	fmt.Fprintf(&b, "- Setup: %s\n", setupLine(in.SetupOn, r.Loaded))
 	fmt.Fprintf(&b, "- Tool calls: %s\n", toolLine(r.Tools))
@@ -249,10 +251,17 @@ func writeFixturesNeeded(b *strings.Builder, needed []FixtureNeeded) {
 	}
 }
 
-func writeScenario(b *strings.Builder, sc domain.Scenario, fixtures map[domain.FixtureID]fixture.Entry, afterTrial bool) {
+func writeScenario(b *strings.Builder, sc domain.Scenario, fixtures map[domain.FixtureID]fixture.Entry, afterTrial bool, differences []Difference) {
 	fmt.Fprintf(b, "\n#### %s: %s\n\n", shown(string(sc.ID), maxValueShown), shown(sc.Title, maxValueShown))
 	if s := strings.TrimSpace(sc.Intent); s != "" {
 		fmt.Fprintf(b, "%s\n\n", paragraph(shown(s, maxTextShown)))
+	}
+	if unmet := unmetCriteria(sc, differences); len(unmet) > 0 {
+		quoted := make([]string, len(unmet))
+		for i, c := range unmet {
+			quoted[i] = shown(c, maxValueShown)
+		}
+		fmt.Fprintf(b, "This scenario is expected to fail on this build: the code does not meet %s.\n\n", andList(quoted))
 	}
 	if afterTrial {
 		b.WriteString("First drafted after the trial run. Check that its expected results come from the code.\n\n")
@@ -273,9 +282,85 @@ func writeScenario(b *strings.Builder, sc domain.Scenario, fixtures map[domain.F
 		if st.Setup {
 			setup = " (setup)"
 		}
-		fmt.Fprintf(b, "%d. %s%s: %s\n", i+1, shown(route, maxValueShown), setup, shown(st.Action, maxTextShown))
+		as := ""
+		if st.As != "" {
+			as = " as " + shown(st.As, maxValueShown)
+		}
+		fmt.Fprintf(b, "%d. %s%s%s: %s\n", i+1, shown(route, maxValueShown), setup, as, shown(st.Action, maxTextShown))
 		for _, e := range st.Expect {
-			fmt.Fprintf(b, "   - Expects %s. Cite: %s\n", shown(check.DescribeFull(e.Check), maxValueShown), shown(e.Cite, maxTextShown))
+			from := ""
+			if e.Source == domain.SourceTicket {
+				from = " Source: ticket."
+			}
+			fmt.Fprintf(b, "   - Expects %s.%s Cite: %s\n", shown(check.DescribeFull(e.Check), maxValueShown), from, shown(e.Cite, maxTextShown))
+		}
+	}
+}
+
+// unmetCriteria are the places in a ticket file that a scenario expects and that the planner says
+// the code does not meet: the cite of a ticket expectation equals the document of a difference
+// of the same ticket. The places come in the order of the scenario, each once.
+func unmetCriteria(sc domain.Scenario, differences []Difference) []string {
+	var out []string
+	for _, st := range sc.Steps {
+		for _, e := range st.Expect {
+			if e.Source != domain.SourceTicket {
+				continue
+			}
+			cite := citeOf(e.Cite)
+			if slices.Contains(out, cite) {
+				continue
+			}
+			if slices.ContainsFunc(differences, func(d Difference) bool { return d.Ticket == sc.Ticket && citeOf(d.Document) == cite }) {
+				out = append(out, cite)
+			}
+		}
+	}
+	return out
+}
+
+// writeManualChecks lists the checks that only a person can make, under their ticket.
+func writeManualChecks(b *strings.Builder, checks []ManualCheckDraft, ticket string) {
+	var mine []ManualCheckDraft
+	for _, m := range checks {
+		if m.Ticket == ticket {
+			mine = append(mine, m)
+		}
+	}
+	if len(mine) == 0 {
+		return
+	}
+	b.WriteString("\nManual checks for a person:\n")
+	for i, m := range mine {
+		fmt.Fprintf(b, "\n%d. %s. Cite: %s\n", i+1, shown(strings.TrimRight(strings.TrimSpace(m.Title), "."), maxTextShown), shown(m.Cite, maxTextShown))
+		for _, s := range m.Steps {
+			fmt.Fprintf(b, "   - %s\n", shown(s, maxTextShown))
+		}
+		fmt.Fprintf(b, "   - Expected: %s\n", shown(m.Expected, maxTextShown))
+	}
+}
+
+const maxRefusedShown = 30
+
+// writeRefused lists the problems of every draft that went back to the planner, so that a person
+// can judge a plan whose earlier drafts are not in it.
+func writeRefused(b *strings.Builder, refused []RefusedDraft) {
+	if len(refused) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "- Drafts that went back to the planner: %d\n", len(refused))
+	for _, r := range refused {
+		fmt.Fprintf(b, "  - Draft %d had %s:\n", r.Attempt, counted(len(r.Problems), "problem"))
+		for i, p := range r.Problems {
+			if i == maxRefusedShown {
+				fmt.Fprintf(b, "    - and %d more\n", len(r.Problems)-i)
+				break
+			}
+			if p.Path == "" {
+				fmt.Fprintf(b, "    - %s\n", shown(p.Message, maxTextShown))
+				continue
+			}
+			fmt.Fprintf(b, "    - %s: %s\n", shown(p.Path, maxValueShown), shown(p.Message, maxTextShown))
 		}
 	}
 }

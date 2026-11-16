@@ -41,6 +41,8 @@ type Input struct {
 	LeftOut       []LeftOut          // files of the head commit that the copy of the source lacks
 	Knowledge     []knowledge.Source // the documents that the configuration lists, as found in the copy
 	Fixtures      []fixture.Entry    // the catalogue: what the planner may name under given
+	Tickets       []knowledge.Ticket // the files of the tickets of the change that the repository holds
+	Accounts      []Account          // the auth profiles of the configuration, which a step may act as
 	Journeys      []domain.Journey   // the valid journey files; the plan lists the ones to rerun
 	Environment   string             // the environment that a run command in plan.md names; "" names none
 	Trial         Trialer            // nil turns the trial off
@@ -48,6 +50,9 @@ type Input struct {
 	BaseAPI       []openapi.Document // the API documents at the merge base, to tell a new route from a wrong path
 	Progress      func(Progress)     // nil for no reports
 }
+
+// Account is an auth profile of the configuration: its name and its one-line description.
+type Account struct{ Name, Description string }
 
 // LeftOut is a file that the copy of the source does not hold, and why.
 type LeftOut struct{ Path, Reason string }
@@ -76,7 +81,7 @@ var (
 // of the draft. The values come back only when there is no problem. It reads SourceDir to
 // check cites and does no other I/O.
 func Validate(d Draft, in Input) ([]domain.Scenario, []domain.Script, []Problem) {
-	v := &validator{in: in, known: map[string]bool{}, files: map[string]citedFile{}, fixtures: fixtureIndex(in.Fixtures)}
+	v := &validator{in: in, known: map[string]bool{}, files: map[string]citedFile{}, fixtures: fixtureIndex(in.Fixtures), ticketFiles: ticketIndex(in.Tickets)}
 	defer v.close()
 	for _, t := range in.Change.Tickets {
 		v.known[t.Key] = true
@@ -118,6 +123,7 @@ func Validate(d Draft, in Input) ([]domain.Scenario, []domain.Script, []Problem)
 	v.behaviourCovered(d)
 	v.differences(d.Differences)
 	v.fixturesNeeded(d)
+	v.manualChecks(d.ManualChecks)
 
 	if len(v.ps) > 0 {
 		return nil, nil, v.ps
@@ -136,9 +142,10 @@ type validator struct {
 	ps    []Problem
 	files map[string]citedFile
 	// fixtures is the catalogue by ID.
-	fixtures map[domain.FixtureID]fixture.Entry
-	root     *os.Root
-	rootErr  error
+	fixtures    map[domain.FixtureID]fixture.Entry
+	ticketFiles map[string]knowledge.Ticket // by ticket key
+	root        *os.Root
+	rootErr     error
 }
 
 func (v *validator) add(path, format string, args ...any) {
@@ -235,15 +242,16 @@ func (v *validator) scenario(i int, sd ScenarioDraft, id domain.ScenarioID, titl
 		for _, name := range slices.Sorted(maps.Keys(st.Headers)) {
 			v.header(fmt.Sprintf("%s.headers[%q]", p, name), name)
 		}
+		v.account(p+".as", st.As)
 		var expect []domain.Expectation
 		for k, e := range st.Expect {
 			ep := fmt.Sprintf("%s.expect[%d]", p, k)
-			expect = append(expect, domain.Expectation{Check: v.check(ep+".check", e.Check), Source: domain.SourceDiff, Cite: e.Why})
-			v.cite(ep+".why", e.Why)
+			source := v.source(ep, sd.Ticket, e)
+			expect = append(expect, domain.Expectation{Check: v.check(ep+".check", e.Check), Source: source, Cite: e.Why, By: byModel})
 		}
 		expectations += len(expect)
 		sc.Steps = append(sc.Steps, domain.Step{
-			ID: domain.StepID(st.ID), Setup: st.Setup, Action: st.Action,
+			ID: domain.StepID(st.ID), Setup: st.Setup, Action: st.Action, As: st.As,
 			Hint: &domain.RequestHint{Method: st.Method, Path: st.Hint}, Expect: expect,
 		})
 		var captures []domain.Capture
@@ -393,19 +401,24 @@ func (v *validator) differences(ds []Difference) {
 			usable = append(usable, s)
 		}
 	}
-	if len(usable) == 0 {
+	if len(usable) == 0 && len(v.ticketFiles) == 0 {
 		v.add("differences", "no document was listed for you to read, so there is no difference to report: leave differences out")
 		return
 	}
 	if len(ds) > maxDifferences {
 		v.add("differences", "the draft has %d differences, and the limit is %d: keep the ones that a caller would notice first", len(ds), maxDifferences)
 	}
+	// A ticket file is a document too: its criterion is the place that the code differs from.
 	holds := func(file string) bool {
-		return slices.ContainsFunc(usable, func(s knowledge.Source) bool { return s.Holds(file) })
+		return slices.ContainsFunc(usable, func(s knowledge.Source) bool { return s.Holds(file) }) ||
+			slices.ContainsFunc(slices.Collect(maps.Values(v.ticketFiles)), func(t knowledge.Ticket) bool { return t.Path == file })
 	}
-	paths := make([]string, len(usable))
-	for i, s := range usable {
-		paths[i] = s.Path
+	paths := make([]string, 0, len(usable))
+	for _, s := range usable {
+		paths = append(paths, s.Path)
+	}
+	for _, key := range slices.Sorted(maps.Keys(v.ticketFiles)) {
+		paths = append(paths, v.ticketFiles[key].Path)
 	}
 	for i, d := range ds {
 		p := fmt.Sprintf("differences[%d]", i)
@@ -415,7 +428,7 @@ func (v *validator) differences(ds []Difference) {
 		if strings.TrimSpace(d.What) == "" {
 			v.add(p+".what", "say in one sentence what differs between the document and the code")
 		}
-		doc, docOK := v.cited(p+".document", d.Document, "document must start with <file>:<line> of a document that the team listed, for example docs/refunds.md:14")
+		doc, docOK := v.citedDocument(p+".document", d.Document, "document must start with <file>:<line> of a document that the team listed, for example docs/refunds.md:14")
 		code, codeOK := v.cited(p+".code", d.Code, "code must start with <file>:<line> of the code, for example internal/refund/handler.go:41")
 		if docOK && !holds(doc) {
 			v.add(p+".document", "%s is not one of the documents that the team listed; cite a file of %s", doc, strings.Join(paths, ", "))

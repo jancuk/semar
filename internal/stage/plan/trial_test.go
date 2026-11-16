@@ -496,7 +496,7 @@ func TestPlanMarkdownTrial(t *testing.T) {
 	in.Trial = &fakeTrialer{}
 	got := render(t, in, out)
 	for _, want := range []string{
-		"- Prompt version: 5\n",
+		"- Prompt version: 6\n",
 		"The read-only requests were tried once. The others were not sent before the first run.\n",
 	} {
 		if !strings.Contains(got, want) {

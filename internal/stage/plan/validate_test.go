@@ -318,9 +318,9 @@ func TestValidateReturnsEveryProblemInOrder(t *testing.T) {
 func TestDecodeDraftIsStrict(t *testing.T) {
 	for name, data := range map[string]string{
 		"an unknown field": `{"summary": "", "tickets": [], "scenarios": [], "notDrafted": [], "uncovered": [], "extra": 1}`,
-		"a source field":   `{"scenarios": [{"steps": [{"expect": [{"check": {"status": 200}, "why": "a:1", "source": "person"}]}]}]}`,
-		"trailing data":    `{"summary": ""} {}`,
-		"not an object":    `[1]`,
+		"a field of a manual check that does not exist": `{"manualChecks": [{"ticket": "A-1", "owner": "x"}]}`,
+		"trailing data": `{"summary": ""} {}`,
+		"not an object": `[1]`,
 	} {
 		if _, err := DecodeDraft([]byte(data)); err == nil {
 			t.Errorf("%s: DecodeDraft accepted it", name)
@@ -358,7 +358,8 @@ func TestSchema(t *testing.T) {
 	}
 }
 
-// walk refuses a property named source (R17) and every keyword that a tool schema may not hold.
+// walk refuses a property named source, except the choice of an expectation between diff and ticket
+// (R17: no source of a scenario or a host), and every keyword that a tool schema may not hold.
 func walk(t *testing.T, path string, node map[string]any) {
 	t.Helper()
 	allowed := []string{"type", "properties", "required", "items", "enum", "additionalProperties"}
@@ -375,7 +376,7 @@ func walk(t *testing.T, path string, node map[string]any) {
 			t.Errorf("%s has fixed keys and allows others", path)
 		}
 		for name, sub := range props {
-			if strings.EqualFold(name, "source") {
+			if strings.EqualFold(name, "source") && path != ".scenarios[].steps[].expect[]" {
 				t.Errorf("%s has a property named %s", path, name)
 			}
 			walk(t, path+"."+name, sub.(map[string]any))

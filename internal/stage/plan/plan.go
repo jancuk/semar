@@ -58,6 +58,15 @@ type Output struct {
 	AfterTrial  []domain.ScenarioID // scenarios first drafted after a trial
 	// TrialReturned counts the trial problems that went back to the planner over all attempts.
 	TrialReturned int
+	// Refused are the drafts that went back to the planner, with their problems, in order.
+	Refused []RefusedDraft
+}
+
+// RefusedDraft is a draft that was not used: a problem of its own, or a problem that the trial
+// found in it. Problems is every problem of the draft, uncut.
+type RefusedDraft struct {
+	Attempt  int
+	Problems []Problem
 }
 
 // Rejected is the end of a plan whose every draft had problems. Nothing may be written (R16).
@@ -86,6 +95,8 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 		Existing:     existingList(in.Existing),
 		Knowledge:    knowledgeList(in.Knowledge),
 		Fixtures:     fixtureList(in.Fixtures),
+		Tickets:      ticketList(in.Tickets, ticketKeys(in.Tickets)),
+		Accounts:     accountList(in.Accounts),
 	}
 	var total provider.Result
 	var problems []Problem
@@ -93,13 +104,14 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 	var passed *accepted
 	frozen := newFrozen()
 	returned := 0
+	var refused []RefusedDraft
 	headAPI := headDocuments(in.Knowledge)
 	finish := func(a *accepted, attempts int) Output {
 		total.Output = a.output
 		return Output{
 			Draft: a.draft, Scenarios: a.scenarios, Scripts: a.scripts, Notes: a.notes,
 			Attempts: attempts, UsedAttempt: a.attempt, Result: total, PlannerID: p.ID(), PlannerKind: p.Kind(),
-			Trial: a.trial, AfterTrial: a.after, TrialReturned: returned,
+			Trial: a.trial, AfterTrial: a.after, TrialReturned: returned, Refused: slices.Clone(refused),
 		}
 	}
 	for attempt := 1; attempt <= MaxAttempts; attempt++ {
@@ -139,6 +151,7 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 		d, err := DecodeDraft(res.Output)
 		if err != nil {
 			problems = []Problem{{Message: "the output is not a draft: " + err.Error()}}
+			refused = append(refused, RefusedDraft{Attempt: attempt, Problems: problems})
 			continue
 		}
 		scenarios, scripts, ps := Validate(d, in)
@@ -147,6 +160,7 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 		}
 		if len(ps) > 0 {
 			problems = ps
+			refused = append(refused, RefusedDraft{Attempt: attempt, Problems: ps})
 			continue
 		}
 		cand := &accepted{
@@ -174,6 +188,7 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 			return finish(cand, attempt), nil
 		}
 		problems = back
+		refused = append(refused, RefusedDraft{Attempt: attempt, Problems: back})
 		returned += len(back)
 	}
 	if passed != nil {

@@ -24,6 +24,19 @@ type Draft struct {
 	// FixturesNeeded proposes a fixture for a scenario that the catalogue cannot serve. A
 	// person writes and approves it; the planner never writes a flow.
 	FixturesNeeded []FixtureNeeded `json:"fixturesNeeded,omitempty"`
+	// ManualChecks are criteria of a ticket that only a person can check. Each becomes an
+	// obligation that needs a person.
+	ManualChecks []ManualCheckDraft `json:"manualChecks,omitempty"`
+}
+
+// ManualCheckDraft is a check that a person makes on a screen or a device. Cite starts with
+// <ticket file>:<line> of the criterion.
+type ManualCheckDraft struct {
+	Ticket   string   `json:"ticket"`
+	Title    string   `json:"title"`
+	Steps    []string `json:"steps"`
+	Expected string   `json:"expected"`
+	Cite     string   `json:"cite"`
 }
 
 type TicketDraft struct {
@@ -51,8 +64,10 @@ type GivenDraft struct {
 }
 
 type StepDraft struct {
-	ID       string            `json:"id"`
-	Setup    bool              `json:"setup,omitempty"`
+	ID    string `json:"id"`
+	Setup bool   `json:"setup,omitempty"`
+	// As names an account of the configuration: every request of the step uses its session.
+	As       string            `json:"as,omitempty"`
 	Action   string            `json:"action"`
 	Service  string            `json:"service,omitempty"`
 	Method   string            `json:"method"`
@@ -73,6 +88,9 @@ type CaptureDraft struct {
 type ExpectDraft struct {
 	Check CheckDraft `json:"check"`
 	Why   string     `json:"why"`
+	// Source is "diff" (the default) or "ticket". A ticket expectation cites a line of the
+	// ticket file in Why.
+	Source string `json:"source,omitempty"`
 }
 
 // CheckDraft has the keys of a check in a scenario file. The bounds stay as JSON text until
@@ -200,6 +218,7 @@ const schema = `{
               "properties": {
                 "id": {"type": "string"},
                 "setup": {"type": "boolean"},
+                "as": {"type": "string"},
                 "action": {"type": "string"},
                 "service": {"type": "string"},
                 "method": {"type": "string", "enum": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]},
@@ -244,7 +263,8 @@ const schema = `{
                           "equalsPath": {"type": "string"}
                         }
                       },
-                      "why": {"type": "string"}
+                      "why": {"type": "string"},
+                      "source": {"type": "string", "enum": ["diff", "ticket"]}
                     }
                   }
                 }
@@ -290,6 +310,21 @@ const schema = `{
           "document": {"type": "string"},
           "code": {"type": "string"},
           "what": {"type": "string"}
+        }
+      }
+    },
+    "manualChecks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ticket", "title", "steps", "expected", "cite"],
+        "properties": {
+          "ticket": {"type": "string"},
+          "title": {"type": "string"},
+          "steps": {"type": "array", "items": {"type": "string"}},
+          "expected": {"type": "string"},
+          "cite": {"type": "string"}
         }
       }
     },
