@@ -61,11 +61,13 @@ type Run struct {
 	// Purpose is empty for a run of scenarios.
 	Purpose string `json:"purpose,omitempty"`
 	// EnvironmentKind is empty in records written before the kind was stored.
-	EnvironmentKind string            `json:"environmentKind,omitempty"`
-	StartedAt       time.Time         `json:"startedAt"`
-	EndedAt         time.Time         `json:"endedAt"`
-	BuildsStart     []BuildRef        `json:"buildsStart"`
-	BuildsEnd       []BuildRef        `json:"buildsEnd"`
-	Results         []ScenarioResult  `json:"results"`
-	Files           map[string]string `json:"files"` // relative path to SHA-256
+	EnvironmentKind string           `json:"environmentKind,omitempty"`
+	StartedAt       time.Time        `json:"startedAt"`
+	EndedAt         time.Time        `json:"endedAt"`
+	BuildsStart     []BuildRef       `json:"buildsStart"`
+	BuildsEnd       []BuildRef       `json:"buildsEnd"`
+	Results         []ScenarioResult `json:"results"`
+	// Journeys is empty, and not encoded, for a run without journeys.
+	Journeys []JourneyResult   `json:"journeys,omitempty"`
+	Files    map[string]string `json:"files"` // relative path to SHA-256
 }
