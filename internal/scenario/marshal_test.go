@@ -506,3 +506,20 @@ func TestMarshalRefusesGivenTextThatParseCannotHold(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestMarshalRoundTripsAsAndBy(t *testing.T) {
+	in := oneCheck(domain.Check{JSONPath: "$.board", Equals: "{{o.board}}"})
+	in.Steps[0].As = "carol"
+	in.Steps[0].Expect[0].By = "model"
+	data := roundTrip(t, in, in)
+	for _, want := range []string{"as: carol", "by: model"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("want %q in\n%s", want, data)
+		}
+	}
+	plain := oneCheck(domain.Check{Status: ptr(200)})
+	data = roundTrip(t, plain, plain)
+	if strings.Contains(string(data), "as:") || strings.Contains(string(data), "by:") {
+		t.Errorf("an unset as or by must write nothing\n%s", data)
+	}
+}

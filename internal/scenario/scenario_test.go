@@ -73,6 +73,14 @@ func TestValidate(t *testing.T) {
 		{"person from a file", func(s *domain.Scenario) { s.Steps[1].Expect[0].Source = "person" }, scenario.FromFile, "", ""},
 		{"ticket with no cite", func(s *domain.Scenario) { s.Steps[1].Expect[0].Cite = "" }, scenario.FromFile, "cite is required for the source ticket", "steps[1].expect[0].cite"},
 		{"check value that cannot be encoded", func(s *domain.Scenario) { s.Steps[2].Expect[0].Check.Equals = math.NaN() }, scenario.FromFile, "cannot be encoded", "steps[2].expect[0].check"},
+		{"as that is not a name", func(s *domain.Scenario) { s.Steps[1].As = "a b" }, scenario.FromFile, "invalid auth profile name", "steps[1].as"},
+		{"as that is a name", func(s *domain.Scenario) { s.Steps[1].As = "carol" }, scenario.FromFile, "", ""},
+		{"by model", func(s *domain.Scenario) { s.Steps[1].Expect[0].By = "model" }, scenario.FromFile, "", ""},
+		{"by something else", func(s *domain.Scenario) { s.Steps[1].Expect[0].By = "robot" }, scenario.FromFile, "by must be model or empty", "steps[1].expect[0].by"},
+		{"operand with a variable", func(s *domain.Scenario) { s.Steps[2].Expect[0].Check.Equals = "board {{o.board}} {{run.id}}" }, scenario.FromFile, "", ""},
+		{"operand with a secret", func(s *domain.Scenario) { s.Steps[2].Expect[0].Check.Equals = "{{secret.TOKEN}}" }, scenario.FromFile, "a check cannot use a secret", "steps[2].expect[0].check.equals"},
+		{"operand with data", func(s *domain.Scenario) { s.Steps[2].Expect[0].Check.Equals = "{{data.a.b}}" }, scenario.FromFile, "data value", "steps[2].expect[0].check.equals"},
+		{"operand with a malformed variable", func(s *domain.Scenario) { s.Steps[2].Expect[0].Check.Equals = "{{ x }}" }, scenario.FromFile, "malformed variable", "steps[2].expect[0].check.equals"},
 		{"greater that is NaN", func(s *domain.Scenario) {
 			c := &s.Steps[2].Expect[0].Check
 			n := math.NaN()

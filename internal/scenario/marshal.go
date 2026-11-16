@@ -140,6 +140,9 @@ func (e *enc) step(path string, st domain.Step) (*yaml.Node, domain.Step) {
 		put(n, "setup", plain("true"))
 	}
 	put(n, "action", e.str(path+".action", st.Action))
+	if st.As != "" {
+		put(n, "as", e.str(path+".as", st.As))
+	}
 	if st.Hint != nil {
 		h := mapping()
 		put(h, "method", e.str(path+".hint.method", st.Hint.Method))
@@ -159,6 +162,9 @@ func (e *enc) step(path string, st domain.Step) (*yaml.Node, domain.Step) {
 			put(x, "source", e.str(p+".source", string(ex.Source)))
 			if ex.Cite != "" {
 				put(x, "cite", e.str(p+".cite", ex.Cite))
+			}
+			if ex.By != "" {
+				put(x, "by", e.str(p+".by", ex.By))
 			}
 			seq.Content = append(seq.Content, x)
 		}

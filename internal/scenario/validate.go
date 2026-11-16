@@ -7,6 +7,7 @@ import (
 	"math"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -80,6 +81,11 @@ func Validate(s domain.Scenario, origin Origin) []Problem {
 			add(sp+".id", "duplicate step id %q", st.ID)
 		}
 		seen[st.ID] = true
+		if st.As != "" {
+			if err := idcheck.Check("auth profile name", st.As); err != nil {
+				add(sp+".as", "%v", err)
+			}
+		}
 		if st.Setup && len(st.Expect) > 0 {
 			add(sp+".expect", "a setup step has no expected result")
 		}
@@ -106,6 +112,11 @@ func validateExpectation(path string, e domain.Expectation, origin Origin) []Pro
 		add(path+".source", "invariants are fixed in Semar and cannot appear in a file")
 	default:
 		add(path+".source", "source must be one of ticket, testcase, person, diff, baseline")
+	}
+	switch e.By {
+	case "", "model":
+	default:
+		add(path+".by", "by must be model or empty")
 	}
 	if e.Source == domain.SourceTicket && e.Cite == "" {
 		add(path+".cite", "cite is required for the source ticket")
@@ -166,6 +177,7 @@ func validateExpectation(path string, e domain.Expectation, origin Origin) []Pro
 		if _, err := json.Marshal(v.val); err != nil {
 			add(cp, "%s cannot be encoded as JSON: %v", v.name, err)
 		}
+		ps = append(ps, operandProblems(cp+"."+v.name, v.val)...)
 	}
 	return ps
 }
@@ -220,6 +232,29 @@ func validateGiven(given []domain.Given) []Problem {
 		case "", domain.LeaseExclusive:
 		default:
 			add(p+".lease", "lease must be exclusive or empty")
+		}
+	}
+	return ps
+}
+
+// operandProblems refuses a secret, a fixture data value, and a malformed variable in a string
+// operand. Whether a name is known depends on the script, so script validation checks that.
+func operandProblems(path string, v any) []Problem {
+	text, ok := v.(string)
+	if !ok {
+		return nil
+	}
+	c := domain.Check{Equals: text}
+	var ps []Problem
+	if domain.OperandMalformed(c) != "" {
+		ps = append(ps, Problem{Path: path, Message: "malformed variable in " + strconv.Quote(text)})
+	}
+	for _, name := range domain.OperandVariables(c) {
+		switch head, _, _ := strings.Cut(name, "."); head {
+		case "secret":
+			ps = append(ps, Problem{Path: path, Message: fmt.Sprintf("{{%s}}: a check cannot use a secret", name)})
+		case "data":
+			ps = append(ps, Problem{Path: path, Message: fmt.Sprintf("{{%s}}: a check cannot use a data value: put it in a with value and use the fixture output", name)})
 		}
 	}
 	return ps
