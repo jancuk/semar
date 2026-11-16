@@ -53,6 +53,8 @@ type Step struct {
 	Action string        `yaml:"action"`
 	Hint   *RequestHint  `yaml:"hint,omitempty"`
 	Expect []Expectation `yaml:"expect,omitempty"`
+	// As names an auth profile: the step's requests use that profile's session, not the scenario's.
+	As string `yaml:"as,omitempty"`
 }
 
 type RequestHint struct {
@@ -64,6 +66,8 @@ type Expectation struct {
 	Check  Check  `yaml:"check"`
 	Source Source `yaml:"source"`
 	Cite   string `yaml:"cite,omitempty"`
+	// By is "model" when a model wrote the expectation; such an expectation always needs confirmation.
+	By string `yaml:"by,omitempty"`
 }
 
 // Exactly one of Status, JSONPath, Header is set. JSONPath and Header take exactly one operator.

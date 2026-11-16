@@ -31,6 +31,7 @@ type hashedExpectation struct {
 	Check  hashedCheck `json:"check"`
 	Source Source      `json:"source"`
 	Cite   string      `json:"cite,omitempty"`
+	By     string      `json:"by,omitempty"`
 }
 
 type hashedStep struct {
@@ -38,6 +39,7 @@ type hashedStep struct {
 	Setup  bool                `json:"setup,omitempty"`
 	Hint   *hashedHint         `json:"hint,omitempty"`
 	Expect []hashedExpectation `json:"expect,omitempty"`
+	As     string              `json:"as,omitempty"`
 }
 
 type hashedGiven struct {
@@ -62,7 +64,7 @@ type hashedScenario struct {
 func ExpectHash(s Scenario) Hash {
 	h := hashedScenario{Intent: s.Intent, AuthProfile: s.AuthProfile, Steps: make([]hashedStep, len(s.Steps))}
 	for i, st := range s.Steps {
-		hs := hashedStep{ID: st.ID, Setup: st.Setup}
+		hs := hashedStep{ID: st.ID, Setup: st.Setup, As: st.As}
 		if st.Hint != nil {
 			hs.Hint = &hashedHint{Method: st.Hint.Method, Path: st.Hint.Path}
 		}
@@ -71,6 +73,7 @@ func ExpectHash(s Scenario) Hash {
 				Check:  hashedCheck(e.Check),
 				Source: e.Source,
 				Cite:   e.Cite,
+				By:     e.By,
 			})
 		}
 		h.Steps[i] = hs

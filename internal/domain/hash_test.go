@@ -182,3 +182,29 @@ func TestExpectHashGivenOrderMatters(t *testing.T) {
 		t.Fatal("the order of given entries must change the hash")
 	}
 }
+
+func TestExpectHashCoversAsAndByOnlyWhenSet(t *testing.T) {
+	h := domain.ExpectHash(base())
+	withAs := base()
+	withAs.Steps[1].As = "carol"
+	hAs := domain.ExpectHash(withAs)
+	if hAs == h {
+		t.Error("as must change the hash when set")
+	}
+	other := base()
+	other.Steps[1].As = "bob"
+	if domain.ExpectHash(other) == hAs {
+		t.Error("a different as must change the hash")
+	}
+	withBy := base()
+	withBy.Steps[1].Expect[0].By = "model"
+	if domain.ExpectHash(withBy) == h {
+		t.Error("by must change the hash when set")
+	}
+	empty := base()
+	empty.Steps[1].As = ""
+	empty.Steps[1].Expect[0].By = ""
+	if domain.ExpectHash(empty) != h {
+		t.Error("empty as and by must hash as before")
+	}
+}
