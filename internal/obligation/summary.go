@@ -13,12 +13,16 @@ func SummaryLine(entries []Entry) string {
 		return ""
 	}
 	count := map[State]int{}
-	passed, failed := 0, 0
+	passed, failed, onCurrent, read := 0, 0, 0, false
 	for _, e := range entries {
 		count[e.State]++
 		if e.Manual != nil {
 			if e.Manual.Result == "passed" {
 				passed++
+				read = read || e.ManualTie != TieUnread
+				if e.ManualTie == TieCurrent {
+					onCurrent++
+				}
 			} else {
 				failed++
 			}
@@ -48,7 +52,11 @@ func SummaryLine(entries []Entry) string {
 	line := fmt.Sprintf("%d %s: %s", len(entries), noun, strings.Join(parts, ", "))
 	var checked []string
 	if passed > 0 {
-		checked = append(checked, fmt.Sprintf("%d passed", passed))
+		text := fmt.Sprintf("%d passed", passed)
+		if read && onCurrent != passed {
+			text += fmt.Sprintf(" (%d on the builds that run now)", onCurrent)
+		}
+		checked = append(checked, text)
 	}
 	if failed > 0 {
 		checked = append(checked, fmt.Sprintf("%d failed", failed))

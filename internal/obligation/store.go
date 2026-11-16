@@ -28,6 +28,8 @@ const (
 
 	maxReason     = 300
 	maxNotes      = 2000
+	maxBuilds     = 32
+	maxBuildField = 128
 	maxDeferDays  = 180
 	maxRecordSize = 64 << 10
 
@@ -55,6 +57,15 @@ type ManualResult struct {
 	Identity   string    `json:"identity"`
 	At         time.Time `json:"at"`
 	Notes      string    `json:"notes"`
+	// Builds are the builds that the environment ran when the person recorded the result (Plan 21,
+	// D16). It is empty for a result recorded without --env.
+	Builds []ManualBuild `json:"builds,omitempty"`
+}
+
+// ManualBuild is a service and the commit that it ran.
+type ManualBuild struct {
+	Service string `json:"service"`
+	Commit  string `json:"commit"`
 }
 
 // Store keeps deferrals and manual results at <root>/store/obligations/<group>/<name>/<kind>/.
@@ -170,6 +181,16 @@ func checkManual(m ManualResult) error {
 		return errors.New("at is required")
 	case utf8.RuneCountInString(m.Notes) > maxNotes:
 		return fmt.Errorf("the notes are longer than %d characters", maxNotes)
+	case len(m.Builds) > maxBuilds:
+		return fmt.Errorf("a result names at most %d builds, not %d", maxBuilds, len(m.Builds))
+	}
+	for _, b := range m.Builds {
+		if err := oneLineText("the service of a build", b.Service, maxBuildField, true); err != nil {
+			return err
+		}
+		if err := oneLineText("the commit of a build", b.Commit, maxBuildField, true); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -434,3 +434,76 @@ func TestStateNames(t *testing.T) {
 		}
 	}
 }
+
+func passedOn(builds ...obligation.ManualBuild) map[string]obligation.ManualResult {
+	return map[string]obligation.ManualResult{"g/a": {Obligation: "g/a", Result: "passed", User: "tester", At: now, Builds: builds}}
+}
+
+func TestManualTieToBuilds(t *testing.T) {
+	tests := []struct {
+		name    string
+		m       map[string]obligation.ManualResult
+		current []domain.BuildRef
+		tie     obligation.ManualTie
+		reason  string
+	}{
+		{"the same commit", passedOn(obligation.ManualBuild{Service: "orders", Commit: "9f3c2ab0000"}), current, obligation.TieCurrent, ""},
+		{"another commit", passedOn(obligation.ManualBuild{Service: "orders", Commit: "1111111"}), current, obligation.TieOther,
+			"checked by a person on another build: rerun the check and record it with --env"},
+		{"a service not read now", passedOn(obligation.ManualBuild{Service: "payments", Commit: "9f3c2ab0000"}), current, obligation.TieOther,
+			"checked by a person on another build: rerun the check and record it with --env"},
+		{"one of two services moved", passedOn(obligation.ManualBuild{Service: "orders", Commit: "9f3c2ab0000"}, obligation.ManualBuild{Service: "payments", Commit: "1"}),
+			append([]domain.BuildRef{{Service: "payments", Commit: "2"}}, current...), obligation.TieOther,
+			"checked by a person on another build: rerun the check and record it with --env"},
+		{"no builds recorded", passedOn(), current, obligation.TieNone, "recorded without --env, so it is not tied to a build"},
+		{"no builds recorded and none read", passedOn(), nil, obligation.TieUnread, "recorded without --env, so it is not tied to a build"},
+		{"builds not read", passedOn(obligation.ManualBuild{Service: "orders", Commit: "9f3c2ab0000"}), nil, obligation.TieUnread, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := results()
+			r.Current = tt.current
+			e := one(t, ob("g/a", manualReason), r, nil, tt.m)
+			if e.ManualTie != tt.tie {
+				t.Errorf("tie %v, want %v", e.ManualTie, tt.tie)
+			}
+			mustReason(t, e, "passed, checked by a person")
+			if tt.reason != "" && !hasReason(e, tt.reason) {
+				t.Errorf("reasons %q lack %q", e.Reasons, tt.reason)
+			}
+			if tt.reason == "" && len(e.Reasons) != 2 {
+				t.Errorf("reasons %q", e.Reasons)
+			}
+			if e.State != obligation.NeedsAPerson {
+				t.Errorf("state %s", e.State)
+			}
+		})
+	}
+}
+
+func TestSummaryCountsManualOnCurrentBuilds(t *testing.T) {
+	mk := func(ties ...obligation.ManualTie) []obligation.Entry {
+		var es []obligation.Entry
+		for _, tie := range ties {
+			es = append(es, obligation.Entry{State: obligation.NeedsAPerson, Manual: &obligation.ManualResult{Result: "passed"}, ManualTie: tie})
+		}
+		return es
+	}
+	tests := []struct {
+		name string
+		es   []obligation.Entry
+		want string
+	}{
+		{"all on current", mk(obligation.TieCurrent, obligation.TieCurrent), "2 use cases: 0 verified, 2 need a person. Checked by a person: 2 passed."},
+		{"some on current", mk(obligation.TieCurrent, obligation.TieOther, obligation.TieNone), "3 use cases: 0 verified, 3 need a person. Checked by a person: 3 passed (1 on the builds that run now)."},
+		{"none on current", mk(obligation.TieOther), "1 use case: 0 verified, 1 needs a person. Checked by a person: 1 passed (0 on the builds that run now)."},
+		{"builds not read", mk(obligation.TieUnread, obligation.TieUnread), "2 use cases: 0 verified, 2 need a person. Checked by a person: 2 passed."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := obligation.SummaryLine(tt.es); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

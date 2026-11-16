@@ -48,9 +48,49 @@ type Entry struct {
 	Reasons    []string
 	Covers     []Cover
 	Manual     *ManualResult
+	ManualTie  ManualTie // how a passed manual result relates to the builds that run now
 	Deferral   *Deferral // the deferral that holds: its expiry is after now
 	Expired    *Deferral // a deferral that was ignored because it expired
 	NoReason   bool      // no cover, no gap, and no manual reason
+}
+
+// ManualTie says how a passed manual result relates to the builds that the environment runs now
+// (Plan 21, D16). Only TieCurrent lets the exit code of the ledger count the result.
+type ManualTie int
+
+const (
+	TieUnread  ManualTie = iota // the builds of the environment were not read, or no passed result
+	TieCurrent                  // every service the result names runs the same commit now
+	TieOther                    // a service runs another commit, or was not read now
+	TieNone                     // the result names no build
+)
+
+const (
+	noteOtherBuild = "checked by a person on another build: rerun the check and record it with --env"
+	noteNoBuild    = "recorded without --env, so it is not tied to a build"
+)
+
+// manualTie relates a manual result to the current builds. A result that names no build is TieNone
+// whatever was read, and with the builds unread, a result that names some is TieUnread.
+func manualTie(m *ManualResult, current []domain.BuildRef) ManualTie {
+	switch {
+	case m == nil || m.Result != "passed":
+		return TieUnread
+	case len(m.Builds) == 0:
+		if current == nil {
+			return TieUnread
+		}
+		return TieNone
+	case current == nil:
+		return TieUnread
+	}
+	for _, b := range m.Builds {
+		i := slices.IndexFunc(current, func(c domain.BuildRef) bool { return c.Service == b.Service })
+		if i < 0 || current[i].Commit != b.Commit {
+			return TieOther
+		}
+	}
+	return TieCurrent
 }
 
 // Derive gives each obligation one state (L1). The first row of the table wins: failed, then
@@ -89,6 +129,7 @@ func deriveOne(o Located, r Results, deferrals map[string]Deferral, manual map[s
 	e := Entry{Obligation: o}
 	if m, ok := manual[o.ID]; ok {
 		e.Manual = &m
+		e.ManualTie = manualTie(e.Manual, r.Current)
 	}
 	var notes []string // the reason that a deferral gave, for the state of another row
 	if d, ok := deferrals[o.ID]; ok {
@@ -153,6 +194,12 @@ func deriveOne(o Located, r Results, deferrals map[string]Deferral, manual map[s
 		e.Reasons = append(e.Reasons, o.Manual.Text)
 		if e.Manual != nil {
 			e.Reasons = append(e.Reasons, e.Manual.Result+", checked by a person")
+			switch {
+			case e.ManualTie == TieOther:
+				e.Reasons = append(e.Reasons, noteOtherBuild)
+			case e.ManualTie == TieNone || (e.Manual.Result == "passed" && len(e.Manual.Builds) == 0):
+				e.Reasons = append(e.Reasons, noteNoBuild)
+			}
 		}
 	case covered && len(notPassed) == 0 && passed == len(e.Covers):
 		e.State = Verified

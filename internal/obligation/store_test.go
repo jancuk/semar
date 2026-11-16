@@ -393,3 +393,62 @@ func TestRecordsMadeByTheWriterHaveNoProblem(t *testing.T) {
 		t.Errorf("deferrals: %q, %v", problems, err)
 	}
 }
+
+func manualWithBuilds(builds string) string {
+	return `{"schema": 1, "obligation": "SHOP-482/difference-1", "result": "passed", "user": "x", "identity": "i", "at": "2026-11-17T09:00:00Z", "notes": "n"` + builds + `}`
+}
+
+func TestManualBuildsAreStoredAndRead(t *testing.T) {
+	root := t.TempDir()
+	s := obligation.NewStore(root)
+	m := result("a user", t0, "passed")
+	m.Builds = []obligation.ManualBuild{{Service: "orders", Commit: "9f3c2ab"}, {Service: "payments", Commit: "abc1234"}}
+	if err := s.Record(m); err != nil {
+		t.Fatal(err)
+	}
+	got, problems, err := s.Manual(now)
+	if err != nil || len(problems) != 0 {
+		t.Fatalf("%q, %v", problems, err)
+	}
+	if b := got["SHOP-482/difference-1"].Builds; len(b) != 2 || b[0].Service != "orders" || b[1].Commit != "abc1234" {
+		t.Errorf("builds %+v", b)
+	}
+}
+
+func TestManualWithoutBuildsStillReads(t *testing.T) {
+	root := t.TempDir()
+	plant(t, root, "manual", "x-"+itoa(t0.Unix())+".json", manualWithBuilds(""))
+	got, problems, err := obligation.NewStore(root).Manual(now)
+	if err != nil || len(problems) != 0 || len(got) != 1 || len(got["SHOP-482/difference-1"].Builds) != 0 {
+		t.Fatalf("got %+v, %q, %v", got, problems, err)
+	}
+}
+
+func TestManualRefusesHostileBuilds(t *testing.T) {
+	many := strings.Repeat(`{"service": "s", "commit": "abc1234"},`, 999) + `{"service": "s", "commit": "abc1234"}`
+	tests := []struct{ name, builds, want string }{
+		{"1000 builds", `, "builds": [` + many + `]`, "at most 32 builds"},
+		{"an empty commit", `, "builds": [{"service": "orders", "commit": ""}]`, "commit of a build is required"},
+		{"an empty service", `, "builds": [{"service": " ", "commit": "abc1234"}]`, "service of a build is required"},
+		{"a long commit", `, "builds": [{"service": "orders", "commit": "` + strings.Repeat("a", 500) + `"}]`, "longer than"},
+		{"a multiline service", `, "builds": [{"service": "a\nb", "commit": "abc1234"}]`, "one line"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			plant(t, root, "manual", "x-"+itoa(t0.Unix())+".json", manualWithBuilds(tt.builds))
+			got, problems, err := obligation.NewStore(root).Manual(now)
+			if err != nil || len(got) != 0 || len(problems) != 1 || !strings.Contains(problems[0], tt.want) {
+				t.Fatalf("got %+v, %q, %v", got, problems, err)
+			}
+		})
+	}
+	m := result("a user", t0, "passed")
+	m.Builds = make([]obligation.ManualBuild, 33)
+	for i := range m.Builds {
+		m.Builds[i] = obligation.ManualBuild{Service: "s", Commit: "abc1234"}
+	}
+	if err := obligation.NewStore(t.TempDir()).Record(m); err == nil {
+		t.Error("33 builds were stored")
+	}
+}
