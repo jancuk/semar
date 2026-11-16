@@ -42,6 +42,7 @@ func TestParseRefusals(t *testing.T) {
 		name, text, want string
 	}{
 		{"unknown key", edited(t, "version: 1.0.0", "version: 1.0.0\nretries: 3"), "retries"},
+		{"as in a fixture step", edited(t, "captures: [{ name: id, jsonpath: \"$.data[0].id\" }]", "captures: [{ name: id, jsonpath: \"$.data[0].id\" }]\n    as: carol"), "as"},
 		{"unknown key in a step", edited(t, "captures: [{ name: id, jsonpath: \"$.data[0].id\" }]", "captures: [{ name: id, jsonpath: \"$.data[0].id\" }]\n    retry: 2"), "retry"},
 		{"empty", "", "the file is empty"},
 		{"second document", exampleText(t) + "---\n" + exampleText(t), "more than one YAML document"},
