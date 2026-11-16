@@ -56,6 +56,7 @@ type Deps struct {
 	Catalogue Catalogue // fixture.Catalogue; nil adds no fixture service to the manifest
 	Builds    build.Prober
 	Services  map[string]string // service name to auth profile, "" when none
+	Accounts  []string          // the auth profiles of the configuration that a leg or a step may act as
 	Clock     func() time.Time
 	Sleep     func(ctx context.Context, d time.Duration) error // waits, or returns ctx.Err()
 }
@@ -70,6 +71,7 @@ func New(d Deps) *Runner {
 		d.Sleep = sleep
 	}
 	d.Services = maps.Clone(d.Services)
+	d.Accounts = slices.Clone(d.Accounts)
 	return &Runner{d: d}
 }
 
@@ -141,6 +143,13 @@ func (r *Runner) Run(ctx context.Context, j domain.Journey) (jr domain.JourneyRe
 
 	if ctx.Err() != nil {
 		notStarted(0, reasonInterrupted)
+		return finish()
+	}
+	if blocked := r.unknownAccounts(runs); len(blocked) > 0 {
+		// Nothing is read or sent: the builds are not probed for a journey that cannot run.
+		in.Start = domain.Manifest{Services: []domain.BuildRef{}, Hash: domain.ManifestHash(nil)}
+		in.AccountProblem = blocked
+		notStarted(0, "nothing was sent: "+blocked[0])
 		return finish()
 	}
 	services := r.manifestServices(j)
@@ -218,6 +227,23 @@ func (r *Runner) Run(ctx context.Context, j domain.Journey) (jr domain.JourneyRe
 	}
 	end = r.readEnd(ctx, services)
 	return finish()
+}
+
+// unknownAccounts gives one text for each auth profile that a leg or a step acts as and the
+// configuration lacks. The profile of the leg's service is the leg's own and is always known.
+func (r *Runner) unknownAccounts(runs []*legRun) []string {
+	var blocked []string
+	for _, lr := range runs {
+		for _, st := range lr.sc.Steps {
+			if st.As == "" || st.As == lr.sc.AuthProfile || slices.Contains(r.d.Accounts, st.As) {
+				continue
+			}
+			if text := "account " + st.As + " is not in the configuration"; !slices.Contains(blocked, text) {
+				blocked = append(blocked, text)
+			}
+		}
+	}
+	return blocked
 }
 
 // given resolves the journey's fixtures once, for every leg. It returns the texts that block the journey.

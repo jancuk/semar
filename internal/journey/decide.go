@@ -13,6 +13,7 @@ import (
 type Outcome struct {
 	ManifestProblem string
 	FixtureProblem  []string
+	AccountProblem  []string           // an account that a leg or a step acts as is not in the configuration
 	Legs            []domain.LegResult // in run order; legs that did not start are not_run
 	Invariants      []domain.InvariantResult
 	Start           domain.Manifest
@@ -47,6 +48,9 @@ func Decide(in Outcome) (domain.JourneyOutcome, domain.LegID, []domain.Reason) {
 
 	if in.ManifestProblem != "" {
 		add(1, domain.OutcomeBlocked, in.ManifestProblem)
+	}
+	for _, p := range in.AccountProblem {
+		add(1, domain.OutcomeBlocked, p)
 	}
 	for _, p := range in.FixtureProblem {
 		add(1, domain.OutcomeBlocked, p)

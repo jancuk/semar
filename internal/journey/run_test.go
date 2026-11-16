@@ -96,6 +96,7 @@ type rigOptions struct {
 	catalogue        Catalogue
 	prober           func(build.Prober) build.Prober
 	services         map[string]string
+	accounts         []string // the auth profiles of the configuration; default: the two services' and bob
 }
 
 type rig struct {
@@ -143,7 +144,7 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tokens := map[string]string{"orders-tester": "tok-alice", "payments-tester": "tok-pay"}
+	tokens := map[string]string{"orders-tester": "tok-alice", "payments-tester": "tok-pay", "bob": "tok-pay"}
 	red, err := redact.New(o.redact, func() []string { return []string{"tok-alice", "tok-pay"} }, testKey)
 	if err != nil {
 		t.Fatal(err)
@@ -189,11 +190,16 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	if services == nil {
 		services = map[string]string{"orders": "orders-tester", "payments": "payments-tester"}
 	}
+	accounts := o.accounts
+	if accounts == nil {
+		accounts = []string{"bob", "orders-tester", "payments-tester"}
+	}
 	r.runner = New(Deps{
 		Replay: replay.New(replay.Deps{
 			Engine: eng, Builds: prober, Confirm: confirm.NewLocal(root),
-			Trust: []domain.Source{domain.SourceDiff, domain.SourceBaseline}, Run: testRun,
+			Trust: []domain.Source{domain.SourceDiff, domain.SourceBaseline}, Run: testRun, Accounts: accounts,
 		}),
+		Accounts:  accounts,
 		Fixtures:  o.fixtures,
 		Catalogue: o.catalogue,
 		Builds:    prober,
@@ -780,5 +786,68 @@ func TestWaitEndedByAnErrorAnswerFails(t *testing.T) {
 	}
 	if results[2].Outcome != domain.OutcomeFailed {
 		t.Errorf("settled result = %s", results[2].Outcome)
+	}
+}
+
+func (r *rig) sentAs() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.profiles)
+}
+
+func TestLegAsSendsThatSessionOnItsStepsOnly(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	j := example(t)
+	j.Legs[1].As = "bob"
+	jr, _ := r.run(t, j)
+	if jr.Outcome != domain.JourneyPassed {
+		t.Fatalf("journey %s: %+v", jr.Outcome, jr.Reasons)
+	}
+	// leg settled waits, so it sends more than one request, all as its own profile
+	if got, want := r.sentAs(), []string{"orders-tester", "bob", "orders-tester", "orders-tester"}; !slices.Equal(got, want) {
+		t.Errorf("sessions = %v, want %v", got, want)
+	}
+}
+
+func TestStepAsBeatsTheLegAs(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	j := example(t)
+	j.Legs[1].As = "bob"
+	j.Legs[1].Steps[0].As = "payments-tester"
+	jr, _ := r.run(t, j)
+	if jr.Outcome != domain.JourneyPassed {
+		t.Fatalf("journey %s: %+v", jr.Outcome, jr.Reasons)
+	}
+	if got, want := r.sentAs(), []string{"orders-tester", "payments-tester", "orders-tester", "orders-tester"}; !slices.Equal(got, want) {
+		t.Errorf("sessions = %v, want %v", got, want)
+	}
+}
+
+func TestAnUnknownAccountBlocksTheJourneyBeforeAnyRequest(t *testing.T) {
+	for name, edit := range map[string]func(j *domain.Journey){
+		"on a leg":  func(j *domain.Journey) { j.Legs[2].As = "dave" },
+		"on a step": func(j *domain.Journey) { j.Legs[2].Steps[0].As = "dave" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t, rigOptions{})
+			j := example(t)
+			edit(&j)
+			jr, results := r.run(t, j)
+			if jr.Outcome != domain.JourneyBlocked {
+				t.Fatalf("journey %s: %+v", jr.Outcome, jr.Reasons)
+			}
+			if got := r.sentAs(); len(got) != 0 || r.app.Requests("", "/v1/") != 0 {
+				t.Errorf("requests were sent: %v", got)
+			}
+			if len(jr.Reasons) == 0 || jr.Reasons[0].Text != "account dave is not in the configuration" {
+				t.Errorf("reasons = %+v", jr.Reasons)
+			}
+			if got := outcomes(jr.Legs); !slices.Equal(got, []string{"place not_run", "pay not_run", "settled not_run"}) {
+				t.Errorf("legs = %v", got)
+			}
+			if len(results) != 3 {
+				t.Errorf("%d results", len(results))
+			}
+		})
 	}
 }
