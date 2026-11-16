@@ -41,7 +41,7 @@ func newLedgerCommand(o options) *cobra.Command {
 		Use:   "ledger",
 		Short: "Show the state of every use case, defer one, or record what a person checked",
 		Long: "Show one state for each use case of .semar/obligations: verified, failed, blocked, needs_a_person, or deferred.\n" +
-			"Exit 0 when every use case is verified or deferred and every manual result is passed, 1 when a use case failed or a manual result is failed, and 2 otherwise.\n" +
+			"Exit 0 when every use case is verified or deferred, or needs a person whose newest manual result passed on the builds that run now (recorded with --env), 1 when a use case failed or a manual result is failed, and 2 otherwise.\n" +
 			"Without --env the builds are not read, so a pass on any build counts: the exit code is then 2 at best, and the first line says so.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -429,15 +429,17 @@ func printChecklist(w io.Writer, entries []obligation.Entry) error {
 	return obligation.Checklist(w, entries, "")
 }
 
-// ledgerExitCode is 0 when every use case is verified or deferred and no manual result failed, 1
-// when a use case failed or a manual result failed, and 2 otherwise. With the builds not read, a
-// pass on any build counts, so nothing is confirmed current and the code is 2 at best.
+// ledgerExitCode is 0 when every use case is verified or deferred, or needs a person whose newest
+// manual result passed on the builds that run now (Plan 21, D16), 1 when a use case failed or a
+// manual result failed, and 2 otherwise. With the builds not read, a pass on any build counts, so
+// nothing is confirmed current and the code is 2 at best.
 func ledgerExitCode(entries []obligation.Entry, buildsRead bool) int {
 	code := ExitOK
 	for _, e := range entries {
 		switch {
 		case e.State == obligation.Failed || (e.Manual != nil && e.Manual.Result == "failed"):
 			return ExitFailed
+		case e.State == obligation.NeedsAPerson && e.ManualTie == obligation.TieCurrent:
 		case e.State != obligation.Verified && e.State != obligation.Deferred:
 			code = ExitUndecided
 		}
@@ -528,26 +530,36 @@ func deferUseCase(stdout io.Writer, o options, repo, id string, f deferFlags) er
 	return nil
 }
 
-type recordFlags struct{ notes string }
+type recordFlags struct {
+	notes  string
+	env    string
+	builds []string
+}
 
 func newLedgerRecordCommand(o options, dir *string) *cobra.Command {
 	var f recordFlags
 	cmd := &cobra.Command{
-		Use:   "record <id> passed|failed --notes <text>",
+		Use:   "record <id> passed|failed --notes <text> [--env <name>]",
 		Short: "Record what a person saw when they ran the manual checklist of a use case",
-		Long:  "Store the result of a manual check as a new record, under your name. It is counted apart and shown as checked by a person. It never makes a use case verified.",
-		Args:  cobra.ExactArgs(2),
+		Long: "Store the result of a manual check as a new record, under your name. It is counted apart and shown as checked by a person. It never makes a use case verified.\n" +
+			"With --env the record names the builds that the environment runs now, and `semar ledger --env` counts a pass toward its exit code only while those builds still run. Without --env the record is not tied to a build.",
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return recordResult(cmd.OutOrStdout(), cmd.ErrOrStderr(), o, *dir, args[0], args[1], f)
+			return recordResult(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, *dir, args[0], args[1], f)
 		},
 	}
 	cmd.Flags().StringVar(&f.notes, "notes", "", "what you saw, at most 2000 characters")
+	cmd.Flags().StringVar(&f.env, "env", "", "read the builds that this environment of semar.yaml runs now, and store them in the record")
+	cmd.Flags().StringArrayVar(&f.builds, "build", nil, "with --env, the commit that a service with no build probe runs, as <commit> or <service>=<commit>; repeat for more")
 	return cmd
 }
 
-func recordResult(stdout, stderr io.Writer, o options, repo, id, result string, f recordFlags) error {
+func recordResult(ctx context.Context, stdout, stderr io.Writer, o options, repo, id, result string, f recordFlags) error {
 	if result != "passed" && result != "failed" {
 		return fmt.Errorf("the result must be passed or failed, not %q", terminalSafe(oneLine(result)))
+	}
+	if len(f.builds) > 0 && f.env == "" {
+		return errors.New("--build needs --env: it names the build that a service without a probe runs now")
 	}
 	obs, err := loadObligations(repo)
 	if err != nil {
@@ -568,11 +580,29 @@ func recordResult(stdout, stderr io.Writer, o options, repo, id, result string, 
 	if err != nil {
 		return err
 	}
-	m := obligation.ManualResult{Obligation: id, Result: result, User: name, Identity: obligation.LocalIdentity, At: o.Clock().UTC(), Notes: f.notes}
+	var builds []obligation.ManualBuild
+	if f.env != "" {
+		current, err := currentBuilds(ctx, ledgerFlags{env: f.env, builds: f.builds, dir: repo})
+		if err != nil {
+			return err
+		}
+		for _, b := range current {
+			builds = append(builds, obligation.ManualBuild{Service: b.Service, Commit: b.Commit})
+		}
+	}
+	m := obligation.ManualResult{Obligation: id, Result: result, User: name, Identity: obligation.LocalIdentity, At: o.Clock().UTC(), Notes: f.notes, Builds: builds}
 	if err := obligation.NewStore(semarDir(repo)).Record(m); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "recorded %s for %s as %s (%s), checked by a person\n", result, terminalSafe(id), terminalSafe(oneLine(name)), obligation.LocalIdentity)
+	on := ""
+	if len(builds) > 0 {
+		parts := make([]string, len(builds))
+		for i, b := range builds {
+			parts[i] = terminalSafe(oneLine(b.Service)) + " " + terminalSafe(oneLine(b.Commit))
+		}
+		on = " on " + strings.Join(parts, ", ")
+	}
+	fmt.Fprintf(stdout, "recorded %s for %s as %s (%s), checked by a person%s\n", result, terminalSafe(id), terminalSafe(oneLine(name)), obligation.LocalIdentity, on)
 	return nil
 }
 

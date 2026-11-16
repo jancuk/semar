@@ -100,3 +100,18 @@ func TestLedgerEndToEndFailedScenario(t *testing.T) {
 		t.Errorf("a failed use case is listed as deferred:\n%s", res.stdout)
 	}
 }
+
+// A person's pass on the builds that run now lets a release gate go green, and a new build takes
+// that back (Plan 21, D16).
+func TestLedgerEndToEndManualResultOnTheBuild(t *testing.T) {
+	r := ledgerE2ERepo(t, sampleapp.Options{})
+	r.must(t, cli.ExitOK, "run", "--all")
+	r.must(t, cli.ExitOK, "ledger", "defer", gapObligation, "--reason", "r", "--until", inDays(7))
+	r.must(t, cli.ExitOK, "ledger", "defer", handObligation, "--reason", "r", "--until", inDays(7))
+	r.must(t, cli.ExitUndecided, "ledger", "--env", "local")
+
+	r.must(t, cli.ExitOK, "ledger", "record", manualObligation, "passed", "--notes", "looks right", "--env", "local")
+	res := r.must(t, cli.ExitOK, "ledger", "--env", "local")
+	contains(t, "the ledger", res.stdout, "Checked by a person: 1 passed.", "Needs a person (1)")
+	r.must(t, cli.ExitUndecided, "ledger")
+}

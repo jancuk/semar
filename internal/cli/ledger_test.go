@@ -666,3 +666,118 @@ func TestAScenarioIDOfTheFormOfALegIsRefused(t *testing.T) {
 		contains(t, "stderr", res.stderr, "invalid scenario ID", "checkout.pay")
 	}
 }
+
+// plantManual stores a manual result by hand, as an older or another build of Semar would have.
+func (r *repo) plantManual(t *testing.T, result, builds string) {
+	t.Helper()
+	r.writeRel(t, ".semar/store/obligations/SHOP-482/a/manual/tester-1794560400.json",
+		`{"schema": 1, "obligation": "SHOP-482/a", "result": "`+result+`", "user": "tester", "identity": "i", "at": "2026-11-13T09:00:00Z", "notes": "n"`+builds+`}`)
+}
+
+const (
+	buildsNow   = `, "builds": [{"service": "orders", "commit": "c0ffee1"}]`
+	buildsOther = `, "builds": [{"service": "orders", "commit": "9f3c2ab"}]`
+)
+
+func TestLedgerExitCodeWithManualResults(t *testing.T) {
+	tests := []struct {
+		name, result, builds string
+		failedScenario       bool
+		args                 []string
+		want                 int
+		lines                []string
+	}{
+		{"no manual result", "", "", false, []string{"--env", "local"}, cli.ExitUndecided, nil},
+		{"passed on the builds that run now", "passed", buildsNow, false, []string{"--env", "local"}, cli.ExitOK,
+			[]string{"Checked by a person: 1 passed."}},
+		{"passed without builds", "passed", "", false, []string{"--env", "local"}, cli.ExitUndecided,
+			[]string{"recorded without --env, so it is not tied to a build", "1 passed (0 on the builds that run now)"}},
+		{"passed on another commit", "passed", buildsOther, false, []string{"--env", "local"}, cli.ExitUndecided,
+			[]string{"checked by a person on another build: rerun the check and record it with --env", "1 passed (0 on the builds that run now)"}},
+		{"failed on the builds that run now", "failed", buildsNow, false, []string{"--env", "local"}, cli.ExitFailed,
+			[]string{"Checked by a person: 1 failed."}},
+		{"passed beside a failed scenario", "passed", buildsNow, true, []string{"--env", "local"}, cli.ExitFailed, nil},
+		{"passed without --env on the ledger", "passed", buildsNow, false, nil, cli.ExitUndecided,
+			[]string{"Checked by a person: 1 passed."}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newRepo(t, repoOptions{app: sampleapp.Options{Commit: "c0ffee1"}})
+			entries := []string{entry("SHOP-482/a", "By hand", manualEntryFields)}
+			if tt.failedScenario {
+				entries = append(entries, entry("SHOP-482/b", "Covered", "covers: ["+scenarioID+"]"))
+				r.putRun(t, "r-old-1", "", []domain.BuildRef{{Service: "orders", Commit: "c0ffee1"}}, true, scenarioResult(scenarioID, domain.OutcomeFailed, "boom"))
+			}
+			r.ledgerFile(t, obligations("SHOP-482", entries...))
+			if tt.result != "" {
+				r.plantManual(t, tt.result, tt.builds)
+			}
+			res := r.must(t, tt.want, append([]string{"ledger"}, tt.args...)...)
+			contains(t, "the ledger", res.stdout, tt.lines...)
+			if strings.Contains(res.stdout, "1 verified") && !strings.Contains(res.stdout, "0 verified") && !tt.failedScenario {
+				t.Errorf("a manual result counted as a pass:\n%s", res.stdout)
+			}
+		})
+	}
+}
+
+func TestRecordWithEnvStoresTheBuilds(t *testing.T) {
+	r := newRepo(t, repoOptions{app: sampleapp.Options{Commit: "c0ffee1"}})
+	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "By hand", manualEntryFields)))
+
+	res := r.must(t, cli.ExitOK, "ledger", "record", "SHOP-482/a", "passed", "--notes", "ok", "--env", "local")
+	contains(t, "the record", res.stdout, "recorded passed for SHOP-482/a as tester", "checked by a person on orders c0ffee1")
+	files, err := filepath.Glob(r.path(".semar", "store", "obligations", "SHOP-482", "a", "manual", "*.json"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("%v %v", files, err)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, "the stored record", string(data), `"service": "orders"`, `"commit": "c0ffee1"`)
+	if strings.Contains(string(data), "configHash") {
+		t.Errorf("the record holds more than the service and the commit:\n%s", data)
+	}
+
+	// Without --env, the record has no builds.
+	res = r.must(t, cli.ExitOK, "ledger", "record", "SHOP-482/a", "passed", "--notes", "ok")
+	if strings.Contains(res.stdout, " on ") {
+		t.Errorf("a record without --env names builds: %s", res.stdout)
+	}
+}
+
+func TestRecordBuildNeedsEnvAndEnvMustBeReadable(t *testing.T) {
+	r := ledgerRepo(t)
+	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "By hand", manualEntryFields)))
+	res := r.must(t, cli.ExitError, "ledger", "record", "SHOP-482/a", "passed", "--notes", "x", "--build", "abcdef1")
+	contains(t, "stderr", res.stderr, "--build needs --env")
+	res = r.must(t, cli.ExitError, "ledger", "record", "SHOP-482/a", "passed", "--notes", "x", "--env", "local")
+	contains(t, "stderr", res.stderr, "the build of orders could not be read")
+	if exists(t, r.path(".semar", "store", "obligations")) {
+		t.Error("a refused record was stored")
+	}
+}
+
+func TestLedgerRefusesHostileBuildsOnRead(t *testing.T) {
+	many := strings.Repeat(`{"service": "orders", "commit": "c0ffee1"},`, 999) + `{"service": "orders", "commit": "c0ffee1"}`
+	for name, builds := range map[string]string{
+		"1000 builds":     `, "builds": [` + many + `]`,
+		"an empty commit": `, "builds": [{"service": "orders", "commit": ""}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := ledgerRepo(t)
+			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "By hand", manualEntryFields)))
+			r.plantManual(t, "passed", builds)
+			res := r.must(t, cli.ExitError, "ledger")
+			contains(t, "stderr", res.stderr, "manual record", "is not counted")
+			if res.stdout != "" {
+				t.Errorf("a table was printed:\n%s", res.stdout)
+			}
+		})
+	}
+	r := ledgerRepo(t)
+	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "By hand", manualEntryFields)))
+	r.plantManual(t, "passed", "")
+	r.must(t, cli.ExitUndecided, "ledger")
+}
