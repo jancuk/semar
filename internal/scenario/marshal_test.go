@@ -423,3 +423,86 @@ func FuzzMarshal(f *testing.F) {
 		}
 	})
 }
+
+func TestMarshalRoundTripsGiven(t *testing.T) {
+	tests := []struct {
+		name  string
+		given []domain.Given
+		want  []domain.Given // what Parse gives back. Nil means the same as given
+	}{
+		{"one entry", []domain.Given{{Fixture: "order.paid", As: "order"}}, nil},
+		{"with and lease", []domain.Given{{Fixture: "order.paid", As: "order", With: map[string]string{"customer": "c-1", "amount": "1000"}, Lease: domain.LeaseExclusive}}, nil},
+		{"two entries", []domain.Given{{Fixture: "customer.verified", As: "customer"}, {Fixture: "order.paid", As: "order", With: map[string]string{"customer": "{{data.customers.default}}"}}}, nil},
+		{"values that look like other types", []domain.Given{{Fixture: "f.x", As: "a", With: map[string]string{"status": "true", "count": "3", "equals": "1.50", "n": "null", "d": "2026-11-14", "e": "", "m": "a: b", "o": "010"}}}, nil},
+		{"keys that look like other types", []domain.Given{{Fixture: "f.x", As: "a", With: map[string]string{"y": "1", "n": "2", "on": "3"}}}, nil},
+		{"unicode and control text", []domain.Given{{Fixture: "f.x", As: "a", With: map[string]string{"c": "café   \x1b"}}}, nil},
+		{"an empty with is none", []domain.Given{{Fixture: "f.x", As: "a", With: map[string]string{}}}, []domain.Given{{Fixture: "f.x", As: "a"}}},
+		{"an empty list is none", []domain.Given{}, nil},
+		{"no list", nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := oneCheck(domain.Check{Status: ptr(200)})
+			in.Given = tt.given
+			want := in
+			switch {
+			case tt.want != nil:
+				want.Given = tt.want
+			case len(tt.given) == 0:
+				want.Given = nil
+			}
+			data := roundTrip(t, in, want)
+			if len(want.Given) == 0 && strings.Contains(string(data), "given") {
+				t.Errorf("no given entries must write no given key\n%s", data)
+			}
+		})
+	}
+}
+
+func TestMarshalWritesGivenBetweenAuthProfileAndSteps(t *testing.T) {
+	in := oneCheck(domain.Check{Status: ptr(200)})
+	in.AuthProfile = "tester"
+	in.Given = []domain.Given{{Fixture: "order.paid", As: "order", With: map[string]string{"zeta": "1", "alpha": "2"}}}
+	data := string(roundTrip(t, in, in))
+	auth, given, steps := strings.Index(data, "authProfile:"), strings.Index(data, "given:"), strings.Index(data, "steps:")
+	if auth < 0 || !(auth < given && given < steps) {
+		t.Fatalf("given must follow authProfile and precede steps\n%s", data)
+	}
+	if strings.Index(data, "alpha:") > strings.Index(data, "zeta:") {
+		t.Fatalf("with must be in key order\n%s", data)
+	}
+	for i := range 20 {
+		again, err := scenario.Marshal(in)
+		if err != nil || string(again) != data {
+			t.Fatalf("call %d differs: %v\n%s", i, err, again)
+		}
+	}
+}
+
+func TestMarshalGivenKeepsTheHash(t *testing.T) {
+	in := oneCheck(domain.Check{Status: ptr(200)})
+	in.Given = []domain.Given{{Fixture: "order.paid", As: "order", With: map[string]string{"customer": "c-1"}, Lease: domain.LeaseExclusive}}
+	data, err := scenario.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := scenario.Parse(data, "m.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if domain.ExpectHash(back) != domain.ExpectHash(in) {
+		t.Fatal("the hash changed in the round trip")
+	}
+	in.Given = nil
+	if domain.ExpectHash(back) == domain.ExpectHash(in) {
+		t.Fatal("the hash must cover given")
+	}
+}
+
+func TestMarshalRefusesGivenTextThatParseCannotHold(t *testing.T) {
+	in := oneCheck(domain.Check{Status: ptr(200)})
+	in.Given = []domain.Given{{Fixture: "f.x", As: "a", With: map[string]string{"c": "a\xffb"}}}
+	if _, err := scenario.Marshal(in); err == nil || !strings.Contains(err.Error(), "given[0].with.c") || !strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("got %v", err)
+	}
+}

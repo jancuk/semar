@@ -30,6 +30,13 @@ var (
 // Validate returns every reason the script cannot stand for the scenario.
 // An empty hash never matches, even when both sides are empty.
 func Validate(sc domain.Scenario, s domain.Script) []Problem {
+	return ValidateWith(sc, s, nil)
+}
+
+// ValidateWith is Validate for a scenario with given entries. outputs maps each alias to the
+// output names of its fixture. With nil outputs, any <as>.<name> of a declared alias is accepted.
+// run.id is always known. An alias counts as an earlier capture for every step.
+func ValidateWith(sc domain.Scenario, s domain.Script, outputs map[string][]string) []Problem {
 	var ps []Problem
 	add := func(step domain.StepID, format string, args ...any) {
 		ps = append(ps, Problem{Step: step, Message: fmt.Sprintf(format, args...)})
@@ -61,6 +68,7 @@ func Validate(sc domain.Scenario, s domain.Script) []Problem {
 
 	bound := map[domain.StepID]bool{}
 	captured := map[string]bool{}
+	unknown := variableCheck(sc, captured, outputs)
 	lastIndex, outOfOrder := -1, false
 	for _, ss := range s.Steps {
 		i, known := index[ss.Step]
@@ -84,7 +92,7 @@ func Validate(sc domain.Scenario, s domain.Script) []Problem {
 			if known {
 				hint = sc.Steps[i].Hint
 			}
-			ps = append(ps, validateRequest(ss, hint, len(captured) > 0, captured)...)
+			ps = append(ps, validateRequestWith(ss, hint, len(captured) > 0, unknown)...)
 		}
 
 		seen := map[string]bool{}
@@ -123,12 +131,25 @@ func hasRequest(s domain.Script, id domain.StepID) bool {
 	return slices.ContainsFunc(s.Steps, func(ss domain.ScriptStep) bool { return ss.Step == id && ss.Request != nil })
 }
 
-func validateRequest(ss domain.ScriptStep, hint *domain.RequestHint, hasEarlierCapture bool, captured map[string]bool) []Problem {
-	var ps []Problem
-	add := func(format string, args ...any) {
-		ps = append(ps, Problem{Step: ss.Step, Message: fmt.Sprintf(format, args...)})
+// RequestProblems holds the request rules of Validate that need no scenario step: a service, a
+// known method, a path, header names and values, and well-formed variables. known says whether a
+// variable may be used. Each problem is plain text, and one that has a place starts with it.
+func RequestProblems(r domain.APIRequest, known func(name string) bool) []string {
+	out := requestProblems(r)
+	for _, t := range templates(r) {
+		for _, m := range variablePattern.FindAllStringSubmatch(t.text, -1) {
+			if !known(m[1]) {
+				out = append(out, fmt.Sprintf("%s: {{%s}} is not a known variable", t.where, m[1]))
+			}
+		}
 	}
-	r := ss.Request
+	return out
+}
+
+// requestProblems is RequestProblems without the check that a variable is known.
+func requestProblems(r domain.APIRequest) []string {
+	var out []string
+	add := func(format string, args ...any) { out = append(out, fmt.Sprintf(format, args...)) }
 
 	if r.Service == "" {
 		add("the request has no service")
@@ -152,15 +173,79 @@ func validateRequest(ss domain.ScriptStep, hint *domain.RequestHint, hasEarlierC
 			add("%s", msg)
 		}
 	}
-	for _, m := range templateProblems(*r) {
+	for _, m := range templateProblems(r) {
+		add("%s", m)
+	}
+	return out
+}
+
+// variableCheck gives the problem of one variable name, or "" when a step may use it. captured is
+// read when the check runs, so it sees the captures of the steps before the one in hand.
+func variableCheck(sc domain.Scenario, captured map[string]bool, outputs map[string][]string) func(name string) string {
+	fixtureOf := make(map[string]domain.FixtureID, len(sc.Given))
+	for _, g := range sc.Given {
+		if _, dup := fixtureOf[g.As]; !dup {
+			fixtureOf[g.As] = g.Fixture
+		}
+	}
+	return func(name string) string {
+		if name == "run.id" || captured[name] {
+			return ""
+		}
+		head, rest, dotted := strings.Cut(name, ".")
+		if !dotted {
+			return fmt.Sprintf("%s is used before any step captures it", name)
+		}
+		switch head {
+		case "secret":
+			return fmt.Sprintf("malformed variable {{%s}}: a script cannot use a secret", name)
+		case "data":
+			return fmt.Sprintf("%s cannot be used in a script: put a data value in a fixture parameter or in a with value", name)
+		}
+		fx, ok := fixtureOf[head]
+		if !ok {
+			return fmt.Sprintf("%s is not a capture, run.id, or an output of a given entry: no given entry has as %s", name, head)
+		}
+		if outputs == nil {
+			if namePattern.MatchString(rest) {
+				return ""
+			}
+			return fmt.Sprintf("%s is not an output of fixture %s", name, fx)
+		}
+		outs := outputs[head]
+		if slices.Contains(outs, rest) {
+			return ""
+		}
+		if len(outs) == 0 {
+			return fmt.Sprintf("%s is not an output of fixture %s; it has no known outputs", name, fx)
+		}
+		return fmt.Sprintf("%s is not an output of fixture %s; its outputs are %s", name, fx, strings.Join(outs, ", "))
+	}
+}
+
+func validateRequest(ss domain.ScriptStep, hint *domain.RequestHint, hasEarlierCapture bool, captured map[string]bool) []Problem {
+	return validateRequestWith(ss, hint, hasEarlierCapture, variableCheck(domain.Scenario{}, captured, nil))
+}
+
+func validateRequestWith(ss domain.ScriptStep, hint *domain.RequestHint, hasEarlierCapture bool, unknown func(name string) string) []Problem {
+	var ps []Problem
+	add := func(format string, args ...any) {
+		ps = append(ps, Problem{Step: ss.Step, Message: fmt.Sprintf(format, args...)})
+	}
+	r := ss.Request
+
+	for _, m := range requestProblems(*r) {
 		add("%s", m)
 	}
 
 	names := variables(*r)
 	sort.Strings(names)
 	for i, n := range names {
-		if (i == 0 || names[i-1] != n) && !captured[n] {
-			add("%s is used before any step captures it", n)
+		if i > 0 && names[i-1] == n {
+			continue
+		}
+		if msg := unknown(n); msg != "" {
+			add("%s", msg)
 		}
 	}
 

@@ -3,12 +3,18 @@ package scenario
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"regexp"
+	"slices"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/theory/jsonpath"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/idcheck"
 )
 
 type Origin int
@@ -23,6 +29,18 @@ type Problem struct{ Path, Message string }
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 const idRule = "must match ^[A-Za-z0-9][A-Za-z0-9._-]*$"
+
+const (
+	maxGiven      = 8
+	maxFixtureID  = 64
+	maxWithValue  = 256
+	fixtureIDRule = "must match ^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)*$"
+)
+
+var (
+	fixtureIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*$`)
+	namePattern      = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+)
 
 func Validate(s domain.Scenario, origin Origin) []Problem {
 	var ps []Problem
@@ -50,6 +68,7 @@ func Validate(s domain.Scenario, origin Origin) []Problem {
 	if len(s.Steps) == 0 {
 		add("steps", "at least one step is required")
 	}
+	ps = append(ps, validateGiven(s.Given)...)
 
 	seen := map[domain.StepID]bool{}
 	for i, st := range s.Steps {
@@ -146,6 +165,61 @@ func validateExpectation(path string, e domain.Expectation, origin Origin) []Pro
 		}
 		if _, err := json.Marshal(v.val); err != nil {
 			add(cp, "%s cannot be encoded as JSON: %v", v.name, err)
+		}
+	}
+	return ps
+}
+
+func validateGiven(given []domain.Given) []Problem {
+	var ps []Problem
+	add := func(path, format string, args ...any) {
+		ps = append(ps, Problem{Path: path, Message: fmt.Sprintf(format, args...)})
+	}
+	if len(given) > maxGiven {
+		add("given", "at most %d given entries are allowed, there are %d", maxGiven, len(given))
+	}
+	aliases := map[string]bool{}
+	for i, g := range given {
+		p := fmt.Sprintf("given[%d]", i)
+		switch id := string(g.Fixture); {
+		case !fixtureIDPattern.MatchString(id):
+			add(p+".fixture", "fixture %q "+fixtureIDRule, id)
+		case len(id) > maxFixtureID:
+			add(p+".fixture", "fixture %q is longer than %d bytes", id, maxFixtureID)
+		default:
+			if err := idcheck.Check("fixture ID", id); err != nil {
+				add(p+".fixture", "%v", err)
+			}
+		}
+		switch {
+		case !namePattern.MatchString(g.As):
+			add(p+".as", "as %q must match ^[a-z][a-z0-9_]*$", g.As)
+		case g.As == "run" || g.As == "data":
+			add(p+".as", "the name %s is reserved", g.As)
+		case aliases[g.As]:
+			add(p+".as", "%s is used twice", g.As)
+		}
+		aliases[g.As] = true
+
+		for _, k := range slices.Sorted(maps.Keys(g.With)) {
+			wp := fmt.Sprintf("%s.with.%s", p, k)
+			if !namePattern.MatchString(k) || k == "run" || k == "data" {
+				add(p+".with", "key %q must match ^[a-z][a-z0-9_]*$ and not be run or data", k)
+			}
+			v := g.With[k]
+			switch {
+			case len(v) > maxWithValue:
+				add(wp, "the value is longer than %d bytes", maxWithValue)
+			case !utf8.ValidString(v):
+				add(wp, "the value is not valid UTF-8")
+			case strings.ContainsFunc(v, unicode.IsControl):
+				add(wp, "the value holds a control character")
+			}
+		}
+		switch g.Lease {
+		case "", domain.LeaseExclusive:
+		default:
+			add(p+".lease", "lease must be exclusive or empty")
 		}
 	}
 	return ps

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"reflect"
 	"regexp"
@@ -52,6 +53,18 @@ func Marshal(s domain.Scenario) ([]byte, error) {
 	put(root, "intent", e.str("intent", s.Intent))
 	put(root, "surface", e.str("surface", string(s.Surface)))
 	put(root, "authProfile", e.str("authProfile", s.AuthProfile))
+	if len(s.Given) > 0 {
+		given := sequence()
+		want.Given = make([]domain.Given, len(s.Given))
+		for i, g := range s.Given {
+			var n *yaml.Node
+			n, want.Given[i] = e.given(fmt.Sprintf("given[%d]", i), g)
+			given.Content = append(given.Content, n)
+		}
+		put(root, "given", given)
+	} else {
+		want.Given = nil
+	}
 	if s.Steps != nil {
 		steps := sequence()
 		want.Steps = make([]domain.Step, len(s.Steps))
@@ -97,6 +110,26 @@ func (e *enc) fail(path, format string, args ...any) {
 	if e.err == nil {
 		e.err = fmt.Errorf("%s: %s", path, fmt.Sprintf(format, args...))
 	}
+}
+
+func (e *enc) given(path string, g domain.Given) (*yaml.Node, domain.Given) {
+	want := g
+	n := mapping()
+	put(n, "fixture", e.str(path+".fixture", string(g.Fixture)))
+	put(n, "as", e.str(path+".as", g.As))
+	want.With = nil
+	if len(g.With) > 0 {
+		with := mapping()
+		for _, k := range slices.Sorted(maps.Keys(g.With)) {
+			put2(with, e.str(path+" with key "+strconv.Quote(k), k), e.str(path+".with."+k, g.With[k]))
+		}
+		put(n, "with", with)
+		want.With = maps.Clone(g.With)
+	}
+	if g.Lease != "" {
+		put(n, "lease", e.str(path+".lease", string(g.Lease)))
+	}
+	return n, want
 }
 
 func (e *enc) step(path string, st domain.Step) (*yaml.Node, domain.Step) {

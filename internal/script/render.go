@@ -12,7 +12,8 @@ import (
 )
 
 var (
-	variablePattern = regexp.MustCompile(`\{\{([A-Za-z][A-Za-z0-9_]*)\}\}`)
+	// A dotted name is <as>.<output>, run.id, or data.<key>. A capture name has no dot.
+	variablePattern = regexp.MustCompile(`\{\{([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*)\}\}`)
 	namePattern     = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 )
 

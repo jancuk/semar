@@ -68,6 +68,10 @@ func FuzzRender(f *testing.F) {
 	f.Add("/v1/orders/%{{id}}", "x", "2f", "")
 	f.Add("/v1/%25{{id}}", "x", "2e", "")
 	f.Add(`/v1\{{id}}`, "x", "1", "")
+	f.Add("/v1/orders/{{order.id}}", "order.id", "o-1", "{{order.id}}")
+	f.Add("/v1/orders/{{order.id}}", "order.id", "../admin", "{{run.id}}")
+	f.Add("/v1/{{run.id}}/{{data.a.b}}", "run.id", "r%2f", "{{a.}}")
+	f.Add("/v1/{{a..b}}", "a..b", "x", "")
 	f.Fuzz(func(t *testing.T, path, name, value, other string) {
 		req := domain.APIRequest{
 			Path:    path,

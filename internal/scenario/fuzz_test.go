@@ -21,6 +21,10 @@ func FuzzParse(f *testing.F) {
 	f.Add([]byte("steps:\n  - id: s\n    expect:\n      - check: {jsonpath: $.a, greater: .nan}\n        source: diff\n"))
 	f.Add([]byte("steps:\n  - id: s\n    expect:\n      - check: {jsonpath: $.a, equals: {1: x}}\n        source: diff\n"))
 	f.Add([]byte("\x00\xff: !!binary ~\n"))
+	f.Add([]byte("given:\n  - fixture: order.paid\n    as: order\n    with: { customer: c-1, count: 3 }\n    lease: exclusive\nsteps:\n  - id: s\n"))
+	f.Add([]byte("given:\n  - fixture: order.paid\n    as: order\n    with: { status: paid, equals: 1.50, greater: .inf }\nsteps:\n  - id: s\n"))
+	f.Add([]byte("given: [{fixture: a.b, as: x}, {fixture: a.b, as: x}]\nsteps:\n  - id: s\n"))
+	f.Add([]byte("given:\n  - fixture: \"{{order.id}}\"\n    as: \"a.b\"\n    with: { \"{{x.y}}\": \"{{data.k}}\" }\n"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		s, err := scenario.Parse(data, "fuzz.yaml")
 		if err != nil {

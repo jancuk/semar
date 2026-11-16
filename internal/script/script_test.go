@@ -160,8 +160,8 @@ func TestValidate(t *testing.T) {
 			s.Steps[1].Request.Path = "/v1/orders/{{ order_id }}/refunds"
 		}, "malformed variable"},
 		{"open brace pair in a path", func(_ *domain.Scenario, s *domain.Script) { s.Steps[1].Request.Path = "/v1/orders/{{/refunds" }, "malformed variable"},
-		{"dotted variable in a query", func(_ *domain.Scenario, s *domain.Script) {
-			s.Steps[0].Request.Query = map[string]string{"a": "{{a.b}}"}
+		{"dotted variable with an empty part in a query", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Request.Query = map[string]string{"a": "{{a..b}}"}
 		}, "malformed variable"},
 		{"malformed variable in a header", func(_ *domain.Scenario, s *domain.Script) {
 			s.Steps[0].Request.Headers = map[string]string{"A": "{{ x }}"}
@@ -204,10 +204,10 @@ func TestValidate(t *testing.T) {
 		}, ""},
 		{"a malformed variable names its key", func(_ *domain.Scenario, s *domain.Script) {
 			s.Steps[0].Request.Headers = map[string]string{"X-A": "{{ x }}"}
-			s.Steps[0].Request.Query = map[string]string{"page": "{{a.b}}"}
+			s.Steps[0].Request.Query = map[string]string{"page": "{{a..b}}"}
 		}, "header X-A: "},
 		{"a malformed variable in a query names its key", func(_ *domain.Scenario, s *domain.Script) {
-			s.Steps[0].Request.Query = map[string]string{"page": "{{a.b}}"}
+			s.Steps[0].Request.Query = map[string]string{"page": "{{a..b}}"}
 		}, "query page: "},
 		{"a malformed variable in a json body names its place", func(_ *domain.Scenario, s *domain.Script) {
 			s.Steps[0].Request.JSON = map[string]any{"a": []any{"x", "{{"}}
@@ -394,7 +394,8 @@ func TestRender(t *testing.T) {
 		{name: "header with a nul", vars: map[string]string{"x": "a\x00b"}, req: domain.APIRequest{Path: "/x", Headers: map[string]string{"A": "{{x}}"}}, wantErr: "x"},
 		{name: "header with a del", vars: map[string]string{"x": "a\x7fb"}, req: domain.APIRequest{Path: "/x", Headers: map[string]string{"A": "{{x}}"}}, wantErr: "x"},
 		{name: "spaced variable", vars: base, req: domain.APIRequest{Path: "/x/{{ order_id }}"}, wantErr: "malformed"},
-		{name: "dotted variable", vars: base, req: domain.APIRequest{Path: "/x", Query: map[string]string{"a": "{{a.b}}"}}, wantErr: "malformed"},
+		{name: "dotted variable with an empty part", vars: base, req: domain.APIRequest{Path: "/x", Query: map[string]string{"a": "{{a..b}}"}}, wantErr: "malformed"},
+		{name: "dotted variable ending in a dot", vars: base, req: domain.APIRequest{Path: "/x", Query: map[string]string{"a": "{{a.}}"}}, wantErr: "malformed"},
 		{name: "variable starting with underscore", vars: map[string]string{"_a": "1"}, req: domain.APIRequest{Path: "/x/{{_a}}"}, wantErr: "malformed"},
 	}
 	for _, c := range cases {
@@ -491,5 +492,177 @@ func TestRenderValueIsNotRenderedAgain(t *testing.T) {
 	}
 	if got.Query["q"] != "{{b}}" {
 		t.Fatalf("got %q", got.Query["q"])
+	}
+}
+
+func TestRenderDottedVariable(t *testing.T) {
+	vars := map[string]string{"order.id": "o-7", "run.id": "r-1"}
+	got, err := script.Render(domain.APIRequest{
+		Path:  "/v1/orders/{{order.id}}",
+		Query: map[string]string{"ref": "semar-{{run.id}}"},
+		JSON:  map[string]any{"orderId": "{{order.id}}"},
+	}, vars)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Path != "/v1/orders/o-7" || got.Query["ref"] != "semar-r-1" || got.JSON.(map[string]any)["orderId"] != "o-7" {
+		t.Fatalf("got %#v", got)
+	}
+
+	for _, val := range []string{"a/b", "..", "", "x?y", `a\b`, "s3cr3t/value"} {
+		_, err := script.Render(domain.APIRequest{Path: "/v1/orders/{{order.id}}"}, map[string]string{"order.id": val})
+		if err == nil {
+			t.Fatalf("value %q was accepted in a path", val)
+		}
+		if !strings.Contains(err.Error(), "order.id") || strings.Contains(err.Error(), "s3cr3t") || (val != "" && strings.Contains(err.Error(), val)) {
+			t.Fatalf("error %q must name the variable and not the value %q", err, val)
+		}
+	}
+
+	if _, err := script.Render(domain.APIRequest{Path: "/v1/{{order.nope}}"}, vars); err == nil || !strings.Contains(err.Error(), "unknown variable order.nope") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// withGiven gives the valid pair a given entry and a request that reads its output.
+func withGiven(t *testing.T) (domain.Scenario, domain.Script) {
+	t.Helper()
+	sc, s := loadPair(t)
+	sc.Given = []domain.Given{{Fixture: "order.paid", As: "order"}}
+	s.ExpectHash = domain.ExpectHash(sc)
+	s.Steps[0].Captures = nil
+	s.Steps[1].Request.Path = "/v1/orders/{{order.id}}/refunds"
+	s.Steps[2].Request.Path = "/v1/orders/{{order.id}}"
+	return sc, s
+}
+
+func messages(ps []script.Problem) []string {
+	var out []string
+	for _, p := range ps {
+		out = append(out, p.Message)
+	}
+	return out
+}
+
+func TestValidateWithAliasCountsAsCapture(t *testing.T) {
+	sc, s := withGiven(t)
+	// The first step reads the alias before any step has captured anything.
+	s.Steps[0].Request.Path = "/v1/orders"
+	s.Steps[0].Request.Query = map[string]string{"ref": "{{order.id}}"}
+	for _, outputs := range []map[string][]string{nil, {"order": {"id"}}} {
+		if ps := script.ValidateWith(sc, s, outputs); len(ps) != 0 {
+			t.Fatalf("outputs %v: got %+v", outputs, ps)
+		}
+	}
+	if ps := script.Validate(sc, s); len(ps) != 0 {
+		t.Fatalf("Validate must accept an alias of a declared given entry: %+v", ps)
+	}
+}
+
+func TestValidateWithOutputs(t *testing.T) {
+	cases := []struct {
+		name    string
+		change  func(*domain.Scenario, *domain.Script)
+		outputs map[string][]string
+		want    string // substring of one message. Empty means no problem
+	}{
+		{"known output", func(*domain.Scenario, *domain.Script) {}, map[string][]string{"order": {"id", "total"}}, ""},
+		{"unknown output", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[2].Request.Path = "/v1/orders/{{order.total}}"
+		}, map[string][]string{"order": {"id"}}, "order.total is not an output of fixture order.paid; its outputs are id"},
+		{"unknown output with no outputs", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[2].Request.Path = "/v1/orders/{{order.total}}"
+		}, map[string][]string{}, "order.total is not an output of fixture order.paid; it has no known outputs"},
+		{"unknown alias", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[2].Request.Path = "/v1/orders/{{customer.id}}"
+		}, map[string][]string{"order": {"id"}}, "no given entry has as customer"},
+		{"unknown alias with nil outputs", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[2].Request.Path = "/v1/orders/{{customer.id}}"
+		}, nil, "no given entry has as customer"},
+		{"alias used with no given entries", func(sc *domain.Scenario, s *domain.Script) {
+			sc.Given = nil
+			s.ExpectHash = domain.ExpectHash(*sc)
+		}, nil, "no given entry has as order"},
+		{"run.id without a fixture", func(sc *domain.Scenario, s *domain.Script) {
+			sc.Given = nil
+			s.ExpectHash = domain.ExpectHash(*sc)
+			s.Steps[1].Request.Path = "/v1/orders/{{order_id}}/refunds"
+			s.Steps[2].Request.Path = "/v1/orders/{{order_id}}"
+			s.Steps[0].Captures = []domain.Capture{{Name: "order_id", JSONPath: "$.data.id"}}
+			s.Steps[2].Request.Query = map[string]string{"ref": "semar-{{run.id}}"}
+		}, nil, ""},
+		{"data in a script", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[2].Request.Query = map[string]string{"c": "{{data.customers.default}}"}
+		}, nil, "data.customers.default cannot be used in a script"},
+		{"secret in a script", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[2].Request.Headers = map[string]string{"X-Key": "{{secret.TOKEN}}"}
+		}, nil, "a script cannot use a secret"},
+		{"dotted name with a nested part", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[2].Request.Query = map[string]string{"c": "{{order.id.x}}"}
+		}, nil, "order.id.x is not an output of fixture order.paid"},
+		{"a capture cannot take a dotted name", func(_ *domain.Scenario, s *domain.Script) {
+			s.Steps[0].Captures = []domain.Capture{{Name: "order.id", JSONPath: "$.id"}}
+		}, nil, "capture name order.id is not a valid variable name"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sc, s := withGiven(t)
+			c.change(&sc, &s)
+			ps := script.ValidateWith(sc, s, c.outputs)
+			if c.want == "" {
+				if len(ps) != 0 {
+					t.Fatalf("want no problem, got %+v", ps)
+				}
+				return
+			}
+			for _, m := range messages(ps) {
+				if strings.Contains(m, c.want) {
+					return
+				}
+			}
+			t.Fatalf("want a problem with %q, got %v", c.want, messages(ps))
+		})
+	}
+}
+
+func TestValidateWithoutGivenIsValidate(t *testing.T) {
+	sc, s := loadPair(t)
+	s.Steps[0].Captures = nil
+	if !reflect.DeepEqual(script.Validate(sc, s), script.ValidateWith(sc, s, nil)) {
+		t.Fatal("Validate must equal ValidateWith with nil outputs")
+	}
+}
+
+func TestRequestProblems(t *testing.T) {
+	known := func(name string) bool { return name == "id" || name == "run.id" }
+	cases := []struct {
+		name string
+		req  domain.APIRequest
+		want []string // substrings, one per problem, in order. Empty means no problem
+	}{
+		{"valid", domain.APIRequest{Service: "orders", Method: "GET", Path: "/v1/orders/{{id}}", Query: map[string]string{"ref": "semar-{{run.id}}"}}, nil},
+		{"no service", domain.APIRequest{Method: "GET", Path: "/x"}, []string{"the request has no service"}},
+		{"unknown method", domain.APIRequest{Service: "s", Method: "get", Path: "/x"}, []string{"method get is not one of"}},
+		{"path without slash", domain.APIRequest{Service: "s", Method: "GET", Path: "x"}, []string{"path x must start with /"}},
+		{"dot segment", domain.APIRequest{Service: "s", Method: "GET", Path: "/a/../b"}, []string{"holds a dot segment"}},
+		{"bad header name", domain.APIRequest{Service: "s", Method: "GET", Path: "/x", Headers: map[string]string{"X A": "1"}}, []string{"not a valid HTTP header name"}},
+		{"engine header", domain.APIRequest{Service: "s", Method: "GET", Path: "/x", Headers: map[string]string{"traceparent": "1"}}, []string{"set by Semar on every request"}},
+		{"malformed variable", domain.APIRequest{Service: "s", Method: "GET", Path: "/x", Query: map[string]string{"a": "{{a."}}, []string{"query a: malformed variable"}},
+		{"unknown variable names its place", domain.APIRequest{Service: "s", Method: "POST", Path: "/x/{{order}}", JSON: map[string]any{"k": []any{"{{nope}}"}}},
+			[]string{"path: {{order}} is not a known variable", "json.k[0]: {{nope}} is not a known variable"}},
+		{"secret variable", domain.APIRequest{Service: "s", Method: "GET", Path: "/x", Headers: map[string]string{"Authorization": "{{secret.T}}"}}, []string{"header Authorization: {{secret.T}} is not a known variable"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := script.RequestProblems(c.req, known)
+			if len(got) != len(c.want) {
+				t.Fatalf("got %q, want %d problems %q", got, len(c.want), c.want)
+			}
+			for i, w := range c.want {
+				if !strings.Contains(got[i], w) {
+					t.Errorf("problem %d is %q, want %q in it", i, got[i], w)
+				}
+			}
+		})
 	}
 }
