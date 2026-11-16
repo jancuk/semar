@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/idcheck"
+	"github.com/jancuk/semar/internal/obligation"
 	"github.com/jancuk/semar/internal/scenario"
 	"github.com/jancuk/semar/internal/stage/plan"
 )
@@ -30,7 +32,8 @@ type planFile struct {
 // way to a target is checked, before the first write. Every write goes through a root at the
 // repository, so a link that the repository commits under .semar cannot carry it elsewhere.
 // The plan directory comes first because it is the cheapest to fail, then the scenario files,
-// then the scripts. A failure removes what this call wrote.
+// then the obligations files, then the scripts. A failure removes what this call wrote and puts
+// back an obligations file that it replaced.
 func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.ScenarioID]bool) (string, error) {
 	if len(out.Scripts) != len(out.Scenarios) {
 		return "", fmt.Errorf("the plan has %d scenarios and %d scripts", len(out.Scenarios), len(out.Scripts))
@@ -39,7 +42,7 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 	var scripts []domain.Script
 	var scriptFiles []string
 	storeDirs := []string{filepath.Join(".semar", "runs"), filepath.Join(".semar", "store"), filepath.Join(".semar", "store", "scripts")}
-	checked := []string{filepath.Join(".semar", "plans"), storeDirs[0]}
+	checked := []string{filepath.Join(".semar", "plans"), storeDirs[0], obligationsDir}
 	for i, sc := range out.Scenarios {
 		if err := idcheck.Check("ticket", sc.Ticket); err != nil {
 			return "", fmt.Errorf("scenario %s: %w", sc.ID, err)
@@ -87,6 +90,10 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 			return "", fmt.Errorf("%w; nothing was written", err)
 		}
 	}
+	obligationFiles, replaced, err := obligationsOf(root, in, out)
+	if err != nil {
+		return "", err
+	}
 	for _, f := range scenarioFiles {
 		if _, err := root.Lstat(f.rel); !errors.Is(err, fs.ErrNotExist) {
 			return "", fmt.Errorf("%s exists already; nothing was written", filepath.Join(dir, f.rel))
@@ -98,7 +105,7 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 		}
 	}
 
-	w := &planWriter{root: root}
+	w := &planWriter{root: root, replaced: map[string][]byte{}}
 	for _, d := range slices.Compact(storeDirs) {
 		if _, err := root.Lstat(d); errors.Is(err, fs.ErrNotExist) {
 			w.storeDirs = append(w.storeDirs, d)
@@ -113,6 +120,17 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 		return w.undo(err)
 	}
 	for _, f := range scenarioFiles {
+		if err := w.writeFile(f); err != nil {
+			return w.undo(err)
+		}
+	}
+	for _, f := range obligationFiles {
+		if old, ok := replaced[f.rel]; ok {
+			if err := w.replaceFile(f, old); err != nil {
+				return w.undo(err)
+			}
+			continue
+		}
 		if err := w.writeFile(f); err != nil {
 			return w.undo(err)
 		}
@@ -137,7 +155,17 @@ type planWriter struct {
 	dirs      []string // created, outermost first
 	storeDirs []string // missing before the store was opened, outermost first
 	files     []string
+	replaced  map[string][]byte // an obligations file that the plan replaced, and what it held
 	planDir   string
+}
+
+// replaceFile writes over an existing file, and remembers its content so that undo can put it back.
+func (w *planWriter) replaceFile(f planFile, old []byte) error {
+	if err := atomicfile.WriteIn(w.root, f.rel, f.data, planFileMode); err != nil {
+		return err
+	}
+	w.replaced[f.rel] = old
+	return nil
 }
 
 func (w *planWriter) writeFile(f planFile) error {
@@ -191,6 +219,11 @@ func (w *planWriter) undo(cause error) (string, error) {
 			errs = append(errs, err)
 		}
 	}
+	for _, rel := range slices.Sorted(maps.Keys(w.replaced)) {
+		if err := atomicfile.WriteIn(w.root, rel, w.replaced[rel], planFileMode); err != nil {
+			errs = append(errs, fmt.Errorf("put back %s: %w", filepath.Join(w.root.Name(), rel), err))
+		}
+	}
 	if w.planDir != "" {
 		if err := w.root.RemoveAll(w.planDir); err != nil {
 			errs = append(errs, err)
@@ -229,3 +262,89 @@ func removeIfEmpty(root *os.Root, d string) error {
 	}
 	return nil
 }
+
+var obligationsDir = filepath.Join(".semar", "obligations")
+
+// obligationsOf makes the obligations files of a plan: one per ticket, with the entries of the
+// file that is there kept (D3). Only a file that gains an entry is returned. replaced holds the
+// bytes of each file that the plan will write over. A file that is there and cannot be read
+// stops the plan before any write, because a plan must not hide an obligation that a person wrote.
+func obligationsOf(root *os.Root, in plan.Input, out plan.Output) (files []planFile, replaced map[string][]byte, err error) {
+	tickets := map[string]bool{}
+	for _, t := range in.Change.Tickets {
+		tickets[t.Key] = true
+	}
+	for _, sc := range out.Scenarios {
+		tickets[sc.Ticket] = true
+	}
+	d := out.Draft
+	for _, n := range d.NotDrafted {
+		tickets[n.Ticket] = true
+	}
+	for _, df := range d.Differences {
+		tickets[df.Ticket] = true
+	}
+	existing := map[string]obligation.File{}
+	old := map[string][]byte{}
+	for _, key := range slices.Sorted(maps.Keys(tickets)) {
+		if idcheck.Check("ticket", key) != nil {
+			continue // FromPlan names it
+		}
+		rel := obligationsFile(key)
+		data, err := obligation.ReadFile(root, rel)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w; nothing was written", err)
+		}
+		slashed := filepath.ToSlash(rel)
+		f, err := obligation.Parse(data, slashed)
+		var problems []obligation.Problem
+		var pe *obligation.ParseError
+		switch {
+		case errors.As(err, &pe):
+			problems = pe.Problems
+		case err != nil:
+			return nil, nil, err
+		default:
+			problems = obligation.Validate(f, slashed)
+		}
+		if len(problems) > 0 {
+			more := ""
+			if len(problems) > 1 {
+				more = fmt.Sprintf(" (and %d more)", len(problems)-1)
+			}
+			return nil, nil, fmt.Errorf("%s%s; fix or remove it, and plan again; nothing was written", problems[0], more)
+		}
+		existing[key], old[rel] = f, data
+	}
+
+	made, err := obligation.FromPlan(in.Change, d, out.Scenarios, existing)
+	if err != nil {
+		return nil, nil, fmt.Errorf("make the obligations: %w; nothing was written", err)
+	}
+	replaced = map[string][]byte{}
+	for _, key := range slices.Sorted(maps.Keys(made)) {
+		f := made[key]
+		if prev, ok := existing[key]; ok && len(f.Obligations) == len(prev.Obligations) {
+			continue
+		}
+		data, err := obligation.Marshal(f)
+		if err != nil {
+			return nil, nil, fmt.Errorf("make the obligations of %s: %w; nothing was written", key, err)
+		}
+		rel := obligationsFile(key)
+		if problems := obligation.Validate(f, filepath.ToSlash(rel)); len(problems) > 0 {
+			return nil, nil, fmt.Errorf("%s; the plan cannot add to it: fix or remove it, and plan again; nothing was written", problems[0])
+		}
+		files = append(files, planFile{rel, data})
+		if b, ok := old[rel]; ok {
+			replaced[rel] = b
+		}
+	}
+	return files, replaced, nil
+}
+
+// obligationsFile is the file that the plan of a ticket writes.
+func obligationsFile(ticket string) string { return filepath.Join(obligationsDir, ticket+".plan.yaml") }

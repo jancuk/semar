@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jancuk/semar/internal/cli"
@@ -243,4 +244,131 @@ func TestARefusedPlanLeavesSemarAsItWas(t *testing.T) {
 			t.Errorf(".semar changed:\nbefore %q\nafter  %q", before, after)
 		}
 	})
+}
+
+const existingObligations = `apiVersion: semar/v1
+kind: Obligations
+ticket: SHOP-482
+obligations:
+  - id: SHOP-482/scenario-SHOP-482-01
+    title: Edited by a person
+    source: diff
+    covers: [SHOP-482-01]
+`
+
+func TestPlanWritesObligations(t *testing.T) {
+	p := newPlanRepo(t, sampleapp.Options{})
+	p.configure(t, goodDraft)
+	p.must(t, cli.ExitOK, "plan", "--diff", "main..release")
+
+	data, err := os.ReadFile(p.path(".semar", "obligations", "SHOP-482.plan.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	for _, want := range []string{"ticket: SHOP-482", "id: SHOP-482/scenario-SHOP-482-01", "id: SHOP-482/not-drafted-1", "not drafted: needs a second test account"} {
+		contains(t, "SHOP-482.plan.yaml", got, want)
+	}
+	other, err := os.ReadFile(p.path(".semar", "obligations", "SHOP-483.plan.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, "SHOP-483.plan.yaml", string(other), "id: SHOP-483/scenario-SHOP-483-01")
+	info, err := os.Stat(p.path(".semar", "obligations", "SHOP-482.plan.yaml"))
+	if err != nil || info.Mode().Perm() != 0o644 {
+		t.Errorf("mode %v, %v", info, err)
+	}
+	for _, name := range []string{"SHOP-482.plan.yaml", "SHOP-483.plan.yaml"} {
+		if strings.Contains(string(mustRead(t, p.path(".semar", "obligations", name))), "state") {
+			t.Errorf("%s names a state", name)
+		}
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func TestPlanAddsToAnExistingObligationsFile(t *testing.T) {
+	p := newPlanRepo(t, sampleapp.Options{})
+	p.configure(t, goodDraft)
+	p.write(t, ".semar/obligations/SHOP-482.plan.yaml", existingObligations)
+	p.must(t, cli.ExitOK, "plan", "--diff", "main..release")
+	got := string(mustRead(t, p.path(".semar", "obligations", "SHOP-482.plan.yaml")))
+	contains(t, "file", got, "title: Edited by a person", "id: SHOP-482/not-drafted-1")
+	if strings.Count(got, "scenario-SHOP-482-01") != 1 {
+		t.Errorf("the scenario entry is not kept once:\n%s", got)
+	}
+}
+
+func TestWritePlanRestoresReplacedFile(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a directory that the user cannot write")
+	}
+	p := newPlanRepo(t, sampleapp.Options{})
+	p.configure(t, goodDraft)
+	p.write(t, ".semar/obligations/SHOP-482.plan.yaml", existingObligations)
+	locked := p.path(".semar", "store", "scripts", "SHOP-483-01")
+	if err := os.MkdirAll(locked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+	before := tree(t, p.path(".semar"))
+	res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
+	contains(t, "stderr", res.stderr, "the plan was not written, and what it had written was removed")
+	if got := string(mustRead(t, p.path(".semar", "obligations", "SHOP-482.plan.yaml"))); got != existingObligations {
+		t.Errorf("the replaced file was not put back:\n%s", got)
+	}
+	if exists(t, p.path(".semar", "obligations", "SHOP-483.plan.yaml")) {
+		t.Error("a new obligations file stays")
+	}
+	if after := tree(t, p.path(".semar")); !slices.Equal(after, before) {
+		t.Errorf(".semar changed:\nbefore %q\nafter  %q", before, after)
+	}
+}
+
+func TestWritePlanStopsOnBadExistingFile(t *testing.T) {
+	for _, tt := range []struct{ name, content, want string }{
+		{"unknown key", existingObligations + "    state: verified\n", "a state is computed by code"},
+		{"not YAML", "obligations: [\n", ".semar/obligations/SHOP-482.plan.yaml"},
+		{"a rule broken", strings.Replace(existingObligations, "source: diff", "source: review", 1), "source review is not a source"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newPlanRepo(t, sampleapp.Options{})
+			p.configure(t, goodDraft)
+			p.write(t, ".semar/obligations/SHOP-482.plan.yaml", tt.content)
+			before := tree(t, p.path(".semar"))
+			res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
+			contains(t, "stderr", res.stderr, ".semar/obligations/SHOP-482.plan.yaml", tt.want, "fix or remove it, and plan again; nothing was written")
+			if after := tree(t, p.path(".semar")); !slices.Equal(after, before) {
+				t.Errorf(".semar changed:\nbefore %q\nafter  %q", before, after)
+			}
+			p.assertNothingPlanned(t)
+			p.assertNoTempCopy(t)
+		})
+	}
+}
+
+func TestPlanRefusesALinkAtObligations(t *testing.T) {
+	p := newPlanRepo(t, sampleapp.Options{})
+	p.configure(t, goodDraft)
+	target := t.TempDir()
+	link := p.path(".semar", "obligations")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skip("symlinks are not available:", err)
+	}
+	res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
+	contains(t, "stderr", res.stderr, link, "symbolic link")
+	if entries, err := os.ReadDir(target); err != nil || len(entries) != 0 {
+		t.Errorf("the link's target holds %v (%v)", entries, err)
+	}
+	p.assertNothingPlanned(t)
 }

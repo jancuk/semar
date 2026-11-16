@@ -500,7 +500,7 @@ func Load(repo string) (list []Located, problems []Problem, err error) {
 
 	idFile := map[string]string{}
 	for _, rel := range files {
-		data, err := readFile(root, rel)
+		data, err := ReadFile(root, rel)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -568,13 +568,20 @@ func walk(root *os.Root, dir string, files *[]string) error {
 	return nil
 }
 
-// readFile reads at most one byte more than the limit, so Parse can refuse a file that is too
-// large without Load holding all of it.
-func readFile(root *os.Root, rel string) ([]byte, error) {
+// ReadFile reads a regular file of a root, at most one byte more than the limit, so Parse can
+// refuse a file that is too large without the caller holding all of it. A link, a file that is
+// not regular, and a file that was swapped between the check and the open are errors.
+func ReadFile(root *os.Root, rel string) ([]byte, error) {
 	shown := filepath.Join(root.Name(), rel)
 	info, err := root.Lstat(rel)
 	if err != nil {
 		return nil, fmt.Errorf("read obligations %s: %w", shown, err)
+	}
+	switch {
+	case info.Mode()&fs.ModeSymlink != 0:
+		return nil, fmt.Errorf("%s is a symbolic link, and Semar reads obligations only from real files", shown)
+	case !info.Mode().IsRegular():
+		return nil, fmt.Errorf("%s is not a regular file", shown)
 	}
 	f, err := root.Open(rel)
 	if err != nil {
