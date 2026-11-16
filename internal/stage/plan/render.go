@@ -11,6 +11,7 @@ import (
 	"github.com/jancuk/semar/internal/changeset"
 	"github.com/jancuk/semar/internal/check"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/prompt"
 	"github.com/jancuk/semar/internal/provider"
 )
@@ -45,6 +46,7 @@ func Render(w io.Writer, in Input, out Output) error {
 	}
 	b.WriteString("\n\n## Tickets\n")
 
+	fixtures := fixtureIndex(in.Fixtures)
 	tickets := slices.Clone(d.Tickets)
 	slices.SortStableFunc(tickets, func(a, b TicketDraft) int { return strings.Compare(a.Key, b.Key) })
 	for _, t := range tickets {
@@ -63,7 +65,7 @@ func Render(w io.Writer, in Input, out Output) error {
 				continue
 			}
 			drafted++
-			writeScenario(&b, sc)
+			writeScenario(&b, sc, fixtures)
 		}
 		if drafted == 0 {
 			b.WriteString("\nNo scenario was drafted for this ticket.\n")
@@ -77,6 +79,8 @@ func Render(w io.Writer, in Input, out Output) error {
 	for _, n := range d.NotDrafted {
 		fmt.Fprintf(&b, "- %s: %s. Needs: %s\n", shown(n.Ticket, maxValueShown), shown(n.What, maxTextShown), shown(n.Needs, maxTextShown))
 	}
+
+	writeFixturesNeeded(&b, d.FixturesNeeded)
 
 	b.WriteString("\n## Files that no scenario covers\n\n")
 	if len(d.Uncovered) == 0 {
@@ -206,10 +210,45 @@ func toolLine(tools []provider.ToolUse) string {
 	return strings.Join(parts, ", ")
 }
 
-func writeScenario(b *strings.Builder, sc domain.Scenario) {
+// writeFixturesNeeded lists the fixtures that the planner proposed. A proposal is text of the
+// model, so every part is escaped. It never counts: a person writes the file and approves it.
+func writeFixturesNeeded(b *strings.Builder, needed []FixtureNeeded) {
+	b.WriteString("\n## Fixtures needed\n\n")
+	if len(needed) == 0 {
+		b.WriteString("None.\n")
+		return
+	}
+	value := func(s string) string { return shown(s, maxValueShown) }
+	list := func(items []string) string {
+		if len(items) == 0 {
+			return "none"
+		}
+		out := make([]string, len(items))
+		for i, s := range items {
+			out[i] = value(s)
+		}
+		return strings.Join(out, ", ")
+	}
+	sentence := func(s string) string { return shown(strings.TrimRight(strings.TrimSpace(s), "."), maxTextShown) }
+	for _, n := range needed {
+		p := n.Proposal
+		fmt.Fprintf(b, "- %s: %s. Proposed fixture %s: %s. Parameters: %s. Outputs: %s. Services: %s.\n",
+			value(n.Ticket), sentence(n.What), value(p.ID), sentence(p.Description), list(p.Params), list(p.Outputs), list(p.Services))
+		fmt.Fprintf(b, "  A person writes the fixture in .semar/fixtures/%s.yaml, approves it, and plans again.\n", value(p.ID))
+	}
+}
+
+func writeScenario(b *strings.Builder, sc domain.Scenario, fixtures map[domain.FixtureID]fixture.Entry) {
 	fmt.Fprintf(b, "\n#### %s: %s\n\n", shown(string(sc.ID), maxValueShown), shown(sc.Title, maxValueShown))
 	if s := strings.TrimSpace(sc.Intent); s != "" {
 		fmt.Fprintf(b, "%s\n\n", paragraph(shown(s, maxTextShown)))
+	}
+	for _, g := range sc.Given {
+		note := ""
+		if e, ok := fixtures[g.Fixture]; ok && !e.Approved {
+			note = fmt.Sprintf(" (not approved yet: semar confirm --fixture %s)", shown(string(g.Fixture), maxValueShown))
+		}
+		fmt.Fprintf(b, "Given: %s from %s%s\n\n", shown(g.As, maxValueShown), shown(string(g.Fixture), maxValueShown), note)
 	}
 	for i, st := range sc.Steps {
 		route := ""

@@ -21,6 +21,9 @@ type Draft struct {
 	// Differences are where the planner says a document and the code disagree. Code checks
 	// that both places exist, and cannot check that they disagree.
 	Differences []Difference `json:"differences,omitempty"`
+	// FixturesNeeded proposes a fixture for a scenario that the catalogue cannot serve. A
+	// person writes and approves it; the planner never writes a flow.
+	FixturesNeeded []FixtureNeeded `json:"fixturesNeeded,omitempty"`
 }
 
 type TicketDraft struct {
@@ -32,10 +35,19 @@ type TicketDraft struct {
 }
 
 type ScenarioDraft struct {
-	Ticket string      `json:"ticket"`
-	Title  string      `json:"title"`
-	Intent string      `json:"intent"`
-	Steps  []StepDraft `json:"steps"`
+	Ticket string `json:"ticket"`
+	Title  string `json:"title"`
+	Intent string `json:"intent"`
+	// Given names the fixtures that prepare the state the scenario starts from. It has no
+	// lease: a lease is a decision of the person who reviews the plan.
+	Given []GivenDraft `json:"given,omitempty"`
+	Steps []StepDraft  `json:"steps"`
+}
+
+type GivenDraft struct {
+	Fixture string            `json:"fixture"`
+	As      string            `json:"as"`
+	With    map[string]string `json:"with,omitempty"`
 }
 
 type StepDraft struct {
@@ -98,6 +110,23 @@ type Difference struct {
 	What     string `json:"what"`
 }
 
+// FixtureNeeded asks for a fixture that the catalogue lacks. The scenario that needs it goes
+// under notDrafted.
+type FixtureNeeded struct {
+	Ticket   string          `json:"ticket"`
+	What     string          `json:"what"`
+	Proposal FixtureProposal `json:"proposal"`
+}
+
+// FixtureProposal describes a fixture. It holds no step: only a person writes how to prepare data.
+type FixtureProposal struct {
+	ID          string   `json:"id"`
+	Description string   `json:"description"`
+	Params      []string `json:"params"`
+	Outputs     []string `json:"outputs"`
+	Services    []string `json:"services"`
+}
+
 // DecodeDraft reads one JSON object strictly: an unknown field and trailing data are errors,
 // and a number keeps its text.
 func DecodeDraft(data []byte) (Draft, error) {
@@ -149,6 +178,19 @@ const schema = `{
           "ticket": {"type": "string"},
           "title": {"type": "string"},
           "intent": {"type": "string"},
+          "given": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["fixture", "as"],
+              "properties": {
+                "fixture": {"type": "string"},
+                "as": {"type": "string"},
+                "with": {"type": "object"}
+              }
+            }
+          },
           "steps": {
             "type": "array",
             "items": {
@@ -248,6 +290,30 @@ const schema = `{
           "document": {"type": "string"},
           "code": {"type": "string"},
           "what": {"type": "string"}
+        }
+      }
+    },
+    "fixturesNeeded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ticket", "what", "proposal"],
+        "properties": {
+          "ticket": {"type": "string"},
+          "what": {"type": "string"},
+          "proposal": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "description", "params", "outputs", "services"],
+            "properties": {
+              "id": {"type": "string"},
+              "description": {"type": "string"},
+              "params": {"type": "array", "items": {"type": "string"}},
+              "outputs": {"type": "array", "items": {"type": "string"}},
+              "services": {"type": "array", "items": {"type": "string"}}
+            }
+          }
         }
       }
     }

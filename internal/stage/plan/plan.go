@@ -77,6 +77,7 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 		MaxScenarios: in.Limits.MaxScenarios,
 		Existing:     existingList(in.Existing),
 		Knowledge:    knowledgeList(in.Knowledge),
+		Fixtures:     fixtureList(in.Fixtures),
 	}
 	var total provider.Result
 	var problems []Problem

@@ -18,6 +18,7 @@ import (
 
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/knowledge"
 	"github.com/jancuk/semar/internal/scenario"
 	"github.com/jancuk/semar/internal/script"
@@ -38,6 +39,7 @@ type Input struct {
 	SetupOn       bool               // the planner ran with the person's own MCP servers or skills switched on
 	LeftOut       []LeftOut          // files of the head commit that the copy of the source lacks
 	Knowledge     []knowledge.Source // the documents that the configuration lists, as found in the copy
+	Fixtures      []fixture.Entry    // the catalogue: what the planner may name under given
 	Progress      func(Progress)     // nil for no reports
 }
 
@@ -68,7 +70,7 @@ var (
 // of the draft. The values come back only when there is no problem. It reads SourceDir to
 // check cites and does no other I/O.
 func Validate(d Draft, in Input) ([]domain.Scenario, []domain.Script, []Problem) {
-	v := &validator{in: in, known: map[string]bool{}, files: map[string]citedFile{}}
+	v := &validator{in: in, known: map[string]bool{}, files: map[string]citedFile{}, fixtures: fixtureIndex(in.Fixtures)}
 	defer v.close()
 	for _, t := range in.Change.Tickets {
 		v.known[t.Key] = true
@@ -109,6 +111,7 @@ func Validate(d Draft, in Input) ([]domain.Scenario, []domain.Script, []Problem)
 	}
 	v.behaviourCovered(d)
 	v.differences(d.Differences)
+	v.fixturesNeeded(d)
 
 	if len(v.ps) > 0 {
 		return nil, nil, v.ps
@@ -122,12 +125,14 @@ type citedFile struct {
 }
 
 type validator struct {
-	in      Input
-	known   map[string]bool
-	ps      []Problem
-	files   map[string]citedFile
-	root    *os.Root
-	rootErr error
+	in    Input
+	known map[string]bool
+	ps    []Problem
+	files map[string]citedFile
+	// fixtures is the catalogue by ID.
+	fixtures map[domain.FixtureID]fixture.Entry
+	root     *os.Root
+	rootErr  error
 }
 
 func (v *validator) add(path, format string, args ...any) {
@@ -207,6 +212,8 @@ func (v *validator) scenario(i int, sd ScenarioDraft, id domain.ScenarioID, titl
 		APIVersion: "semar/v1", Kind: "Scenario", ID: id, Title: sd.Title, Ticket: sd.Ticket, Intent: sd.Intent,
 		Surface: domain.SurfaceAPI, AuthProfile: v.in.AuthProfile,
 	}
+	var unknownAliases map[string]bool
+	sc.Given, unknownAliases = v.given(sp, sd.Given)
 	scr := domain.Script{APIVersion: "semar/v1", Kind: "Script", Scenario: id}
 	stepIndex := map[domain.StepID]int{}
 	expectations := 0
@@ -263,8 +270,12 @@ func (v *validator) scenario(i int, sd ScenarioDraft, id domain.ScenarioID, titl
 	}
 
 	scr.ExpectHash = domain.ExpectHash(sc)
-	for _, pr := range script.Validate(sc, scr) {
+	for _, pr := range script.ValidateWith(sc, scr, v.outputsOf(sc.Given)) {
 		if expectations == 0 && scr.ExpectHash == "" && pr.Step == "" {
+			continue
+		}
+		// The unknown fixture has its own problem. Its outputs are not known, so a use of them is not another.
+		if usesAlias(pr.Message, unknownAliases) {
 			continue
 		}
 		path := sp

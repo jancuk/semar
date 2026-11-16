@@ -59,6 +59,10 @@ The read must stay the same.
 
 - SHOP-482: a refund on another user's order. Needs: a second test account
 
+## Fixtures needed
+
+None.
+
 ## Files that no scenario covers
 
 - internal/refund/audit.go: writes a row that no endpoint returns
@@ -99,7 +103,7 @@ The planner could not read these files of the head commit.
 - Setup: the planner could use 2 MCP servers and 3 skills of your own setup, under the permission mode default
 - Tool calls: Read 7, MCP tools (names withheld) 3
 - Refused tool calls: 2
-- Prompt version: 3
+- Prompt version: 4
 
 Every expected result here was read from the code by a model. Confirm each scenario before its result counts.
 

@@ -140,7 +140,7 @@ func TestPlanReadsTheListedDocuments(t *testing.T) {
 		"- SHOP-482-01, step refund-too-much: status 422 is not declared for POST /v1/orders/{id}/refunds; the document declares 201 and 400\n",
 		"- SHOP-483-01, step read-order: the API document has /v1/orders/{id} with PUT, and not with GET\n",
 		"- SHOP-482: docs/refunds.md:3 and internal/refund/handler.go:9. The status of a refund above the rest of the total.\n",
-		"Prompt version: 3")
+		"Prompt version: 4")
 	p.assertNoTempCopy(t)
 }
 
