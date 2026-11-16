@@ -6,7 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -82,23 +86,86 @@ type unconfirmed struct {
 	sources []domain.Source
 }
 
-// needsConfirmation lists the expected results of a scenario that a person must confirm.
-func needsConfirmation(sc domain.Scenario, trust []domain.Source) unconfirmed {
+// needsConfirmation lists the expected results of a scenario that a person must confirm. A step
+// that acts as another account says so. For a ticket expectation whose cite names a line of a file
+// of the repository at dir, the line is printed as it is in the working tree, so that the person can
+// compare it with the check.
+func needsConfirmation(dir string, sc domain.Scenario, trust []domain.Source) unconfirmed {
 	u := unconfirmed{sc: sc}
 	for _, st := range sc.Steps {
 		for _, e := range st.Expect {
 			if !confirm.NeedsExpectation(e, trust) {
 				continue
 			}
-			line := fmt.Sprintf("step %s: %s (source %s", st.ID, check.DescribeFull(e.Check), e.Source)
+			head := "step " + string(st.ID)
+			if st.As != "" {
+				head += " as " + st.As
+			}
+			line := fmt.Sprintf("%s: %s (source %s", head, check.DescribeFull(e.Check), e.Source)
 			if e.Cite != "" {
 				line += ", cite: " + e.Cite
 			}
-			u.lines = append(u.lines, terminalSafe(line+")"))
+			line = terminalSafe(line + ")")
+			if e.Source == domain.SourceTicket {
+				if file, n, ok := citedLine(e.Cite); ok {
+					line += "\n      " + citedText(dir, file, n)
+				}
+			}
+			u.lines = append(u.lines, line)
 			u.sources = append(u.sources, e.Source)
 		}
 	}
 	return u
+}
+
+const maxCitedText = 300
+
+// maxCitedFile bounds how much of a cited file is read.
+const maxCitedFile = 1 << 20
+
+var citeLine = regexp.MustCompile(`^([^\s:]+):([0-9]{1,9})(?:\s|$)`)
+
+// citedLine reads <repo file>:<line> from the start of a cite.
+func citedLine(cite string) (file string, n int, ok bool) {
+	m := citeLine.FindStringSubmatch(cite)
+	if m == nil {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(m[2])
+	return m[1], n, err == nil
+}
+
+// citedText is the text that the confirm screen prints for a cited line: the line of the file in the
+// working tree, as one escaped line of at most maxCitedText characters, or "line not found" when the
+// file or the line is not there. A path outside the repository is never read.
+func citedText(dir, file string, n int) string {
+	notFound := fmt.Sprintf("%s line %d: line not found", terminalSafe(file), n)
+	if n < 1 || !filepath.IsLocal(file) {
+		return notFound
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return notFound
+	}
+	defer root.Close()
+	f, err := root.Open(file)
+	if err != nil {
+		return notFound
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(io.LimitReader(f, maxCitedFile))
+	sc.Buffer(nil, maxCitedFile)
+	for i := 1; sc.Scan(); i++ {
+		if i < n {
+			continue
+		}
+		text := terminalSafe(strings.ReplaceAll(sc.Text(), "\t", " "))
+		if r := []rune(text); len(r) > maxCitedText {
+			text = string(r[:maxCitedText-3]) + "..."
+		}
+		return fmt.Sprintf("%s line %d: %s", terminalSafe(file), n, text)
+	}
+	return notFound
 }
 
 func confirmScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f confirmFlags, args []string) error {
@@ -120,7 +187,7 @@ func confirmScenarios(ctx context.Context, stdout, stderr io.Writer, o options, 
 	}
 	var todo []unconfirmed
 	for _, sc := range scs {
-		if u := needsConfirmation(sc, cfg.Policy.Trust.Confirm); len(u.lines) > 0 {
+		if u := needsConfirmation(f.dir, sc, cfg.Policy.Trust.Confirm); len(u.lines) > 0 {
 			todo = append(todo, u)
 		}
 	}

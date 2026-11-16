@@ -621,7 +621,7 @@ func confirmJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f
 		before := len(todo)
 		for _, l := range j.Legs {
 			sc, _ := journey.LegScenario(j, l.ID, legAuth(env, j, l.Service))
-			u := needsConfirmation(sc, cfg.Policy.Trust.Confirm)
+			u := needsConfirmation(f.dir, sc, cfg.Policy.Trust.Confirm)
 			if len(u.lines) == 0 {
 				continue
 			}
