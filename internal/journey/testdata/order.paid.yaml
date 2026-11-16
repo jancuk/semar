@@ -1,0 +1,21 @@
+apiVersion: semar/v1
+kind: Fixture
+id: order.paid
+description: A paid order of 1000 that belongs to the given customer
+version: 1.0.0
+owner: team-orders
+params:
+  customer: { default: "{{data.customers.default}}" }
+lease: ""
+find:
+  - request: { service: orders, method: GET, path: /v1/orders, query: { status: paid, customer: "{{customer}}" } }
+    captures: [{ name: id, jsonpath: "$.data[0].id" }]
+create:
+  - request: { service: orders, method: POST, path: /v1/orders, json: { amount: 1000, customer: "{{customer}}", ref: "semar-{{run.id}}" } }
+    captures: [{ name: id, jsonpath: "$.data.id" }]
+  - request: { service: payments, method: POST, path: /v1/payments, json: { orderId: "{{id}}" } }
+  - request: { service: orders, method: GET, path: "/v1/orders/{{id}}" }
+    until: { jsonpath: "$.data.status", equals: paid, timeout: 30s, every: 1s }
+outputs: [id]
+cleanup:
+  - request: { service: orders, method: POST, path: "/v1/orders/{{id}}/cancel" }
