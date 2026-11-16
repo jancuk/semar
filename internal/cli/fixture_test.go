@@ -267,13 +267,13 @@ func TestFixtureCheckOnAReadOnlyEnvironmentSendsNoWrite(t *testing.T) {
 
 func TestFixtureCheckUsage(t *testing.T) {
 	r := newRepo(t, repoOptions{tree: "e2e-fixtures", offline: true})
-	for _, args := range [][]string{
-		{"fixture", "check", "--env", "local"},
-		{"fixture", "check", "order.paid", "--all", "--env", "local"},
+	for args, want := range map[string]string{
+		"fixture check --env local":                  "name the fixtures to check, or use --all",
+		"fixture check order.paid --all --env local": "name the fixtures, or use --all, and not both",
 	} {
-		res := r.semar(t, t.Context(), args...)
-		if res.code != cli.ExitError || !strings.Contains(res.stderr, "name the fixtures, or use --all, and not both") {
-			t.Errorf("%v: exit %d, stderr %q", args, res.code, res.stderr)
+		res := r.semar(t, t.Context(), strings.Fields(args)...)
+		if res.code != cli.ExitError || !strings.Contains(res.stderr, want) {
+			t.Errorf("%v: exit %d, stderr %q, want %q", args, res.code, res.stderr, want)
 		}
 	}
 	res := r.semar(t, t.Context(), "fixture", "check", "order.missing", "--env", "local")

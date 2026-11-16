@@ -183,7 +183,10 @@ func newFixtureCheckCommand(o options) *cobra.Command {
 		Long: "Run find, then create, then cleanup of each fixture on an environment, and record whether it still works.\n" +
 			"A fixture that is not approved is not run. A fixture that failed its last check blocks the scenarios that use it.",
 		Args: func(_ *cobra.Command, args []string) error {
-			if (len(args) > 0) == f.all {
+			switch {
+			case len(args) == 0 && !f.all:
+				return errors.New("name the fixtures to check, or use --all")
+			case len(args) > 0 && f.all:
 				return errors.New("name the fixtures, or use --all, and not both")
 			}
 			return nil
