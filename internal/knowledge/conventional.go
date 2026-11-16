@@ -20,7 +20,8 @@ var conventionalAPI = []string{
 }
 
 // Conventional returns the sources that the naming convention finds under dir: the first
-// API document of the list, with the ID api, and the docs folder, with the ID docs. It
+// API document of the list, with the ID api, the docs folder, with the ID docs, and the
+// docs/tickets folder, with the ID tickets. It
 // uses Lstat only, so a link never counts and is never followed.
 func Conventional(dir string) []config.Knowledge {
 	var found []config.Knowledge
@@ -33,7 +34,22 @@ func Conventional(dir string) []config.Knowledge {
 	if fi, err := os.Lstat(filepath.Join(dir, "docs")); err == nil && fi.IsDir() {
 		found = append(found, config.Knowledge{ID: "docs", Kind: config.KnowledgeFiles, Path: "docs"})
 	}
+	if isFolder(dir, "docs/tickets") {
+		found = append(found, config.Knowledge{ID: "tickets", Kind: config.KnowledgeTickets, Path: "docs/tickets"})
+	}
 	return found
+}
+
+// isFolder reports whether rel is a real folder under dir, with no link on the way.
+func isFolder(dir, rel string) bool {
+	cur := dir
+	for _, n := range strings.Split(rel, "/") {
+		cur = filepath.Join(cur, n)
+		if fi, err := os.Lstat(cur); err != nil || !fi.IsDir() {
+			return false
+		}
+	}
+	return true
 }
 
 // isRegular reports whether rel is a regular file under dir. Every folder on the way is

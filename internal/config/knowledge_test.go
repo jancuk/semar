@@ -63,8 +63,9 @@ func TestKnowledgeRefusals(t *testing.T) {
 		{"bad id", "  - {id: _a, kind: files, path: d}\n", `knowledge[0].id: invalid source id "_a"`},
 		{"empty id", "  - {kind: files, path: d}\n", "knowledge[0].id: invalid source id"},
 		{"id twice with other case", "  - {id: Docs, kind: files, path: d}\n  - {id: docs, kind: files, path: e}\n", `knowledge[1].id: "docs" is already used by knowledge[0]`},
-		{"unknown kind", "  - {id: a, kind: wiki, path: d}\n", `knowledge[0].kind must be files or openapi, got "wiki"`},
-		{"no kind", "  - {id: a, path: d}\n", "knowledge[0].kind must be files or openapi"},
+		{"unknown kind", "  - {id: a, kind: wiki, path: d}\n", `knowledge[0].kind must be files, openapi, or tickets, got "wiki"`},
+		{"no kind", "  - {id: a, path: d}\n", "knowledge[0].kind must be files, openapi, or tickets"},
+		{"tickets with service", "  - {id: t, kind: tickets, path: docs/tickets, service: orders}\n", "knowledge[0].service is allowed on an openapi source only"},
 		{"files with service", "  - {id: a, kind: files, path: d, service: orders}\n", "knowledge[0].service is allowed on an openapi source only"},
 		{"unknown service", "  - {id: a, kind: openapi, path: d.yaml, service: billing}\n", `knowledge[0].service: "billing" is not the name of a service of any environment; known services: orders`},
 		{"empty path", "  - {id: a, kind: files}\n", "knowledge[0].path: the path is empty"},
@@ -117,5 +118,16 @@ func TestCheckKnowledgePath(t *testing.T) {
 	}
 	if err := config.CheckKnowledgePath(strings.Repeat("a", 512)); err != nil {
 		t.Errorf("512 bytes: %v", err)
+	}
+}
+
+func TestKnowledgeTicketsKindLoads(t *testing.T) {
+	cfg, err := loadText(t, knowledgeBase+"knowledge:\n  - {id: tickets, kind: tickets, path: docs/tickets/}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []config.Knowledge{{ID: "tickets", Kind: config.KnowledgeTickets, Path: "docs/tickets"}}
+	if !reflect.DeepEqual(cfg.Knowledge, want) {
+		t.Errorf("knowledge = %+v, want %+v", cfg.Knowledge, want)
 	}
 }

@@ -25,6 +25,8 @@ type Knowledge struct {
 const (
 	KnowledgeFiles   = "files"
 	KnowledgeOpenAPI = "openapi"
+	// KnowledgeTickets names a folder of <ticket key>.md files: the requirements of the tickets.
+	KnowledgeTickets = "tickets"
 )
 
 const (
@@ -92,15 +94,15 @@ func validateKnowledge(c Config, add func(string, ...any)) {
 		} else {
 			seen[strings.ToLower(k.ID)] = i
 		}
-		if k.Kind != KnowledgeFiles && k.Kind != KnowledgeOpenAPI {
-			add("%s.kind must be %s or %s, got %q", p, KnowledgeFiles, KnowledgeOpenAPI, k.Kind)
+		if k.Kind != KnowledgeFiles && k.Kind != KnowledgeOpenAPI && k.Kind != KnowledgeTickets {
+			add("%s.kind must be %s, %s, or %s, got %q", p, KnowledgeFiles, KnowledgeOpenAPI, KnowledgeTickets, k.Kind)
 		}
 		if err := CheckKnowledgePath(k.Path); err != nil {
 			add("%s.path: %v", p, err)
 		}
 		switch {
 		case k.Service == "":
-		case k.Kind == KnowledgeFiles:
+		case k.Kind != KnowledgeOpenAPI:
 			add("%s.service is allowed on an %s source only", p, KnowledgeOpenAPI)
 		case !slices.Contains(services, k.Service):
 			add("%s.service: %q is not the name of a service of any environment; known services: %s", p, k.Service, strings.Join(services, ", "))

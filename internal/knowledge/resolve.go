@@ -79,6 +79,9 @@ func resolve(root *os.Root, k config.Knowledge) Source {
 			s.Problem = k.Path + " cannot be read in the copy of the source"
 		}
 		return s
+	case k.Kind == config.KnowledgeTickets && info.Mode().IsRegular():
+		s.Problem = k.Path + " is a file, and a tickets source is a folder"
+		return s
 	case !info.Mode().IsRegular():
 		s.Problem = k.Path + " is neither a file nor a folder in the copy of the source"
 		return s
