@@ -7,13 +7,25 @@
 
 **Test data on UAT (2026-11-14):** Semar does change test data on UAT, through the application and as a test account. [What a test may change](#what-a-test-may-change) sets the limits.
 
+**Updated 2026-11-17:** This update adds designs that are planned and not built. Each part says what is not verified.
+
+* The promise and four layers in the [summary](#summary-of-the-design), and decisions T61 to T76.
+* [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger): every use case that needs testing ends in a state, or on a short list for a person, with the reason.
+* [Fixtures](#fixtures): reviewed preparation flows across services. They replace the fragments of [Plan 11](implementation/11-configuration.md) for preparation steps.
+* [Trial run](#trial-run): the read-only steps of a plan are sent once before the plan is final.
+* [Journeys](#journeys): product flows across services and surfaces, on one target manifest. They replace the narrow journey of [Plan 10](implementation/10-android.md).
+* [Screens and UI legs](#screens-and-ui-legs): how an agent authors a UI leg and how Semar replays it.
+* [Engines and the gateway](#engines-and-the-gateway): existing MCP servers as engines, behind one gateway that records every call.
+* [Packs and the registry](#packs-and-the-registry), [Standards and interchange](#standards-and-interchange), and [Dashboard views](#dashboard-views).
+* New types in the [domain model](#planned-types-for-obligations-fixtures-journeys-and-engines), new pipeline steps, configuration files, commands, threats, packages, tests, milestone items, spikes S15 to S19, and items under [Not verified](#not-verified).
+
 ## Current scope and role contract
 
 The [current PRD scope](PRD.md#current-scope) supersedes earlier platform and mandatory-QA assumptions: API, web, and native Android are the initial product scope; native iOS follows. Grafana and databases are evidence connectors, not application surfaces. API-only increments are pilots; they do not complete the requested initial scope.
 
 Dispatch by adapter capability and declared project surfaces. A missing required Android capability is `not_run`/blocked readiness, while a product that has no Android app can record `not_applicable` with a reason. Native testing must identify the app artifact and emulator/device; mobile web emulation cannot fulfill a native check.
 
-A business journey may span several adapters. Keep a journey ID and target manifest above the per-surface scenarios, with explicit dependency/capture bindings and fixture leases across API, web, and Android steps. Do not infer a connected journey pass from independent scenarios that happened to pass on different resources or builds. Reserve iOS as a future capability without pretending Android scripts or evidence establish iOS correctness.
+A business journey may span several adapters. Keep a journey ID and target manifest above the per-surface scenarios, with explicit dependency/capture bindings and fixture leases across API, web, and Android steps. Do not infer a connected journey pass from independent scenarios that happened to pass on different resources or builds. [Journeys](#journeys) specifies the journey file, the target manifest, the bindings between legs, and the leases. Reserve iOS as a future capability without pretending Android scripts or evidence establish iOS correctness.
 
 Authorization uses capabilities such as `confirm_intent`, `review_evidence`, and `authorize_release`, mapped to existing team members. No hardcoded `qa` account or TestRail source is required. Reused approved checks can receive a policy-based assessment; new intent follows authenticated confirmation. Solo author confirmation is recorded as `author_confirmed`, separate from independent review, with the release restrictions in the PRD.
 
@@ -31,7 +43,7 @@ The draft proposes a Go core with API, web, and Android execution adapters and o
 Semar has seven parts:
 
 1. **QA tool layer.** The daemon `semard` and the thin MCP server `semar mcp`. Every action the agent takes on a surface goes through this layer.
-2. **Engines.** One per surface: `api`, `web`, and `android`. Two more read evidence only: `observe` for Grafana and `db` for the UAT database. The daemon owns them.
+2. **Engines.** One per surface: `api`, `web`, and `android`. Two more read evidence only: `observe` for Grafana and `db` for the UAT database. The daemon owns them. Planned: an engine can also be an existing MCP server that the person registers, reached only through the [gateway](#engines-and-the-gateway).
 3. **Recorder.** Stores every action and its result, redacted. It sits inside the daemon, between the tools and the engines.
 4. **Verdict engine.** A pure function from recorded evidence to an outcome.
 5. **Evidence store.** A git branch that holds runs, confirmations, and sign-offs.
@@ -56,7 +68,9 @@ flowchart LR
         DBE[db engine]
         PILOT[Pilot: optional fast model]
         KB[Knowledge: sources and MCP gateway]
+        GW[Engine gateway, planned:<br/>policy, pinning, recording]
     end
+    EXT[(Registered MCP engines, planned)]
     VER[Verdict engine]
     EV[Evidence store]
     UAT[(UAT services)]
@@ -75,6 +89,7 @@ flowchart LR
     REC --> AND --> DEVICE
     REC --> OBS -- "read only" --> GRAF
     REC --> DBE -- "read only" --> DB
+    REC -.-> GW -. one process per engine .-> EXT
     TOOLS -.-> PILOT
     TOOLS --> KB -- "read only" --> SRC
     EV -- "result comment" --> SRC
@@ -82,6 +97,27 @@ flowchart LR
 ```
 
 The main agent works in three activities: Plan, Author, and Explore. Replay, Observe, Verdict, and every regression run never call a model, neither the main agent nor the pilot.
+
+Dashed lines in the diagram are planned and not built.
+
+**The promise.** Semar does not guarantee that all behaviour is correct. Testing shows defects and cannot prove that none exist. Semar guarantees three things:
+
+1. Nothing that needs testing is silently skipped. Every use case that needs testing ends in a state with evidence, or on a short list for a person, with the reason. See [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger).
+2. Every pass has evidence that a person can open and check.
+3. The false-pass rate is measured. `semar sample` checks a random sample of passes, and the detection check runs on the seeded-defect sample app before each release. See [Marking a wrong result and sampling passes](#marking-a-wrong-result-and-sampling-passes).
+
+**Four layers of content (planned).** Semar merges what it tests from four layers:
+
+| Layer | Holds | Owner |
+| --- | --- | --- |
+| Semar core | The formats, the engines, and generic packs: access checks, pagination, idempotent create, and the API security probes | The project, open source |
+| Organisation registry | Fixtures, named checks, screens, journeys, and adapter profiles for the company's services, versioned and reviewed | A platform or QA team |
+| Repository | Scenarios and fixtures specific to one service | The service team |
+| Journeys | Product flows across services and surfaces, in the organisation repository or in the repository of a single-repository product | A named product or QA owner |
+
+The precedence is repository, then organisation, then built-in. [Packs and the registry](#packs-and-the-registry) gives the merge rules, and [Journeys](#journeys) the journey format. This content layering is separate from the core, policy, and adapter layers of [Architecture for adoption](#architecture-for-adoption), which stay as they are.
+
+**The gateway (planned).** Semar does not build every surface engine itself. It can use an existing MCP server as an engine. During a verification run the agent sees one MCP server, `semar`. Semar applies policy to each call, forwards it to the engine, and records it. A call that Semar did not see cannot become evidence, so the agent has no direct path to an engine. Semar adds what an engine does not provide: recording, verdicts computed by code, the effects policy, replay, fixtures, and journeys. See [Engines and the gateway](#engines-and-the-gateway).
 
 ### Two ways to start the agent
 
@@ -123,6 +159,12 @@ A developer or a QA engineer changes what Semar tests by editing files under `.s
 | `.semar/checks.yaml` | Named checks |
 | `.semar/probes/` | Security probes. Semar's own probes ship in the same format |
 | `.semar/agents/<name>.md` | Extra guidance for one agent |
+| `.semar/fixtures/<id>.yaml` | Planned. Reviewed preparation flows. See [Fixtures](#fixtures) |
+| `.semar/journeys/<id>.yaml` | Planned. Product flows across services and surfaces. See [Journeys](#journeys) |
+| `.semar/screens/<app>.yaml` | Planned. Screen objects for UI legs. See [Screens and UI legs](#screens-and-ui-legs) |
+| `.semar/packs.lock` | Planned. The exact versions and digests of the packs the repository names. See [Packs and the registry](#packs-and-the-registry) |
+
+For preparation steps, a fixture replaces the fragment of Plan 11. A fragment stays for steps that several scenarios share and that make a product claim. A fixture is a fragment that has `find`, `create`, `cleanup`, `outputs`, and a lease.
 
 Files are expanded to plain scenarios before the core sees them. The expectation hash is computed on the expanded form, so a change to a shared fragment lapses the confirmation and the script of every scenario that uses it.
 
@@ -196,6 +238,22 @@ Three things stay in code, because they are what makes a result mean the same ev
 | T58 | Files are expanded to plain scenarios before the core sees them, and the expectation hash covers the expanded form | Teach the verdict engine about cases and fragments | The core stays small, and a change to a shared file lapses what depends on it |
 | T59 | Models are named agents, and fixed jobs are assigned to them in configuration, with fallback between jobs, backups per agent, pools, and panels | A fixed set of roles in code | Your instruction |
 | T60 | Where a job is a choice, the decision provider is asked first, and a company can add its own questions | Use an agent for every question | Your instruction to use the fast, cheap model wherever it fits. No answer sets an outcome |
+| T61 | Each use case that needs testing is an obligation, and code computes one of five states for it from the outcomes of the scenarios and journeys that cover it. The ledger sits above the six scenario outcomes | Count scenarios and outcomes only | A plan can look complete while a use case has no state. This extends T33 and PRD decisions D25 and D54. See [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger) |
+| T62 | Test data and preconditions are fixtures: named, reviewed flows with `find`, `create`, `until`, `outputs`, and `cleanup`. A scenario names a fixture under `given` and never holds the flow. For preparation steps, a fixture replaces the fragment of Plan 11 | The planner writes setup steps in each scenario, or a fragment holds them | The planner reads one repository and cannot know another service's calls. "Take the first item of a list" fails on an empty environment. See [Fixtures](#fixtures) |
+| T63 | The fixture file is compatible with Arazzo workflows, with Semar's find, create, cleanup, lease, and effects under `x-semar` keys. Spike S15 checks the mapping | Semar's own YAML only | Other tools can then read fixtures. Whether Arazzo keeps find before create, cleanup, and a lease is not verified. If it does not fit, Semar keeps its own YAML and offers an import |
+| T64 | A fixture that cannot give its state ends the scenario `blocked`, naming the fixture and the step, never `failed`. A fixture whose scheduled health run fails gives `blocked: fixture unhealthy` | Report a preparation failure as a product failure | A failure of the preparation is not evidence about the behaviour under test. This applies the existing rule for a setup step |
+| T65 | After the plan passes validation, Semar sends the read-only steps once against the environment and returns request problems to the planner, inside the three attempts. A trial result never counts as a pass and never changes an expected result | Meet the environment first at `semar run` | A wrong path or an empty capture then shows in the plan, not in the run. A response shows what the service does, not what it should do. See [Trial run](#trial-run) |
+| T66 | A journey is a file of legs with explicit bindings, run against one target manifest, and code computes its outcome: `passed`, `failed`, `blocked`, `stale`, or `not_run`. The first failing leg is named, and later legs are `not_run` | Plan 10's journey: an ordered list of scenario IDs and shared names | A journey must not depend on another repository's scenarios, and a pass is valid only on the manifest it ran on. See [Journeys](#journeys) |
+| T67 | Legs run one at a time, in the order that `needs` gives, with file order breaking ties. A wait polls a condition with a timeout and never sleeps | Run independent legs in parallel, or sleep a fixed time | The first failing leg is then well defined and the result repeats. A fixed sleep is either too short or wastes time |
+| T68 | A UI leg has two phases. The agent authors it once, and Semar replays it with no model. Screen objects (`kind: Screens`) give screens and elements stable names that a person approves | The model acts on every replay, or steps refer to positions and visible text | Replay must repeat and cost no model call. Screen objects are the Page Object pattern of QA practice. See [Screens and UI legs](#screens-and-ui-legs) |
+| T69 | During a verification run the agent sees one MCP server, `semar`. The gateway applies policy to each engine call, forwards it, and records it as an `Action` | Let the agent reach an engine's MCP server directly | A call that Semar did not see cannot become evidence (product rule 1). This extends T28 and PRD decision D44. See [Engines and the gateway](#engines-and-the-gateway) |
+| T70 | Engines and registries are configured only in the person's own Semar home, never in the repository under test. An engine runs at an exact version, and a changed tool description denies the tool until a person approves it again | Read engines from `.semar/`, or accept a version range | The repository is untrusted, which is the existing rule for providers. A tool description can change after approval |
+| T71 | A surface engine sits behind an engine adapter interface. Adapter profiles map one MCP server's tools to Semar's actions. T10 is not reversed: brojev stays the web candidate, and spikes S6 and S7 compare it with Playwright, mobile-mcp, Maestro, and Appium through the same interface | Pick one engine per surface now | No candidate is verified. One interface lets the spikes compare them on the same tests, and lets a team change engines without changing scenarios |
+| T72 | Where an adapter supports a native replay format, the stored script may be that native artifact, and Semar still binds each expected result to a recorded action. Spike S17 checks it | Store only Semar's own script format | A team can then run the same flow without Semar. Whether the binding survives a native artifact is not verified |
+| T73 | Packs come from a registry that is a git repository. `semar pack add` pins an exact version and writes a lock file with a digest. Precedence is repository, then organisation, then built-in. The registry address comes from the person's home | Copy shared fixtures into each repository, or float on the newest pack | Shared fixtures are defined once. Git gives review and history. A run must say which pack versions it used. See [Packs and the registry](#packs-and-the-registry) |
+| T74 | The dashboard is a view and an approval interface. Git stays the source of truth | Keep catalogues, approvals, or results in a dashboard database | A second record drifts from the files. See [Dashboard views](#dashboard-views) |
+| T75 | Semar publishes its scenario, fixture, journey, screens, evidence, and verdict formats as versioned JSON Schemas with a conformance suite. It exports CTRF, JUnit XML, and SARIF, and every import is a draft that a person reviews | Private formats, and imports that count at once | Another tool can implement the formats and be checked. Semar does not claim to be a standard. See [Standards and interchange](#standards-and-interchange) |
+| T76 | `lease: exclusive` reserves an account or a record for one run at a time. On one machine the lease is a file lock. The lease across several machines is an open question | No reservation, or a lock in the git repository | Two runs that change one account or record break each other. Git cannot lock. See [Fixtures](#fixtures) |
 
 ## Domain model
 
@@ -306,6 +364,272 @@ steps:
 
 Who confirmed the scenario is not written in the file. Semar reads the confirmation from the code host or the evidence store at run time, so the agent and the author cannot write it.
 
+### Planned types for obligations, fixtures, journeys, and engines
+
+None of these types exists in `internal/domain` today. They reuse the built types where they can: `domain.Outcome`, `domain.Step`, `domain.APIRequest`, `domain.Capture`, `domain.Check`, `domain.BuildRef`, `domain.Reason`, `domain.Hash`, and the `Action` and `Locator` of [Recording and replay](#recording-and-replay).
+
+A Scenario gains one field. Everything else in it stays.
+
+```go
+type Scenario struct {
+	// ... the fields above
+	Given []Given // planned. The states the scenario needs, each from a fixture
+}
+
+// A Given names a fixture and the name its outputs take in the scenario.
+type Given struct {
+	Fixture FixtureID         // order.paid
+	As      string            // order. The script reads {{order.id}}
+	With    map[string]string // values for the fixture's params
+	Lease   LeaseMode         // "" | exclusive
+}
+```
+
+```yaml
+given:
+  - fixture: order.paid
+    as: order
+steps:
+  - id: read-order
+    action: Read the paid order
+    hint: { method: GET, path: "/v1/orders/{id}" }   # the script sends {{order.id}}
+```
+
+**Obligations and the ledger.** An obligation state is its own type. It never replaces a scenario outcome.
+
+```go
+type ObligationID string // SHOP-482/AC-1, refunds/refund-owner
+
+type Obligation struct {
+	ID       ObligationID
+	Title    string           // one use case, in a QA engineer's words
+	Source   ObligationSource // criterion | diff | knowledge | testcase | feature_map | defect
+	Cite     string           // the quoted text and the item ID, checked by code like a ticket quote
+	Ticket   TicketRef
+	Feature  FeatureID
+	Covers   []ScenarioID
+	Journeys []JourneyID
+	Manual   *ManualReason // set when it cannot be automated
+	Deferral *Deferral
+}
+
+type ObligationState string // verified | failed | blocked | needs_a_person | deferred
+
+type ManualReason struct {
+	Kind string // physical_device | third_party_otp | judgement | other
+	Text string
+}
+
+type Deferral struct {
+	By      Identity // from the code host
+	Reason  string
+	Expires time.Time
+}
+
+// ManualResult is what a person recorded for a needs_a_person obligation.
+type ManualResult struct {
+	Result string // passed | failed
+	By     Identity
+	At     time.Time
+	Notes  string
+}
+
+type LedgerEntry struct {
+	Obligation ObligationID
+	State      ObligationState
+	Reasons    []domain.Reason // the missing piece for blocked, the failing scenario for failed
+	Manual     *ManualResult   // counted apart and labelled "checked by a person"
+}
+```
+
+**Fixtures.** A fixture step is an API request with captures, the same shape a script step has today.
+
+```go
+type FixtureID string // order.paid
+
+type Fixture struct {
+	ID          FixtureID
+	Description string           // the planner reads this, the params, and the outputs. Nothing else
+	Version     string           // semantic version. Every run records it
+	Owner       string
+	Params      map[string]Param // name to default
+	Find        []FixtureStep    // reads only
+	Create      []FixtureStep    // runs only when Find gives nothing
+	Outputs     []string         // capture names the scenario may read
+	Cleanup     []FixtureStep    // runs for what Create made, also after a failure
+	Lease       LeaseMode        // the default for a Given that names none
+}
+
+type FixtureStep struct {
+	Request  domain.APIRequest // Service names the service. Its auth profile comes from configuration
+	Captures []domain.Capture
+	Until    *Until            // poll this request until the condition holds
+}
+
+// Until is a wait on a condition. A fixed sleep has no type.
+type Until struct {
+	JSONPath string
+	Equals   any
+	Timeout  time.Duration // required
+	Every    time.Duration // the first interval. Doubles up to 15s
+}
+
+type LeaseMode string // "" | exclusive
+
+type Param struct{ Default string }
+```
+
+**Journeys.** A journey outcome is a separate type from the six scenario outcomes. A leg ends in a scenario outcome.
+
+```go
+type JourneyID string
+type LegID string
+
+type Journey struct {
+	ID          JourneyID
+	Title       string
+	Owner       string      // a named product or QA owner
+	Criticality string      // critical | standard
+	Given       []Given
+	Legs        []Leg
+	Invariants  []Invariant
+}
+
+type Leg struct {
+	ID      LegID
+	Surface domain.Surface // api | web | android
+	Service string         // for an api leg
+	App     string         // for a UI leg: the app whose screens it uses
+	Needs   []LegID
+	Wait    *Until         // poll the leg's last read until the condition holds
+	Given   []Given
+	Steps   []domain.Step
+	Outputs []string       // capture names later legs read as {{<leg>.<name>}}
+}
+
+// Invariant holds what only a journey can see.
+type Invariant struct {
+	Equal []string // templates such as {{place.total}}. All must be equal
+}
+
+type JourneyOutcome string // passed | failed | blocked | stale | not_run
+
+// Manifest is what a journey result is valid for.
+type Manifest struct {
+	Services []domain.BuildRef // every service a leg calls, from its build probe
+	Web      *domain.BuildRef  // the web build, when a leg is on the web
+	Mobile   *AppBuild         // package, version, and commit, when a leg is on Android
+	Hash     domain.Hash       // SHA-256 of the canonical form
+}
+
+type AppBuild struct{ Package, Version, Commit string }
+
+type LegResult struct {
+	Leg     LegID
+	Outcome domain.Outcome
+	Reasons []domain.Reason
+}
+
+type JourneyResult struct {
+	Journey      JourneyID
+	Manifest     Manifest
+	Outcome      JourneyOutcome
+	FirstFailing LegID
+	Legs         []LegResult
+	Invariants   []InvariantResult
+	Reasons      []domain.Reason
+}
+```
+
+**Screens.**
+
+```go
+type ElementID string // order-total
+
+type Screens struct {
+	App           string
+	Screens       map[string]map[ElementID]ElementLocator // screen name to its elements
+	Interruptions []Interruption                          // known dialogs that replay dismisses
+}
+
+// ElementLocator is how replay finds an element again. It feeds the recorder's Locator.
+type ElementLocator struct {
+	AccessibilityID string
+	ResourceID      string
+	Role            string
+	Name            string // accessible name
+	Text            string
+}
+
+type Interruption struct {
+	ID      string         // permission-location, update-prompt
+	When    ElementLocator // how to recognise it
+	Dismiss ElementLocator // what to tap or click
+}
+```
+
+**Engines and packs.**
+
+```go
+// Engine is one registered MCP server. It is read from the person's Semar home only.
+type Engine struct {
+	ID        string
+	Surface   domain.Surface
+	Command   []string  // the process to start, as an argument list
+	URL       string    // or a server that already listens on 127.0.0.1
+	Version   string    // exact. "latest" and ranges are refused
+	Profile   string    // an AdapterProfile, by pack name and ID
+	Network   []string  // hosts the engine process may reach
+	Approvals []ToolApproval
+}
+
+type ToolApproval struct {
+	Tool            string
+	DescriptionHash domain.Hash // SHA-256 of the tool's name, description, and input schema
+	By              Identity
+	At              time.Time
+}
+
+// AdapterProfile maps one MCP server's tools to Semar's actions.
+type AdapterProfile struct {
+	ID       string
+	Server   string              // the server name the engine reports
+	Versions []string            // exact versions the profile was tested with
+	Surface  domain.Surface
+	Tools    map[string]ToolMap  // Semar action (snapshot, click, type, tap, ...) to a tool
+	Snapshot string              // how the profile reads roles and names from a snapshot
+}
+
+type ToolMap struct {
+	Tool    string
+	Effect  EffectClass        // read | write | destructive
+	Args    map[string]string  // Semar argument to tool argument
+	HostArg string             // an argument that holds a URL, checked against the host allowlist
+}
+
+type EffectClass string
+
+// Pack is a versioned set of content in a registry.
+type Pack struct {
+	Name     string // acme/orders
+	Version  string
+	Owner    string
+	Fixtures []FixtureID
+	Checks   []string
+	Screens  []string
+	Journeys []JourneyID
+	Profiles []string
+}
+
+// LockEntry is one line of .semar/packs.lock.
+type LockEntry struct {
+	Name     string      // acme/orders
+	Version  string      // exact: 1.2.3
+	Commit   string      // the registry commit of that version
+	Digest   domain.Hash // SHA-256 over the pack's files, in path order
+}
+```
+
 ## Pipeline
 
 Each stage is a command and can run alone. `semar verify` runs stages 3 to 9 in order. When a change has no plan yet, `semar verify` runs stage 1 first.
@@ -315,6 +639,7 @@ No stage waits for a person. A scenario with an unconfirmed expected result is t
 | # | Stage | Command | Uses a model | Output |
 | --- | --- | --- | --- | --- |
 | 1 | Plan | `semar plan` | Yes | Test plan with targets, scenario files, and recommendations |
+| 1a | Trial run, planned | part of `semar plan`. `--no-trial` turns it off | No. Its problems go back to the planner | A trial result beside each read-only step in `plan.md`. See [Trial run](#trial-run) |
 | 2 | Confirm | Merge request approval, or `semar confirm` | No | Confirmation record |
 | 3 | Gate | `semar gate` | No | Build per service, or `blocked` |
 | 4 | Sign in | part of `semar run`, and `semar login` for a first sign-in by a person | No | Session per auth profile. See [Signing in](#signing-in) |
@@ -328,6 +653,20 @@ No stage waits for a person. A scenario with an unconfirmed expected result is t
 | - | Explore | `semar explore` | Yes | Findings for a person to triage |
 | - | Security | part of `semar verify`, or `semar explore --security` | Yes | Security findings, confirmed by code where code can check |
 | - | Regression | `semar regression run` | No | Evidence and an outcome for every scenario in the suite |
+| - | Journey, planned | `semar journey run` | No, except to author or repair a UI leg | An outcome per journey on one target manifest. See [Journeys](#journeys) |
+| - | Ledger, planned | `semar ledger`, and part of `semar publish` | No | A state per obligation, and the manual checklist. See [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger) |
+
+### Where the planned parts run
+
+The planned parts slot into the stages above without renumbering them:
+
+1. **Plan.** The planner drafts obligations and scenarios. Each scenario names its fixtures under `given`. Plan validation checks the draft as today, and also checks that every obligation has a covering scenario or a stated reason, and that every named fixture exists in the merged catalogue.
+2. **Trial run.** After validation passes, code resolves each fixture's `find` steps and sends the read-only steps once. Problems go back to the planner inside the same three attempts. The plan lists journeys whose legs call a touched route.
+3. **Gate and sign in.** As today.
+4. **Author and Run.** Before the first step of a scenario, code resolves each `given` entry: lease, then `find`, then `create` when `find` gives nothing, then `until`. These actions are recorded in the `setup` pass. After the last step, also after a failure, code runs `cleanup` in the `cleanup` pass and releases the leases.
+5. **Observe and Verdict.** As today. A fixture that could not give its state ends the scenario `blocked`.
+6. **Journey.** A journey runs after the scenarios of the same run, or alone with `semar journey run`. Code forms the target manifest, runs the legs in `needs` order, checks the invariants, and reads the manifest again at the end.
+7. **Ledger.** After the verdicts, code derives each obligation's state from the outcomes of the scenarios and journeys that cover it. `semar publish` writes the ledger and the manual checklist with the report.
 
 ### Plan
 
@@ -337,7 +676,7 @@ Output: a test plan that names every target, the scenario files, and recommendat
 
 The agent job gets the harness's own read-only file tools, the `kb_*` tools, and two more Semar tools: `qa_context` and `qa_submit_plan`. In an unattended job it has no shell, no network, and no write tool. Semar validates the submitted plan. A validation error goes back to the agent as the tool result, for at most three attempts.
 
-The change is not deployed at merge request time, so nothing is executed in this stage.
+The change is not deployed at merge request time, so nothing is executed in this stage. The planned [trial run](#trial-run) is the one exception: code, not the agent, sends the read-only steps once to the build that the environment runs, and never a write.
 
 ### Gate
 
@@ -703,6 +1042,415 @@ Not selected: 2 lower-risk scenarios. Could not be traced: none.
 
 The reader answers the yes or no items and reads nothing else unless they want to. Expected results that came from the ticket or from an invariant are not listed as questions.
 
+## Test obligations and the coverage ledger
+
+Planned, not built. An obligation is one use case that a QA engineer would test by hand. The ledger gives each obligation exactly one state, computed by code, so that nothing that needs testing is silently skipped. The ledger sits above the six scenario outcomes and does not replace them. It extends the change coverage of [Change coverage](#change-coverage) and the criteria table of [Coverage of the ticket's criteria](#coverage-of-the-tickets-criteria) (PRD decisions D25 and D54).
+
+### Where obligations come from
+
+| Source | How an obligation is made | Checked by code |
+| --- | --- | --- |
+| The ticket's acceptance criteria | Code makes one obligation per item, `AC-1`, `AC-2`, as it splits them today | The item exists |
+| Behaviour found in the diff | The planner proposes one per changed behaviour that a tester would check by hand, citing the hunks | Every cited hunk exists |
+| Documents under `knowledge` | The planner proposes one per stated rule that the change touches, quoting it | The quote exists in the document |
+| Existing manual test cases, imported from a tracker or a spreadsheet | The planner links an imported case to the change, or proposes an obligation from it | The case exists under the cited ID |
+| The feature map | Code makes one per "must never" rule of an affected feature | The rule exists |
+| Past defects and incidents | The planner proposes one per earlier defect on the affected feature | The ticket exists |
+
+How obligations are imported from existing manual test cases, and how good the imported ones are, is an open question.
+
+### The file
+
+The plan writes the obligations of a ticket beside its scenario files, so the same merge request reviews both:
+
+```yaml
+# .semar/scenarios/SHOP-482/obligations.yaml
+apiVersion: semar/v1
+kind: Obligations
+ticket: SHOP-482
+obligations:
+  - id: SHOP-482/AC-1
+    title: A refund above the order total is rejected
+    source: criterion
+    cite: "SHOP-482: a refund above the order total must be rejected"
+    covers: [SHOP-482-01, SHOP-482-02]
+  - id: SHOP-482/AC-3
+    title: The customer gets an email about the rejection
+    source: criterion
+    cite: "SHOP-482: the customer is told about the rejection by email"
+    manual: { kind: other, text: The email leaves the test environment }
+  - id: refunds/refund-owner
+    title: A customer cannot refund another customer's order
+    source: feature_map
+    covers: [SHOP-482-04]
+    journeys: []
+```
+
+A deferral and a manual result are not in this file. A person records them with `semar ledger defer` and `semar ledger record`, and Semar stores each as a file in the evidence store under the person's code-host identity, as it does for a confirmation.
+
+### Rules
+
+| # | Rule |
+| --- | --- |
+| 1 | Each obligation ends in exactly one state: `verified`, `failed`, `blocked`, `needs_a_person`, or `deferred`. Code computes it. The agent never sets a state |
+| 2 | An obligation with no covering scenario or journey and no `manual` reason is a defect of the plan. Plan validation returns it to the planner inside the three attempts. If it remains, the plan lists it first on the double-check list as "use case with no test and no reason" |
+| 3 | The agent may propose a `manual` reason. The plan shows each proposal as a yes or no question, because a model could otherwise mark a hard case as manual to skip it |
+| 4 | A deferral needs a name, a reason, and an expiry date. An expired deferral is ignored, and the report says it expired |
+| 5 | For every `needs_a_person` obligation, Semar writes a manual checklist with exact steps and expected results. The expected results come from the obligation's citation. The steps are drafted by the planner and labelled as written by AI |
+| 6 | A manual result is counted apart from automated ones and labelled "checked by a person". It never counts as a scenario pass |
+| 7 | The ledger never changes a scenario outcome or a journey outcome |
+| 8 | Readiness reads the ledger. A `failed` or `blocked` obligation makes a ticket "not ready". A `needs_a_person` obligation with no manual result is an open item. A `deferred` obligation is listed like an accepted gap |
+
+### How code derives a state
+
+The first matching rule gives the state. Only results on the builds that UAT runs now count, as for readiness.
+
+| Order | State | Condition |
+| --- | --- | --- |
+| 1 | `failed` | A covering scenario or journey is `failed`. A failure shows even under a deferral or a manual reason |
+| 2 | `deferred` | A deferral exists and has not expired |
+| 3 | `needs_a_person` | The obligation has a `manual` reason. The manual result, when one exists, is shown beside the state |
+| 4 | `verified` | At least one scenario or journey covers it, and every covering scenario and journey is `passed`. A `passed` scenario already has confirmed expectations and evidence |
+| 5 | `blocked` | Anything else. The reasons name each covering item that is not `passed`, with its outcome and its reason, or say that nothing covers it |
+
+The five states have no word for "tested, but not decided". A covering scenario that is `inconclusive`, `stale`, or `not_run` therefore gives `blocked`, and the reason names the missing piece: a confirmation, a run on the current build, or a missing engine. The report shows the scenario outcome beside it.
+
+The report opens with one line, for example `42 use cases: 35 verified, 2 failed, 3 blocked, 2 need a person`.
+
+### Manual checklist
+
+```text
+Manual checks for SHOP-482 (1)
+1. SHOP-482/AC-3  The customer gets an email about the rejection
+   Why a person: the email leaves the test environment
+   Steps (written by AI):
+     1. Sign in to the test mailbox of semar-qa-1.
+     2. Find the email sent after run r-20261114-0042.
+   Expected: the customer is told about the rejection by email (SHOP-482)
+   Record:   semar ledger record SHOP-482/AC-3 passed|failed --notes "<what you saw>"
+```
+
+### Failure modes
+
+| Case | Result |
+| --- | --- |
+| A cited text does not exist in its source | Plan validation rejects the obligation, like a ticket quote |
+| A covering scenario was deleted | `blocked`, "no scenario or journey covers this" |
+| A covering scenario is `stale` | `blocked`, "rerun on the current build" |
+| A person records `failed` for a manual check | The state stays `needs_a_person`, the line reads "failed, checked by a person", and readiness is "not ready" |
+| A deferral expired | The deferral is ignored and the state is derived again |
+
+### What is not verified
+
+* That the planner proposes the obligations that a QA engineer would list. The shadow milestone compares them.
+* How obligations are imported from existing manual test cases, and their quality.
+
+## Trial run
+
+Planned, not built. Today `semar plan` never sends a request, so a script first meets the environment at `semar run`. The trial run sends the read-only steps of the drafted plan once, after plan validation passes, and returns request problems to the planner for repair inside the existing three attempts.
+
+### What is sent
+
+1. Code signs in with each scenario's auth profile, as the sign-in stage does.
+2. For each scenario, code resolves the `find` steps of its fixtures. A fixture's `create` is never sent.
+3. Code sends each step that the environment's effects policy classes as a read: `GET` or `HEAD`, or a request listed under `effects.reads`, and not under `effects.deny`. A step whose variables cannot be resolved, for example an ID that only a write would give, is "not tried".
+4. Each request is recorded as an `Action` in a new `trial` pass, redacted like any other. The existing rule that evidence counts only in its own pass keeps a trial action out of every verdict.
+5. The existing request count limit per job bounds the trial.
+
+The change is usually not deployed at merge request time, so the trial meets the build that the environment runs now. The plan records that build beside the trial results.
+
+### What goes back to the planner
+
+| Trial result | Back to the planner | Shown in `plan.md` |
+| --- | --- | --- |
+| 404 or 405 on a path that the environment should already have | Yes: the path or the method is likely wrong | Yes |
+| 404 on a path that the change adds, judged by the OpenAPI document at the merge base and at the head | No | "Route not on the environment yet" |
+| 400 or 422 on a read | Yes: a query parameter is likely wrong | Yes |
+| 401 or 403 | Yes, with the auth profile name | Yes |
+| A capture finds nothing | Yes | Yes |
+| A 5xx response | No. It may be a defect, so a person sees it | Yes, on the double-check list |
+| A refused host or a denied operation | No request is sent | "Not tried", with the reason |
+| How a response compares with an expected result | Never. Expectations are not evaluated in a trial | No |
+
+### Rules
+
+| # | Rule |
+| --- | --- |
+| 1 | Only reads are sent. Steps that write, and fixture creates, are listed as "not tried: writes" |
+| 2 | A trial result is evidence about the script. It never counts as a pass and never changes an expected result. The planner cannot change an expected result because of a trial response. The expected result still comes from the diff, the ticket, a person, or a document |
+| 3 | The trial is on by default when the environment, its address, and an account are configured. Otherwise Semar prints one line, for example "Trial run skipped: no account for support-agent", and goes on. `semar plan --no-trial` and `plan.trial: false` turn it off |
+| 4 | Trial problems and validation errors share the three attempts. Problems that remain after the third attempt are listed beside the steps and on the double-check list. The plan is still written |
+| 5 | Code sends the trial. The planner still has no network |
+
+`plan.md` shows each result beside its step:
+
+```text
+SHOP-482-01 Refund above the order total is rejected
+  given order.paid     trial: find gave order 81234
+  refund-too-much      not tried: writes
+  order-unchanged      trial: GET /v1/orders/81234 -> 200, capture id found
+```
+
+### Failure modes
+
+| Case | Result |
+| --- | --- |
+| The environment does not answer | The trial is skipped with one line. The plan goes on |
+| Sign-in fails | The trial is skipped for that auth profile with one line |
+| A `GET` changes state on this service | The team lists it under `effects.deny`, as today. Semar cannot detect it |
+
+### What is not verified
+
+* That trial problems lead the planner to a correct repair.
+* That telling an added route from a wrong path by the OpenAPI document works when a service has no OpenAPI document.
+
+## Fixtures
+
+Planned, not built. A scenario often needs data in a given state, for example a customer with a completed purchase, and creating it can involve several services. The planner reads one repository and cannot know the other services' calls. A list request followed by "take the first item" fails when the environment holds no such record.
+
+A fixture is a named, reusable, reviewed preparation flow in `.semar/fixtures/<id>.yaml`, or in a pack. For preparation steps it replaces the fragment of [Plan 11](implementation/11-configuration.md). A fixture is a fragment that has `find`, `create`, `cleanup`, `outputs`, and a lease.
+
+### The file
+
+```yaml
+apiVersion: semar/v1
+kind: Fixture
+id: order.paid
+description: A paid order that belongs to the given customer
+version: 1.2.0
+owner: team-orders
+params: { customer: { default: "{{data.customers.default}}" } }
+find:                        # reuse an existing record first
+  - request: { service: orders, method: GET, path: /v1/orders, query: { status: paid, customer: "{{customer}}" } }
+    captures: [{ name: id, jsonpath: "$.data[0].id" }]
+create:                      # only when find gives nothing
+  - request: { service: orders, method: POST, path: /v1/orders, json: { customerId: "{{customer}}", ref: "semar-{{run.id}}" } }
+    captures: [{ name: id, jsonpath: "$.data.id" }]
+  - request: { service: payments, method: POST, path: /v1/payments, json: { orderId: "{{id}}" } }
+  - request: { service: orders, method: GET, path: "/v1/orders/{{id}}" }
+    until: { jsonpath: "$.data.status", equals: paid, timeout: 90s }
+outputs: [id]
+cleanup:                     # in reverse order, for what was created
+  - request: { service: orders, method: POST, path: "/v1/orders/{{id}}/cancel" }
+```
+
+A scenario names the state it needs and never holds the flow:
+
+```yaml
+given:
+  - fixture: order.paid
+    as: order
+steps:
+  - id: read-order
+    hint: { method: GET, path: "/v1/orders/{id}" }   # the script sends {{order.id}}
+```
+
+Each service in a fixture step uses its own auth profile, set on the service in configuration (`environments.<env>.services[].authProfile`, planned). A fixture holds no secret.
+
+### Rules
+
+| # | Rule |
+| --- | --- |
+| 1 | The planner sees only the catalogue: each fixture's id, description, parameters, and outputs. It picks one by meaning and never writes a multi-service flow |
+| 2 | When no fixture gives the state a scenario needs, `plan.md` lists a "fixtures needed" entry with a proposed fixture, and the scenario goes under `notDrafted`. A person approves or rewrites the proposal |
+| 3 | A fixture counts only after a person approves it, the same way an expected result is confirmed. The approval names the fixture's version and a hash of its expanded form. A change lapses the approval |
+| 4 | Every run records the fixture ID, the version, the hash, whether `find` or `create` gave the state, and the outputs |
+| 5 | `find` steps must be reads under the environment's effects policy. Validation refuses a `find` step that writes |
+| 6 | `until` waits on a condition with a required timeout. A fixed sleep has no syntax |
+| 7 | A fixture step obeys the environment's `effects` policy (`deny`, `once`, `reads`, and `mode`) exactly like a scenario step |
+| 8 | Unique values use `{{run.id}}`, so two runs do not share records. Where the application lets a record carry a note or a reference, the run ID goes there, as [What a test may change](#what-a-test-may-change) says |
+| 9 | A fixture may use another fixture under its own `given`, to a depth of 3. A cycle is an error that names the files |
+| 10 | Fixtures that several services share are defined once in the registry, not generated in each repository. See [Packs and the registry](#packs-and-the-registry) |
+
+### How a fixture resolves
+
+For each `given` entry, in file order, before the scenario's first step:
+
+1. **Load.** Find the fixture in the merged catalogue: repository, then organisation packs, then built-in. Check its approval and its health on this environment.
+2. **Fill the parameters.** From `with`, else the default. `{{data.x}}` comes from the environment's data set and `{{run.id}}` from the run.
+3. **Lease.** When the entry or the fixture says `lease: exclusive`, take the lease. See [Leases](#leases).
+4. **Find.** Send the `find` steps in order. `find` gives nothing when a step answers 404, a list is empty, or a capture matches nothing. A transport error or another status is recorded, and resolution goes on to `create`.
+5. **Create.** Only when `find` gave nothing. Send the `create` steps in order, with their captures. A step with `until` is repeated: the first wait is `every` (2 seconds by default), and each next wait doubles up to 15 seconds, until the condition holds or the timeout passes.
+6. **Outputs.** Expose each name in `outputs` as `{{<as>.<name>}}`. A missing output is a failure of the fixture.
+7. **Record.** Every request is an `Action` in the `setup` pass, with the fixture ID and step in the activity entry.
+
+After the scenario's last step, also after a failure or an interrupt, cleanup runs:
+
+1. Fixtures are cleaned up in reverse order of their `given` entries. Only a fixture that `create` resolved is cleaned up. A record that `find` reused is never cleaned up.
+2. A fixture's `cleanup` steps run as written. Each is a write. It obeys the effects policy and is logged in the `cleanup` pass of the activity log.
+3. A cleanup failure is recorded and never sent again. It does not change the scenario outcome. The data ledger lists the record as "still exists".
+4. The lease is released.
+
+A state that cannot be undone declares no cleanup. `find` then reuses records to limit growth. Cleanup of data that the application cannot delete is an open question.
+
+### Leases
+
+`lease: exclusive` on a `given` entry reserves the account or the record for one run at a time. The lease key is the fixture ID, the environment, and the resolved parameters. When `find` returns a record that another run holds, resolution treats `find` as giving nothing and goes to `create`. When the fixture has no `create`, Semar waits up to the lease wait, 2 minutes by default, and then ends the scenario `blocked` with "lease not available". This joins the existing account pool, in which parallel scenarios each take a different account.
+
+On one machine the lease is a file lock under the person's Semar home, held by the running process, so a crash releases it. With parallel runners on several machines a git repository cannot lock. The options are a lock service in the team edition, or a marker on the environment's own record with a time limit. This is an open question.
+
+### Health
+
+A scheduled job runs each fixture's `find` and `create`, and its `cleanup`, on a test environment, and records the result with the environment and the build (`semar fixture check`). A fixture whose last health run failed makes every scenario that uses it end `blocked` with "fixture unhealthy", not `failed`. The dashboard shows the last time `find` and `create` worked.
+
+### Format and Arazzo
+
+Fixtures are planned to be written in a format compatible with the OpenAPI Initiative's Arazzo workflows, with Semar's own fields under `x-semar` extension keys. The YAML above is Semar's own form. The intended mapping, not verified:
+
+| Semar field | Arazzo element, to verify in spike S15 |
+| --- | --- |
+| `id`, `description` | A workflow's `workflowId` and `description` |
+| `params` | The workflow's `inputs` |
+| `find`, `create`, `cleanup` steps | Workflow steps, with the phase in an `x-semar` key on each step |
+| `request.service` | A source description per service, and the step's operation |
+| `captures`, `outputs` | Step outputs and workflow outputs |
+| `until` | A success criterion with a retry, if Arazzo can express a timeout |
+| `version`, `owner`, `lease`, effects | `x-semar` keys |
+
+If Arazzo does not fit, Semar keeps its own YAML and offers an import from Arazzo.
+
+### Import
+
+`semar fixture import postman <file>` and `semar fixture import har <file>` write a draft fixture from a Postman collection or a HAR file. A draft never counts. A person reviews it, adds `find` and `cleanup`, and approves it. How faithful these imports are is not verified.
+
+### Failure modes
+
+| Case | Scenario outcome | Reason in the report |
+| --- | --- | --- |
+| The fixture does not exist or is not approved | `blocked` | "fixture order.paid is missing" or "is not approved" |
+| The last health run failed | `blocked` | "fixture unhealthy" |
+| `find` gives nothing and `create` fails | `blocked` | The fixture and the step that failed |
+| `until` times out | `blocked` | The fixture, the step, and each attempt |
+| A `create` write may have reached the service and its effect is unknown | `blocked` | "fixture effect unknown". Nothing is sent again, and the record is listed as possibly left |
+| The environment is `read_only` and `find` gives nothing | `blocked` | "this environment is read-only" |
+| A fixture step is on `effects.deny` | `blocked` | The denied operation |
+| The lease is not available in time | `blocked` | "lease not available" |
+| Cleanup fails | Unchanged | The record under "still exists" in the data ledger |
+
+A fixture never makes a scenario `failed`, because a failed preparation is not evidence about the behaviour under test.
+
+### What is not verified
+
+* That Arazzo can express find before create, cleanup, and a lease. Spike S15.
+* The lease strategy for several runners on several machines. Spike S18.
+* How faithful Postman and HAR imports are. Spike S19.
+* That every service lets a record carry the run ID.
+
+## Journeys
+
+Planned, not built. A journey is a business flow that belongs to the product, not to one service: for example a mobile app places an order, a warehouse service packs it, the web app shows it, and a billing service records it. It is the fourth layer, above scenarios. This replaces the narrow journey of [Plan 10](implementation/10-android.md), an ordered list of scenario IDs and shared names, which is a specification that is not built.
+
+### The file
+
+```yaml
+apiVersion: semar/v1
+kind: Journey
+id: checkout-to-fulfilment
+title: An order placed on mobile is fulfilled and shown on the web
+owner: team-commerce
+criticality: critical
+given:
+  - fixture: customer.verified
+    as: customer
+    lease: exclusive
+legs:
+  - id: place
+    surface: android
+    steps: [...]
+    outputs: [order_id, total]
+  - id: fulfil
+    surface: api
+    service: warehouse
+    needs: [place]
+    wait: { until: { jsonpath: "$.status", equals: packed }, timeout: 5m }
+  - id: web
+    surface: web
+    needs: [fulfil]
+  - id: ledger
+    surface: api
+    service: billing
+    needs: [fulfil]
+invariants:
+  - equal: ["{{place.total}}", "{{ledger.total}}", "{{web.total}}"]
+```
+
+The steps of each leg are scenario steps, with hints, expected results, and source labels. UI steps use screen objects, as in [Screens and UI legs](#screens-and-ui-legs).
+
+### Rules
+
+| # | Rule |
+| --- | --- |
+| 1 | No service owns a journey. Semar orchestrates it, and a named product or QA owner owns it. It lives in `.semar/journeys/` of the organisation repository, or of the repository of a single-repository product |
+| 2 | A journey runs against one target manifest. Its result is valid only for that manifest |
+| 3 | Legs bind data by name. A later leg reads `{{place.order_id}}`. A leg may read only outputs of legs it needs, directly or through other legs. Validation refuses any other reference |
+| 4 | A leg reuses fixtures and named checks. It does not depend on another repository's scenarios, so a service team can change its scenarios without breaking someone else's journey |
+| 5 | A leg is run and judged like a scenario: a script per leg, the binding of each expected result to one recorded action, and the existing verdict rules. Its expected results need confirmation as usual |
+| 6 | Invariants check what only a journey can see: the same value on every surface. Values compare exactly, as decimals, like every other check |
+| 7 | A journey needs no ticket. Its evidence goes to the evidence branch of the repository that holds it |
+
+### The target manifest
+
+At the start of a journey, code forms the manifest:
+
+1. For every service that an `api` leg names or that a fixture step calls, read the service's build probe, as the gate does.
+2. For a `web` leg, read the web build from the web build probe (`web.build`, planned).
+3. For an `android` leg, read the app's package, version, and commit, as Plan 10 rule R3 records them.
+4. Sort the parts by name and hash the canonical form with SHA-256.
+
+A part that cannot be read ends the journey `blocked`. Code reads the manifest again at the end. A stored result is shown as `stale` as soon as a later read of any part differs, whether or not a newer run exists, the same way a sign-off lapses.
+
+### Scheduling and waits
+
+Legs run one at a time. The order is a topological order of `needs`, and file order breaks ties. A cycle is a validation error. A leg starts only when every leg it needs has `passed`. When a leg ends with any other outcome, the journey stops, and every leg that has not started is `not_run` with the reason "stopped after leg fulfil".
+
+`wait` polls the leg's last step, which must be a read, after the leg's steps ran. The intervals are as for a fixture's `until`. When the timeout passes, the leg ends `failed`, and the evidence holds each attempt, as for a database check with `eventually`.
+
+### Outcome
+
+The first matching rule wins. Every matching reason is kept.
+
+| Order | Outcome | Condition |
+| --- | --- | --- |
+| 1 | `not_run` | The journey was filtered out, or a leg's surface has no engine in this installation |
+| 2 | `blocked` | The manifest could not be formed, a journey fixture or its lease failed, a leg could not start (an unhealthy fixture, a missing device), the first leg that did not pass ended `blocked` or `inconclusive`, or an invariant could not be evaluated because a value was not captured |
+| 3 | `stale` | A leg ended `stale`, or the manifest at the end differs from the start |
+| 4 | `failed` | The first leg that did not pass ended `failed`, or an invariant is false |
+| 5 | `passed` | Every leg passed, every invariant held, and the manifest held from start to end |
+
+A journey has no `inconclusive` outcome. A leg that ends `inconclusive`, for example because an element was not found, gives a `blocked` journey, and the reason names the leg and its reason. The report names the first failing leg in every outcome other than `passed`.
+
+### Impact and triggers
+
+When `semar plan` reads a change, it matches each leg's step hints against the impact map. The plan lists the journeys whose legs call a touched route, so it says which business flows to rerun. A journey runs on three triggers: a change that touches a leg, a release gate that runs every `critical` journey (`semar journey run --critical`), and a nightly schedule.
+
+A failed journey points to the owner of the failing leg's service, read from the registry.
+
+### Practice
+
+* Keep journeys few, and for critical flows only.
+* Cover each service boundary with contract tests, for example Pact, so that journeys need not test every combination.
+* Wait on conditions, never on sleeps.
+* Blame the first failing leg.
+
+### Sequence
+
+API-only journeys come first, in M1.1, because they use the engine that exists. Web legs follow in M2, and Android legs in M3, with no change to the journey format. Until the UI engines exist, a mobile leg may be tested through the API calls that the app itself makes.
+
+### Failure modes
+
+| Case | Outcome |
+| --- | --- |
+| A build probe of a manifest part fails | `blocked`, naming the part |
+| A service is redeployed during the journey | `stale` |
+| The warehouse never reaches `packed` within 5 minutes | `failed` on leg `fulfil`, with each attempt. Legs `web` and `ledger` are `not_run` |
+| The web leg shows another total than the billing leg | `failed`, the invariant, with the three values |
+| No Android device is connected | `blocked` on leg `place` |
+
+### What is not verified
+
+* That journeys across real services repeat reliably enough to gate a release.
+* That every service in a journey has a build probe.
+
 ## Knowledge and earlier testing
 
 A QA engineer does not plan from the diff alone. They remember what was tested before, read the old test cases, and check earlier tickets. Semar gives the agent the same material: the sources a team lists are presented as one knowledge base, and the plan must say what earlier testing it found and how it used it.
@@ -758,6 +1506,8 @@ The daemon can act as a client of MCP servers that the team configures, and pass
 
 The server's credentials stay in the daemon.
 
+**Engines through the same gateway (planned).** [Engines and the gateway](#engines-and-the-gateway) extends this client to surface engines. It keeps PRD decision D44 and the deny-by-default rule: a tool that no adapter profile maps stays denied. It adds an exact version pin, a hash of each tool description, and an effect class per tool. One difference is deliberate: a knowledge server may be listed under `mcpServers` in the repository, but a surface engine is registered only in the person's own Semar home.
+
 ### MCP configurations
 
 Semar is an MCP server and an MCP client.
@@ -784,6 +1534,8 @@ Each listed tool states its use and its effect:
 | `surface` | The agent, through the recorder | An internal admin tool that prepares test data |
 
 The effect is `read` unless the configuration says `write`. A tool that writes obeys the environment's `effects` settings and is recorded in the activity log as a write. A `tracker` tool that writes is limited to Semar's own comment, as in [What Semar may write](#what-semar-may-write).
+
+A `surface` tool is planned to pass through the engine gateway's checks too: the description hash, the effect class, the host allowlist, and the size cap. See [Engines and the gateway](#engines-and-the-gateway).
 
 The tracker and the observability connection can each run through an MCP server in place of Semar's own adapter. Code makes those calls. The agent still holds no credential for Jira or Grafana and never sees a `tracker` tool.
 
@@ -1212,11 +1964,15 @@ Route A is the recommendation. Route C is the fallback.
 
 The engine adds one thing to every request the page makes to a listed host: the `traceparent` header, set through the DevTools Protocol. The observe engine can then attribute server errors to a web step. Spike S8 checks that this works for cross-origin requests.
 
+**Engine adapters (planned).** The web engine sits behind the engine adapter interface of [Engines and the gateway](#engines-and-the-gateway). brojev, by one of the routes above, is one adapter. An existing MCP server for the web, such as Playwright's, can be another, reached through the gateway with an adapter profile. This is not a decision. Decision T10 stands, and spike S6 compares the candidates on the same tests: snapshot quality, locators, actionability, host blocking inside the browser, the `traceparent` header, and recording of each action.
+
 ### Android engine
 
 The engine drives an emulator or a device through `adb`. It installs the build under test, launches the app, reads the screen as a list of elements with refs, sends input, and captures screenshots and `logcat`. [Signing in](#signing-in) describes sign-in on the device.
 
 Reading the screen fast is the hard part. `adb shell uiautomator dump` works everywhere but takes on the order of seconds. An on-device UI Automator server answers faster. Spike S7 measures three candidates and picks one: a small server APK that Semar ships, the Appium UiAutomator2 server, and Maestro's driver.
+
+**Engine adapters (planned).** The Android engine also sits behind the engine adapter interface. Spike S7 adds two candidates that are MCP servers, reached through the [gateway](#engines-and-the-gateway): mobile-mcp, which covers Android and iOS, and Maestro. None is chosen. If a candidate covers iOS, iOS may arrive before M4. That is an open question. The connected journeys of M3 follow [Journeys](#journeys), which replaces the narrow journey of [Plan 10](implementation/10-android.md).
 
 Known obstacles, each to be checked against the real app before M3 is planned: emulator detection, certificate pinning, OTP delivery to the device, weak accessibility labels, and matching the app build to the backend build.
 
@@ -1262,6 +2018,8 @@ A replay runs the Script as a batch through the same engines, with `By: replay`.
 
 `semar author --repair` lets the agent propose new locators. A repair cannot change an expectation, add a step, or remove a step. Semar shows the repair as the old locator beside the new one. When the element's role or name changed, a person approves the repair before the script counts again. A repair that only follows a moved element needs no approval.
 
+**Native replay artifacts (planned, not verified).** Where an engine adapter supports a native replay format, such as a Playwright script or a Maestro flow, the stored script may be that native artifact. The Script then keeps the binding beside it: for each step with an expected result, which action of the artifact carries it out. Replay runs the artifact through the gateway, so that the recorder still stores one `Action` per step, and the verdict engine reads those actions as today. Whether a native artifact can be bound this way is not verified. Spike S17 checks it. Without it, Semar stores its own script format only.
+
 ### Pilot
 
 ```go
@@ -1304,6 +2062,203 @@ Three rules apply:
 Exploring never produces `passed`. It produces findings through `qa_finding`. Each finding carries its recorded actions, so a person can replay it. A person triages each finding as a defect, a new scenario, or noise.
 
 `semar verify` runs an explore pass by default, within the limits under `explore` in configuration. A finding can become a scenario: the agent adds a proposed check to the finding, and a person who accepts it gets a scenario file with `source: person`.
+
+## Screens and UI legs
+
+Planned, not built. The web and Android engines are specified and not built. Only API replay is built. This section says how an agent knows what to click in a UI leg of a journey or in a UI scenario, and how Semar repeats it.
+
+### Two phases
+
+| Phase | Who acts | What happens |
+| --- | --- | --- |
+| Author, once and again when the app changes | The agent | It does the leg like a tester. The recorder stores each action with a locator |
+| Replay, every run | Semar, no model | It finds each element again from its locator and repeats the actions |
+
+The model runs only in authoring and repair, so replay costs no model call. This is the existing split of [Author](#author) and [Recording and replay](#recording-and-replay), applied to UI legs.
+
+### What guides the agent while it authors
+
+1. **The step in business words**, for example "add the first in-stock item to the cart and pay with the test card". Never "click button X".
+2. **The live screen**, read as a snapshot of elements with roles and accessible names. The agent acts through Semar's tools and has no shell.
+3. **The app source and the documents** under `knowledge`.
+4. **Values from journey bindings.** Secrets are placeholders that Semar fills in. The agent never sees a password. Sign-in with an OTP or a third-party account is done once by a person, as in [Signing in](#signing-in).
+5. **Screen objects**, the Page Object pattern of QA practice. A `kind: Screens` file gives each screen a stable name and each element a stable ID. The agent proposes entries from the source and the live screen with `qa_propose_screen` (planned). A person approves them in a merge request.
+
+### The screens file
+
+```yaml
+# .semar/screens/shop.yaml
+apiVersion: semar/v1
+kind: Screens
+app: shop
+screens:
+  Confirmation:
+    order-number: { accessibilityId: confirmation.order_number }
+    order-total:  { accessibilityId: confirmation.total }
+    order-status: { accessibilityId: confirmation.status }
+interruptions:
+  - id: location-permission
+    when:    { text: "Allow Shop to access this device's location?" }
+    dismiss: { text: "Don't allow" }
+```
+
+A UI step may carry `screen:`, a capture `from: { screen, element }`, and an expectation `check: { element, text }`:
+
+```yaml
+- id: read-confirmation
+  action: Read the order number and total on the confirmation screen
+  screen: Confirmation
+  captures:
+    - { name: order_id, from: { screen: Confirmation, element: order-number } }
+    - { name: total,    from: { screen: Confirmation, element: order-total } }
+  expect:
+    - check: { element: order-status, text: "Order placed" }
+      source: ticket
+      cite: "SHOP-482: the customer sees that the order was placed"
+```
+
+### Rules
+
+| # | Rule |
+| --- | --- |
+| 1 | Each expected result is bound to exactly one recorded action, as today |
+| 2 | Code compares numbers and text from the snapshot. It never uses the model's description of a screenshot |
+| 3 | A UI capture should be minimal. API legs are the source of truth, and an invariant checks them against the UI capture |
+| 4 | A screen element resolves to the recorder's `Locator`. Replay tries the accessibility ID, then the resource ID, then the role and accessible name, then the exact text |
+| 5 | A locator that is not found ends the leg `inconclusive`. A repair proposal needs a person's approval when the element's role or name changed, and can never change an expectation or a step, as today |
+| 6 | Each app declares its known interruptions: permission dialogs, update prompts, feature banners. Replay dismisses a known one and records the dismissal as an action by `replay`. An unknown one stops the leg as `inconclusive`, because the next element is not found |
+| 7 | An element without a stable ID is recorded with a warning, and the report lists it, as Plan 10 rule R5 says |
+| 8 | A script that uses a screen object that no person approved ends `inconclusive`, like an unconfirmed expectation |
+
+Until the UI engines exist, a mobile leg may be tested through the API calls that the app itself makes.
+
+### What is not verified
+
+* That an agent proposes screen objects that stay stable across app releases.
+* That a snapshot from each candidate engine gives roles and accessible names that are good enough for locators. Spikes S6 and S7.
+
+## Engines and the gateway
+
+Planned, not built. Semar does not build every surface engine itself. It integrates existing MCP servers as engines and adds what they do not provide: recording, verdicts computed by code, the effects policy, replay, journeys, and fixtures. The engine gateway extends the MCP client of [MCP gateway](#mcp-gateway) and the package `internal/gateway`. It does not reverse T10: brojev stays the web candidate, and the spikes compare it with the others through the same adapter interface (T71).
+
+### The rule
+
+During a verification run the agent sees one MCP server, `semar`. Semar applies policy to each call, forwards it to the real engine, and records it. A call that Semar did not see cannot become evidence, so the agent has no direct path to an engine (product rule 1). In an interactive session the user's agent may have its own servers. Calls through them are not recorded, never count as evidence, and the report says so, as today.
+
+Planning is different. The planner is read-only and may use the person's own MCP servers and skills.
+
+### Registration
+
+Engines are registered in the person's own Semar home (`$SEMAR_HOME`, else `$XDG_CONFIG_HOME/semar`, else `~/.config/semar`), the directory where `providers.yaml` already lives. Semar never reads an engine from the repository, because the repository is untrusted. This follows the existing rule for provider setup.
+
+```yaml
+# ~/.config/semar/engines.yaml. The names, command, and version are examples
+engines:
+  - id: web-main
+    surface: web
+    command: [/opt/semar-engines/web-engine, --stdio]
+    version: 2.4.1                         # exact. "latest" and ranges are refused
+    profile: { pack: acme/web-profiles, version: 1.0.2, id: web-engine, digest: "sha256:0c4b..." }
+    network: [shop.uat.example.com]        # the only hosts the engine process may reach
+    approvals:                             # written by semar engine approve
+      - { tool: browser_click, hash: "sha256:5d1e...", by: rina, at: 2026-11-17 }
+```
+
+`semar engine add` writes an entry, `semar engine list` shows each engine with its tools and their approval state, and `semar engine approve <id>` records an approval for each tool whose description hash is new.
+
+### Adapter profiles
+
+A profile maps one MCP server's tool names to Semar's actions. Profiles are shared through the registry. A tool that no mapping allows stays denied, which extends the rule of T28 and PRD decision D44. Semar uses a profile only when the engine's entry in `engines.yaml` names it with an exact version and a digest. A profile in a pack that the repository names is ignored for engines, so a repository cannot remap an engine's tools.
+
+```yaml
+apiVersion: semar/v1
+kind: AdapterProfile
+id: web-engine
+server: web-engine
+versions: ["2.4.1"]
+surface: web
+snapshot: aria-tree                        # how Semar reads roles and names from the engine's snapshot
+tools:                                     # Semar action to the engine's tool. The tool names are examples
+  snapshot: { tool: browser_snapshot, effect: read }
+  navigate: { tool: browser_navigate, effect: read, args: { url: url }, hostArg: url }
+  click:    { tool: browser_click, effect: write, args: { ref: ref } }
+  type:     { tool: browser_type, effect: write, args: { ref: ref, text: text } }
+```
+
+The agent still calls `web_click` or `android_tap` on `semar`. The profile decides which engine tool carries it out.
+
+### How the gateway forwards a call
+
+1. The agent calls a Semar tool, for example `web_click { ref: e12, why: "submit the refund" }`.
+2. The gateway finds the engine for the surface in `engines.yaml` and the tool in its profile. No mapping means the call is refused.
+3. Checks before the call: the engine runs and reports the pinned version, the tool's description hash matches an approval, the tool's effect class is allowed by the environment's effects policy and `effects.deny`, a URL argument is on the host allowlist, and the run's action limit is not reached. A `destructive` tool is refused unless the person approved it as destructive.
+4. Semar fills secret placeholders into the arguments after the checks, so the agent never sees a value.
+5. Semar sends the `tools/call` to the engine process and waits, with a timeout.
+6. Semar caps the size of the result, redacts it, and marks it as untrusted data.
+7. The recorder stores one `Action`: the surface, the Semar action as `Op`, the `Locator` resolved from the last snapshot, the redacted input and result, the evidence, and `By`. A planned field names the engine, its version, the tool, and the description hash. A refused call is stored with `Refused` set, as the API engine does today.
+8. The activity log gets the entry, and the redacted result goes back to the agent.
+
+At the start of a run the gateway calls `tools/list` on each engine and hashes each tool's name, description, and input schema with SHA-256. A new tool, or a tool whose hash changed, stays denied until `semar engine approve`. This is the defence against a tool that changes after approval.
+
+### Controls
+
+| Control | How |
+| --- | --- |
+| Exact version | `version` is exact and never `latest`. The engine's reported version must match |
+| Description hash | A changed description needs a new approval |
+| Effect class | Each mapped tool is `read`, `write`, or `destructive`. Writes obey the effects policy like an API write |
+| Host allowlist | The environment's hosts, checked on every URL argument, and the browser-level block of [Web engine](#web-engine) where the engine supports it |
+| Action limit | The existing limit per job |
+| Redaction | The recorder's redaction, on every input and result |
+| Secrets | Placeholders that Semar fills in after the checks |
+| Size cap | A result above the cap is cut and marked. A check on the cut part is not evaluated |
+| Untrusted output | Every engine output is data. It cannot change an expected result, a verdict, or a permission |
+| Isolation | One process per engine, with only the network it needs |
+
+### Candidates
+
+None is verified. Spikes S6 and S7 compare them through the adapter interface.
+
+| Surface | Candidates |
+| --- | --- |
+| Web | brojev, as decided in T10. Playwright |
+| Android | mobile-mcp, Maestro, Appium, and the candidates already in S7 |
+| iOS | mobile-mcp, Maestro, Appium. Whether iOS can come before M4 is an open question |
+
+### Native replay artifacts
+
+Where an adapter supports a native format, such as a Playwright script or a Maestro flow, the stored script may be that native artifact. Semar binds each expected result to a recorded action and computes the verdict. A team can then run the same flow without Semar. Whether the binding works with a native artifact is not verified. Spike S17 checks it.
+
+### Read engines through the gateway
+
+Observability, data checks, and other read engines go through the same gateway. A read-only subset of tools is allowed and their writing tools stay denied. This extends PRD FR-215, in which the observability connection may run through an MCP server.
+
+### Semar as an MCP server for other harnesses
+
+Semar also exposes its own job-level tools, `plan`, `run`, `verdict`, and `ledger`, with `semar mcp serve` (planned), so that another agent harness can call it: the agent drives, Semar judges. The plugin and the MCP configuration in [Repository layout](#repository-layout) carry this. `semar mcp`, the thin server of QA tools, stays as it is.
+
+### More surfaces
+
+The same gateway could carry more surfaces. None is designed and no candidate is evaluated: read-only data checks (they exist as the `db` engine), logs and traces (they exist as `observe`), the email and SMS inboxes of test accounts, webhooks and queues, and scheduled jobs.
+
+### Failure modes
+
+| Case | Outcome |
+| --- | --- |
+| No engine is registered for the scenario's surface | `not_run`, "surface not supported", as verdict rule 1 |
+| The engine does not start or crashes | `blocked`, naming the engine |
+| The engine reports another version than the pinned one | `blocked`, with both versions |
+| A needed tool is new or its description changed | `blocked`, "tool needs approval: semar engine approve web-main" |
+| Policy refuses the call | The step is `blocked` with the refusal, as for a host that is not allowed |
+| A write times out | Effect unknown. Never sent again. `inconclusive`, as today |
+| A result tells the agent to do something | Nothing. It is data. The agent's only tools are Semar's |
+
+### What is not verified
+
+* That each candidate engine reports its version and lists its tools in a way that pinning and hashing can rely on.
+* That forwarding and recording work with a real MCP engine. Spike S16.
+* That a native replay artifact can carry Semar's binding of expected results. Spike S17.
+* Which engine fits each surface. Spikes S6 and S7.
 
 ## Signing in
 
@@ -1631,6 +2586,8 @@ Which sources need confirmation is set by `trust.confirm`. The default is `diff`
 
 A scenario that passes on `baseline` expectations alone is reported as "passed, unchanged since baseline", and the report counts it apart from the other passes.
 
+Planned: a fixture that cannot give its state is a failed setup under rule 2, so the scenario ends `blocked` with the fixture and the step. See [Fixtures](#fixtures). Journey outcomes and obligation states are computed by their own rules in [Journeys](#journeys) and [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger), from scenario outcomes. They never change a scenario outcome.
+
 Invariants need no confirmation. They are a fixed list in Semar's code. The agent cannot add one, and a scenario file cannot carry one:
 
 * No 5xx response, unless an expectation asks for one.
@@ -1811,6 +2768,10 @@ A read is a `GET` or `HEAD` request by default. A team lists a `GET` that change
 Each scenario creates the data it needs and does not depend on data that another scenario or person made. Where the application lets a record carry a note or a reference, Semar puts the run ID in it, so that test data can be told apart later.
 
 `effects.mode` has no default. `semar init` asks for it, and Semar refuses to run against an environment that does not set it.
+
+**Fixtures (planned).** A [fixture](#fixtures) step obeys the same limits as a scenario step: `effects.mode`, `effects.deny`, `effects.once`, `effects.reads`, the host list, and the test accounts. A fixture's `find` must read. A fixture's `create` is a write, so on a `read_only` environment a fixture that `find` cannot satisfy ends the scenario `blocked`. Cleanup is a write too. It obeys the same policy and is logged in the `cleanup` pass of the activity log, and the data ledger shows what it removed and what is left.
+
+The rule that each scenario creates its own data changes for fixtures in one way. A fixture's `find` may reuse an existing record that matches its query, to limit growth. The activity log names a reused record as reused, cleanup never touches it, and a scenario that changes such a record must take it with `lease: exclusive`.
 
 ## Regression
 
@@ -2160,6 +3121,162 @@ The `providers`, `deciders`, and `roles` blocks are shown in [Instances and thir
 
 The `knowledge` key is a list of at most 16 sources, and the built loader refuses a kind other than `files` and `openapi`. The kinds `semar`, `jira`, `testrail`, and `mcp`, and a `cache` setting, are specified and not built. Their shape in the file will be decided when they are built. [Plan 14](implementation/14-knowledge-documents.md) describes the built kinds.
 
+### Planned files and keys in the repository
+
+| Path or key | Holds | Validation |
+| --- | --- | --- |
+| `.semar/fixtures/<id>.yaml` | One fixture | `id` matches the file name. `find` steps read. Every `until` has a timeout. `outputs` are capture names. A cycle under `given` is an error |
+| `.semar/journeys/<id>.yaml` | One journey | `needs` has no cycle. A binding names an output of a needed leg. A `wait` follows a read. `owner` is set |
+| `.semar/screens/<app>.yaml` | Screen objects and known interruptions of one app | Element IDs are unique within a screen. Each element has at least one locator field |
+| `.semar/scenarios/<ticket>/obligations.yaml` | The obligations of a ticket | Every obligation has a cover or a `manual` reason. Every `cite` exists |
+| `.semar/packs.lock` | One `LockEntry` per pack | Written by `semar pack add` and `semar pack update` only. A hand edit fails the digest check |
+| `packs:` in `semar.yaml` | Pack names with a version, such as `acme/orders@1.2` | A name only. A URL, a path, or a registry address is refused |
+| `environments.<env>.services[].authProfile` | The auth profile a fixture step uses for that service | The profile exists |
+| `web.build` | A build probe for the web app, for the journey manifest | The same shape as a service build probe |
+| `plan.trial` | `true` by default. `false` turns the trial run off | A boolean |
+
+```yaml
+packs:
+  - acme/orders@1.2
+environments:
+  uat:
+    services:
+      - name: orders
+        authProfile: support-agent
+      - name: payments
+        authProfile: payments-tester
+plan:
+  trial: true
+```
+
+### Planned files in the person's home
+
+These live in the person's Semar home (`$SEMAR_HOME`, else `$XDG_CONFIG_HOME/semar`, else `~/.config/semar`), beside the existing `providers.yaml`. Semar never reads them from the repository under test, because the repository is untrusted. A key with the same name in `.semar/semar.yaml` is refused with an error that names the home file.
+
+| File | Holds | Validation |
+| --- | --- | --- |
+| `engines.yaml` | Registered engines, their exact versions, adapter profiles, network, and tool approvals | `version` is exact: `latest`, a range, or a tag that moves is refused. A command is an argument list. A URL is on 127.0.0.1 |
+| `registries.yaml` | The address of each registry, by name | The name matches the first part of a pack name. The address is a git URL |
+| `leases/` | File locks for `lease: exclusive` on this machine | Created by Semar. Never edited |
+| `packs/` | A cache of fetched pack versions | Each version is checked against its digest before use |
+
+```yaml
+# ~/.config/semar/registries.yaml
+registries:
+  acme: { url: "git@git.example.com:acme/semar-registry.git" }
+```
+
+## Packs and the registry
+
+Planned, not built. A company needs one reviewed set of fixtures, named checks, screens, journeys, and adapter profiles for its services, defined once and not copied into every repository. A pack is a versioned set of that content in a registry.
+
+### Layers and precedence
+
+| Layer | Holds | Owner |
+| --- | --- | --- |
+| Semar core | The formats, the engines, and generic packs: access checks, pagination, idempotent create, and the API security probes | The project, open source |
+| Organisation registry | Fixtures, named checks, screens, journeys, and adapter profiles for the company's services, versioned and reviewed | A platform or QA team |
+| Repository | Scenarios and fixtures specific to one service | The service team |
+
+Journeys are the fourth layer and live in the organisation repository, as [Journeys](#journeys) says.
+
+### The registry
+
+The registry is a git repository and the source of truth. Each pack is a directory with a `pack.yaml`:
+
+```yaml
+# packs/orders/pack.yaml in the registry
+apiVersion: semar/v1
+kind: Pack
+name: acme/orders
+version: 1.2.3
+owner: team-orders
+services:
+  orders:   { owner: team-orders }
+  payments: { owner: team-payments }
+contents:
+  fixtures: [fixtures/order.paid.yaml, fixtures/customer.verified.yaml]
+  checks:   [checks.yaml]
+  screens:  [screens/shop.yaml]
+```
+
+A version is a git tag, `orders/v1.2.3`. The `services` block is where a journey report finds the owner of a failing leg's service.
+
+### Pinning
+
+`semar pack add acme/orders@1.2`:
+
+1. Reads the address of the registry `acme` from `registries.yaml` in the person's home. A missing name is an error that says which file to edit.
+2. Resolves `1.2` to the highest tag `orders/v1.2.x`, and records the exact version.
+3. Fetches that tag into the cache and computes the digest: SHA-256 over each file's path and content, in path order.
+4. Writes `acme/orders@1.2` under `packs:` and one entry in `.semar/packs.lock`:
+
+```yaml
+packs:
+  - name: acme/orders
+    version: 1.2.3
+    commit: 4e1f0c9
+    digest: "sha256:9a7c..."
+```
+
+Every run checks each cached pack against its digest and records the pack versions in `run.json`. A digest that does not match ends the run `blocked` with "pack acme/orders changed since it was locked". `semar pack update` moves a pin and writes a new lock entry. The lock change goes through a merge request like any other file.
+
+### Merging
+
+1. Semar loads the built-in packs, then the organisation packs from the lock file, then the repository's own files.
+2. Content is keyed by kind and ID. An entry in a higher layer replaces the lower one whole. There is no deep merge.
+3. Two packs of the same layer that define the same kind and ID are an error that names both.
+4. `semar validate` lists every override, so a person sees which layer gave each fixture.
+5. The fixed core cannot be overridden: verdict rules, invariants, and who may label an expected result, as [Configuration over code](#configuration-over-code) says.
+
+### Review
+
+A pack counts only after it was reviewed and approved in the registry, and the repository's change to `packs.lock` was approved in a merge request. A fixture from a pack still obeys the environment's effects policy. A repository can only name a pack. It can never give a registry address.
+
+### What is not verified
+
+* The license of shared packs, and where the commercial boundary lies. Both are open questions.
+* That one tag scheme per pack suits a registry with many packs.
+
+## Standards and interchange
+
+Planned, not built. Semar's formats should be readable and writable by other tools, and results should reach the tools a team already runs. Semar does not claim to be a standard. Adoption is earned.
+
+| Area | Plan | Not verified |
+| --- | --- | --- |
+| Published schemas | The scenario, fixture, journey, screens, evidence, and verdict formats are versioned JSON Schemas under `semar/v1`, which exists today, with a conformance suite that another tool can run | Nothing beyond the design |
+| Reports | `semar export ctrf <run>` and `semar export junit <run>` | The exact version of CTRF and of the JUnit XML dialect |
+| Findings | `semar export sarif <run>` writes security findings and confirmed defects | The exact SARIF version |
+| Trace | The W3C `traceparent` header on every API and web request, as [API engine](#api-engine) and [Web engine](#web-engine) say, so a run's requests can be found in the tracing backend | As in spikes S4 and S8 |
+| Import | Postman collections, OpenAPI documents, HAR files, and existing manual test cases. Every import is a draft that a person reviews | Fidelity. Spike S19 for Postman and HAR |
+| Vocabulary | `given` follows Gherkin's Given. A fixture state follows the idea of provider states in consumer-driven contract testing | Not applicable |
+| Fixture format | Compatible with Arazzo workflows, with `x-semar` keys. See [Fixtures](#fixtures) | Spike S15 |
+| Evidence bundles | A bundle may later be signed in the style of in-toto and Sigstore attestations, so that an auditor can verify a result without trusting Semar | Not designed. A later stage |
+
+A conformance test is a set of files and expected results: valid files that must load, invalid files that must be refused with a named rule, and stored evidence with the outcome that the verdict rules must give. A neutral foundation and an RFC process are a later option.
+
+## Dashboard views
+
+Planned, not built. The local dashboard exists: `semar dashboard` serves model settings on the person's own machine, with a random token and a loopback host check. It gains views. It does not become a database.
+
+| View | Shows | Reads |
+| --- | --- | --- |
+| Catalogue | Fixtures, screens, and journeys, with the scenarios that use each | The merged files |
+| Fixture health | The last time `find` and `create` worked, on which environment and build | Health records in the evidence store |
+| Review | Proposed fixtures, screen objects, and packs, for a person to approve | Files in open merge requests and the working copy |
+| Impact | Which scenarios and journeys break if a fixture changes | The merged files |
+| Plan gaps | "Fixtures needed" entries from `plan.md` | Plans in the evidence store |
+| Journey status | The outcome of each journey per manifest | `run.json` files |
+| Ledger | Obligations by state, and the manual checklist | Obligations and run results |
+
+Rules:
+
+1. Git stays the source of truth. Every view is computed from files.
+2. An approval in the dashboard writes the same record that `semar confirm` writes, under the code-host identity that the person's token belongs to. The dashboard keeps no approval of its own.
+3. The dashboard listens on the loopback address only, as today.
+
+A team edition on a shared server is a later stage. It is where single sign-on, role-based access, an audit log, run history across teams, secret-manager integration, masking of personal data in evidence, and data residency belong. The core stays Apache-2.0, and the formats and the engine are never made commercial. This is consistent with PRD decision D4 and the staged managed cloud in [Milestones](#milestones).
+
 ## Commands
 
 | Command | Purpose |
@@ -2206,6 +3323,21 @@ The `knowledge` key is a list of at most 16 sources, and the built loader refuse
 | `semar mark <scenario> false-pass\|false-failure <reason>` | Record that a result was wrong |
 | `semar sample --release <name>` | Pick passed scenarios at random for a person to check |
 | `semar import gherkin <file>` | Turn the scenarios of a feature file into Semar scenarios |
+| `semar plan --no-trial` | Planned. Plan without the [trial run](#trial-run) |
+| `semar fixture list` | Planned. List the merged fixture catalogue with the layer, version, approval, and health of each |
+| `semar fixture check [<id>]` | Planned. Run the health check of one fixture or of all: `find`, `create`, and `cleanup` on a test environment |
+| `semar fixture import postman\|har <file>` | Planned. Write a draft fixture for a person to review |
+| `semar journey list` | Planned. List journeys with owner, criticality, and the last outcome per manifest |
+| `semar journey run [<id>] [--critical]` | Planned. Run one journey, or every critical journey |
+| `semar ledger [--ticket <key>]` | Planned. Print the state of each obligation and the manual checklist |
+| `semar ledger defer <obligation> --reason <text> --until <date>` | Planned. Record a deferral as the signed-in code-host user |
+| `semar ledger record <obligation> passed\|failed --notes <text>` | Planned. Record the result of a manual check |
+| `semar pack add <name>@<version>` | Planned. Pin a pack and write its lock entry |
+| `semar pack update [<name>]` | Planned. Move a pin and write a new lock entry |
+| `semar engine add`, `semar engine list` | Planned. Register an engine in the person's home, and list engines with their tools and approval state |
+| `semar engine approve <id>` | Planned. Approve each tool whose description hash is new |
+| `semar mcp serve` | Planned. Serve Semar's job-level tools (`plan`, `run`, `verdict`, `ledger`) to another agent harness |
+| `semar export ctrf <run>`, `semar export sarif <run>` | Planned. Write results as CTRF, or findings as SARIF |
 
 ## Security model
 
@@ -2248,6 +3380,11 @@ The `knowledge` key is a list of at most 16 sources, and the built loader refuse
 | The agent posts or edits something in Jira or TestRail | The agent holds no credential for either. Code posts one comment and, when turned on, test results |
 | A tracker or TestRail credential allows more than Semar needs | `semar doctor` reports what each credential allows and warns on excess |
 | A result comment leaks request or response data into Jira | The comment carries outcomes and step descriptions only. Bodies stay in the evidence store |
+| Planned. An engine's tool description tells the agent to do something, or a tool changes after approval (tool poisoning, a rug pull) | Engines come from the person's home only, at an exact version. Each tool's name, description, and input schema are hashed, and a changed hash denies the tool until a person approves it again. A tool that no adapter profile maps stays denied. See [Engines and the gateway](#engines-and-the-gateway) |
+| Planned. A page or a response tells the agent to change an expected result, skip a step, or call another tool (prompt injection) | Every engine output is untrusted data. Expected results come from the Scenario file, which the agent cannot write. The agent's only tools are Semar's, behind policy. A trial response cannot change an expected result |
+| Planned. A malicious pack or registry adds a fixture that writes, or remaps an engine | The registry address comes from the person's home only. A repository can only name a pack. Each pack is pinned by digest and counts only after review. A fixture step obeys the effects policy. An adapter profile counts only when `engines.yaml` names it with a digest |
+| Planned. A run holds a lease for ever, or takes an account another run needs (lease abuse) | A lease is held by a running process and released when it ends, so a crash releases it. A lease wait has a limit, after which the scenario is `blocked`. Leases across several machines are an open question |
+| Planned. Fixture cleanup deletes the wrong record | Cleanup runs only for records that the fixture's own `create` made in this run, by the IDs it captured. A record that `find` reused is never cleaned up. Cleanup obeys `effects.deny` and is logged in the `cleanup` pass |
 
 ## Repository layout
 
@@ -2288,7 +3425,14 @@ internal/ready/         risk levels, exit criteria, readiness, and defect drafts
 internal/tracker/       ticket adapters: jira (read ticket, post result comment)
 internal/knowledge/     sources, one search, cache, feature placement, memory notes
 internal/knowledge/testrail/ read cases and results, write runs and results
-internal/gateway/       MCP client for configured servers, tool allowlist
+internal/gateway/       MCP client for configured servers, tool allowlist. Planned: engine forwarding, adapter profiles, version pins, description hashes
+internal/fixture/       planned: fixture catalogue, resolution, until, cleanup, leases, health, Arazzo and draft imports
+internal/journey/       planned: journey loading, manifest, leg scheduling, invariants, journey outcome
+internal/ledger/        planned: obligations, state derivation, deferrals, manual checklist
+internal/pack/          planned: registries, pinning, lock file, digests, merge by precedence
+internal/screens/       planned: screen objects, interruptions, element to locator
+internal/export/        planned: CTRF, JUnit XML, and SARIF writers
+schemas/                planned: the published JSON Schemas and the conformance suite
 internal/evidence/      bundle layout, EvidenceStore, git branch store
 internal/report/        report and roll-up rendering
 plugin/                 Claude Code plugin: manifest, MCP config, skill, install hook
@@ -2296,6 +3440,8 @@ testdata/sampleapp/     a small service with seeded defects
 ```
 
 `internal/domain` and `internal/verdict` import nothing from the other packages.
+
+The planned packages build on what exists. The trial run belongs in `internal/stage/plan`, which holds plan validation today. The person's home files belong beside `internal/userconfig`, which reads `providers.yaml`. The new views belong in `internal/dashboard`. `internal/journey` replaces the `internal/workflow` package that Plan 10 specifies and that is not built. `internal/ledger` is pure, like `internal/verdict`: it reads outcomes and does no I/O.
 
 Candidate dependencies. Confirm each one's current version and maintenance state when adding it:
 
@@ -2336,16 +3482,29 @@ Candidate dependencies. Confirm each one's current version and maintenance state
 * **End to end.** `testdata/sampleapp` is a small HTTP service with a switch for each seeded defect. The suite runs the full pipeline with a scripted fake provider and asserts the outcome per defect. The seeded defects include a wrong business result with status 200, a refund that another user can make, and a reverted change.
 * **Detection check.** The same sample app with a real provider measures how many seeded defects end `failed`. It runs by hand before each release and its result goes in the release notes.
 
+Planned tests for the parts added on 2026-11-17:
+
+* **Ledger.** Table-driven tests, one row per derivation rule and rows for rule order: a failed scenario under a deferral is `failed`, an expired deferral is ignored, an `inconclusive` cover gives `blocked` with its reason, and an obligation with no cover and no reason is a plan validation problem. One test asserts that the ledger never changes a scenario outcome.
+* **Fixtures.** Against the sample app: `find` reuses a record, `create` runs only when `find` gives nothing, `until` polls and times out, outputs reach the scenario, cleanup runs in reverse order after a failure and never touches a reused record, and every failure mode in [Fixtures](#fixtures) ends `blocked`, never `failed`. One test asserts that a `find` step that writes is refused, and one that a fixture step on `effects.deny` is refused. A lease test runs two processes on one machine and asserts that only one holds the lease.
+* **Trial run.** One test asserts that no write and no fixture `create` is sent. One asserts that a trial action never counts as evidence for a scenario. One feeds a planner that tries to change an expected result after a trial response and asserts that validation rejects it.
+* **Journeys.** Scheduling by `needs`, a cycle as an error, a binding to a leg that is not needed as an error, the first failing leg named and later legs `not_run`, an invariant that breaks, a wait that times out, and a manifest that changes during the run giving `stale`. Each row of the outcome table has a test.
+* **Screens.** The locator order, a known interruption dismissed, an unknown one giving `inconclusive`, and a script that uses an unapproved screen object giving `inconclusive`.
+* **Gateway.** A fake MCP engine serves tools with set descriptions. The tests assert that an unmapped tool is denied, a changed description denies the tool until it is approved, a version that differs from the pin blocks, a URL off the host list is refused, a result above the cap is cut, secrets never appear in what the engine receives before the checks or in what the agent sees, and every forwarded call is recorded as one `Action`.
+* **Packs.** A local git registry: pinning writes the right lock entry, a changed file fails the digest, precedence replaces whole entries, two packs of one layer with the same ID are an error, and a registry address or an engine in the repository is refused.
+* **Conformance suite.** The published schemas ship with valid files, invalid files with the rule each breaks, and stored evidence with the outcome the verdict rules must give. Semar's own loaders run the suite in CI.
+* **Prompt injection.** A sample-app page and a response tell the agent to change an expected result. The test asserts that plan validation, and the script binding in authoring, reject the change.
+* **Sample app.** The seeded-defect sample app gains a second service for a multi-service fixture, and a two-leg API journey across both services, with a seeded defect in which the two services disagree on a total.
+
 ## Milestones
 
 | Milestone | Contents | Done when |
 | --- | --- | --- |
 | M0 | Relevant spikes below; baseline of the team's actual verification effort, including developer work and skipped checks | Contracts and pilot criteria are recorded without assuming a QA team exists |
 | M1 | The daemon, `semar mcp`, the Claude Code plugin, the `api`, `observe`, and `db` engines, the recorder, replay, verdict, `claude` and `codex` drivers, the ticket gate with Jira read, the `semar`, `jira`, and `files` knowledge sources with `kb_search`, the feature map, Plan with earlier testing, the impact map, and recommendations, Gate, sign-in, Author, Explore, `regression run` and `regression coverage`, local report, `init`, `doctor`, `egress` | One real ticket runs from plan to a local report on UAT, in both the interactive and the unattended way. A local regression run replays the scenarios that ticket left behind. The sample-app suite passes |
-| M1.1 | Code host adapter, evidence branch, `publish` with the Jira result comment, the `testrail` source and TestRail results, the MCP gateway, memory notes, decisions in the merge request, `sync`, `status`, pipeline templates, promotion on sign-off, `regression bootstrap` with bulk confirmation, the regression comparison report, Postman import, `rollup`, `acp` driver | A ticket goes from an opened merge request to a signed-off report and a Jira comment with no person starting a command, and the nightly regression run publishes its report |
-| M2 | The `web` engine on brojev, `web_run` with the pilot, locators, script repair, the object-storage evidence store | One real web ticket runs from plan to a published report |
-| M3 | Native Android adapter, app/device identity, evidence artifacts, and connected API/web/Android journeys; completes the initial platform scope | Required checks run across each applicable surface on one target manifest and connected fixture; a QA engineer, a developer, or a product manager can review the evidence |
-| M4 | Native iOS adapter and separately validated runner/device capabilities; extend the existing Android support | iOS journeys pass the same evidence/permission contracts without borrowing Android results |
+| M1.1 | Code host adapter, evidence branch, `publish` with the Jira result comment, the `testrail` source and TestRail results, the MCP gateway, memory notes, decisions in the merge request, `sync`, `status`, pipeline templates, promotion on sign-off, `regression bootstrap` with bulk confirmation, the regression comparison report, Postman import, `rollup`, `acp` driver. Planned on 2026-11-17: the trial run, local fixtures with leases on one machine and fixture health, the obligations and the ledger with the manual checklist, API-only journeys, and the CTRF, JUnit XML, and SARIF exports | A ticket goes from an opened merge request to a signed-off report and a Jira comment with no person starting a command, and the nightly regression run publishes its report. Planned: the ticket's report opens with the ledger line, and a two-leg API journey runs on the sample app on one manifest |
+| M2 | The `web` engine on brojev, `web_run` with the pilot, locators, script repair, the object-storage evidence store. Planned on 2026-11-17: the engine gateway and the engine registry, packs and the registry, the published schemas and the conformance suite, screen objects, and web legs of journeys | One real web ticket runs from plan to a published report. Planned: a journey with a web leg passes on one manifest, and another tool's loader passes the conformance suite |
+| M3 | Native Android adapter, app/device identity, evidence artifacts, and connected API/web/Android journeys; completes the initial platform scope. Planned on 2026-11-17: Android legs of journeys, in the format of [Journeys](#journeys) | Required checks run across each applicable surface on one target manifest and connected fixture; a QA engineer, a developer, or a product manager can review the evidence |
+| M4 | Native iOS adapter and separately validated runner/device capabilities; extend the existing Android support. Planned on 2026-11-17: signed evidence bundles, and the open question of whether iOS can come earlier through an engine that S7 finds | iOS journeys pass the same evidence/permission contracts without borrowing Android results |
 | Shadow | Compare with the team's existing checks from M1 onward; developers, leads, or product owners perform independent checks when QA is absent | Reliability and total human effort are measured; absent/skipped prior testing is disclosed rather than treated as zero-cost equivalent quality |
 
 M1 builds two provider drivers and three engines on purpose. One implementation of an interface leaves the interface unproven.
@@ -2356,7 +3515,7 @@ The initial three execution surfaces are API, web, and Android, followed by iOS.
 
 The effects policy, script binding, the verdict fixes, and access checks on the API belong to M1, because a pass cannot be trusted without them. The run key, the account pool, plan revisions in replies, and suite upkeep belong to M1.1. The activity log and the security pass on the API also belong to M1. Sign-in on the web, with `semar login` and the dedicated Chrome profile, belongs to M2. Sign-in on Android belongs to M3. Risk levels, the health check, readiness, and defect drafts belong to M1. The screener, the second reader, and the MCP import belong to M1.1. The testing practices marked M1 in [Testing practices built into Semar](#testing-practices-built-into-semar) are small. The larger ones are in M1.1 or later.
 
-A managed cloud service is a later stage. Nothing in M0 to M4 builds it. It needs tenant isolation, per-document permissions on knowledge, and signed evidence. Three choices keep it possible: the `EvidenceStore` interface, run records that are complete without a server, and a runner that needs no inbound connection.
+A managed cloud service is a later stage. Nothing in M0 to M4 builds it. It needs tenant isolation, per-document permissions on knowledge, and signed evidence. Three choices keep it possible: the `EvidenceStore` interface, run records that are complete without a server, and a runner that needs no inbound connection. Enterprise operation belongs to that managed edition, after M4: single sign-on, role-based access, an audit log, run history across teams, secret-manager integration, masking of personal data in evidence, and data residency. A lock service for leases across several machines is one option there.
 
 ## Spikes before Milestone 1
 
@@ -2369,9 +3528,8 @@ Each spike is a throwaway script with a written result. None needs product code.
 | S3 | Does `github.com/coder/acp-go-sdk` complete `initialize`, `session/new` with an MCP server, and `session/prompt` against `gemini --acp`? | The ACP driver |
 | S4 | Do the UAT services continue a `traceparent` header, and does the trace ID appear in Loki lines and Tempo traces? | Whether the observer can fail a scenario or is advisory only |
 | S5 | Can a model draft useful scenarios and request hints from three past merge requests of yours with blank tickets? Compare the draft with what QA tested | Whether the Plan stage has value at all |
-
-| S6 | Which route brings brojev's engine into Semar: import, drive the daemon, or vendor? | The web engine and decision T10 |
-| S7 | Which on-device server gives a screen snapshot fast enough for a pilot loop, and does it run on your UAT Android build? Appium with UiAutomator2 is one candidate | The Android engine |
+| S6 | Which route brings brojev's engine into Semar: import, drive the daemon, or vendor? Extended on 2026-11-17: through the same engine adapter interface, compare brojev with Playwright on one set of local pages: snapshot roles and names, locators that survive a reload, actionability checks, host blocking inside the browser, the `traceparent` header, and one recorded `Action` per call | The web engine, decisions T10 and T71 |
+| S7 | Which on-device server gives a screen snapshot fast enough for a pilot loop, and does it run on your UAT Android build? Appium with UiAutomator2 is one candidate. Extended on 2026-11-17: compare mobile-mcp, Maestro, and Appium next to the existing candidates, on the same test APK, and check whether any of them covers iOS | The Android engine, decision T71, and whether iOS can come before M4 |
 | S8 | Can the web engine add a `traceparent` header to the page's requests, including cross-origin ones? | Whether a web step can be tied to server logs |
 | S9 | Which stores does UAT use (PostgreSQL, MySQL, Elasticsearch), can you get a read-only account for each, and which Go SQL parsers handle PostgreSQL and MySQL statements without cgo? | The `db` engine |
 | S10 | Can the agent build a correct feature map for one of your services, and does it trace a change in a shared function to the right endpoints? | The impact map and regression coverage |
@@ -2379,6 +3537,11 @@ Each spike is a throwaway script with a written result. None needs product code.
 | S12 | For one past UAT deploy of yours, how many commits can code link to a ticket, and how many tickets span more than one repository? | The change set and the build view |
 | S13 | After a person signs in to Google once in the dedicated Chrome profile, does the session stay valid when Semar drives that profile, and for how long? Does the same hold for a test Google account on your Android emulator? | Route 1 of [Sign-in with Google](#sign-in-with-google) |
 | S14 | On your own failed runs and probe responses, how often is Jev's likely cause right, and does its ranking put the odd responses first? | The screener role |
+| S15 | Can an Arazzo workflow, with `x-semar` keys, express a fixture's find before create, `until` with a timeout, cleanup in reverse order, outputs, and a lease, and does a round trip from Semar's YAML to Arazzo and back lose nothing? Before M1.1 | The fixture format, decision T63 |
+| S16 | Can the gateway start a real MCP engine, read its version, list and hash its tools, forward a call after policy, and record one `Action` with a usable `Locator` from the engine's snapshot? Before M2 | The engine gateway, decisions T69 and T70 |
+| S17 | Can a native replay artifact, such as a Playwright script or a Maestro flow, be replayed through the gateway so that each expected result binds to one recorded action? Before M2 | Native replay artifacts, decision T72 |
+| S18 | Which lease strategy holds when several runners on several machines run against one environment: a lock service, or a marker with a time limit on the environment's own record? Before parallel runners are supported | Leases, decision T76 |
+| S19 | How faithfully do a real Postman collection and a real HAR file import as draft fixtures: requests, variables, captures, and order? Before M1.1 | Fixture import and the Postman import |
 
 S5 is the cheapest test of the whole idea. Run it first.
 
@@ -2411,3 +3574,22 @@ S5 is the cheapest test of the whole idea. Run it first.
 * TypeSafe's facts come from its documentation and from brojev's README. Jev was not called. Spike S14 measures the screening jobs.
 * That OpenRouter serves the same decision interface. brojev's source uses it, and TypeSafe's documentation does not mention it.
 * That an MCP server which signs in through a browser can be used by the daemon without a person each time.
+
+Added on 2026-11-17:
+
+* That the fixture format fits Arazzo workflows without losing find, create, cleanup, or a lease. Spike S15.
+* The exact Arazzo version and its retry and timeout elements for `until`.
+* The lease strategy for parallel runners on several machines. Spike S18.
+* How to clean up data that the application cannot delete.
+* That a Postman collection or a HAR file imports faithfully as a draft fixture. Spike S19.
+* How obligations are imported from existing manual test cases, and their quality.
+* That the planner proposes the obligations that a QA engineer would list.
+* That trial problems lead the planner to a correct repair.
+* Which engine fits each surface: brojev or Playwright for the web, and mobile-mcp, Maestro, or Appium for mobile. Spikes S6 and S7.
+* Whether iOS can come before M4 through a mobile engine.
+* That the gateway can forward and record calls of a real MCP engine, and that each engine reports a version and stable tool descriptions. Spike S16.
+* That a native replay artifact can carry Semar's binding of expected results. Spike S17.
+* That snapshots from each candidate engine give roles and accessible names good enough for locators and screen objects.
+* The exact versions of CTRF, the JUnit XML dialect, and SARIF that Semar will write.
+* That journeys across real services repeat reliably enough to gate a release.
+* Where the commercial boundary lies, and the license of shared packs.
