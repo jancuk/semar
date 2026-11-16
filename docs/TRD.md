@@ -1153,6 +1153,8 @@ The first matching rule gives the state. Only results on the builds that UAT run
 | 4 | `verified` | At least one scenario or journey covers it, and every covering scenario and journey is `passed`. A `passed` scenario already has confirmed expectations and evidence |
 | 5 | `blocked` | Anything else. The reasons name each covering item that is not `passed`, with its outcome and its reason, or say that nothing covers it |
 
+A pass counts only while the scenario file has the expected results that the run judged. Each scenario result stores the expectation hash, and after an edit the obligation is `blocked` with "rerun: the scenario changed". A failure shows whatever the hash is.
+
 The five states have no word for "tested, but not decided". A covering scenario that is `inconclusive`, `stale`, or `not_run` therefore gives `blocked`, and the reason names the missing piece: a confirmation, a run on the current build, or a missing engine. The report shows the scenario outcome beside it.
 
 The report of `semar run` opens with one line, for example `42 use cases: 35 verified, 2 failed, 3 blocked, 2 need a person`, and a second line that names `semar ledger --ticket <key>`. The run counts every obligation whose ticket or `covers` touch a scenario of the run. A run that did not finish prints no line.
