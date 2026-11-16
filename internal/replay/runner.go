@@ -82,6 +82,8 @@ type replayed struct {
 	confirmed func(domain.Expectation) bool
 	notes     []domain.Reason // why the scenario stopped early, when no recorded action says it
 	fixtures  []domain.FixtureRecord
+	captured  map[string]string // every capture of every step, raw. Never stored
+	last      *api.Call         // the call of the last step that was sent
 }
 
 // Run replays each scenario and returns one result per scenario, in input order.
@@ -202,7 +204,7 @@ func (r *Runner) confirmation(sc domain.Scenario, run *replayed) func(domain.Exp
 // The given entries are resolved after the script is validated, so a bad script sends nothing.
 // Their cleanup runs when the scenario ends, also after a failure or an interrupt.
 func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (run replayed, doErr error) {
-	run = replayed{steps: map[domain.StepID]verdict.StepEvidence{}}
+	run = newReplayed()
 	run.confirmed = r.confirmation(sc, &run)
 
 	s, found, err := r.d.Scripts.Script(sc.ID, domain.ExpectHash(sc))
@@ -214,14 +216,8 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (run replayed, 
 		run.blocked = []string{reasonNoScript}
 		return run, nil
 	}
-	if problems := script.ValidateWith(sc, s, r.outputs(sc)); len(problems) > 0 {
-		for _, p := range problems {
-			text := "the script does not fit the scenario: " + p.Message
-			if p.Step != "" {
-				text = fmt.Sprintf("the script does not fit the scenario: step %s: %s", p.Step, p.Message)
-			}
-			run.blocked = append(run.blocked, text)
-		}
+	if blocked := scriptBlocked(script.ValidateWith(sc, s, r.outputs(sc))); len(blocked) > 0 {
+		run.blocked = blocked
 		return run, nil
 	}
 
@@ -250,7 +246,24 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (run replayed, 
 		}
 		maps.Copy(vars, res.Vars)
 	}
-	return run, r.steps(ctx, sc, s, &run, vars)
+	return run, r.steps(ctx, sc, s, &run, vars, domain.PassScenario)
+}
+
+func newReplayed() replayed {
+	return replayed{steps: map[domain.StepID]verdict.StepEvidence{}, captured: map[string]string{}}
+}
+
+// scriptBlocked turns the problems of a script into the reasons that block its scenario.
+func scriptBlocked(problems []script.Problem) []string {
+	var blocked []string
+	for _, p := range problems {
+		text := "the script does not fit the scenario: " + p.Message
+		if p.Step != "" {
+			text = fmt.Sprintf("the script does not fit the scenario: step %s: %s", p.Step, p.Message)
+		}
+		blocked = append(blocked, text)
+	}
+	return blocked
 }
 
 // outputs maps each alias to the outputs of its fixture, for script validation. With a fixture
@@ -271,7 +284,9 @@ func (r *Runner) outputs(sc domain.Scenario) map[string][]string {
 	return out
 }
 
-func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script, run *replayed, vars map[string]string) error {
+// steps sends the steps of sc. A step that is not a setup step belongs to pass. It writes to vars
+// and to run, so each call needs its own.
+func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script, run *replayed, vars map[string]string, pass domain.Pass) error {
 	bound := make(map[domain.StepID]domain.ScriptStep, len(s.Steps))
 	for _, ss := range s.Steps {
 		bound[ss.Step] = ss
@@ -287,12 +302,13 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 			note(step.ID, fmt.Sprintf("step %s has no request in the script, so the later steps were not sent", step.ID))
 			break
 		}
-		call, err := buildCall(sc, step, ss, vars)
+		call, err := buildCall(sc, step, ss, vars, pass)
 		if err != nil {
 			note(step.ID, fmt.Sprintf("step %s could not be sent: the request could not be built", step.ID))
 			break
 		}
 		res, err := r.d.Engine.Do(ctx, call)
+		run.last = &call
 		if res.Action.ID != "" {
 			run.steps[step.ID] = evaluate(step, res.Action)
 		}
@@ -308,6 +324,7 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 		if a := res.Action; a.Response == nil || a.Refused != "" || a.Err != "" {
 			break
 		}
+		maps.Copy(run.captured, res.Captured)
 		if len(res.Missing) > 0 {
 			if i < len(sc.Steps)-1 {
 				note(step.ID, fmt.Sprintf("step %s: capture %s found no value, so the later steps were not sent", step.ID, strings.Join(res.Missing, ", ")))
@@ -325,7 +342,7 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 	return doErr
 }
 
-func buildCall(sc domain.Scenario, step domain.Step, ss domain.ScriptStep, vars map[string]string) (api.Call, error) {
+func buildCall(sc domain.Scenario, step domain.Step, ss domain.ScriptStep, vars map[string]string, pass domain.Pass) (api.Call, error) {
 	req, err := script.Render(*ss.Request, vars)
 	if err != nil {
 		return api.Call{}, err
@@ -336,7 +353,6 @@ func buildCall(sc domain.Scenario, step domain.Step, ss domain.ScriptStep, vars 
 			return api.Call{}, fmt.Errorf("json: %w", err)
 		}
 	}
-	pass := domain.PassScenario
 	if step.Setup {
 		pass = domain.PassSetup
 	}
