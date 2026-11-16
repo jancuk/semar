@@ -958,9 +958,11 @@ The run ID is in the path on the `report:` line of `semar run`. The report goes 
 | --- | --- |
 | `ctrf` | A JSON report with one test for each scenario: its name (the scenario ID and title), status, duration, the first reason as a message, every reason as a trace, and the ticket as the suite. It also holds the counts, the start and stop times, the environment, and the builds |
 | `junit` | JUnit XML with one test suite for each ticket and one test case for each scenario. A `failed` scenario is a `failure`, and a `blocked`, `inconclusive`, or `stale` one is an `error`, so that no pipeline shows it as green. The run, the environment, and the builds are properties |
-| `sarif` | SARIF 2.1.0 with the confirmed defects of the run only: one result for each false check on a confirmed expected result, and one for each broken invariant. Each result points at the scenario file and, when known, the line of the step. A `blocked` or `inconclusive` scenario is not a finding about the product, so it gives no result |
+| `sarif` | SARIF 2.1.0 with the confirmed defects of the run only: one result for each false check on a confirmed expected result, one for each broken invariant, and one for each failed journey, which names its first failing leg. A scenario result points at the scenario file and, when known, the line of the step. A `blocked` or `inconclusive` scenario is not a finding about the product, so it gives no result |
 
 Every export also carries the Semar outcome of each scenario beside the status of the format, so that none of the six outcomes is lost. `blocked`, `inconclusive`, and `stale` are never written as a pass. In `ctrf`, `not_run` is `skipped`, and `blocked`, `inconclusive`, and `stale` are `other`. In `junit`, `not_run` is `skipped`.
+
+The run of a journey has one test for each leg, and one more test named `journey <id>` in the suite `semar journeys` of `ctrf` and `junit`. A journey can fail on an invariant while every leg passed, so read the journey test as well. Its `blocked` and `stale` outcomes are `other` in `ctrf` and `error` in `junit`.
 
 An export is refused for a run that did not finish, for a run whose stored evidence changed after it was written (the message names the file), and for a run with no scenario result, such as a trial run or a fixture check. The evidence was redacted when it was stored, and an export adds no request and no header.
 
