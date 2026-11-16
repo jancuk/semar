@@ -82,3 +82,17 @@ func TestScenarioResultFixturesOmittedWhenEmpty(t *testing.T) {
 		t.Fatalf("no fixtures must not be encoded: %s", b)
 	}
 }
+
+func TestScenarioResultOmitsAnEmptyExpectHash(t *testing.T) {
+	got, err := json.Marshal(domain.ScenarioResult{Scenario: "S-1", Outcome: domain.OutcomePassed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "expectHash") {
+		t.Errorf("an old result gained a key: %s", got)
+	}
+	got, err = json.Marshal(domain.ScenarioResult{Scenario: "S-1", Outcome: domain.OutcomePassed, ExpectHash: "abc"})
+	if err != nil || !strings.Contains(string(got), `"expectHash":"abc"`) {
+		t.Errorf("%s, %v", got, err)
+	}
+}

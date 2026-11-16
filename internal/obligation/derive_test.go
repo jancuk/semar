@@ -300,6 +300,24 @@ func TestAScenarioOnAServiceNotReadNowIsNotCurrent(t *testing.T) {
 	mustReason(t, e, "A-1 ran on orders 0ld0ld0, and the build of orders was not read now: rerun on the current build")
 }
 
+func TestAPassOfAScenarioThatChangedIsNotCounted(t *testing.T) {
+	c := res("A-1", "passed", "")
+	c.ScenarioChanged = true
+	e := one(t, ob("g/a", covers("A-1")), results(c), nil, nil)
+	if e.State != obligation.Blocked {
+		t.Fatalf("state %s", e.State)
+	}
+	mustReason(t, e, "A-1: rerun: the scenario changed since r-20261117T090000Z-1a2b")
+}
+
+func TestAFailureOfAScenarioThatChangedStillShows(t *testing.T) {
+	c := res("A-1", "failed", "boom")
+	c.ScenarioChanged = true
+	if e := one(t, ob("g/a", covers("A-1")), results(c), nil, nil); e.State != obligation.Failed {
+		t.Fatalf("state %s", e.State)
+	}
+}
+
 func TestNoReasonListedFirst(t *testing.T) {
 	obs := []obligation.Located{
 		ob("g/verified", covers("A-1")),

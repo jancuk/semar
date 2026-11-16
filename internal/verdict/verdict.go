@@ -54,10 +54,11 @@ func outcomeOrder() [5]domain.Outcome {
 // Compute returns the one outcome and every reason. The same input always gives the same result.
 func Compute(in Input) domain.ScenarioResult {
 	res := domain.ScenarioResult{
-		Scenario: in.Scenario.ID,
-		Reasons:  []domain.Reason{},
-		Checks:   []domain.CheckResult{},
-		Actions:  []domain.ActionID{},
+		Scenario:   in.Scenario.ID,
+		Reasons:    []domain.Reason{},
+		Checks:     []domain.CheckResult{},
+		Actions:    []domain.ActionID{},
+		ExpectHash: domain.ExpectHash(in.Scenario),
 	}
 	byRule := map[domain.Outcome][]domain.Reason{}
 	add := func(rule domain.Outcome, step domain.StepID, text string) {

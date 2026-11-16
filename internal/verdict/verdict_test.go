@@ -884,3 +884,11 @@ func FuzzCompute(f *testing.F) {
 		}
 	})
 }
+
+func TestComputeStoresTheExpectationHashOfTheScenario(t *testing.T) {
+	in := pass()
+	got := verdict.Compute(in)
+	if want := domain.ExpectHash(in.Scenario); want == "" || got.ExpectHash != want {
+		t.Errorf("ExpectHash = %q, want %q", got.ExpectHash, want)
+	}
+}

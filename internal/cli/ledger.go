@@ -273,7 +273,7 @@ func storedResults(stderr io.Writer, repo string, only domain.RunID, obs []oblig
 		}
 		for _, r := range run.Results {
 			if missing[r.Scenario] {
-				res.Scenarios[r.Scenario] = coverOf(run, r)
+				res.Scenarios[r.Scenario] = coverOf(repo, run, r)
 				delete(missing, r.Scenario)
 			}
 		}
@@ -344,8 +344,15 @@ func scenarioRun(run domain.Run) bool {
 	return run.Purpose == "" || run.Purpose == domain.PurposeJourney
 }
 
-func coverOf(run domain.Run, r domain.ScenarioResult) obligation.Cover {
+// coverOf is the result of a scenario as a use case sees it. A result that stored the expectation
+// hash of its scenario counts only while the scenario file has the same one. A result of an older
+// run has none, and counts as it always did.
+func coverOf(repo string, run domain.Run, r domain.ScenarioResult) obligation.Cover {
 	c := obligation.Cover{Scenario: r.Scenario, Found: true, Outcome: string(r.Outcome), Run: run.ID, Builds: run.BuildsEnd}
+	if r.ExpectHash != "" {
+		sc, err := loadScenario(repo, r.Scenario)
+		c.ScenarioChanged = err != nil || domain.ExpectHash(sc) != r.ExpectHash
+	}
 	if len(r.Reasons) > 0 {
 		c.Reason = r.Reasons[0].Text
 	}
@@ -602,7 +609,7 @@ func runCoverage(stderr io.Writer, o options, repo string, scenarios []domain.Sc
 	}
 	for _, r := range rec.Results {
 		if _, ok := res.Scenarios[r.Scenario]; ok {
-			res.Scenarios[r.Scenario] = coverOf(rec, r)
+			res.Scenarios[r.Scenario] = coverOf(repo, rec, r)
 		}
 	}
 	for _, jr := range rec.Journeys {

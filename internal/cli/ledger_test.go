@@ -12,6 +12,7 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/sampleapp"
+	"github.com/jancuk/semar/internal/scenario"
 )
 
 // today is the day of the clock that newRepo gives a test.
@@ -353,6 +354,57 @@ func TestLedgerSkipsTrialAndCheckRuns(t *testing.T) {
 
 	res := r.must(t, cli.ExitFailed, "ledger")
 	contains(t, "the table", res.stdout, "Failed (1)", "SHOP-482-01 failed in r-a-scenarios")
+}
+
+// withHash is a passed result that carries the hash of the expected results of the scenario file now.
+func (r *repo) withHash(t *testing.T) domain.ScenarioResult {
+	t.Helper()
+	sc, err := scenario.Load(r.path(".semar", "scenarios", "SHOP-482", scenarioID+".yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := scenarioResult(scenarioID, domain.OutcomePassed, "")
+	res.ExpectHash = domain.ExpectHash(sc)
+	return res
+}
+
+// ledgerTable is what semar ledger prints, whatever the exit code.
+func (r *repo) ledgerTable(t *testing.T) string {
+	t.Helper()
+	return r.semar(t, t.Context(), "ledger").stdout
+}
+
+// editScenario changes the scenario file of SHOP-482-01, and fails when the change does not apply.
+func (r *repo) editScenario(t *testing.T, from, to string) {
+	t.Helper()
+	rel := ".semar/scenarios/SHOP-482/" + scenarioID + ".yaml"
+	data, err := os.ReadFile(r.path(filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), from) {
+		t.Fatalf("%s does not hold %q", rel, from)
+	}
+	r.writeRel(t, rel, strings.Replace(string(data), from, to, 1))
+}
+
+func TestLedgerDoesNotCountAPassOfAScenarioThatChanged(t *testing.T) {
+	r := ledgerRepo(t)
+	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
+	r.putRun(t, "r-1", "", nil, true, r.withHash(t))
+	contains(t, "the table", r.ledgerTable(t), "Verified (1)")
+
+	// The expected result is edited after the pass.
+	r.editScenario(t, "status: 422", "status: 400")
+	contains(t, "the table", r.ledgerTable(t), "Blocked (1)", scenarioID+": rerun: the scenario changed since r-1")
+}
+
+func TestLedgerCountsAPassOfAnOldRunWithNoHash(t *testing.T) {
+	r := ledgerRepo(t)
+	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
+	r.putRun(t, "r-1", "", nil, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
+	r.editScenario(t, "status: 422", "status: 400")
+	contains(t, "the table", r.ledgerTable(t), "Verified (1)")
 }
 
 func TestLedgerReadsTheNewestCompleteRun(t *testing.T) {

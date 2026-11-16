@@ -28,6 +28,9 @@ type Cover struct {
 	Run      domain.RunID
 	Reason   string // the first reason of the result
 	Builds   []domain.BuildRef
+	// ScenarioChanged is true when the result stored the expectation hash of its scenario and the
+	// scenario file has another one now, or cannot be read: the pass judged something else.
+	ScenarioChanged bool
 }
 
 // Results is what the stored runs say. A scenario whose file exists is a key of Scenarios, with
@@ -111,6 +114,8 @@ func deriveOne(o Located, r Results, deferrals map[string]Deferral, manual map[s
 			failed = append(failed, label+" failed in "+string(c.Run)+withReason(c.Reason))
 		case c.Outcome != string(domain.OutcomePassed):
 			notPassed = append(notPassed, fmt.Sprintf("%s is %s in %s%s", label, strings.ReplaceAll(c.Outcome, "_", " "), c.Run, withReason(c.Reason)))
+		case c.ScenarioChanged:
+			notPassed = append(notPassed, fmt.Sprintf("%s: rerun: the scenario changed since %s", label, c.Run))
 		case !onCurrent(c, r.Current):
 			notPassed = append(notPassed, fmt.Sprintf("%s ran %s: rerun on the current build", label, strings.Join(staleDetails(c, r.Current), "; ")))
 		default:
