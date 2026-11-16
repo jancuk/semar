@@ -50,6 +50,24 @@ func loadJourneys(repo string) ([]domain.Journey, []journey.Problem, error) {
 
 func problemLine(p journey.Problem) string { return oneLine(terminalSafe(p.String())) }
 
+// withServiceAuth gives every service that names no auth profile the one that fixture check uses:
+// the only profile, or the one named default. Without it a journey's fixture and a leg on such a
+// service went out with no session, while fixture check of the same fixture signed in.
+func withServiceAuth(cfg config.Config, env config.Environment) config.Environment {
+	fallback, err := pickAuthProfile(cfg, "")
+	if err != nil {
+		return env
+	}
+	services := slices.Clone(env.Services)
+	for i := range services {
+		if services[i].AuthProfile == "" {
+			services[i].AuthProfile = fallback
+		}
+	}
+	env.Services = services
+	return env
+}
+
 // legAuth is the auth profile of a leg: the one of its service in the environment, else the
 // journey's (Plan 18, D7). Both the run and the confirmation use it, because the profile is part of
 // the hash that a confirmation names.
@@ -340,6 +358,7 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 		return err
 	}
 	envName, env, err := cfg.Environment(f.env)
+	env = withServiceAuth(cfg, env)
 	if err != nil {
 		return err
 	}
@@ -630,6 +649,7 @@ func confirmJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f
 		return err
 	}
 	_, env, err := cfg.Environment(f.env)
+	env = withServiceAuth(cfg, env)
 	if err != nil {
 		return err
 	}

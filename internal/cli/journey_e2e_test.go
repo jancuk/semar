@@ -323,3 +323,27 @@ func TestJourneyEndToEndGivenFixture(t *testing.T) {
 	contains(t, "report.md", r.lastReport(t), "- Given order: order.paid 1.0.0 (hash ", "made by create; cleanup done")
 	r.assertNoSecret(t, []string{token, "tok-pay"})
 }
+
+// A service that names no auth profile signs in with the one that fixture check uses, the profile
+// named default, both for the journey's fixture and for its legs. Before, the fixture went out with
+// no session and the journey ended blocked with a 401.
+func TestJourneyEndToEndServiceWithoutProfileUsesDefault(t *testing.T) {
+	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
+	r.rewriteConfig(t, func(s string) string {
+		s = strings.Replace(s, "      mode: test_data\n", "      mode: test_data\n    data:\n      customers.default: c-1\n", 1)
+		s = strings.Replace(s, "        authProfile: support-agent\n", "", 1)
+		return strings.Replace(s, "  support-agent:\n", "  default:\n", 1)
+	})
+	fixtureText, err := os.ReadFile("../../testdata/e2e-fixtures/.semar/fixtures/order.paid.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.writeRel(t, ".semar/fixtures/order.paid.yaml", string(fixtureText))
+	r.writeRel(t, ".semar/journeys/seen-paid.yaml", givenJourney)
+	r.approveFixture(t)
+
+	r.must(t, cli.ExitOK, "journey", "run", "seen-paid")
+	if j := singleJourney(t, r); j.Outcome != domain.JourneyPassed || len(j.Fixtures) != 1 || j.Fixtures[0].Cleanup != "done" {
+		t.Fatalf("journey = %+v, fixtures %+v", j, j.Fixtures)
+	}
+}

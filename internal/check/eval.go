@@ -181,7 +181,7 @@ func evalJSONPath(res *Result, c domain.Check, op string, resp *domain.HTTPRespo
 		res.State = state((len(nodes) > 0) == *c.Exists)
 		return
 	case "count":
-		res.State = state(len(nodes) == *c.Count)
+		res.State = state(countOf(path, nodes) == *c.Count)
 		return
 	}
 
@@ -550,4 +550,16 @@ func short(s string) string {
 	}
 	r := []rune(s)
 	return string(r[:maxText-3]) + "..."
+}
+
+// countOf is the length of the array when a singular path (names and indexes only, RFC 9535)
+// selects one array, and the number of selected nodes otherwise. "$.data.cards" with count 0
+// then means "no cards", as a reader expects, and "$.data.cards[*]" keeps counting nodes.
+func countOf(path *jsonpath.Path, nodes []any) int {
+	if len(nodes) == 1 && path.Query().Singular() != nil {
+		if items, ok := nodes[0].([]any); ok {
+			return len(items)
+		}
+	}
+	return len(nodes)
 }

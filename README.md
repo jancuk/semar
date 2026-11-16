@@ -523,6 +523,8 @@ A name that `semar.yaml` does not define blocks the scenario before any request,
 
 A string operand of `equals`, `notEquals`, or `contains` may hold `{{name}}`: a capture of this or an earlier step, an output of a `given` entry such as `{{card.board}}`, or `{{run.id}}`. Semar fills it in before it checks. A `secret.` or `data.` name, a malformed `{{`, or a name that nothing provides is refused when the files are loaded, and a value that is missing at run time makes the check `not_evaluated`. The report shows the filled-in value next to what was written, and a value that the redaction hides stays hidden.
 
+`count` compares a number of values. On a path made only of names and indexes, such as `$.data.lists[0].cards`, that selects one array, it is the length of the array, so `count: 0` means the array is empty. On any other path, such as `$.data.cards[*]`, it is the number of values the path selects.
+
 ```yaml
       - check: { jsonpath: "$.data.board", equals: "{{card.board}}" }
         source: ticket
