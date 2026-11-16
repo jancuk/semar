@@ -143,11 +143,22 @@ func (r *Redactor) headersOf(s *scrubber, in map[string][]string) map[string][]s
 
 // capturesOf joins the values of keys that collide after redaction, as HTTP
 // joins repeated fields, so that no captured value is dropped.
+//
+// A capture whose whole text equals a value that a configured JSONPath removed
+// from a body shows that value's marker. The capture holds no path, so a capture
+// that equals such a value by coincidence is masked too. That is the safe
+// direction: a check on it is not evaluated, while the other error would store
+// the value that the configuration says must not be stored. The caller's
+// captures are not touched, so later steps still read the raw values.
 func capturesOf(s *scrubber, in map[string]string) map[string]string {
 	joined := make(map[string][]string, len(in))
 	for _, k := range slices.Sorted(maps.Keys(in)) {
 		redacted := s.text(k)
-		joined[redacted] = append(joined[redacted], in[k])
+		v := in[k]
+		if marker, ok := s.masked[v]; ok {
+			v = marker
+		}
+		joined[redacted] = append(joined[redacted], v)
 	}
 	out := make(map[string]string, len(joined))
 	for k, vs := range joined {
@@ -159,6 +170,9 @@ func capturesOf(s *scrubber, in map[string]string) map[string]string {
 type scrubber struct {
 	r     *Redactor
 	forms []form
+	// masked maps the text of each value that a JSONPath replaced, in any body
+	// of the action, to the marker that the body shows.
+	masked map[string]string
 }
 
 // A form is one literal way a loaded secret can appear in text. Encodings that

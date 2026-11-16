@@ -3,7 +3,10 @@ package redact
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -47,6 +50,9 @@ func (s *scrubber) body(b []byte) []byte {
 func (s *scrubber) jsonOnce(t string) (string, bool) {
 	sc := &jsonScanner{t: t, dupCheck: len(s.r.paths) > 0}
 	sc.value(s.selected(t))
+	for _, rv := range sc.raws {
+		s.mask(rv.raw, rv.marker)
+	}
 	if sc.dup {
 		return "", false
 	}
@@ -87,7 +93,9 @@ func (s *scrubber) selected(t string) *pathTrie {
 	trie := &pathTrie{}
 	for _, p := range s.r.paths {
 		for _, n := range p.SelectLocated(root) {
-			trie.add(n.Path, `"`+s.markerOf(n.Node)+`"`)
+			marker := s.markerOf(n.Node)
+			trie.add(n.Path, `"`+marker+`"`)
+			s.remember(n.Node, marker)
 		}
 	}
 	return trie
@@ -124,11 +132,57 @@ func (s *scrubber) markerOf(node any) string {
 		}
 		return s.r.Marker(str)
 	}
+	return s.r.Marker(compact(node))
+}
+
+// remember records the text that a capture stores for node, and for every value
+// inside it, so that capturesOf can mask a capture of a value that a JSONPath
+// removed from the body. A value inside a container goes by its own marker, as
+// it would if a path selected it. The text is the string, the number as it was
+// written, true or false, and the compact JSON of a container.
+func (s *scrubber) remember(node any, marker string) {
+	switch v := node.(type) {
+	case string:
+		s.mask(v, marker)
+	case json.Number:
+		s.mask(v.String(), marker)
+	case bool:
+		s.mask(strconv.FormatBool(v), marker)
+	case nil:
+		s.mask("null", marker)
+	case map[string]any:
+		s.mask(compact(v), marker)
+		for _, k := range slices.Sorted(maps.Keys(v)) {
+			s.remember(v[k], s.markerOf(v[k]))
+		}
+	case []any:
+		s.mask(compact(v), marker)
+		for _, e := range v {
+			s.remember(e, s.markerOf(e))
+		}
+	}
+}
+
+// mask lets the first marker stand when two values have the same text. A marker
+// is its own text and masking it changes nothing, so it is not recorded.
+func (s *scrubber) mask(raw, marker string) {
+	if IsMarker(raw) {
+		return
+	}
+	if s.masked == nil {
+		s.masked = map[string]string{}
+	}
+	if _, ok := s.masked[raw]; !ok {
+		s.masked[raw] = marker
+	}
+}
+
+func compact(node any) string {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(node) // a value decoded from JSON always encodes
-	return s.r.Marker(strings.TrimSuffix(buf.String(), "\n"))
+	return strings.TrimSuffix(buf.String(), "\n")
 }
 
 type edit struct {
@@ -164,6 +218,10 @@ func isNumber(lit string) bool { return lit[0] == '-' || lit[0] >= '0' && lit[0]
 
 type token struct{ start, end int }
 
+// A rawValue is the source text of a container that a JSONPath replaced, laid
+// out as the body had it, and the marker that now stands for it.
+type rawValue struct{ raw, marker string }
+
 // jsonScanner reads a document that json.Valid accepted. It records the inside
 // of every string, keys included, every number and literal, and an edit for
 // every selected value. With dupCheck set, it reports a key that repeats in
@@ -174,6 +232,7 @@ type jsonScanner struct {
 	strings  []token
 	scalars  []token
 	edits    []edit
+	raws     []rawValue
 	dupCheck bool
 	dup      bool
 }
@@ -224,6 +283,9 @@ func (sc *jsonScanner) value(sel *pathTrie) {
 	}
 	if sel != nil && sel.replacement != "" {
 		sc.edits = append(sc.edits, edit{start, sc.pos, sel.replacement})
+		if c := sc.t[start]; c == '{' || c == '[' {
+			sc.raws = append(sc.raws, rawValue{sc.t[start:sc.pos], strings.Trim(sel.replacement, `"`)})
+		}
 	}
 }
 
