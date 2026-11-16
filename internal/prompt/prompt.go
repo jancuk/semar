@@ -26,6 +26,8 @@ type PlanData struct {
 	Existing     string // a Markdown list, indented under its bullet; empty when there is none
 	Knowledge    string // a Markdown list of the documents to read; empty when there is none
 	Fixtures     string // a Markdown list of the fixtures the planner may name; empty when there is none
+	Tickets      string // the ticket files of the change, numbered by line; empty when there is none
+	Accounts     string // a Markdown list of the accounts a step may act as; empty with fewer than two
 }
 
 // PlanVersion is the version line of the planner prompt.
