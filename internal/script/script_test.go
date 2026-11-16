@@ -666,3 +666,41 @@ func TestRequestProblems(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateOperandVariables(t *testing.T) {
+	cases := []struct {
+		name    string
+		operand string
+		outputs map[string][]string
+		want    string // substring of one message. Empty means no problem
+	}{
+		{"an earlier capture", "{{order_id}}", nil, ""},
+		{"an output of a given entry", "{{order.id}}", map[string][]string{"order": {"id"}}, ""},
+		{"run.id", "semar-{{run.id}}", nil, ""},
+		{"a plain string", "no variables", nil, ""},
+		{"an unknown capture", "{{nope}}", nil, "expect[0].check.equals: nope is used before any step captures it"},
+		{"an unknown output", "{{order.total}}", map[string][]string{"order": {"id"}}, "order.total is not an output of fixture order.paid"},
+		{"an unknown alias", "{{board.id}}", map[string][]string{"order": {"id"}}, "no given entry has as board"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sc, s := withGiven(t)
+			sc.Steps[2].Expect[0].Check.Equals = c.operand
+			s.ExpectHash = domain.ExpectHash(sc)
+			s.Steps[0].Captures = []domain.Capture{{Name: "order_id", JSONPath: "$.data.id"}}
+			ps := script.ValidateWith(sc, s, c.outputs)
+			if c.want == "" {
+				if len(ps) != 0 {
+					t.Fatalf("want no problem, got %+v", ps)
+				}
+				return
+			}
+			for _, m := range messages(ps) {
+				if strings.Contains(m, c.want) {
+					return
+				}
+			}
+			t.Fatalf("want a problem with %q, got %v", c.want, messages(ps))
+		})
+	}
+}

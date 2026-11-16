@@ -114,6 +114,25 @@ func ValidateWith(sc domain.Scenario, s domain.Script, outputs map[string][]stri
 		for name := range seen {
 			captured[name] = true
 		}
+		if known {
+			for j, e := range sc.Steps[i].Expect {
+				for _, o := range []struct {
+					op string
+					v  any
+				}{{"equals", e.Check.Equals}, {"notEquals", e.Check.NotEquals}, {"contains", e.Check.Contains}} {
+					text, isText := o.v.(string)
+					if !isText {
+						continue
+					}
+					for _, name := range domain.OperandVariables(domain.Check{Equals: text}) {
+						if msg := unknown(name); msg != "" {
+							msg = strings.Replace(msg, "a script cannot use a secret", "a check cannot use a secret", 1)
+							add(ss.Step, "expect[%d].check.%s: %s", j, o.op, msg)
+						}
+					}
+				}
+			}
+		}
 	}
 	if outOfOrder {
 		add("", "steps are not in the scenario's order")
