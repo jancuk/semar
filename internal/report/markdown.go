@@ -30,6 +30,11 @@ type Data struct {
 	// CoverageTickets are the tickets of the use cases that the line counts, for the command
 	// that shows the detail.
 	CoverageTickets []string
+	// Journeys are the journey results of the run. The report opens with them, and a leg that did not
+	// pass is reproduced through its journey.
+	Journeys []domain.JourneyResult
+	// JourneyTitles gives the title of each journey, which the result does not hold.
+	JourneyTitles map[domain.JourneyID]string
 }
 
 type reasonView struct{ Text, Step string }
@@ -40,6 +45,7 @@ type checkView struct {
 
 type scenarioView struct {
 	ID, Title, Outcome string
+	Reproduce          string
 	Reasons            []reasonView
 	Fixtures           []string
 	Checks             []checkView
@@ -55,6 +61,7 @@ type markdownView struct {
 	BuildsStart, BuildsEnd, Counts     string
 	Interrupted, OnlyDeclared          bool
 	Coverage, CoverageDetail           string
+	Journeys                           []journeyView
 	Attention, Passed                  []scenarioView
 	Ledger                             []ledgerView
 	StillExists                        []string
@@ -86,11 +93,17 @@ func buildView(d Data) markdownView {
 		v.Coverage = shown(d.Coverage)
 		v.CoverageDetail = ledgerCommand(d.CoverageTickets)
 	}
+	v.Journeys = journeyViews(d)
+	legs := legJourneys(d.Journeys)
 	for _, r := range ordered(run.Results) {
 		sv := scenarioView{
 			ID:      shown(string(r.Scenario)),
 			Title:   shown(d.Scenarios[r.Scenario].Title),
 			Outcome: shown(string(r.Outcome)),
+		}
+		sv.Reproduce = "semar run --scenario " + sv.ID
+		if j, ok := legs[r.Scenario]; ok {
+			sv.Reproduce = journeyCommand(j, run.Environment)
 		}
 		for _, rec := range r.Fixtures {
 			sv.Fixtures = append(sv.Fixtures, fixtureLine(rec))
@@ -113,6 +126,7 @@ func buildView(d Data) markdownView {
 		}
 		v.Attention = append(v.Attention, sv)
 	}
+	v.StillExists = append(v.StillExists, journeyStillExists(d.Journeys)...)
 	for _, row := range activity.Ledger(d.Activity) {
 		v.Ledger = append(v.Ledger, ledgerViewOf(row))
 	}

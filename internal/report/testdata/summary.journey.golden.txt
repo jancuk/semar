@@ -1,0 +1,8 @@
+checkout   failed  first failing leg settled: waited 30s and $.data.status was never paid (6 attempts)
+  place    passed
+  pay      passed
+  settled  failed  waited 30s and $.data.status was never paid (6 attempts)
+refund     passed
+  ask      passed
+failed 1, blocked 0, inconclusive 0, stale 0, not_run 0, passed 3
+3 use cases: 2 verified, 1 failed

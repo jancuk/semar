@@ -90,20 +90,29 @@ func countLine(results []domain.ScenarioResult) string {
 // the service.
 func Summary(w io.Writer, run domain.Run, coverage string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	for _, r := range ordered(run.Results) {
-		line := plain(string(r.Scenario)) + "\t" + plain(string(r.Outcome))
-		switch {
-		case len(r.Reasons) > 0:
-			head, more := cut(r.Reasons[0].Text, maxShown)
-			line += "\t" + plain(head)
-			if more > 0 {
-				line += cutMark(more)
+	if len(run.Journeys) > 0 {
+		// A journey run prints each leg under its journey, in place of the loose legs.
+		for _, line := range journeyLines(run.Journeys) {
+			if _, err := fmt.Fprintln(tw, line); err != nil {
+				return err
 			}
-		case r.Outcome != domain.OutcomePassed:
-			line += "\tno reason recorded"
 		}
-		if _, err := fmt.Fprintln(tw, line); err != nil {
-			return err
+	} else {
+		for _, r := range ordered(run.Results) {
+			line := plain(string(r.Scenario)) + "\t" + plain(string(r.Outcome))
+			switch {
+			case len(r.Reasons) > 0:
+				head, more := cut(r.Reasons[0].Text, maxShown)
+				line += "\t" + plain(head)
+				if more > 0 {
+					line += cutMark(more)
+				}
+			case r.Outcome != domain.OutcomePassed:
+				line += "\tno reason recorded"
+			}
+			if _, err := fmt.Fprintln(tw, line); err != nil {
+				return err
+			}
 		}
 	}
 	if err := tw.Flush(); err != nil {

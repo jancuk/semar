@@ -9,6 +9,34 @@ Details: `{{ .CoverageDetail }}`
 > This run did not finish: no end time was recorded. Scenarios without a result are missing from this report.
 
 {{ end -}}
+{{ if .Journeys -}}
+## Journeys
+
+{{ range .Journeys -}}
+### {{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}
+
+Outcome: **{{ .Outcome }}**{{ if .First }}. First failing leg: {{ .First }}.{{ end }}
+
+{{ range .Reasons -}}
+- Reason: {{ . }}
+{{ end -}}
+- Manifest: {{ .Manifest }} (hash {{ .Hash }})
+{{ if .ManifestEnd -}}
+- Manifest at the end: {{ .ManifestEnd }}
+{{ end -}}
+{{ range .Legs -}}
+- Leg {{ .Leg }}: {{ .Outcome }}{{ if .Reason }}: {{ .Reason }}{{ end }}
+{{ end -}}
+{{ range .Invariants -}}
+- Invariant {{ .Number }}: {{ .State }}{{ if .Values }}: {{ .Values }}{{ end }}{{ if .Detail }} ({{ .Detail }}){{ end }}
+{{ end -}}
+{{ range .Fixtures -}}
+- {{ . }}
+{{ end }}
+Reproduce: {{ .Reproduce }}
+
+{{ end -}}
+{{ end -}}
 {{ if .Environment }}- Environment: {{ .Environment }}{{ if .EnvironmentKind }} ({{ .EnvironmentKind }}){{ end }}
 {{ end -}}
 - Started: {{ .Started }}
@@ -42,7 +70,7 @@ Outcome: **{{ .Outcome }}**
   - Observed: {{ .Observed }}
 {{ if .Detail }}  - Detail: {{ .Detail }}
 {{ end }}{{ end }}{{ if .Checks }}
-{{ end }}Reproduce: semar run --scenario {{ .ID }}
+{{ end }}Reproduce: {{ .Reproduce }}
 
 {{ end -}}
 {{ if .Passed -}}
