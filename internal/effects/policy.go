@@ -107,6 +107,12 @@ func (p *Policy) Once(r Request) bool {
 	return matches(p.once, strings.ToUpper(r.Method), r.URL, true)
 }
 
+// Denied reports whether the deny list matches the request, whatever its host and the mode. A
+// caller that checks a request before it has a real host uses it, because Admit refuses the host first.
+func (p *Policy) Denied(r Request) bool {
+	return matches(p.deny, strings.ToUpper(r.Method), r.URL, true)
+}
+
 // Admit returns nil when the request may be sent, or a *Refusal. The order is
 // scheme and host, method, deny list, then mode.
 func (p *Policy) Admit(r Request) error {

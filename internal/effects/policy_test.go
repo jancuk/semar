@@ -173,6 +173,32 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+func TestDenied(t *testing.T) {
+	p, err := effects.New(env("test_data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, method, url string
+		want              bool
+	}{
+		{"match", "POST", "https://other.example.net/v1/payouts/x/send", true},
+		{"lower case method", "post", "/v1/payouts/x/send", true},
+		{"trailing slash", "POST", "/v1/payouts/", true},
+		{"upper case", "POST", "/v1/Payouts/x", true},
+		{"wrong method", "GET", "/v1/payouts/x/send", false},
+		{"other path", "POST", "/v1/orders", false},
+		{"allowed in test data", "POST", "/v1/vouchers/9/redeem", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := p.Denied(req(t, c.method, c.url)); got != c.want {
+				t.Fatalf("Denied = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 func TestOnce(t *testing.T) {
 	p, err := effects.New(env("test_data"))
 	if err != nil {
