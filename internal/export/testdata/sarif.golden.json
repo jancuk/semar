@@ -18,6 +18,12 @@
               "shortDescription": {
                 "text": "A built-in invariant was broken"
               }
+            },
+            {
+              "id": "semar/journey-failed",
+              "shortDescription": {
+                "text": "A journey failed"
+              }
             }
           ]
         }

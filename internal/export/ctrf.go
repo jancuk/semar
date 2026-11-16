@@ -114,6 +114,34 @@ func CTRF(w io.Writer, r Run) error {
 		}
 		res.Tests = append(res.Tests, t)
 	}
+	for _, jc := range journeyCases(r) {
+		t := ctrfTest{
+			Name:     jc.Name,
+			Status:   ctrfJourneyStatus(jc.Result.Outcome),
+			Duration: jc.DurationMS,
+			Suite:    suiteForJourneys,
+			Extra: map[string]string{
+				"semarOutcome":     string(jc.Result.Outcome),
+				"semarRun":         string(r.Run.ID),
+				"semarEnvironment": cutMessage(r.Run.Environment),
+				"semarJourney":     cutMessage(string(jc.Result.Journey)),
+			},
+		}
+		if jc.Result.Outcome != domain.JourneyPassed {
+			t.Message, t.Trace = jc.Message, jc.Detail
+		}
+		switch t.Status {
+		case "passed":
+			res.Summary.Passed++
+		case "failed":
+			res.Summary.Failed++
+		case "skipped":
+			res.Summary.Skipped++
+		default:
+			res.Summary.Other++
+		}
+		res.Tests = append(res.Tests, t)
+	}
 	res.Summary.Tests = len(res.Tests)
 	data, err := atomicfile.EncodeJSON(ctrfReport{Results: res})
 	if err != nil {

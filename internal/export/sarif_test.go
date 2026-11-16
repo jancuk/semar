@@ -79,7 +79,7 @@ func TestSARIFShape(t *testing.T) {
 		t.Errorf("driver = %+v", run.Tool.Driver)
 	}
 	rules := run.Tool.Driver.Rules
-	if len(rules) != 2 || rules[0].ID != "semar/expected-result-not-met" || rules[1].ID != "semar/invariant-broken" {
+	if len(rules) != 3 || rules[0].ID != "semar/expected-result-not-met" || rules[1].ID != "semar/invariant-broken" || rules[2].ID != "semar/journey-failed" {
 		t.Fatalf("rules = %+v", rules)
 	}
 	if run.AutomationDetails.ID != "semar/r-20261117T090000Z-1a2b" {

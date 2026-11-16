@@ -123,6 +123,13 @@ func JUnit(w io.Writer, r Run) error {
 		top.Tests++
 		suite.ms += sc.DurationMS
 	}
+	if cases := journeyCases(r); len(cases) > 0 {
+		suite := &junitSuite{Name: suiteForJourneys, Timestamp: timestamp, Properties: runProperties(r.Run)}
+		top.Suites = append(top.Suites, suite)
+		for _, jc := range cases {
+			addJourneyCase(suite, &top, jc)
+		}
+	}
 	for _, suite := range top.Suites {
 		suite.Time = seconds(suite.ms)
 	}
@@ -137,6 +144,38 @@ func JUnit(w io.Writer, r Run) error {
 		return err
 	}
 	return nil
+}
+
+// addJourneyCase adds the case of a journey. A journey that did not pass is never green: blocked
+// and stale are an error, as for a scenario, and only not_run is skipped.
+func addJourneyCase(suite *junitSuite, top *junitSuites, jc journeyCase) {
+	outcome := xmlText(cutMessage(string(jc.Result.Outcome)))
+	message, detail := xmlText(jc.Message), xmlText(jc.Detail)
+	c := junitCase{
+		Name:      xmlText(jc.Name),
+		Classname: suite.Name,
+		Time:      seconds(jc.DurationMS),
+		SystemOut: "semar outcome: " + outcome,
+	}
+	switch jc.Result.Outcome {
+	case domain.JourneyPassed:
+	case domain.JourneyFailed:
+		c.Failure = &junitProblem{Message: message, Type: outcome, Text: detail}
+		suite.Failures++
+		top.Failures++
+	case domain.JourneyNotRun:
+		c.Skipped = &junitSkipped{Message: message}
+		suite.Skipped++
+		top.Skipped++
+	default:
+		c.Error = &junitProblem{Message: message, Type: outcome, Text: detail}
+		suite.Errors++
+		top.Errors++
+	}
+	suite.Cases = append(suite.Cases, c)
+	suite.Tests++
+	top.Tests++
+	suite.ms += jc.DurationMS
 }
 
 // runProperties lists the run, the environment, and the builds, builds in service order.

@@ -18,11 +18,13 @@ import (
 const (
 	ruleExpectedNotMet = 0
 	ruleInvariant      = 1
+	ruleJourneyFailed  = 2
 )
 
 var sarifRules = []sarifRule{
 	{ID: "semar/expected-result-not-met", ShortDescription: sarifText{Text: "A confirmed expected result was not met"}},
 	{ID: "semar/invariant-broken", ShortDescription: sarifText{Text: "A built-in invariant was broken"}},
+	{ID: "semar/journey-failed", ShortDescription: sarifText{Text: "A journey failed"}},
 }
 
 type sarifLog struct {
@@ -102,6 +104,11 @@ func SARIF(w io.Writer, r Run) error {
 			results = append(results, sarifResultFor(r, sc, c, rule))
 		}
 	}
+	for _, jc := range journeyCases(r) {
+		if jc.Result.Outcome == domain.JourneyFailed {
+			results = append(results, sarifJourneyResult(r, jc))
+		}
+	}
 	log := sarifLog{Version: "2.1.0", Runs: []sarifRun{{
 		Tool:              sarifTool{Driver: sarifDriver{Name: "Semar", Version: r.Version, Rules: sarifRules}},
 		AutomationDetails: sarifAutomation{ID: "semar/" + string(r.Run.ID)},
@@ -113,6 +120,32 @@ func SARIF(w io.Writer, r Run) error {
 	}
 	_, err = w.Write(data)
 	return err
+}
+
+// sarifJourneyResult is the finding of a failed journey. It names the first failing leg and gives
+// the reasons of the journey, which include each invariant that is false.
+func sarifJourneyResult(r Run, jc journeyCase) sarifResult {
+	id := string(jc.Result.Journey)
+	msg := "journey " + id + " failed"
+	if jc.Result.FirstFailing != "" {
+		msg += " at leg " + string(jc.Result.FirstFailing)
+	}
+	if jc.Detail != "" {
+		msg += ": " + strings.ReplaceAll(jc.Detail, "\n", "; ")
+	}
+	props := map[string]string{"semarRun": string(r.Run.ID), "semarJourney": id}
+	if jc.Result.FirstFailing != "" {
+		props["semarLeg"] = string(jc.Result.FirstFailing)
+	}
+	sum := sha256.Sum256([]byte(strings.Join([]string{id, sarifRules[ruleJourneyFailed].ID}, "\x00")))
+	return sarifResult{
+		RuleID:              sarifRules[ruleJourneyFailed].ID,
+		RuleIndex:           ruleJourneyFailed,
+		Level:               "error",
+		Message:             sarifText{Text: cutMessage(msg)},
+		PartialFingerprints: map[string]string{"semar/v1": hex.EncodeToString(sum[:])},
+		Properties:          props,
+	}
 }
 
 // findingRule says which rule a check result breaks. A false check that nobody confirmed

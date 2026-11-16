@@ -51,6 +51,7 @@ Task 6 adds `newExportCommand()` to `internal/cli/root.go` first, before the lin
 | D10 | An export writes to standard output, or with `--out <file>` to a new file with mode 0644. An existing file is refused unless `--force` | Exports go to CI systems and are not secret: the evidence they read is redacted. Overwriting a file by mistake loses another report |
 | D11 | The exit code of `semar export` is 0 when the file was written and 3 on an error. It does not reflect outcomes | An export is not a gate. `semar run` already exits 0, 1, or 2 from the outcomes |
 | D12 | Every text is cut: a message to 1000 characters and a detail to 8000, with the marker `[cut: 123 more characters]` | A report that a CI system shows must stay readable, and an observed value can be large |
+| D13 | A run with journeys also exports one test per journey, after the tests of its legs, named `journey <id>`, in the suite `semar journeys` of JUnit and CTRF. The mapping is D5 with the journey outcome: `passed` to `passed`, `failed` to `failed` (JUnit `failure`), `not_run` to `skipped`, and `blocked` and `stale` to `other` (JUnit `error`). The reasons of the journey are the message. SARIF has one result of rule `semar/journey-failed` for each failed journey, which names the first failing leg and the reasons, among them each false invariant | Legs are scenario results, and every leg can pass while an invariant is false, so a gate that reads only the legs goes green on a journey that `semar journey run` fails. Blocked and stale keep the mapping of a blocked or stale scenario, so that neither reads as green |
 
 ## Trust
 
@@ -262,7 +263,6 @@ semar export (ctrf | junit | sarif) <run id> [--out <file>] [--force] [--dir <re
 | Imports: Postman collections, OpenAPI documents, HAR files, and manual test cases (FR-71, FR-338, FR-339) | Fidelity is not verified (spike S19). An import is a draft that needs a review flow |
 | Security and exploration findings in SARIF | Neither is built. The rules list grows when they are |
 | Signed evidence bundles (FR-340) | Not designed, M4 |
-| Exporting journey results as their own suite | Plan 18 stores legs as scenario results, so they export as tests. A journey-level suite can follow |
 
 ## Open points
 
