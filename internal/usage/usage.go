@@ -65,7 +65,15 @@ func Append(home string, r Record) error {
 	case err != nil && !errors.Is(err, fs.ErrNotExist):
 		return fmt.Errorf("check %s: %w", path, err)
 	}
-	f, err := root.OpenFile(FileName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, atomicfile.FileMode)
+	// Opening through a Root with O_CREATE can report "not found" when another job creates the
+	// same file at the same moment. The file exists after that race, so try again a few times.
+	var f *os.File
+	for attempt := 0; attempt < 5; attempt++ {
+		f, err = root.OpenFile(FileName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, atomicfile.FileMode)
+		if err == nil || !errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
