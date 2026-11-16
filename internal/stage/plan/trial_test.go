@@ -249,6 +249,9 @@ func TestTrialProblemsReturnToPlanner(t *testing.T) {
 	if out.Trial == nil || len(out.Trial.Steps) != 1 || out.Trial.Steps[0].Status != 200 {
 		t.Errorf("the output holds %+v, want the trial of the second draft", out.Trial)
 	}
+	if out.TrialReturned != 1 {
+		t.Errorf("TrialReturned = %d, want the one problem that went back", out.TrialReturned)
+	}
 	if strings.Contains(p.jobs[0].Prompt, "trial:") {
 		t.Error("the first prompt holds a trial problem")
 	}

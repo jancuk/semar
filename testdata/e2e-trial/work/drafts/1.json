@@ -1,0 +1,86 @@
+{
+  "summary": "A paid order is read with its status, and a refund above what is left is refused.",
+  "tickets": [
+    {
+      "key": "SHOP-482",
+      "kind": "behaviour",
+      "behaviour": "an order is read with its status, and an oversized refund gets 422",
+      "risk": "standard",
+      "reason": "money"
+    }
+  ],
+  "scenarios": [
+    {
+      "ticket": "SHOP-482",
+      "title": "A paid order can be read",
+      "intent": "Before: no status. Now: the owner reads the status of a paid order.",
+      "given": [
+        {
+          "fixture": "order.paid",
+          "as": "order"
+        }
+      ],
+      "steps": [
+        {
+          "id": "read-order",
+          "action": "Read the paid order",
+          "service": "orders",
+          "method": "GET",
+          "hint": "/v1/order/{id}",
+          "path": "/v1/order/{{order.id}}",
+          "captures": [
+            {
+              "name": "status",
+              "jsonpath": "$.data.status"
+            }
+          ],
+          "expect": [
+            {
+              "check": {
+                "status": 200
+              },
+              "why": "services/orders/read.go:5 returns 200"
+            }
+          ]
+        },
+        {
+          "id": "summary",
+          "action": "Read the summary of the order",
+          "service": "orders",
+          "method": "GET",
+          "hint": "/v1/orders/{id}/summary",
+          "path": "/v1/orders/{{order.id}}/summary",
+          "expect": [
+            {
+              "check": {
+                "status": 200
+              },
+              "why": "services/orders/read.go:5 returns 200"
+            }
+          ]
+        },
+        {
+          "id": "refund",
+          "action": "Refund more than is left",
+          "service": "orders",
+          "method": "POST",
+          "hint": "/v1/orders/{id}/refunds",
+          "path": "/v1/orders/{{order.id}}/refunds",
+          "json": {
+            "amount": 150000
+          },
+          "expect": [
+            {
+              "check": {
+                "status": 422
+              },
+              "why": "services/orders/refund.go:6 returns 422 above what is left"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notDrafted": [],
+  "uncovered": []
+}

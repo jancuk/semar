@@ -99,7 +99,7 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 		return Output{
 			Draft: a.draft, Scenarios: a.scenarios, Scripts: a.scripts, Notes: a.notes,
 			Attempts: attempts, UsedAttempt: a.attempt, Result: total, PlannerID: p.ID(), PlannerKind: p.Kind(),
-			Trial: a.trial, AfterTrial: a.after,
+			Trial: a.trial, AfterTrial: a.after, TrialReturned: returned,
 		}
 	}
 	for attempt := 1; attempt <= MaxAttempts; attempt++ {

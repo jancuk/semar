@@ -1,0 +1,28 @@
+openapi: 3.0.3
+info:
+  title: Orders
+  version: 1.0.0
+servers:
+  - url: https://orders.example.com
+paths:
+  /v1/orders:
+    get:
+      responses:
+        "200": {description: the orders of the caller}
+    post:
+      responses:
+        "201": {description: created}
+  /v1/orders/{id}:
+    get:
+      responses:
+        "200": {description: the order}
+        "404": {description: no such order}
+  /v1/orders/{id}/summary:
+    get:
+      responses:
+        "200": {description: the summary of the order}
+  /v1/orders/{id}/refunds:
+    post:
+      responses:
+        "201": {description: refunded}
+        "422": {description: above what is left}
