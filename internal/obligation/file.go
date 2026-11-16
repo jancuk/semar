@@ -336,7 +336,7 @@ func validateObligation(o Obligation, fileTicket, p string, add func(path, forma
 	}
 
 	for i, c := range o.Covers {
-		if err := idcheck.Check("scenario ID", string(c)); err != nil {
+		if err := idcheck.Scenario(string(c)); err != nil {
 			add(fmt.Sprintf("%s.covers[%d]", p, i), "%s", err)
 		}
 	}

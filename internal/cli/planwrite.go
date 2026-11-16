@@ -47,7 +47,7 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 		if err := idcheck.Check("ticket", sc.Ticket); err != nil {
 			return "", fmt.Errorf("scenario %s: %w", sc.ID, err)
 		}
-		if err := idcheck.Check("scenario ID", string(sc.ID)); err != nil {
+		if err := idcheck.Scenario(string(sc.ID)); err != nil {
 			return "", err
 		}
 		if known[sc.ID] {

@@ -148,6 +148,7 @@ func TestValidateRules(t *testing.T) {
 
 		// O7
 		{"O7 covers", entry("    covers: [\"../x\"]\n"), "obligations[0].covers[0]: invalid scenario ID"},
+		{"O7 covers a leg scenario", entry("    covers: [\"checkout.pay\"]\n"), "obligations[0].covers[0]: invalid scenario ID"},
 		{"O7 journeys", entry("    journeys: [ok, \"a b\"]\n"), "obligations[0].journeys[1]: invalid journey ID"},
 
 		// O8

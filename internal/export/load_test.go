@@ -296,3 +296,17 @@ func TestLoadKeepsTheOrderOfResults(t *testing.T) {
 		}
 	}
 }
+
+// checkout.pay is the scenario of a journey leg: a scenario file of that name does not label it.
+func TestLoadLegScenarioIsNotLabelledByAScenarioFile(t *testing.T) {
+	repo := t.TempDir()
+	writeScenario(t, repo, "SHOP-1", "checkout.pay", "apiVersion: semar/v1\nkind: Scenario\nid: checkout.pay\ntitle: A real scenario\nticket: SHOP-1\nsteps: []\n")
+	store := writeRun(t, repo, runSpec{id: "r-1", results: []domain.ScenarioResult{result("checkout.pay", domain.OutcomePassed)}})
+	r, err := export.Load(store, repo, "r-1", "0.9.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Scenarios[0]; got.File != "" || got.Title != "" || got.Ticket != "" {
+		t.Errorf("the leg took the labels of a file: %+v", got)
+	}
+}

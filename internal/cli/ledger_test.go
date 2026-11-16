@@ -636,3 +636,14 @@ func TestLedgerRefusesStoredRecordsThatTheCommandsWouldRefuse(t *testing.T) {
 		})
 	}
 }
+
+// A scenario file named like the scenario of a journey leg is refused, so that no result, label, or
+// confirmation is shared with the leg.
+func TestAScenarioIDOfTheFormOfALegIsRefused(t *testing.T) {
+	r := ledgerRepo(t)
+	r.copyScenario(t, "checkout.pay")
+	for _, args := range [][]string{{"confirm", "checkout.pay", "--yes"}, {"run", "--scenario", "checkout.pay"}} {
+		res := r.must(t, cli.ExitError, args...)
+		contains(t, "stderr", res.stderr, "invalid scenario ID", "checkout.pay")
+	}
+}

@@ -76,7 +76,7 @@ func Load(store *evidence.Store, repo string, id domain.RunID, version string) (
 		if err != nil {
 			return Run{}, err
 		}
-		if idcheck.Check("scenario ID", string(res.Scenario)) == nil {
+		if idcheck.Scenario(string(res.Scenario)) == nil {
 			if p := paths[res.Scenario]; len(p) == 1 {
 				readLabels(repo, res.Scenario, p[0], &sc)
 			}

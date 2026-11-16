@@ -69,7 +69,7 @@ func scenarioFiles(repo string) (map[domain.ScenarioID][]string, error) {
 }
 
 func loadScenario(repo string, id domain.ScenarioID) (domain.Scenario, error) {
-	if err := idcheck.Check("scenario ID", string(id)); err != nil {
+	if err := idcheck.Scenario(string(id)); err != nil {
 		return domain.Scenario{}, err
 	}
 	files, err := scenarioFiles(repo)
@@ -91,7 +91,7 @@ func loadAllScenarios(repo string) ([]domain.Scenario, error) {
 	var scs []domain.Scenario
 	var errs []error
 	for _, id := range slices.Sorted(maps.Keys(files)) {
-		if err := idcheck.Check("scenario ID", string(id)); err != nil {
+		if err := idcheck.Scenario(string(id)); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", files[id][0], err))
 			continue
 		}
