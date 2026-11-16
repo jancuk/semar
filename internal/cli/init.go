@@ -37,9 +37,10 @@ const (
 type initFlags struct {
 	baseURL, env, service, authHeader, authValue, tokenEnv string
 	buildURL, buildCommit, kind                            string
+	accounts                                               []string // name=ENV, one for each extra account
 }
 
-var initFlagNames = []string{"base-url", "service", "auth-header", "auth-value", "token-env", "build-url", "build-commit", "kind"}
+var initFlagNames = []string{"base-url", "service", "auth-header", "auth-value", "token-env", "build-url", "build-commit", "kind", "account"}
 
 func addInitFlags(cmd *cobra.Command, f *initFlags) {
 	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "the address of the service in the environment, such as https://orders.uat.example.com")
@@ -48,6 +49,7 @@ func addInitFlags(cmd *cobra.Command, f *initFlags) {
 	cmd.Flags().StringVar(&f.authValue, "auth-value", defaultAuthValue, "the value of that header; it must hold "+tokenPlaceholder)
 	cmd.Flags().StringVar(&f.tokenEnv, "token-env", defaultTokenEnv, "the environment variable that holds the token")
 	cmd.Flags().StringVar(&f.kind, "kind", config.KindTest, "the kind of the environment, test or production; production is read only and allows GET and HEAD")
+	cmd.Flags().StringArrayVar(&f.accounts, "account", nil, "another account as <name>=<ENV>: an auth profile with the same session header and the token in the environment variable ENV; repeatable")
 	cmd.Flags().StringVar(&f.buildURL, "build-url", "", "an address on the host of --base-url that answers with the commit the service runs, such as https://orders.uat.example.com/version")
 	cmd.Flags().StringVar(&f.buildCommit, "build-commit", "", "the JSONPath of the commit in the answer of --build-url (default "+defaultBuildPath+")")
 }
@@ -85,6 +87,9 @@ func newInitCommand() *cobra.Command {
 				if len(diffs) > 0 {
 					return initFlagsDiffer(diffs, "To change the environment, edit "+configFileName+".")
 				}
+				if err := ensureGitignore(dir); err != nil {
+					return err
+				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s already has these settings; nothing was written\n", configFileName)
 				return nil
 			}
@@ -118,9 +123,20 @@ func printInitDone(w io.Writer, path string, f initFlags) {
 	if f.kind == config.KindProduction {
 		fmt.Fprintln(w, "the production environment is read only; edit the file to allow more")
 		fmt.Fprintf(w, "export %s=<the token of a read only account> before semar run --env <the environment name>\n", f.tokenEnv)
+		printAccounts(w, f)
 		return
 	}
 	fmt.Fprintf(w, "export %s=<the token of the test account> before semar run\n", f.tokenEnv)
+	printAccounts(w, f)
+}
+
+// printAccounts tells the person which variable each extra account needs.
+func printAccounts(w io.Writer, f initFlags) {
+	for _, a := range f.accounts {
+		if name, env, ok := strings.Cut(a, "="); ok {
+			fmt.Fprintf(w, "export %s=<the token of the account %s>\n", env, name)
+		}
+	}
 }
 
 var (
@@ -188,8 +204,24 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	accounts, err := parseAccounts(f.accounts)
+	if err != nil {
+		return nil, err
+	}
 
 	flow := func(n *yaml.Node) *yaml.Node { n.Style = yaml.FlowStyle; return n }
+	profiles := mapping(
+		"default", mapping(
+			"session", flow(mapping("header", text(f.authHeader), "value", quoted(f.authValue))),
+			"secrets", flow(mapping("TOKEN", quoted("env:"+f.tokenEnv))),
+		),
+	)
+	for _, a := range accounts {
+		profiles.Content = append(profiles.Content, text(a.name), mapping(
+			"session", flow(mapping("header", text(f.authHeader), "value", quoted(f.authValue))),
+			"secrets", flow(mapping("TOKEN", quoted("env:"+a.env))),
+		))
+	}
 	doc := mapping(
 		"version", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: "1"},
 		"environments", mapping(
@@ -201,12 +233,7 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 				"services", sequence(serviceNode(service, f.baseURL, probe)),
 			),
 		),
-		"authProfiles", mapping(
-			"default", mapping(
-				"session", flow(mapping("header", text(f.authHeader), "value", quoted(f.authValue))),
-				"secrets", flow(mapping("TOKEN", quoted("env:"+f.tokenEnv))),
-			),
-		),
+		"authProfiles", profiles,
 	)
 	if found := knowledge.WithFolder(knowledge.Conventional(dir), folderInWorkTree(dir)); len(found) > 0 {
 		list := make([]*yaml.Node, len(found))
@@ -225,6 +252,33 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 		return nil, fmt.Errorf("write the configuration: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+type account struct{ name, env string }
+
+// parseAccounts reads the --account values, <name>=<ENV>. A name is an auth profile name that is
+// not default, and a name may be given once.
+func parseAccounts(values []string) ([]account, error) {
+	var out []account
+	for _, v := range values {
+		name, env, ok := strings.Cut(v, "=")
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("--account %q must be <name>=<ENV>, such as bob=LANES_TOKEN_BOB", v)
+		case name == "default":
+			return nil, fmt.Errorf("--account %q: the name default is the account of --token-env", v)
+		case !envVarPattern.MatchString(env):
+			return nil, fmt.Errorf("--account %q: %q is not the name of an environment variable", v, env)
+		}
+		if err := idcheck.Check("account name", name); err != nil {
+			return nil, fmt.Errorf("--account %q: %w", v, err)
+		}
+		if slices.ContainsFunc(out, func(a account) bool { return a.name == name }) {
+			return nil, fmt.Errorf("--account: the name %s is given more than once", name)
+		}
+		out = append(out, account{name, env})
+	}
+	return out, nil
 }
 
 // buildProbe checks --build-url and --build-commit, and returns nil when no probe was asked for.
@@ -300,7 +354,37 @@ func writeInitConfig(dir string, data []byte) (path string, err error) {
 		}
 		return "", fmt.Errorf("the configuration that init wrote is not valid, so it was removed: %w", err)
 	}
+	if err := ensureGitignore(dir); err != nil {
+		return "", err
+	}
 	return path, nil
+}
+
+// gitignoreText keeps on the machine what must not be published: the evidence, the key that makes a
+// redacted value unguessable, and the health of fixtures. Approvals and confirmations stay in the
+// repository, so the team shares them.
+const gitignoreText = `# Written by semar init. These stay on this machine.
+runs/
+store/redact.key
+store/fixture-health/
+semar.local.yaml
+`
+
+// ensureGitignore writes .semar/.gitignore when there is none, and never changes one that exists.
+func ensureGitignore(dir string) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	rel := filepath.Join(".semar", ".gitignore")
+	if _, err := atomicfile.MkdirIn(root, filepath.Dir(rel)); err != nil {
+		return err
+	}
+	if err := atomicfile.WriteNewIn(root, rel, []byte(gitignoreText), atomicfile.FileMode); err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	return nil
 }
 
 // defaultServiceName is the repository directory's name, lowered, with every run of other

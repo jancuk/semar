@@ -146,6 +146,21 @@ func diffInitFlags(cfg config.Config, envFlag, profileFlag string, f initFlags, 
 			}
 		}
 	}
+	if given["account"] {
+		accounts, err := parseAccounts(f.accounts)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			prof, ok := cfg.AuthProfiles[a.name]
+			switch ref := prof.Secrets["TOKEN"]; {
+			case !ok:
+				diffs = append(diffs, fmt.Sprintf("  --account %s is not an auth profile in the file", terminalSafe(a.name)))
+			case ref != "env:"+a.env:
+				diffs = append(diffs, fmt.Sprintf("  --account %s uses %s, and the file has %s", terminalSafe(a.name), terminalSafe(a.env), terminalSafe(ref)))
+			}
+		}
+	}
 	slices.Sort(diffs)
 	return diffs, nil
 }
