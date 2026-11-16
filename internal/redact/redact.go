@@ -16,6 +16,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/theory/jsonpath"
 
@@ -28,17 +29,32 @@ const (
 	minKeyLen    = 16
 	maxDecodes   = 4
 	maxRounds    = 4
+
+	// A value that a JSONPath removed is kept for the rest of the run, so that a later action
+	// cannot store it. The set is bounded: values of fewer than minSecretLen bytes or more than
+	// maxLearnedLen bytes are not kept, and nor is any value after the first maxLearned.
+	maxLearned    = 512
+	maxLearnedLen = 4096
 )
 
 var fixedHeaders = []string{"Authorization", "Cookie", "Set-Cookie", "Proxy-Authorization"}
 
+// A Redactor serves one run. Besides the secrets, it keeps every value that a configured JSONPath
+// removed from an action and removes it from every later action of the run, wherever it appears.
 type Redactor struct {
 	paths    []*jsonpath.Path
 	headers  map[string]bool
 	patterns []pattern
 	secrets  func() []string
 	key      []byte
+
+	mu      sync.Mutex
+	learned []learnedValue // in the order they were first seen
+	known   map[string]bool
 }
+
+// learnedValue is a value that a JSONPath removed, and the marker that its body showed.
+type learnedValue struct{ text, marker string }
 
 // New returns an error that names the entry when a JSONPath or a pattern does
 // not compile. The key makes markers of low-entropy values, such as a one-time
@@ -87,6 +103,18 @@ func HasMarker(s string) bool { return markerRE.MatchString(s) }
 
 // Action returns a deep copy of a with every secret removed.
 func (r *Redactor) Action(a domain.Action) domain.Action {
+	if len(r.paths) > 0 {
+		// The bodies are read once first, so that a value they show under a JSONPath is known
+		// before the URL, the headers, and the error of this action are redacted.
+		pre := r.newScrubber()
+		if a.Request != nil {
+			pre.body(a.Request.Body)
+		}
+		if a.Response != nil {
+			pre.body(a.Response.Body)
+		}
+		r.learn(pre.masked)
+	}
 	s := r.newScrubber()
 	out := a
 	if a.Request != nil {
@@ -110,7 +138,37 @@ func (r *Redactor) Action(a domain.Action) domain.Action {
 	out.Err = s.text(a.Err)
 	out.Refused = s.text(a.Refused)
 	out.Why = s.text(a.Why)
+	r.learn(s.masked)
 	return out
+}
+
+// learn keeps the values that this action's JSONPaths removed, in sorted order, so that the set
+// is the same for the same actions.
+func (r *Redactor) learn(masked map[string]string) {
+	if len(masked) == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, text := range slices.Sorted(maps.Keys(masked)) {
+		if len(r.learned) >= maxLearned {
+			return
+		}
+		if len(text) < minSecretLen || len(text) > maxLearnedLen || r.known[text] {
+			continue
+		}
+		if r.known == nil {
+			r.known = map[string]bool{}
+		}
+		r.known[text] = true
+		r.learned = append(r.learned, learnedValue{text, masked[text]})
+	}
+}
+
+func (r *Redactor) learnedValues() []learnedValue {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.learned)
 }
 
 func (r *Redactor) headersOf(s *scrubber, in map[string][]string) map[string][]string {
@@ -170,6 +228,8 @@ func capturesOf(s *scrubber, in map[string]string) map[string]string {
 type scrubber struct {
 	r     *Redactor
 	forms []form
+	// markers maps a value learned from an earlier action to the marker its body showed.
+	markers map[string]string
 	// masked maps the text of each value that a JSONPath replaced, in any body
 	// of the action, to the marker that the body shows.
 	masked map[string]string
@@ -183,7 +243,16 @@ func (r *Redactor) newScrubber() *scrubber {
 	s := &scrubber{r: r}
 	var list []string
 	if r.secrets != nil {
-		list = r.secrets()
+		list = slices.Clone(r.secrets())
+	}
+	for _, l := range r.learnedValues() {
+		if s.markers == nil {
+			s.markers = map[string]string{}
+		}
+		if _, ok := s.markers[l.text]; !ok {
+			s.markers[l.text] = l.marker
+		}
+		list = append(list, l.text)
 	}
 	for _, sec := range list {
 		if len(sec) < minSecretLen {
@@ -301,7 +370,11 @@ func (s *scrubber) replace(t string, spans []span) string {
 		if v == "" {
 			v = t[sp.start:sp.end]
 		}
-		b.WriteString(s.r.Marker(v))
+		if m, ok := s.markers[v]; ok {
+			b.WriteString(m)
+		} else {
+			b.WriteString(s.r.Marker(v))
+		}
 		pos = sp.end
 	}
 	b.WriteString(t[pos:])

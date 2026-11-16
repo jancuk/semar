@@ -1,6 +1,7 @@
 package recorder_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -169,5 +170,80 @@ func TestRecorderIsSafeInParallel(t *testing.T) {
 	}
 	if len(seqs) != n || len(sink.activities) != n {
 		t.Errorf("stored %d actions and %d activities, want %d each", len(seqs), len(sink.activities), n)
+	}
+}
+
+// A value that a configured JSONPath removed from one action must not be stored by a later action
+// of the run: a step or a cleanup that puts it in a path, a query, a body, or an error, nor the
+// activity log that names the object of that path.
+func TestJSONPathValueStaysMaskedForTheRun(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"string", `{"data":{"nik":"3201770011","name":"Ana"}}`},
+		{"number", `{"data":{"nik":3201770011,"name":"Ana"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &fakeSink{}
+			red, err := redact.New(config.Redact{JSONPaths: []string{"$.data.nik"}}, func() []string { return nil }, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec := recorder.New(sink, red, classify, "run-1")
+			marker := red.Marker("3201770011")
+			first := domain.Action{
+				Use:      domain.UseCase{Pass: domain.PassSetup},
+				Request:  &domain.HTTPRequest{Method: "POST", URL: "https://h/v1/customers", PathTemplate: "/v1/customers"},
+				Response: &domain.HTTPResponse{Status: 201, Body: []byte(tc.body)},
+				Captures: map[string]string{"nik": "3201770011"},
+			}
+			got, err := rec.Record(first)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Captures["nik"] != marker {
+				t.Fatalf("first capture = %q", got.Captures["nik"])
+			}
+			later := []domain.Action{
+				{
+					Use:      domain.UseCase{Pass: domain.PassScenario, Step: "read"},
+					Request:  &domain.HTTPRequest{Method: "GET", URL: "https://h/v1/customers/3201770011?ref=3201770011", PathTemplate: "/v1/customers/{{c.nik}}"},
+					Response: &domain.HTTPResponse{Status: 200, Body: []byte(`{"owner":"3201770011","seen":3201770011}`)},
+					Captures: map[string]string{"owner": "3201770011"},
+				},
+				{
+					Use:      domain.UseCase{Pass: domain.PassScenario, Step: "update"},
+					Request:  &domain.HTTPRequest{Method: "PUT", URL: "https://h/v1/customers/3201770011", PathTemplate: "/v1/customers/{{c.nik}}", Body: []byte(`{"nik":"3201770011"}`)},
+					Response: &domain.HTTPResponse{Status: 500},
+					Err:      "customer 3201770011 failed",
+				},
+				{
+					Use:      domain.UseCase{Pass: domain.PassCleanup},
+					Request:  &domain.HTTPRequest{Method: "POST", URL: "https://h/v1/customers/3201770011/close", PathTemplate: "/v1/customers/{{c.nik}}/close"},
+					Response: &domain.HTTPResponse{Status: 200},
+				},
+			}
+			for _, a := range later {
+				if _, err := rec.Record(a); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, a := range sink.actions {
+				b, _ := json.Marshal(a)
+				if strings.Contains(string(b), "3201770011") {
+					t.Errorf("action %s stores the value: %s", a.ID, b)
+				}
+			}
+			for _, e := range sink.activities {
+				b, _ := json.Marshal(e)
+				if strings.Contains(string(b), "3201770011") {
+					t.Errorf("activity %d stores the value: %s", e.Seq, b)
+				}
+			}
+			if o := sink.activities[3].Object; o == nil || o.ID != marker {
+				t.Errorf("the cleanup object = %+v, want the marker %s", o, marker)
+			}
+			if u := sink.actions[1].Request.URL; u != "https://h/v1/customers/"+marker+"?ref="+marker {
+				t.Errorf("URL = %s", u)
+			}
+		})
 	}
 }
