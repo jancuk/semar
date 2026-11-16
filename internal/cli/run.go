@@ -343,10 +343,10 @@ func (rg *envRig) resolver(o options, envName string, env config.Environment, ca
 			return nil, err
 		}
 	}
-	names := make([]string, len(env.Services))
+	services := make(map[string]string, len(env.Services))
 	auth := map[string]string{}
-	for i, s := range env.Services {
-		names[i] = s.Name
+	for _, s := range env.Services {
+		services[s.Name] = s.BaseURL
 		if s.AuthProfile != "" {
 			auth[s.Name] = s.AuthProfile
 		}
@@ -359,7 +359,7 @@ func (rg *envRig) resolver(o options, envName string, env config.Environment, ca
 		Health:      fixture.NewHealthStore(rg.store.Root()),
 		Leases:      leases,
 		Environment: envName,
-		EnvServices: names,
+		Services:    services,
 		ServiceAuth: auth,
 		Data:        env.Data,
 		Run:         rg.id,

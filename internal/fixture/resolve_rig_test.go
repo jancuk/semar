@@ -106,6 +106,7 @@ type rigOptions struct {
 	unapproved   bool
 	noLeases     bool
 	timeout      time.Duration
+	prefix       string // a path prefix of both base URLs, such as /api
 }
 
 type rig struct {
@@ -136,6 +137,9 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	}
 	if o.wrapPayments != nil {
 		ph = o.wrapPayments(pay)
+	}
+	if o.prefix != "" {
+		oh, ph = http.StripPrefix(o.prefix, oh), http.StripPrefix(o.prefix, ph)
 	}
 	osrv, psrv := httptest.NewServer(oh), httptest.NewServer(ph)
 	t.Cleanup(osrv.Close)
@@ -174,7 +178,7 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	eng := api.New(api.Options{
 		Policy:   pol,
 		Recorder: recorder.New(sink, red, classify, testRun),
-		Services: map[string]string{"orders": osrv.URL, "payments": psrv.URL},
+		Services: map[string]string{"orders": osrv.URL + o.prefix, "payments": psrv.URL + o.prefix},
 		Session: func(_ context.Context, profile string) (string, string, error) {
 			tok, ok := tokens[profile]
 			if !ok {
@@ -207,7 +211,7 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	slices.SortFunc(fixtures, func(a, b domain.Fixture) int { return strings.Compare(string(a.ID), string(b.ID)) })
 	health := NewHealthStore(root)
 	return &rig{
-		t: t, app: app, pay: pay, ordersURL: osrv.URL, payURL: psrv.URL, sink: sink, clock: clock,
+		t: t, app: app, pay: pay, ordersURL: osrv.URL + o.prefix, payURL: psrv.URL + o.prefix, sink: sink, clock: clock,
 		approvals: approvals, health: health, leases: leases,
 		deps: Deps{
 			Engine:      eng,
@@ -217,7 +221,7 @@ func newRig(t *testing.T, o rigOptions) *rig {
 			Health:      health,
 			Leases:      leases,
 			Environment: testEnv,
-			EnvServices: []string{"orders", "payments"},
+			Services:    map[string]string{"orders": osrv.URL + o.prefix, "payments": psrv.URL + o.prefix},
 			ServiceAuth: map[string]string{"payments": "payments-tester"},
 			Data:        map[string]string{"customers.default": "c-1"},
 			Run:         testRun,

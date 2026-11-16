@@ -131,12 +131,12 @@ func listFixtures(ctx context.Context, stdout, stderr io.Writer, f fixtureListFl
 		fmt.Fprintf(stdout, "invalid: %s\n", oneLine(terminalSafe(p.String())))
 	}
 	if policy != nil {
-		var names []string
+		services := map[string]string{}
 		for _, s := range env.Services {
-			names = append(names, s.Name)
+			services[s.Name] = s.BaseURL
 		}
 		for _, fx := range cat.Fixtures {
-			for _, p := range fixture.CheckPolicy(fx, policy, names) {
+			for _, p := range fixture.CheckPolicy(fx, policy, services) {
 				fmt.Fprintf(stdout, "policy of %s: %s: %s: %s\n", terminalSafe(f.env), fx.ID, terminalSafe(p.Path), oneLine(terminalSafe(p.Message)))
 			}
 		}

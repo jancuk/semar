@@ -890,7 +890,7 @@ func (r *rig) withFixtures(t *testing.T, approved bool) {
 		Approvals:   r.confirm,
 		Health:      fixture.NewHealthStore(r.store.Root()),
 		Environment: "local",
-		EnvServices: []string{"orders"},
+		Services:    map[string]string{"orders": r.url},
 		Run:         runID,
 	})
 }

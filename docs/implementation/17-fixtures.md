@@ -243,7 +243,7 @@ cleanup:
 | P3 | No step matches `effects.once` | `create[0]: POST /v1/vouchers matches effects.once, and a fixture runs on every run` |
 | P4 | No step matches `effects.deny` | `create[1]: POST /v1/payments is on the deny list of uat` |
 
-P2 to P4 are checked again on each rendered request at run time, because a pattern can match a real value that the placeholder did not.
+P2 to P4 match the URL that the engine sends: the path is joined to the service's base URL with `api.JoinURL`, which keeps a path prefix of the base URL, so a base URL `https://h/api` and a step `POST /v1/payments` are matched as `POST /api/v1/payments`. P2 to P4 are checked again on each rendered request at run time, because a pattern can match a real value that the placeholder did not. The engine also refuses a call that carries `UseCase.Fixture` and matches `effects.once`, with `a fixture request must not match effects.once`.
 
 ### `internal/config`
 

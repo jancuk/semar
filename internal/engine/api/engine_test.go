@@ -1025,3 +1025,27 @@ func TestJoinURL(t *testing.T) {
 		})
 	}
 }
+
+// A fixture runs on every run, so the engine refuses a fixture call that matches effects.once,
+// whatever the caller checked before. A scenario step that matches once is sent.
+func TestFixtureCallThatMatchesOnce(t *testing.T) {
+	srv := newServer(t, ok)
+	e, sink := newEngine(t, srv, setup{env: func(env *config.Environment) {
+		env.Effects.Once = []config.OpPattern{{Method: "POST", Path: "/v1/payments"}}
+	}})
+	c := post("/v1/payments", `{}`)
+	c.Use = domain.UseCase{Pass: domain.PassSetup, Scenario: "SHOP-1-01", Fixture: &domain.FixtureUse{ID: "order.paid", As: "order", Phase: domain.PhaseCreate, Index: 1}}
+	res := do(t, e, c)
+	if res.Action.Refused != "a fixture request must not match effects.once" {
+		t.Errorf("Refused = %q", res.Action.Refused)
+	}
+	if n := srv.hits.Load(); n != 0 {
+		t.Errorf("server hits = %d, want 0", n)
+	}
+	if sink.count() != 1 {
+		t.Errorf("recorded %d actions, want 1", sink.count())
+	}
+	if res := do(t, e, post("/v1/payments", `{}`)); res.Action.Refused != "" {
+		t.Errorf("a step that matches once was refused: %q", res.Action.Refused)
+	}
+}

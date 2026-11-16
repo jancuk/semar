@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -54,7 +53,7 @@ type Deps struct {
 	Health      Health
 	Leases      *Leases // nil refuses lease: exclusive with a blocked reason
 	Environment string
-	EnvServices []string
+	Services    map[string]string // service name to base URL, of this environment
 	ServiceAuth map[string]string // service to auth profile, from configuration
 	Data        map[string]string // environments.<env>.data
 	Run         domain.RunID
@@ -77,7 +76,7 @@ func New(d Deps) *Resolver {
 	if d.LeaseWait <= 0 {
 		d.LeaseWait = defaultLeaseWait
 	}
-	d.EnvServices = slices.Clone(d.EnvServices)
+	d.Services = maps.Clone(d.Services)
 	d.ServiceAuth = maps.Clone(d.ServiceAuth)
 	d.Data = maps.Clone(d.Data)
 	return &Resolver{d: d}
@@ -208,7 +207,7 @@ func (r *Resolver) prepare(e *entry) []string {
 		}
 	}
 	var blocked []string
-	for _, p := range CheckPolicy(f, r.d.Policy, r.d.EnvServices) {
+	for _, p := range CheckPolicy(f, r.d.Policy, r.d.Services) {
 		blocked = append(blocked, fmt.Sprintf("fixture %s: %s: %s", f.ID, p.Path, r.inEnvironment(p.Message)))
 	}
 	if len(blocked) > 0 {
@@ -588,7 +587,17 @@ func (r *Resolver) send(ctx context.Context, e *entry, pass domain.Pass, phase s
 	if err != nil {
 		return outcome{notSent: true, renderErr: err, failure: "could not be built: " + err.Error()}, nil
 	}
-	preq := effects.Request{Method: rendered.Method, URL: &url.URL{Path: rendered.Path}}
+	// The engine joins the path to the base URL and keeps its path prefix; the policy is matched
+	// against that URL, so the resolver joins it the same way.
+	base, known := r.d.Services[rendered.Service]
+	if !known {
+		return outcome{notSent: true, failure: "could not be built: service " + rendered.Service + " is not in " + r.envName()}, nil
+	}
+	u, err := api.JoinURL(base, rendered.Path, rendered.Query)
+	if err != nil {
+		return outcome{notSent: true, renderErr: err, failure: "could not be built: " + err.Error()}, nil
+	}
+	preq := effects.Request{Method: rendered.Method, URL: u}
 	if r.d.Policy != nil {
 		if phase == domain.PhaseFind && r.d.Policy.Classify(preq) != effects.Read {
 			return outcome{notSent: true, policy: true, failure: fmt.Sprintf("writes under the effects policy of %s; a find step must read", r.envName())}, nil

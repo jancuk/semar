@@ -39,6 +39,7 @@ const (
 
 	refusedNoUseCase       = "a write must belong to a scenario step, an exploration, or a probe"
 	refusedBudget          = "request budget reached"
+	refusedFixtureOnce     = "a fixture request must not match effects.once"
 	refusedRedirectedWrite = "redirect refused: a write is not followed"
 )
 
@@ -177,6 +178,11 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 	preq := effects.Request{Method: method, URL: u}
 	if err := e.o.Policy.Admit(preq); err != nil {
 		a.Refused = refusalText(err, label)
+		return e.record(ctx, label, a, nil, missing)
+	}
+	if c.Use.Fixture != nil && e.o.Policy.Once(preq) {
+		// A fixture runs on every run, and once means a single time in the life of the environment.
+		a.Refused = refusedFixtureOnce
 		return e.record(ctx, label, a, nil, missing)
 	}
 	write := e.o.Policy.Classify(preq) == effects.Write

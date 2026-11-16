@@ -122,11 +122,10 @@ func planTrial(ctx context.Context, stderr io.Writer, o options, f planFlags, cf
 	}, id)
 
 	services := make(map[string]string, len(env.Services))
-	var probed, names []string
+	var probed []string
 	auth := map[string]string{}
 	for _, s := range env.Services {
 		services[s.Name] = s.BaseURL
-		names = append(names, s.Name)
 		if s.Build != nil {
 			probed = append(probed, s.Name)
 		}
@@ -178,7 +177,7 @@ func planTrial(ctx context.Context, stderr io.Writer, o options, f planFlags, cf
 			Approvals:   confirm.NewLocal(store.Root()),
 			Health:      fixture.NewHealthStore(store.Root()),
 			Environment: envName,
-			EnvServices: names,
+			Services:    services,
 			ServiceAuth: auth,
 			Data:        env.Data,
 			Run:         id,
