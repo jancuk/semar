@@ -129,11 +129,11 @@ func TestConfirmFixtureNeedsYesWithoutTerminal(t *testing.T) {
 func TestConfirmFixturePrintsStepsSafely(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
 	text := strings.Replace(orderPaidFixture, "path: /v1/orders, query", `path: "/v1/orders\u001b[2J", query`, 1)
-	text = strings.Replace(text, "A paid order of 1000 that belongs to the given customer", `"x\n  find 9: GET orders /v1/fake‮"`, 1)
+	text = strings.Replace(text, "A paid order of 1000 that belongs to the given customer", `"x\n  find 9: GET orders /v1/fake\u202e"`, 1)
 	r.writeFixture(t, "order.paid.yaml", text)
 	res := r.must(t, cli.ExitOK, "confirm", "--fixture", "order.paid", "--yes")
 	contains(t, "stdout", res.stdout, `/v1/orders\x1b[2J`, `description: x\n  find 9: GET orders /v1/fake`)
-	for _, bad := range []string{"\x1b", "‮"} {
+	for _, bad := range []string{"\x1b", "\u202e"} {
 		if strings.Contains(res.stdout, bad) {
 			t.Errorf("stdout holds %q", bad)
 		}
