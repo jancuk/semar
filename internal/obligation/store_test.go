@@ -1,0 +1,263 @@
+package obligation_test
+
+import (
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jancuk/semar/internal/obligation"
+)
+
+var t0 = time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
+
+func deferral(user string, at time.Time, reason string) obligation.Deferral {
+	return obligation.Deferral{Obligation: "SHOP-482/difference-1", User: user, At: at, Reason: reason, Until: time.Date(2026, 12, 1, 23, 59, 59, 0, time.UTC)}
+}
+
+func result(user string, at time.Time, res string) obligation.ManualResult {
+	return obligation.ManualResult{Obligation: "SHOP-482/difference-1", Result: res, User: user, At: at, Notes: "n"}
+}
+
+func TestDeferAndReadNewest(t *testing.T) {
+	root := t.TempDir()
+	s := obligation.NewStore(root)
+	if got, err := s.Deferrals(); err != nil || len(got) != 0 {
+		t.Fatalf("an empty store gave %v, %v", got, err)
+	}
+	if err := s.Defer(deferral("tester", t0, "first")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Defer(deferral("other", t0.Add(time.Hour), "second")); err != nil {
+		t.Fatal(err)
+	}
+	other := deferral("tester", t0, "elsewhere")
+	other.Obligation = "refunds/a"
+	if err := s.Defer(other); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Deferrals()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d obligations: %+v", len(got), got)
+	}
+	d := got["SHOP-482/difference-1"]
+	if d.Reason != "second" || d.User != "other" || d.Schema != 1 || d.Identity != "local, unverified identity" {
+		t.Errorf("newest deferral is %+v", d)
+	}
+	if got["refunds/a"].Reason != "elsewhere" {
+		t.Errorf("other obligation: %+v", got["refunds/a"])
+	}
+	dir := filepath.Join(root, "store", "obligations", "SHOP-482", "difference-1", "deferral")
+	if _, err := os.Stat(filepath.Join(dir, "tester-"+itoa(t0.Unix())+".json")); err != nil {
+		t.Errorf("the record is not where the contract says: %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Errorf("directory: %v, %v", info, err)
+	}
+}
+
+func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+func TestRecordNeverReplaces(t *testing.T) {
+	root := t.TempDir()
+	s := obligation.NewStore(root)
+	if err := s.Record(result("tester", t0, "failed")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Record(result("tester", t0.Add(time.Minute), "passed")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Manual()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := got["SHOP-482/difference-1"]; m.Result != "passed" {
+		t.Errorf("newest is %+v", m)
+	}
+	files, err := filepath.Glob(filepath.Join(root, "store", "obligations", "SHOP-482", "difference-1", "manual", "*.json"))
+	if err != nil || len(files) != 2 {
+		t.Fatalf("files %v, %v", files, err)
+	}
+}
+
+func TestSameSecondDoesNotReplace(t *testing.T) {
+	s := obligation.NewStore(t.TempDir())
+	for _, res := range []string{"failed", "passed"} {
+		if err := s.Record(result("tester", t0, res)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.Manual()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["SHOP-482/difference-1"].Result != "passed" {
+		t.Errorf("the later record of one second must count: %+v", got)
+	}
+}
+
+func TestStoreRefusesBadRecords(t *testing.T) {
+	s := obligation.NewStore(t.TempDir())
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"id with a traversal", s.Defer(func() obligation.Deferral { d := deferral("u", t0, "r"); d.Obligation = "../x"; return d }()), "invalid"},
+		{"id with one part", s.Defer(func() obligation.Deferral { d := deferral("u", t0, "r"); d.Obligation = "x"; return d }()), "<group>/<name>"},
+		{"no user", s.Defer(deferral("", t0, "r")), "user"},
+		{"no reason", s.Defer(deferral("u", t0, " ")), "reason"},
+		{"no expiry", s.Defer(func() obligation.Deferral { d := deferral("u", t0, "r"); d.Until = time.Time{}; return d }()), "until"},
+		{"result is neither", s.Record(result("u", t0, "maybe")), "passed or failed"},
+		{"no user on a result", s.Record(result("", t0, "passed")), "user"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.err == nil || !strings.Contains(tt.err.Error(), tt.want) {
+				t.Fatalf("got %v, want an error with %q", tt.err, tt.want)
+			}
+		})
+	}
+}
+
+func TestStoreRefusesLinkSwapAndWrongDirectory(t *testing.T) {
+	setup := func(t *testing.T) (string, *obligation.Store, string) {
+		root := t.TempDir()
+		s := obligation.NewStore(root)
+		if err := s.Defer(deferral("tester", t0, "r")); err != nil {
+			t.Fatal(err)
+		}
+		return root, s, filepath.Join(root, "store", "obligations", "SHOP-482", "difference-1", "deferral")
+	}
+	record := `{"schema": 1, "obligation": "SHOP-482/difference-1", "user": "x", "identity": "i", "at": "2026-11-17T09:00:00Z", "reason": "r", "until": "2026-12-01T23:59:59Z"}`
+
+	t.Run("a link as a record", func(t *testing.T) {
+		_, s, dir := setup(t)
+		target := filepath.Join(t.TempDir(), "r.json")
+		if err := os.WriteFile(target, []byte(record), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(dir, "x-1.json")); err != nil {
+			t.Skip(err)
+		}
+		if _, err := s.Deferrals(); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("a link as a directory on the way", func(t *testing.T) {
+		root, s, _ := setup(t)
+		group := filepath.Join(root, "store", "obligations", "SHOP-482")
+		if err := os.Rename(group, group+".real"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(group+".real", group); err != nil {
+			t.Skip(err)
+		}
+		if _, err := s.Deferrals(); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+			t.Fatalf("read: %v", err)
+		}
+		if err := s.Defer(deferral("again", t0.Add(time.Hour), "r")); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+			t.Fatalf("write: %v", err)
+		}
+		entries, _ := os.ReadDir(filepath.Join(group+".real", "difference-1", "deferral"))
+		if len(entries) != 1 {
+			t.Errorf("the write went through the link: %v", entries)
+		}
+	})
+	t.Run("a link as the store", func(t *testing.T) {
+		root, s, _ := setup(t)
+		dir := filepath.Join(root, "store", "obligations")
+		if err := os.Rename(dir, dir+".real"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(dir+".real", dir); err != nil {
+			t.Skip(err)
+		}
+		if _, err := s.Manual(); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("a record in the wrong directory", func(t *testing.T) {
+		_, s, dir := setup(t)
+		wrong := strings.Replace(record, "SHOP-482/difference-1", "SHOP-482/other", 1)
+		if err := os.WriteFile(filepath.Join(dir, "x-1.json"), []byte(wrong), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Deferrals(); err == nil || !strings.Contains(err.Error(), "SHOP-482/other") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("an unknown field", func(t *testing.T) {
+		_, s, dir := setup(t)
+		bad := strings.Replace(record, `"reason"`, `"state": "verified", "reason"`, 1)
+		if err := os.WriteFile(filepath.Join(dir, "x-1.json"), []byte(bad), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Deferrals(); err == nil || !strings.Contains(err.Error(), "state") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("another schema", func(t *testing.T) {
+		_, s, dir := setup(t)
+		if err := os.WriteFile(filepath.Join(dir, "x-1.json"), []byte(strings.Replace(record, `"schema": 1`, `"schema": 2`, 1)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Deferrals(); err == nil || !strings.Contains(err.Error(), "schema 2") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("not a regular file", func(t *testing.T) {
+		_, s, dir := setup(t)
+		if err := os.Mkdir(filepath.Join(dir, "x-1.json"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Deferrals(); err != nil {
+			t.Fatalf("a directory is skipped as in the confirmations: %v", err)
+		}
+	})
+	t.Run("strays are ignored", func(t *testing.T) {
+		root, s, dir := setup(t)
+		for _, p := range []string{filepath.Join(dir, ".tmp-1"), filepath.Join(root, "store", "obligations", ".DS_Store"), filepath.Join(root, "store", "obligations", "SHOP-482", "note.txt")} {
+			if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got, err := s.Deferrals(); err != nil || len(got) != 1 {
+			t.Fatalf("got %v, %v", got, err)
+		}
+	})
+}
+
+func TestUserNameCleaned(t *testing.T) {
+	root := t.TempDir()
+	s := obligation.NewStore(root)
+	if err := s.Defer(deferral("../x", t0, "r")); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "store", "obligations", "SHOP-482", "difference-1", "deferral")
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("%v, %v", entries, err)
+	}
+	if want := ".._x-" + itoa(t0.Unix()) + ".json"; entries[0].Name() != want {
+		t.Errorf("file is %q, want %q", entries[0].Name(), want)
+	}
+	if err := s.Defer(deferral("..", t0.Add(time.Hour), "r")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "unknown-"+itoa(t0.Add(time.Hour).Unix())+".json")); err != nil {
+		t.Error(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "outside"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Deferrals(); err != nil || got["SHOP-482/difference-1"].User != ".." {
+		t.Errorf("the user name in the record keeps its text: %+v, %v", got, err)
+	}
+}
