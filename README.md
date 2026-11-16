@@ -468,6 +468,37 @@ semar run --scenario SHOP-482-01 --build 9f3c2ab41d07; echo "exit $?"
 
 `testdata/e2e/` holds these files as a working example. Its configuration points at an address where nothing listens, so a run there ends as `blocked`. The tests in `internal/cli` run the same files against a sample service.
 
+### Act as another account
+
+A step uses the auth profile of the scenario. `as` makes one step, a setup step too, act as another auth profile of `semar.yaml`. Every request of that step then carries that profile's session, and no other:
+
+```yaml
+  - id: move-to-other-board
+    action: A member of another board moves the card
+    as: carol
+    hint: { method: POST, path: "/v1/cards/{id}/move" }
+    expect:
+      - check: { status: 403 }
+        source: ticket
+        cite: "docs/tickets/SHOP-482.md:14 only a member of the board may move a card"
+```
+
+A name that `semar.yaml` does not define blocks the scenario before any request, with `account carol is not in the configuration`. A fixture step and a journey leg have no `as`: they use the profile of their service, and a file that sets `as` there is refused.
+
+### Expected results from a model, and variables in them
+
+`by: model` on an expected result says that a model wrote it. It always needs a person's confirmation, whatever its `source` and whatever `policy.trust.confirm` lists. `semar confirm` prints the cited line for a `ticket` result whose `cite` starts with `<file of the repository>:<line>`, read from your working tree as one escaped line of at most 300 characters, and `as` for each step that has it. A cite to a file or a line that is not there prints `line not found`, so you can see that it does not hold up.
+
+A string operand of `equals`, `notEquals`, or `contains` may hold `{{name}}`: a capture of this or an earlier step, an output of a `given` entry such as `{{card.board}}`, or `{{run.id}}`. Semar fills it in before it checks. A `secret.` or `data.` name, a malformed `{{`, or a name that nothing provides is refused when the files are loaded, and a value that is missing at run time makes the check `not_evaluated`. The report shows the filled-in value next to what was written, and a value that the redaction hides stays hidden.
+
+```yaml
+      - check: { jsonpath: "$.data.board", equals: "{{card.board}}" }
+        source: ticket
+        cite: "docs/tickets/SHOP-482.md:9 the card stays on its board"
+```
+
+`as` and `by` are part of what a confirmation covers, but only when set, so a scenario that does not use them keeps its hash and its stored confirmations and scripts.
+
 ### Prepare data with fixtures
 
 A scenario often needs data in a given state, such as a paid order, and making it can take calls to several services. A fixture is a reviewed file that does this. A scenario names the state it needs and holds no preparation steps.
@@ -805,6 +836,7 @@ Semar does not read the acceptance criteria of a ticket, the feature map, or pas
 | `--token-env` | `SEMAR_TOKEN` | The environment variable that holds the token |
 | `--build-url` | none | An address of the service that answers with the commit it runs, such as `https://orders.uat.example.com/version` |
 | `--build-commit` | `$.commit` | Where that answer holds the commit, as a JSONPath |
+| `--account <name>=<ENV>` | none | Another account: an auth profile `<name>` with the same session header and value as `default`, and the token in the environment variable `<ENV>`. Repeat the flag for more accounts. A name that is not a valid profile name, is `default`, or is given twice stops the command with exit 3 |
 
 The file that they write:
 
@@ -829,6 +861,10 @@ authProfiles:
     session: {header: Authorization, value: "Bearer {{secret.TOKEN}}"}
     secrets: {TOKEN: "env:ORDERS_UAT_TOKEN"}
 ```
+
+With `--account bob=ORDERS_UAT_TOKEN_BOB --account carol=ORDERS_UAT_TOKEN_CAROL`, the `authProfiles` block also holds `bob` and `carol`, each with its own token variable. A scenario step can then act as one of them (see [Act as another account](#act-as-another-account)).
+
+`init` also writes `.semar/.gitignore` when there is none, and never changes one that exists. It keeps `runs/`, `store/redact.key`, `store/fixture-health/`, and `semar.local.yaml` on your machine. The redaction key must stay there: published next to the evidence, it would let a reader guess a short redacted value. Approvals and confirmations are not listed, so the team commits them.
 
 **Production.** The same file can declare a production environment. What Semar may do there is what the file says: the hosts, the methods, and the effects mode.
 
@@ -865,6 +901,7 @@ environments:
 | `plan.trial` | `true` by default. `false` turns the [trial run](#the-trial-run) off. It must be a boolean |
 | `environments.<env>.data` | The data of the environment: a flat map from a dotted key to a string, at most 100 keys. A fixture reads a value as `{{data.<key>}}`, in a parameter default or in a `with` value |
 | `environments.<env>.services[].authProfile` | The auth profile that a fixture step or a journey leg uses for this service. It must be defined under `authProfiles`. A service with none uses the auth profile of the scenario |
+| `authProfiles.<name>.description` | One line, at most 200 characters, with no control character: what the account can do, such as `a member of another board, without the owner's rights`. The planner reads it to draft access checks |
 
 The file also takes `redact`, `policy`, `replay`, `providers`, `tickets`, and `plan` blocks. The [technical requirements](docs/TRD.md) and [Plan 12](docs/implementation/12-plan-from-a-diff.md) describe them.
 
@@ -878,15 +915,15 @@ Every command takes `--dir <path>`, the root of the repository that holds `.sema
 | `semar plan --diff <link or range>` | Drafts scenarios and scripts for a change, and writes `plan.md` and the obligations. Tells the planner to read the documents that `knowledge` lists, and sends the read-only steps of the draft once to the environment. Also takes `--provider <id>`, `--model <name>`, `--reasoning <level>`, `--no-setup`, `--no-trial`, `--max-scenarios <n>`, and `--no-fetch` |
 | `semar dashboard` | Opens a page on your machine to manage the model providers and see usage. `--no-open` prints the address only, `--port <n>` sets the port |
 | `semar providers` | Prints your providers and marks the one that would plan here. No model |
-| `semar init --base-url <url>` | Writes `.semar/semar.yaml`, with a `knowledge` entry for each conventional path that it finds |
+| `semar init --base-url <url>` | Writes `.semar/semar.yaml`, with a `knowledge` entry for each conventional path that it finds, and `.semar/.gitignore` when there is none. `--account <name>=<ENV>` adds an auth profile, and can repeat |
 | `semar script add <file>` | Checks a script against its scenario and stores it |
 | `semar run --all` | Replays every scenario in `.semar/scenarios` |
 | `semar run --scenario <id>` | Replays one scenario. Repeat the flag for more |
-| `semar confirm <scenario id>` | Lists the expected results that need a person, and stores the confirmation. `--all` for every scenario, `--yes` to skip the question |
+| `semar confirm <scenario id>` | Lists the expected results that need a person, with the cited ticket line and the account of a step, and stores the confirmation. `--all` for every scenario, `--yes` to skip the question |
 | `semar confirm --fixture <id>` | Shows a fixture and approves it as it is now. Repeat the flag for more. It cannot be combined with a scenario ID or `--all` |
 | `semar confirm --journey <id>` | Confirms the expected results of every leg of a journey. Repeat the flag for more. `--env <name>` names the environment whose auth profiles the legs use |
 | `semar fixture list` | Lists the fixtures with their approval, their health, and the scenarios that use them. `--env <name>` shows the health on that environment and checks each fixture against its effects policy |
-| `semar fixture check (<id>... \| --all) --env <name>` | Runs `find`, `create`, and `cleanup` of fixtures on an environment and records their health. It sends writes. Also takes `--auth-profile <name>` and `--build <commit>` or `--build <service>=<commit>` |
+| `semar fixture check (<id>... \| --all) --env <name>` | With neither IDs nor `--all` it says `name the fixtures to check, or use --all` and exits 3. Runs `find`, `create`, and `cleanup` of fixtures on an environment and records their health. It sends writes. Also takes `--auth-profile <name>` and `--build <commit>` or `--build <service>=<commit>` |
 | `semar journey list` | Lists the journeys with their criticality, owner, legs, and last stored result. `--env <name>` marks a result `stale` when a build differs. Also takes `--build` |
 | `semar journey run (<id>... \| --critical \| --all)` | Runs journeys one leg at a time and writes a report. Also takes `--env <name>` and `--build` |
 | `semar ledger` | Shows the state of every use case in `.semar/obligations`. Also takes `--ticket <key>`, `--env <name>`, `--build`, `--run <id>`, and `--checklist` |
