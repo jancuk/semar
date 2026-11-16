@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="semar r-20261117T090000Z-1a2b" tests="7" failures="2" errors="3" skipped="1" time="12.000">
+  <testsuite name="SHOP-482" tests="4" failures="1" errors="2" skipped="0" time="2.027" timestamp="2026-11-17T09:00:00">
+    <properties>
+      <property name="semar.run" value="r-20261117T090000Z-1a2b"></property>
+      <property name="semar.environment" value="uat"></property>
+      <property name="semar.build.orders" value="9f3c2ab"></property>
+      <property name="semar.build.payments" value="77aa01c"></property>
+    </properties>
+    <testcase name="SHOP-482-01 Refund above the order total is rejected" classname="SHOP-482" time="0.412">
+      <failure message="step refund-too-much: expected status 422, observed status 200 (source ticket)" type="failed">step refund-too-much: expected status 422, observed status 200 (source ticket)&#xA;step refund-too-much broke an invariant: expected no server error, observed status 500</failure>
+      <system-out>semar outcome: failed</system-out>
+    </testcase>
+    <testcase name="SHOP-482-02 Refund of a partly refunded order" classname="SHOP-482" time="0.085">
+      <error message="setup failed: create-order answered 500" type="blocked">setup failed: create-order answered 500</error>
+      <system-out>semar outcome: blocked</system-out>
+    </testcase>
+    <testcase name="SHOP-482-03 Refund of the full total" classname="SHOP-482" time="1.500">
+      <system-out>semar outcome: passed</system-out>
+    </testcase>
+    <testcase name="SHOP-482-04 Refund history is listed" classname="SHOP-482" time="0.030">
+      <error message="an expected result is not confirmed" type="inconclusive">an expected result is not confirmed</error>
+      <system-out>semar outcome: inconclusive</system-out>
+    </testcase>
+  </testsuite>
+  <testsuite name="PAY-9" tests="2" failures="0" errors="1" skipped="1" time="2.000" timestamp="2026-11-17T09:00:00">
+    <properties>
+      <property name="semar.run" value="r-20261117T090000Z-1a2b"></property>
+      <property name="semar.environment" value="uat"></property>
+      <property name="semar.build.orders" value="9f3c2ab"></property>
+      <property name="semar.build.payments" value="77aa01c"></property>
+    </properties>
+    <testcase name="PAY-9-01 Capture a held payment" classname="PAY-9" time="0.000">
+      <skipped message="the environment has no payment service"></skipped>
+      <system-out>semar outcome: not_run</system-out>
+    </testcase>
+    <testcase name="PAY-9-02 Void a captured payment" classname="PAY-9" time="2.000">
+      <properties>
+        <property name="semar.durationUnknown" value="true"></property>
+      </properties>
+      <error message="the build changed during the run" type="stale">the build changed during the run</error>
+      <system-out>semar outcome: stale</system-out>
+    </testcase>
+  </testsuite>
+  <testsuite name="semar" tests="1" failures="1" errors="0" skipped="0" time="0.010" timestamp="2026-11-17T09:00:00">
+    <properties>
+      <property name="semar.run" value="r-20261117T090000Z-1a2b"></property>
+      <property name="semar.environment" value="uat"></property>
+      <property name="semar.build.orders" value="9f3c2ab"></property>
+      <property name="semar.build.payments" value="77aa01c"></property>
+    </properties>
+    <testcase name="LEGACY-1" classname="semar" time="0.010">
+      <failure message="step x: expected status 200, observed status 404 (source person)" type="failed">step x: expected status 200, observed status 404 (source person)</failure>
+      <system-out>semar outcome: failed</system-out>
+    </testcase>
+  </testsuite>
+</testsuites>
