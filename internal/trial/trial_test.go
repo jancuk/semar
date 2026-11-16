@@ -589,6 +589,12 @@ func (c *clock) Now() time.Time {
 	return c.now
 }
 
+func (c *clock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
 func TestTimeLimitStops(t *testing.T) {
 	c := &clock{now: time.Date(2026, 11, 17, 8, 0, 0, 0, time.UTC), by: time.Minute}
 	h := newHarness(t, func(o *options) { o.deps = func(d *trial.Deps) { d.Clock = c.Now } })
@@ -605,6 +611,80 @@ func TestTimeLimitStops(t *testing.T) {
 	}
 	if sent == 0 || sent >= 4 {
 		t.Fatalf("sent %d of 4 steps, want some but not all before the 2 minute limit", sent)
+	}
+	if tr.Skipped != "" {
+		t.Fatalf("Skipped = %q for a trial that sent requests", tr.Skipped)
+	}
+
+	// The limit was used inside the first Try. A repaired draft is not tried, and the trial says so
+	// instead of listing a draft with no problems.
+	c.advance(10 * time.Minute)
+	again := try(t, h, sc, s)
+	if again.Skipped != "the trial budget was reached before any request of this draft was sent" {
+		t.Fatalf("second Try: Skipped = %q, steps %+v", again.Skipped, again.Steps)
+	}
+	for _, x := range again.Steps {
+		if x.Result == plan.TrialSent {
+			t.Fatalf("second Try sent %+v after the limit", x)
+		}
+	}
+}
+
+// The planner drafts between two calls of Try. That time is not the trial's, so a repaired draft
+// is tried with what is left of the limit.
+func TestTimeBetweenAttemptsDoesNotCount(t *testing.T) {
+	c := &clock{now: time.Date(2026, 11, 17, 8, 0, 0, 0, time.UTC)}
+	h := newHarness(t, func(o *options) { o.deps = func(d *trial.Deps) { d.Clock = c.Now } })
+	sc, s := scenario("SHOP-482-01", nil, get("a", "/v1/orders"), get("b", "/v1/orders"))
+	if tr := try(t, h, sc, s); tr.Steps[1].Result != plan.TrialSent {
+		t.Fatalf("first Try = %+v", tr)
+	}
+	c.advance(10 * time.Minute)
+	tr := try(t, h, sc, s)
+	if tr.Skipped != "" || len(tr.Steps) != 2 || tr.Steps[0].Result != plan.TrialSent || tr.Steps[1].Result != plan.TrialSent {
+		t.Fatalf("second Try = %+v, want both steps sent", tr)
+	}
+}
+
+// blockingFinder waits until its context ends, as a find whose until never holds does.
+type blockingFinder struct{ ended chan error }
+
+func (f *blockingFinder) FindOnly(ctx context.Context, _ domain.ScenarioID, _ []domain.Given, _ string, _ domain.Pass) ([]domain.GivenFind, error) {
+	select {
+	case <-ctx.Done():
+		f.ended <- ctx.Err()
+		return nil, ctx.Err()
+	case <-time.After(10 * time.Second):
+		f.ended <- nil
+		return nil, nil
+	}
+}
+
+// The time limit bounds a fixture find too, not only the steps.
+func TestTimeLimitBoundsTheFind(t *testing.T) {
+	f := &blockingFinder{ended: make(chan error, 1)}
+	h := newHarness(t, func(o *options) {
+		o.deps = func(d *trial.Deps) { d.Finder, d.Limit = f, 100*time.Millisecond }
+	})
+	sc, s := scenario("SHOP-482-01", []domain.Given{{Fixture: "order.paid", As: "order"}}, get("a", "/v1/orders"))
+	start := time.Now()
+	tr, err := h.runner.Try(t.Context(), []domain.Scenario{sc}, []domain.Script{s})
+	if err != nil {
+		t.Fatalf("Try: %v", err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("Try took %s with a limit of 100ms", took)
+	}
+	if got := <-f.ended; got == nil {
+		t.Fatal("the find ran to its end; the limit did not reach it")
+	}
+	if tr.Skipped != "the trial budget was reached before any request of this draft was sent" {
+		t.Errorf("Skipped = %q", tr.Skipped)
+	}
+	for _, x := range tr.Steps {
+		if x.Result != plan.TrialNotTried || x.Why != "the trial budget was reached" {
+			t.Errorf("step %+v, want not tried for the budget", x)
+		}
 	}
 }
 

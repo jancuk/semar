@@ -29,6 +29,7 @@ const (
 
 	skipNoAnswer = "the environment did not answer"
 	skipSignIn   = "the sign-in for the trial failed"
+	skipLimit    = "the trial budget was reached before any request of this draft was sent"
 
 	whyWrites          = "writes"
 	whyOnce            = "matches effects.once"
@@ -70,17 +71,33 @@ type Deps struct {
 }
 
 // Runner keeps the state of one trial across the attempts of a plan: the builds it read, the
-// requests it sent, and its time limit are for the whole trial, not for one call of Try.
+// requests it sent, and its time limit are for the whole trial, not for one call of Try. Only the
+// time spent inside Try counts against the limit: the planner drafts between two calls.
 type Runner struct {
 	d Deps
 
 	mu       sync.Mutex
 	probed   bool
 	builds   []domain.BuildRef
-	deadline time.Time
+	used     time.Duration // spent inside earlier calls of Try
+	deadline time.Time     // of the current call of Try
+	overtime bool          // the context of the current call reached the limit
 	sent     int
 	spent    bool   // the engine refused a request for its budget
 	dead     string // why no request is sent any more
+}
+
+// errTimeLimit is the cause of the context of a Try that reached the time limit.
+var errTimeLimit = errors.New("the trial time limit was reached")
+
+// overLimit reports whether err comes from the time limit of this trial rather than from the
+// caller, and then marks the trial as out of time.
+func (r *Runner) overLimit(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() == nil || !errors.Is(context.Cause(ctx), errTimeLimit) {
+		return false
+	}
+	r.overtime = true
+	return true
 }
 
 func New(d Deps) *Runner {
@@ -105,13 +122,18 @@ func (r *Runner) Try(ctx context.Context, scenarios []domain.Scenario, scripts [
 	if err := ctx.Err(); err != nil {
 		return tr, fmt.Errorf("trial: %w", err)
 	}
+	start := r.d.Clock()
+	left := r.d.Limit - r.used
+	r.deadline, r.overtime = start.Add(left), false
+	defer func() { r.used += max(r.d.Clock().Sub(start), 0) }()
+	// The context bounds what the clock checks cannot: a find that waits, or a slow request.
+	ctx, cancel := context.WithTimeoutCause(ctx, max(left, 0), errTimeLimit)
+	defer cancel()
+
 	if err := r.readBuilds(ctx); err != nil {
 		return tr, err
 	}
 	tr.Builds = slices.Clone(r.builds)
-	if r.deadline.IsZero() {
-		r.deadline = r.d.Clock().Add(r.d.Limit)
-	}
 	scriptOf := make(map[domain.ScenarioID]domain.Script, len(scripts))
 	for _, s := range scripts {
 		scriptOf[s.Scenario] = s
@@ -129,7 +151,23 @@ func (r *Runner) Try(ctx context.Context, scenarios []domain.Scenario, scripts [
 		}
 	}
 	tr.Skipped = r.dead
+	if tr.Skipped == "" && limitedOut(tr.Steps) {
+		tr.Skipped = skipLimit
+	}
 	return tr, nil
+}
+
+// limitedOut reports whether the limit or the budget kept every request of a draft from being
+// sent. Such a draft was not tried, so it must not read as a draft with no problems.
+func limitedOut(steps []plan.TrialStep) bool {
+	limited := false
+	for _, ts := range steps {
+		if ts.Result == plan.TrialSent {
+			return false
+		}
+		limited = limited || ts.Why == whyBudget
+	}
+	return limited
 }
 
 // readBuilds probes once. A service that cannot be read is left out, with no line: the trial
@@ -141,6 +179,9 @@ func (r *Runner) readBuilds(ctx context.Context) error {
 	var builds []domain.BuildRef
 	for _, name := range r.d.Probed {
 		b, err := r.d.Builds.Probe(ctx, name)
+		if r.overLimit(ctx, ctx.Err()) {
+			break
+		}
 		if ctx.Err() != nil {
 			return fmt.Errorf("trial: %w", ctx.Err())
 		}
@@ -212,6 +253,9 @@ func (r *Runner) find(ctx context.Context, run *scenarioRun, tr *plan.Trial) err
 	default:
 		var err error
 		finds, err = r.d.Finder.FindOnly(ctx, sc.ID, slices.Clone(sc.Given), r.authProfile(sc), domain.PassTrial)
+		if r.overLimit(ctx, err) {
+			err = nil
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return fmt.Errorf("trial: %w", ctx.Err())
@@ -264,7 +308,7 @@ func (r *Runner) authProfile(sc domain.Scenario) string {
 
 // exhausted says why no more requests may be sent, or "" when one may be.
 func (r *Runner) exhausted() string {
-	if r.spent || r.sent >= maxRequests || !r.d.Clock().Before(r.deadline) {
+	if r.spent || r.overtime || r.sent >= maxRequests || !r.d.Clock().Before(r.deadline) {
 		return whyBudget
 	}
 	return ""
@@ -343,6 +387,12 @@ func (r *Runner) step(ctx context.Context, run *scenarioRun, step domain.Step, s
 	if res.Action.ID != "" {
 		r.note(&ts, res)
 		tr.Steps = append(tr.Steps, ts)
+	}
+	if r.overLimit(ctx, err) {
+		if res.Action.ID == "" {
+			skip(whyBudget)
+		}
+		return nil
 	}
 	if err != nil {
 		if ctx.Err() != nil {
