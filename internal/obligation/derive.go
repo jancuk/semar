@@ -112,7 +112,7 @@ func deriveOne(o Located, r Results, deferrals map[string]Deferral, manual map[s
 		case c.Outcome != string(domain.OutcomePassed):
 			notPassed = append(notPassed, fmt.Sprintf("%s is %s in %s%s", label, strings.ReplaceAll(c.Outcome, "_", " "), c.Run, withReason(c.Reason)))
 		case !onCurrent(c, r.Current):
-			notPassed = append(notPassed, fmt.Sprintf("%s ran on %s: rerun on the current build", label, staleDetail(c, r.Current)))
+			notPassed = append(notPassed, fmt.Sprintf("%s ran %s: rerun on the current build", label, strings.Join(staleDetails(c, r.Current), "; ")))
 		default:
 			passed++
 		}
@@ -174,37 +174,33 @@ func withReason(s string) string {
 
 func day(t time.Time) string { return t.UTC().Format("2006-01-02") }
 
-// onCurrent is true when every service of current has the same commit and configuration hash
-// in the builds of the result. With no builds read, every result counts.
-func onCurrent(c Cover, current []domain.BuildRef) bool { return len(staleServices(c, current)) == 0 }
+// onCurrent is true when the cover is not stale. With no builds read, every result counts.
+func onCurrent(c Cover, current []domain.BuildRef) bool { return len(staleDetails(c, current)) == 0 }
 
-func staleServices(c Cover, current []domain.BuildRef) []string {
+// staleDetails says, for each service that the cover ran on, what it ran on and what runs now,
+// when they differ or when the current build of the service was not read. A service that the
+// cover did not run on is not compared: a journey touches some services, and the environment has
+// more. With builds read and none recorded, the cover cannot be matched and is stale.
+func staleDetails(c Cover, current []domain.BuildRef) []string {
+	if current == nil {
+		return nil
+	}
+	if len(c.Builds) == 0 && len(current) > 0 {
+		return []string{"with no recorded build, so it cannot be matched to the current build"}
+	}
 	var out []string
-	for _, cur := range current {
-		i := slices.IndexFunc(c.Builds, func(b domain.BuildRef) bool { return b.Service == cur.Service })
-		if i < 0 || c.Builds[i].Commit != cur.Commit || c.Builds[i].ConfigHash != cur.ConfigHash {
-			out = append(out, cur.Service)
+	for _, ran := range c.Builds {
+		i := slices.IndexFunc(current, func(b domain.BuildRef) bool { return b.Service == ran.Service })
+		switch {
+		case i < 0:
+			out = append(out, fmt.Sprintf("on %s %s, and the build of %s was not read now", ran.Service, shortCommit(ran.Commit), ran.Service))
+		case current[i].Commit != ran.Commit:
+			out = append(out, fmt.Sprintf("on %s %s, and the environment runs %s", ran.Service, shortCommit(ran.Commit), shortCommit(current[i].Commit)))
+		case current[i].ConfigHash != ran.ConfigHash:
+			out = append(out, fmt.Sprintf("on %s %s with another configuration, and the environment runs %s", ran.Service, shortCommit(ran.Commit), shortCommit(current[i].Commit)))
 		}
 	}
 	return out
-}
-
-// staleDetail says, for each service that differs, what the result ran on and what runs now.
-func staleDetail(c Cover, current []domain.BuildRef) string {
-	var parts []string
-	for _, svc := range staleServices(c, current) {
-		cur := current[slices.IndexFunc(current, func(b domain.BuildRef) bool { return b.Service == svc })]
-		i := slices.IndexFunc(c.Builds, func(b domain.BuildRef) bool { return b.Service == svc })
-		ran := "no build of " + svc
-		if i >= 0 {
-			ran = svc + " " + shortCommit(c.Builds[i].Commit)
-			if c.Builds[i].Commit == cur.Commit {
-				ran += " with another configuration"
-			}
-		}
-		parts = append(parts, fmt.Sprintf("%s, and the environment runs %s", ran, shortCommit(cur.Commit)))
-	}
-	return strings.Join(parts, "; ")
 }
 
 func shortCommit(c string) string {

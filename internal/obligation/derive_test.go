@@ -221,14 +221,23 @@ func TestStaleByCurrentBuilds(t *testing.T) {
 			t.Fatalf("state %s, %q", e.State, e.Reasons)
 		}
 	})
-	t.Run("a service the result did not run on", func(t *testing.T) {
+	t.Run("a service the result did not touch is not compared", func(t *testing.T) {
 		r := results(old)
 		r.Current = append([]domain.BuildRef{{Service: "payments", Commit: "abc1234000", ConfigHash: "c"}}, current...)
+		if e := one(t, ob("g/a", covers("A-1")), r, nil, nil); e.State != obligation.Verified {
+			t.Fatalf("state %s: %q", e.State, e.Reasons)
+		}
+	})
+	t.Run("a result with no recorded build", func(t *testing.T) {
+		r := results(old)
+		none := old
+		none.Builds = nil
+		r.Scenarios["A-1"] = none
 		e := one(t, ob("g/a", covers("A-1")), r, nil, nil)
 		if e.State != obligation.Blocked {
 			t.Fatalf("state %s", e.State)
 		}
-		mustReason(t, e, "A-1 ran on no build of payments, and the environment runs abc1234: rerun on the current build")
+		mustReason(t, e, "A-1 ran with no recorded build, so it cannot be matched to the current build: rerun on the current build")
 	})
 	t.Run("builds not read", func(t *testing.T) {
 		r := results(old)
@@ -242,14 +251,16 @@ func TestStaleByCurrentBuilds(t *testing.T) {
 			t.Fatalf("state %s", e.State)
 		}
 	})
-	t.Run("a service of the result that runs no more", func(t *testing.T) {
+	t.Run("a service of the result that was not read now", func(t *testing.T) {
 		r := results(old)
 		old2 := old
 		old2.Builds = append(old2.Builds, domain.BuildRef{Service: "retired", Commit: "1"})
 		r.Scenarios["A-1"] = old2
-		if e := one(t, ob("g/a", covers("A-1")), r, nil, nil); e.State != obligation.Verified {
+		e := one(t, ob("g/a", covers("A-1")), r, nil, nil)
+		if e.State != obligation.Blocked {
 			t.Fatalf("state %s", e.State)
 		}
+		mustReason(t, e, "A-1 ran on retired 1, and the build of retired was not read now: rerun on the current build")
 	})
 	t.Run("a failure on another build still shows", func(t *testing.T) {
 		bad := res("A-1", "failed", "boom")
@@ -259,6 +270,34 @@ func TestStaleByCurrentBuilds(t *testing.T) {
 			t.Fatalf("state %s", e.State)
 		}
 	})
+}
+
+// Under --env, Current holds every probed service. A journey records only its own services, and
+// that must not make it stale.
+func TestAJourneyOnAFewServicesIsCurrent(t *testing.T) {
+	paymentsBuild := domain.BuildRef{Service: "payments", Commit: "abc1234000", ConfigHash: "c"}
+	r := results()
+	r.Current = []domain.BuildRef{ordersBuild, paymentsBuild}
+	r.Journeys = map[string]obligation.Cover{"checkout": {Journey: "checkout", Found: true, Outcome: "passed", Run: "r-1", Builds: []domain.BuildRef{ordersBuild}}}
+	o := ob("g/a", func(o *obligation.Obligation) { o.Journeys = []string{"checkout"} })
+	if e := one(t, o, r, nil, nil); e.State != obligation.Verified {
+		t.Fatalf("state %s: %q", e.State, e.Reasons)
+	}
+}
+
+// In the report of a journey run, Current holds the services of its journeys only. A scenario that
+// ran on an old build of another service is not current for that reason.
+func TestAScenarioOnAServiceNotReadNowIsNotCurrent(t *testing.T) {
+	paymentsBuild := domain.BuildRef{Service: "payments", Commit: "abc1234000", ConfigHash: "c"}
+	c := res("A-1", "passed", "")
+	c.Builds = []domain.BuildRef{{Service: "orders", Commit: "0ld0ld00000", ConfigHash: "cfg1"}, paymentsBuild}
+	r := results(c)
+	r.Current = []domain.BuildRef{paymentsBuild}
+	e := one(t, ob("g/a", covers("A-1")), r, nil, nil)
+	if e.State != obligation.Blocked {
+		t.Fatalf("state %s: %q", e.State, e.Reasons)
+	}
+	mustReason(t, e, "A-1 ran on orders 0ld0ld0, and the build of orders was not read now: rerun on the current build")
 }
 
 func TestNoReasonListedFirst(t *testing.T) {
