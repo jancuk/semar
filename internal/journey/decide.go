@@ -60,9 +60,12 @@ func Decide(in Outcome) (domain.JourneyOutcome, domain.LegID, []domain.Reason) {
 		}
 	}
 
+	// A journey that sent nothing, as one interrupted before its first leg, has no end manifest to
+	// read and nothing that could have changed under it: it is not stale.
+	sent := slices.ContainsFunc(in.Legs, func(l domain.LegResult) bool { return l.Outcome != domain.OutcomeNotRun })
 	started := !in.Filtered && in.ManifestProblem == ""
 	switch {
-	case in.End == nil && started:
+	case in.End == nil && started && (sent || len(in.Legs) == 0):
 		add(2, domain.OutcomeStale, reasonNoEnd)
 	case in.End != nil && in.End.Hash != in.Start.Hash:
 		for _, c := range Changes(in.Start.Services, in.End.Services) {

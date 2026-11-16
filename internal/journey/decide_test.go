@@ -162,9 +162,19 @@ func TestDecideTable(t *testing.T) {
 			},
 		},
 		{
-			name: "a not_run leg from a stop is never the first failing leg",
+			name: "a journey interrupted before its first leg is not_run, and not stale: nothing was sent",
 			in: Outcome{Legs: []domain.LegResult{
 				legResult("place", domain.OutcomeNotRun, "the run was interrupted"),
+				legResult("pay", domain.OutcomeNotRun, "the run was interrupted"),
+			}, Start: start},
+			want:    domain.JourneyNotRun,
+			reasons: []domain.Reason{reason(domain.OutcomeNotRun, "leg place was not run: the run was interrupted")},
+		},
+		{
+			name: "a not_run leg after a leg that ran, with no end manifest, is stale",
+			in: Outcome{Legs: []domain.LegResult{
+				legResult("place", domain.OutcomePassed),
+				legResult("pay", domain.OutcomeNotRun, "the run was interrupted"),
 			}, Start: start},
 			want: domain.JourneyStale,
 			reasons: []domain.Reason{

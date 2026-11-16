@@ -559,6 +559,9 @@ func TestInterruptBeforeStartSendsNothing(t *testing.T) {
 	if len(r.sink.actions) != 0 {
 		t.Errorf("%d actions recorded", len(r.sink.actions))
 	}
+	if jr.Outcome != domain.JourneyNotRun || hasReason(jr.Reasons, reasonNoEnd) {
+		t.Errorf("a journey that sent nothing is %s with reasons %+v, want not_run", jr.Outcome, jr.Reasons)
+	}
 }
 
 // countingProber counts the probes of each service.
