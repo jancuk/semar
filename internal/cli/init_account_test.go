@@ -15,15 +15,15 @@ var initBase = []string{"init", "--base-url", "https://orders.example.com", "--s
 func TestInitAccountsAddAuthProfiles(t *testing.T) {
 	p := newPlanRepo(t, sampleapp.Options{})
 	p.opts.Providers = noProvider(t)
-	args := append(slicesClone(initBase), "--account", "bob=LANES_TOKEN_BOB", "--account", "carol=LANES_TOKEN_CAROL")
+	args := append(slicesClone(initBase), "--account", "bob=ORDERS_TOKEN_BOB", "--account", "carol=ORDERS_TOKEN_CAROL")
 	res := p.must(t, cli.ExitOK, args...)
-	contains(t, "stdout", res.stdout, "export LANES_TOKEN_BOB=", "export LANES_TOKEN_CAROL=")
+	contains(t, "stdout", res.stdout, "export ORDERS_TOKEN_BOB=", "export ORDERS_TOKEN_CAROL=")
 	cfg, err := config.Load(p.dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	def := cfg.AuthProfiles["default"]
-	for name, env := range map[string]string{"bob": "LANES_TOKEN_BOB", "carol": "LANES_TOKEN_CAROL"} {
+	for name, env := range map[string]string{"bob": "ORDERS_TOKEN_BOB", "carol": "ORDERS_TOKEN_CAROL"} {
 		got, ok := cfg.AuthProfiles[name]
 		if !ok {
 			t.Fatalf("no profile %s in %v", name, cfg.AuthProfiles)
@@ -46,12 +46,12 @@ func TestInitAccountsAddAuthProfiles(t *testing.T) {
 func TestInitRefusesABadAccount(t *testing.T) {
 	for name, account := range map[string]string{
 		"no equals sign":   "bob",
-		"empty name":       "=LANES_TOKEN",
+		"empty name":       "=ORDERS_TOKEN",
 		"empty variable":   "bob=",
-		"a bad name":       "bo b=LANES_TOKEN",
-		"a path as a name": "../x=LANES_TOKEN",
+		"a bad name":       "bo b=ORDERS_TOKEN",
+		"a path as a name": "../x=ORDERS_TOKEN",
 		"a bad variable":   "bob=1X",
-		"the default name": "default=LANES_TOKEN",
+		"the default name": "default=ORDERS_TOKEN",
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := newPlanRepo(t, sampleapp.Options{})

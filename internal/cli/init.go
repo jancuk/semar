@@ -264,7 +264,7 @@ func parseAccounts(values []string) ([]account, error) {
 		name, env, ok := strings.Cut(v, "=")
 		switch {
 		case !ok:
-			return nil, fmt.Errorf("--account %q must be <name>=<ENV>, such as bob=LANES_TOKEN_BOB", v)
+			return nil, fmt.Errorf("--account %q must be <name>=<ENV>, such as bob=ORDERS_TOKEN_BOB", v)
 		case name == "default":
 			return nil, fmt.Errorf("--account %q: the name default is the account of --token-env", v)
 		case !envVarPattern.MatchString(env):
