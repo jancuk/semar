@@ -129,7 +129,12 @@ type Plan struct {
 	MaxScenarios int           `yaml:"maxScenarios"`
 	MaxTurns     int           `yaml:"maxTurns"`
 	Timeout      time.Duration `yaml:"timeout"`
+	// Trial is false when the person turned the trial run off. Nil means on.
+	Trial *bool `yaml:"trial"`
 }
+
+// TrialOn reports whether semar plan sends the read-only steps of a draft once.
+func (p Plan) TrialOn() bool { return p.Trial == nil || *p.Trial }
 
 const (
 	fileName             = "semar.yaml"

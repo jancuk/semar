@@ -441,3 +441,45 @@ func TestUnknownKeyUnderServiceStillRefused(t *testing.T) {
 		t.Fatalf("an unknown key in an environment: got %v", err)
 	}
 }
+
+func TestPlanTrialDefaultsOn(t *testing.T) {
+	for _, text := range []string{"version: 1\n", "version: 1\nplan: {maxTurns: 7}\n", "version: 1\nplan: {trial: true}\n"} {
+		cfg, err := loadText(t, text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !cfg.Plan.TrialOn() {
+			t.Fatalf("TrialOn is false for %q", text)
+		}
+	}
+	if !(config.Plan{}).TrialOn() {
+		t.Fatal("TrialOn is false for the zero Plan")
+	}
+}
+
+func TestPlanTrialFalse(t *testing.T) {
+	cfg, err := loadText(t, "version: 1\nplan:\n  trial: false\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Plan.TrialOn() || cfg.Plan.Trial == nil || *cfg.Plan.Trial {
+		t.Fatalf("plan = %+v, want the trial off", cfg.Plan)
+	}
+	if cfg.Plan.MaxTurns != 60 {
+		t.Fatalf("the other plan defaults were lost: %+v", cfg.Plan)
+	}
+}
+
+func TestPlanTrialNotBoolean(t *testing.T) {
+	for _, value := range []string{"maybe", `"false"`, "3", "[true]", "{a: 1}"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := loadText(t, "version: 1\nplan:\n  trial: "+value+"\n")
+			if err == nil {
+				t.Fatalf("plan.trial %s was accepted", value)
+			}
+			if !strings.Contains(err.Error(), "semar.yaml:3") {
+				t.Fatalf("error %q does not name the file and the line", err)
+			}
+		})
+	}
+}
