@@ -135,7 +135,7 @@ func Render(w io.Writer, in Input, out Output) error {
 	} else {
 		b.WriteString("\nThe requests were drafted from the source and were not sent before the first run.\n")
 	}
-	b.WriteString("\nA request uses a literal ID only when the same scenario captured it or the source holds it as a fixed test value. " +
+	b.WriteString("\nA request uses a literal ID only when the same scenario captured it or the source holds it as a fixed test value, except an ID that cannot exist, written as `missing-{{run.id}}`, for a not-found test. " +
 		"The planner was told to list every other case under \"Not drafted\". Code cannot check this, so read the requests before the first run.\n")
 
 	_, err := io.WriteString(w, b.String())

@@ -11,8 +11,8 @@ import (
 var update = flag.Bool("update", false, "rewrite the golden files")
 
 func TestPlanVersion(t *testing.T) {
-	if got := PlanVersion(); got != "6" {
-		t.Errorf("PlanVersion() = %q, want 5", got)
+	if got := PlanVersion(); got != "7" {
+		t.Errorf("PlanVersion() = %q, want 7", got)
 	}
 }
 
@@ -374,5 +374,41 @@ func TestTicketAndAccountTextStayDataInThePrompt(t *testing.T) {
 	got = strings.Replace(got, "- `owner`: A move is refused.", "- `owner`: A board owner.", 1)
 	if got != want {
 		t.Errorf("a hostile ticket or description changes the prompt beyond its own text:\n%s", got)
+	}
+}
+
+// The planner is told once that every criterion is accounted for, and only when it has ticket files (D9).
+func TestPromptStatesTheAccountingRuleOnceAndOnlyWithTickets(t *testing.T) {
+	with, err := Plan(PlanData{ChangeTable: "T", Services: "`orders`", Methods: "GET", MaxScenarios: 3, Tickets: "1: x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(with, "must be accounted for"); n != 1 {
+		t.Errorf("the accounting rule appears %d times, want once", n)
+	}
+	for _, want := range []string{"`notDrafted` entry whose `cite` is", "A draft that leaves a criterion out goes back to you."} {
+		if !strings.Contains(with, want) {
+			t.Errorf("the prompt lacks %q", want)
+		}
+	}
+	without, err := Plan(PlanData{ChangeTable: "T", Services: "`orders`", Methods: "GET", MaxScenarios: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(without, "accounted for") {
+		t.Error("the accounting rule is in a prompt without ticket files")
+	}
+}
+
+// An ID that cannot exist is allowed for a not-found test, in one form only (D10).
+func TestPromptAllowsOnlyTheMissingIDForm(t *testing.T) {
+	got, err := Plan(PlanData{ChangeTable: "T", Services: "`orders`", Methods: "GET", MaxScenarios: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Never invent an ID", "`missing-{{run.id}}`", "`/v1/lists/missing-{{run.id}}`", "No other made-up ID is allowed."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the prompt lacks %q", want)
+		}
 	}
 }

@@ -409,3 +409,13 @@ func sameSet(a, b []string) bool {
 	}
 	return true
 }
+
+// A not-found test may use an ID that cannot exist, built from the id of the run (D10).
+func TestMissingIDFormPassesValidation(t *testing.T) {
+	d := draft(t)
+	d.Scenarios[1].Steps[1].Path = "/v1/orders/missing-{{run.id}}"
+	d.Scenarios[1].Steps[1].Expect[0] = ExpectDraft{Check: CheckDraft{Status: new(404)}, Why: "internal/orders/read.go:3 returns 404 for an unknown order"}
+	if _, _, ps := Validate(d, input(t)); len(ps) > 0 {
+		t.Fatalf("the missing-ID form is refused: %s", problemTexts(ps))
+	}
+}

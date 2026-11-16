@@ -114,10 +114,10 @@ The planner could not read these files of the head commit.
 - Setup: the planner could use 2 MCP servers and 3 skills of your own setup, under the permission mode default
 - Tool calls: Read 7, MCP tools (names withheld) 3
 - Refused tool calls: 2
-- Prompt version: 6
+- Prompt version: 7
 
 Every expected result here was read from the code by a model. Confirm each scenario before its result counts.
 
 The requests were drafted from the source and were not sent before the first run.
 
-A request uses a literal ID only when the same scenario captured it or the source holds it as a fixed test value. The planner was told to list every other case under "Not drafted". Code cannot check this, so read the requests before the first run.
+A request uses a literal ID only when the same scenario captured it or the source holds it as a fixed test value, except an ID that cannot exist, written as `missing-{{run.id}}`, for a not-found test. The planner was told to list every other case under "Not drafted". Code cannot check this, so read the requests before the first run.
