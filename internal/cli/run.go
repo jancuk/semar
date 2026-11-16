@@ -137,7 +137,7 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 		}
 	}
 
-	if err := report.Summary(stdout, record); err != nil {
+	if err := report.Summary(stdout, record, ""); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "report: %s\n", filepath.Join(r.store.Root(), "runs", string(r.id), reportFile))

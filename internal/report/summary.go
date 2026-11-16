@@ -85,9 +85,10 @@ func countLine(results []domain.ScenarioResult) string {
 	return strings.Join(parts, ", ")
 }
 
-// Summary writes one line per scenario, one line with the count of each outcome, and one line
-// for each build that was declared rather than read from the service.
-func Summary(w io.Writer, run domain.Run) error {
+// Summary writes one line per scenario, one line with the count of each outcome, the coverage
+// line when there is one, and one line for each build that was declared rather than read from
+// the service.
+func Summary(w io.Writer, run domain.Run, coverage string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, r := range ordered(run.Results) {
 		line := plain(string(r.Scenario)) + "\t" + plain(string(r.Outcome))
@@ -110,6 +111,11 @@ func Summary(w io.Writer, run domain.Run) error {
 	}
 	if _, err := fmt.Fprintln(w, countLine(run.Results)); err != nil {
 		return err
+	}
+	if coverage != "" {
+		if _, err := fmt.Fprintln(w, plain(coverage)); err != nil {
+			return err
+		}
 	}
 	for _, b := range run.BuildsStart {
 		if b.Declared {

@@ -153,7 +153,7 @@ func TestMarkdownSaysWhatADeclaredBuildCannotShow(t *testing.T) {
 
 func TestSummaryShowsADeclaredBuild(t *testing.T) {
 	var b bytes.Buffer
-	if err := report.Summary(&b, declaredFixture().Run); err != nil {
+	if err := report.Summary(&b, declaredFixture().Run, ""); err != nil {
 		t.Fatal(err)
 	}
 	want := "build: orders 0123456789ab (declared on the command line, not read from the service)\n"
@@ -376,7 +376,7 @@ func TestSummaryCutsAndCleansTheReason(t *testing.T) {
 	run := fixture().Run
 	run.Results[1].Reasons[0].Text = "a\u202eb" + strings.Repeat("z", 5000)
 	var b bytes.Buffer
-	if err := report.Summary(&b, run); err != nil {
+	if err := report.Summary(&b, run, ""); err != nil {
 		t.Fatal(err)
 	}
 	out := b.String()
@@ -435,7 +435,7 @@ func TestExitCode(t *testing.T) {
 
 func TestSummaryGolden(t *testing.T) {
 	var b bytes.Buffer
-	if err := report.Summary(&b, fixture().Run); err != nil {
+	if err := report.Summary(&b, fixture().Run, ""); err != nil {
 		t.Fatal(err)
 	}
 	compareGolden(t, "summary.golden.txt", b.Bytes())
@@ -445,7 +445,7 @@ func TestSummaryShape(t *testing.T) {
 	run := fixture().Run
 	run.Results[1].Reasons[0].Text = "evil \x1b[31mred\x1b[0m\nline"
 	var b bytes.Buffer
-	if err := report.Summary(&b, run); err != nil {
+	if err := report.Summary(&b, run, ""); err != nil {
 		t.Fatal(err)
 	}
 	out := b.String()
@@ -463,7 +463,7 @@ func TestSummaryShape(t *testing.T) {
 
 func TestSummaryEmptyRun(t *testing.T) {
 	var b bytes.Buffer
-	if err := report.Summary(&b, domain.Run{}); err != nil {
+	if err := report.Summary(&b, domain.Run{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	want := "failed 0, blocked 0, inconclusive 0, stale 0, not_run 0, passed 0\n"
@@ -602,5 +602,101 @@ func TestReportFixtureValuesAreEscaped(t *testing.T) {
 			!strings.HasPrefix(line, "## Data touched") && !strings.HasPrefix(line, "## Still exists") {
 			t.Errorf("a value started a heading: %q", line)
 		}
+	}
+}
+
+const coverageLine = "42 use cases: 35 verified, 2 failed, 3 blocked, 2 need a person"
+
+func coverageReport() report.Data {
+	d := fixture()
+	d.Coverage = coverageLine
+	d.CoverageTickets = []string{"SHOP-482", "refunds"}
+	return d
+}
+
+func TestReportOpensWithCoverageLine(t *testing.T) {
+	out := render(t, coverageReport())
+	compareGolden(t, "report.coverage.golden.md", []byte(out))
+	lines := strings.Split(out, "\n")
+	if lines[0] != "# Semar report run-20261114-0001" || lines[1] != "" || lines[2] != coverageLine {
+		t.Errorf("the report does not open with the title and the summary line:\n%s", strings.Join(lines[:4], "\n"))
+	}
+	if lines[3] != "Details: `semar ledger --ticket SHOP-482 --ticket refunds`" {
+		t.Errorf("the line after the summary is %q", lines[3])
+	}
+	if n := strings.Count(out, "use cases"); n != 1 {
+		t.Errorf("the report holds the summary line %d times", n)
+	}
+}
+
+func TestReportWithoutCoverageIsTheOldReport(t *testing.T) {
+	d := fixture()
+	d.CoverageTickets = []string{"SHOP-482"}
+	if got := render(t, d); got != render(t, fixture()) {
+		t.Errorf("tickets alone changed the report:\n%s", lineDiff(render(t, fixture()), got))
+	}
+	for _, name := range []string{"report.golden.md", "report.declared.golden.md", "report.given.golden.md"} {
+		data, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "use case") || strings.Contains(string(data), "semar ledger") {
+			t.Errorf("%s mentions the coverage", name)
+		}
+	}
+}
+
+func TestReportCoverageStaysOneLine(t *testing.T) {
+	d := coverageReport()
+	d.Coverage = "1 use case: 1 verified\n# Injected <b>x</b> [l](http://evil.example/)"
+	d.CoverageTickets = []string{"SHOP-482 `x`", "bad\n--ticket", "SHOP-480"}
+	out := render(t, d)
+	for _, bad := range []string{"<b>", "[l](", "http://", "\n# Injected", "`x`", "bad"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("report contains %q:\n%s", bad, out)
+		}
+	}
+	if !strings.Contains(out, "Details: `semar ledger --ticket SHOP-480`") {
+		t.Errorf("a safe ticket was dropped:\n%s", out)
+	}
+}
+
+func TestReportCoverageOnAnInterruptedRun(t *testing.T) {
+	d := coverageReport()
+	d.Run.EndedAt = time.Time{}
+	lines := strings.Split(render(t, d), "\n")
+	if lines[2] != coverageLine || !strings.HasPrefix(lines[5], "> This run did not finish") {
+		t.Errorf("the summary line does not come before the note about an unfinished run:\n%s", strings.Join(lines[:7], "\n"))
+	}
+}
+
+func TestSummaryHasCoverageLine(t *testing.T) {
+	var b bytes.Buffer
+	run := declaredFixture().Run
+	if err := report.Summary(&b, run, coverageLine); err != nil {
+		t.Fatal(err)
+	}
+	compareGolden(t, "summary.coverage.golden.txt", b.Bytes())
+	lines := strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
+	n := len(lines)
+	if lines[n-2] != coverageLine || !strings.HasPrefix(lines[n-1], "build: ") || !strings.HasPrefix(lines[n-3], "failed ") {
+		t.Errorf("the line is not between the counts and the builds:\n%s", b.String())
+	}
+	var without bytes.Buffer
+	if err := report.Summary(&without, run, ""); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(without.String(), "use case") {
+		t.Errorf("a run with no obligation prints a coverage line:\n%s", without.String())
+	}
+}
+
+func TestSummaryCoverageLineIsPlain(t *testing.T) {
+	var b bytes.Buffer
+	if err := report.Summary(&b, fixture().Run, "1 use case\x1b[2J: 1 verified\nsecond \u202eline"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(b.String(), "\x1b\u202e") || strings.Contains(b.String(), "\nsecond") {
+		t.Errorf("the coverage line is not plain:\n%q", b.String())
 	}
 }

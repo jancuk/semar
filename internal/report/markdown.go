@@ -11,6 +11,7 @@ import (
 
 	"github.com/jancuk/semar/internal/activity"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/idcheck"
 )
 
 //go:embed report.md.tmpl
@@ -23,6 +24,12 @@ type Data struct {
 	Run       domain.Run
 	Scenarios map[domain.ScenarioID]domain.Scenario
 	Activity  []domain.Activity
+	// Coverage is the line that opens the report, such as "42 use cases: 35 verified". It is empty
+	// for a repository with no obligation, and then nothing is printed.
+	Coverage string
+	// CoverageTickets are the tickets of the use cases that the line counts, for the command
+	// that shows the detail.
+	CoverageTickets []string
 }
 
 type reasonView struct{ Text, Step string }
@@ -47,6 +54,7 @@ type markdownView struct {
 	EnvironmentKind                    string
 	BuildsStart, BuildsEnd, Counts     string
 	Interrupted, OnlyDeclared          bool
+	Coverage, CoverageDetail           string
 	Attention, Passed                  []scenarioView
 	Ledger                             []ledgerView
 	StillExists                        []string
@@ -73,6 +81,10 @@ func buildView(d Data) markdownView {
 		Counts:          countLine(run.Results),
 		Interrupted:     run.EndedAt.IsZero(),
 		OnlyDeclared:    onlyDeclared(run),
+	}
+	if d.Coverage != "" {
+		v.Coverage = shown(d.Coverage)
+		v.CoverageDetail = ledgerCommand(d.CoverageTickets)
 	}
 	for _, r := range ordered(run.Results) {
 		sv := scenarioView{
@@ -105,6 +117,18 @@ func buildView(d Data) markdownView {
 		v.Ledger = append(v.Ledger, ledgerViewOf(row))
 	}
 	return v
+}
+
+// ledgerCommand is the command that shows the use cases of the tickets. A key that is not safe
+// as an ID is left out, because it sits in a code span where nothing can be escaped.
+func ledgerCommand(tickets []string) string {
+	cmd := "semar ledger"
+	for _, t := range tickets {
+		if idcheck.Check("ticket", t) == nil {
+			cmd += " --ticket " + t
+		}
+	}
+	return cmd
 }
 
 // fixtureLine says what one given entry did: which fixture, in which version, how it gave its

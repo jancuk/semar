@@ -1,5 +1,10 @@
 # Semar report {{ .RunID }}
 
+{{ if .Coverage -}}
+{{ .Coverage }}
+Details: `{{ .CoverageDetail }}`
+
+{{ end -}}
 {{ if .Interrupted -}}
 > This run did not finish: no end time was recorded. Scenarios without a result are missing from this report.
 
