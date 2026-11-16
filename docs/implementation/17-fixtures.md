@@ -222,7 +222,7 @@ cleanup:
 | F3 | `id` matches `^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*$`, passes `idcheck.Check`, is at most 64 bytes, and equals the file name without `.yaml` or `.yml` | `id order.paid does not match the file name order-paid.yaml` |
 | F4 | `description` has 1 to 500 characters, one paragraph, and no control character | `description is required` |
 | F5 | `version` matches `^[0-9]+\.[0-9]+\.[0-9]+$`. `owner` passes `idcheck.Check` | `version 1.2 must be MAJOR.MINOR.PATCH` |
-| F6 | At most 16 `params`. A name matches `^[a-z][a-z0-9_]*$` and is not `run` or `data`. A default is a literal, a literal with `{{run.id}}`, or exactly one `{{data.<key>}}` | `params.run: the name run is reserved` |
+| F6 | At most 16 `params`. A name matches `^[a-z][a-z0-9_]*$` and is not `run`, `data`, or `secret`. A default is a literal, a literal with `{{run.id}}`, or exactly one `{{data.<key>}}` | `params.run: the name run is reserved` |
 | F7 | `lease` is empty or `exclusive` | `lease must be exclusive or empty` |
 | F8 | At least one of `find` and `create`. At most 8 `find`, 16 `create`, and 8 `cleanup` steps | `a fixture needs find or create steps` |
 | F9 | Each step's request passes `script.RequestProblems`: a service, a known method, a path that `checkPath` accepts, valid header names, and well-formed variables | the existing script messages |
@@ -268,7 +268,7 @@ A fixture step's session comes from its service's `authProfile`. When the servic
 
 ### `internal/scenario` and `internal/script`
 
-* `scenario.Validate` adds, at `given[i]`: at most 8 entries; `fixture` follows F3's pattern; `as` matches `^[a-z][a-z0-9_]*$`, is not `run` or `data`, and is unique; each `with` key matches F6's name pattern, each value has at most 256 bytes and no control character; `lease` is empty or `exclusive`. Messages: `given[1].as: order is used twice`, `given[0].lease must be exclusive or empty`.
+* `scenario.Validate` adds, at `given[i]`: at most 8 entries; `fixture` follows F3's pattern; `as` matches `^[a-z][a-z0-9_]*$`, is not `run`, `data`, or `secret`, and is unique; each `with` key matches F6's name pattern and is not one of those three names, each value has at most 256 bytes and no control character; `lease` is empty or `exclusive`. Messages: `given[1].as: order is used twice`, `given[0].lease must be exclusive or empty`.
 * `scenario.Marshal` writes `given` after `authProfile` and before `steps`, with `with` in key order.
 * `script.variablePattern` becomes `\{\{([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*)\}\}`. A dotted name is `<as>.<output>`, `run.id`, or `data.<key>`. `namePattern` for capture names keeps no dot.
 * New exported functions:

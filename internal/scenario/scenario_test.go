@@ -194,6 +194,8 @@ func TestValidateGiven(t *testing.T) {
 		{"as with a dot", []domain.Given{g("order.paid", "or.der")}, "must match", "given[0].as", false},
 		{"as run", []domain.Given{g("order.paid", "run")}, "the name run is reserved", "given[0].as", false},
 		{"as data", []domain.Given{g("order.paid", "data")}, "the name data is reserved", "given[0].as", false},
+		{"as secret", []domain.Given{g("order.paid", "secret")}, "the name secret is reserved", "given[0].as", false},
+		{"with key secret", []domain.Given{{Fixture: "order.paid", As: "order", With: map[string]string{"secret": "x"}}}, `key "secret" must match ^[a-z][a-z0-9_]*$ and not be run, data, or secret`, "given[0].with", false},
 		{"as used twice", []domain.Given{g("order.paid", "order"), g("order.refunded", "order")}, "order is used twice", "given[1].as", false},
 		{"with key in upper case", []domain.Given{{Fixture: "order.paid", As: "order", With: map[string]string{"Customer": "x"}}}, `key "Customer" must match`, "given[0].with", false},
 		{"with key run", []domain.Given{{Fixture: "order.paid", As: "order", With: map[string]string{"run": "x"}}}, `key "run"`, "given[0].with", false},

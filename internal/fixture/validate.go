@@ -150,7 +150,7 @@ func (v *validator) params() {
 	for _, name := range slices.Sorted(maps.Keys(v.f.Params)) {
 		where := "params." + name
 		switch {
-		case name == "run" || name == "data":
+		case name == "run" || name == "data" || name == "secret":
 			v.add(where, "the name %s is reserved", name)
 		case !paramPattern.MatchString(name):
 			v.add(where, "name must match %s", paramRule)

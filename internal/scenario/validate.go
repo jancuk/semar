@@ -194,7 +194,7 @@ func validateGiven(given []domain.Given) []Problem {
 		switch {
 		case !namePattern.MatchString(g.As):
 			add(p+".as", "as %q must match ^[a-z][a-z0-9_]*$", g.As)
-		case g.As == "run" || g.As == "data":
+		case g.As == "run" || g.As == "data" || g.As == "secret":
 			add(p+".as", "the name %s is reserved", g.As)
 		case aliases[g.As]:
 			add(p+".as", "%s is used twice", g.As)
@@ -203,8 +203,8 @@ func validateGiven(given []domain.Given) []Problem {
 
 		for _, k := range slices.Sorted(maps.Keys(g.With)) {
 			wp := fmt.Sprintf("%s.with.%s", p, k)
-			if !namePattern.MatchString(k) || k == "run" || k == "data" {
-				add(p+".with", "key %q must match ^[a-z][a-z0-9_]*$ and not be run or data", k)
+			if !namePattern.MatchString(k) || k == "run" || k == "data" || k == "secret" {
+				add(p+".with", "key %q must match ^[a-z][a-z0-9_]*$ and not be run, data, or secret", k)
 			}
 			v := g.With[k]
 			switch {

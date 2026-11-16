@@ -55,6 +55,7 @@ func TestValidateRules(t *testing.T) {
 
 		{rule: "F6", name: "reserved run", edit: func(f *domain.Fixture) { f.Params["run"] = domain.Param{} }, path: "params.run", want: "the name run is reserved"},
 		{rule: "F6", name: "reserved data", edit: func(f *domain.Fixture) { f.Params["data"] = domain.Param{} }, path: "params.data", want: "the name data is reserved"},
+		{rule: "F6", name: "reserved secret", edit: func(f *domain.Fixture) { f.Params["secret"] = domain.Param{} }, path: "params.secret", want: "the name secret is reserved"},
 		{rule: "F6", name: "name pattern", edit: func(f *domain.Fixture) { f.Params["Customer"] = domain.Param{} }, path: "params.Customer", want: "name must match ^[a-z][a-z0-9_]*$"},
 		{rule: "F6", name: "too many", edit: func(f *domain.Fixture) {
 			for i := range 16 {
