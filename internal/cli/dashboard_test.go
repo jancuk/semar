@@ -168,12 +168,16 @@ func TestDashboardServesUntilCancelled(t *testing.T) {
 	if code != 200 || json.Unmarshal([]byte(body), &st) != nil || st.Default != "claude" || st.Exists || st.Providers[0].Health.Version != "test" {
 		t.Fatalf("state %d %s", code, body)
 	}
+	wrong := "0" + token[1:]
+	if token[0] == '0' {
+		wrong = "1" + token[1:]
+	}
 	for name, c := range map[string]struct {
 		token string
 		edit  func(*http.Request)
 	}{
 		"no token":       {"", nil},
-		"wrong token":    {"0" + token[1:], nil},
+		"wrong token":    {wrong, nil},
 		"foreign host":   {token, func(r *http.Request) { r.Host = "orders.example.com" }},
 		"foreign origin": {token, func(r *http.Request) { r.Header.Set("Origin", "https://orders.example.com") }},
 	} {
