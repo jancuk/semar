@@ -484,3 +484,15 @@ func TestLedgerCountsAStaleJourney(t *testing.T) {
 	res := r.must(t, cli.ExitUndecided, "ledger", "--env", "local")
 	contains(t, "the ledger", res.stdout, "journey checkout ran on orders 0ld0ld0, and the environment runs 9f3c2ab: rerun on the current build")
 }
+
+func TestJourneyRunOfAnInvalidFileShowsItSafely(t *testing.T) {
+	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
+	r.writeRel(t, ".semar/journeys/evil.yaml", "apiVersion: semar/v1\nkind: Journey\nid: evil\n\"x\\e[31mred\\u202eblue\": 1\n")
+	for _, args := range [][]string{{"journey", "run", "evil"}, {"journey", "run", "--all"}, {"confirm", "--journey", "evil", "--yes"}} {
+		res := r.semar(t, t.Context(), args...)
+		if strings.ContainsAny(res.stdout+res.stderr, "\x1b‮") {
+			t.Errorf("semar %s printed a control character:\n%q", strings.Join(args, " "), res.stderr)
+		}
+		contains(t, "stderr", res.stderr, ".semar/journeys/evil.yaml:", `x\x1b[31mred`)
+	}
+}
