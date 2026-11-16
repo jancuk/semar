@@ -240,7 +240,7 @@ type replayRig struct {
 // is created or sent, so a missing secret leaves no trace. The redactor follows
 // the store, which holds its key. cat is nil when no scenario names a fixture.
 func newReplay(ctx context.Context, o options, repo string, cfg config.Config, envName string, env config.Environment, declared map[string]string, scenarios []domain.Scenario, cat *fixture.Catalogue) (*replayRig, error) {
-	rg, err := newEnvRig(ctx, o, repo, cfg, env, declared, sessionNeeds(env, scenarios, cat))
+	rg, err := newEnvRig(ctx, o, repo, cfg, env, declared, sessionNeeds(cfg, env, scenarios, cat))
 	if err != nil {
 		return nil, err
 	}
@@ -253,6 +253,7 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 		Trust:    cfg.Policy.Trust.Confirm,
 		Workers:  cfg.Replay.Workers,
 		Run:      rg.id,
+		Accounts: slices.Sorted(maps.Keys(cfg.AuthProfiles)),
 	}
 	if cat != nil {
 		fx, err := rg.resolver(o, envName, env, *cat)
@@ -368,11 +369,22 @@ func (rg *envRig) resolver(o options, envName string, env config.Environment, ca
 
 // sessionNeeds maps each auth profile that a run uses to the first reason it needs it: a scenario,
 // or the service of a fixture that a scenario names.
-func sessionNeeds(env config.Environment, scenarios []domain.Scenario, cat *fixture.Catalogue) map[string]string {
+func sessionNeeds(cfg config.Config, env config.Environment, scenarios []domain.Scenario, cat *fixture.Catalogue) map[string]string {
 	needs := map[string]string{}
 	for _, sc := range scenarios {
 		if sc.AuthProfile != "" {
 			needs[sc.AuthProfile] = "scenario " + string(sc.ID)
+		}
+	}
+	// A step that acts as an account the configuration lacks is not a reason to stop the run: the
+	// runner blocks that scenario, with the account's name.
+	for _, sc := range scenarios {
+		for _, st := range sc.Steps {
+			if _, known := cfg.AuthProfiles[st.As]; known && st.As != "" {
+				if _, ok := needs[st.As]; !ok {
+					needs[st.As] = "step " + string(st.ID) + " of scenario " + string(sc.ID)
+				}
+			}
 		}
 	}
 	if cat == nil {
