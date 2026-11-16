@@ -1,0 +1,104 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Semar",
+          "version": "0.9.0",
+          "rules": [
+            {
+              "id": "semar/expected-result-not-met",
+              "shortDescription": {
+                "text": "A confirmed expected result was not met"
+              }
+            },
+            {
+              "id": "semar/invariant-broken",
+              "shortDescription": {
+                "text": "A built-in invariant was broken"
+              }
+            }
+          ]
+        }
+      },
+      "automationDetails": {
+        "id": "semar/r-20261117T090000Z-1a2b"
+      },
+      "results": [
+        {
+          "ruleId": "semar/expected-result-not-met",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {
+            "text": "SHOP-482-01 step refund-too-much: expected status 422, observed status 200 (source ticket)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".semar/scenarios/SHOP-482/SHOP-482-01.yaml"
+                },
+                "region": {
+                  "startLine": 14
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "semar/v1": "2532763b96845c51e6cf92da414d62d67bf3f01bcaab4c07b2f41999e2067976"
+          },
+          "properties": {
+            "semarRun": "r-20261117T090000Z-1a2b",
+            "semarScenario": "SHOP-482-01",
+            "semarStep": "refund-too-much"
+          }
+        },
+        {
+          "ruleId": "semar/invariant-broken",
+          "ruleIndex": 1,
+          "level": "error",
+          "message": {
+            "text": "SHOP-482-01 step refund-too-much broke an invariant: expected no server error, observed status 500"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".semar/scenarios/SHOP-482/SHOP-482-01.yaml"
+                },
+                "region": {
+                  "startLine": 14
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "semar/v1": "e3dbd4707fbe8d67c9407a6e754eb6806cefec02c648ad6854f7b121c7ec2413"
+          },
+          "properties": {
+            "semarRun": "r-20261117T090000Z-1a2b",
+            "semarScenario": "SHOP-482-01",
+            "semarStep": "refund-too-much"
+          }
+        },
+        {
+          "ruleId": "semar/expected-result-not-met",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {
+            "text": "LEGACY-1 step x: expected status 200, observed status 404 (source person)"
+          },
+          "partialFingerprints": {
+            "semar/v1": "69ab905da5c130c7f75239f0bf4fedb40066ec4f93c1f99895b56d191e81f5ab"
+          },
+          "properties": {
+            "semarRun": "r-20261117T090000Z-1a2b",
+            "semarScenario": "LEGACY-1",
+            "semarStep": "x"
+          }
+        }
+      ]
+    }
+  ]
+}
