@@ -269,18 +269,22 @@ type Runner struct{ /* deps */ }
 type Deps struct {
 	Replay    Single            // *replay.Runner
 	Fixtures  Fixtures          // *fixture.Resolver; nil blocks a journey with given
+	Catalogue Catalogue         // fixture.Catalogue, for the services that fixture steps call
 	Builds    build.Prober
-	Policy    *effects.Policy
 	Services  map[string]string // service name to auth profile, "" when none
-	Confirm   confirm.Store
-	Trust     []domain.Source
-	Run       domain.RunID
 	Clock     func() time.Time
 	Sleep     func(ctx context.Context, d time.Duration) error
 }
 
+// Single is *replay.Runner. Its engine applies the effects policy, and it reads the
+// confirmations with its own store and trust list, so the runner needs neither.
 type Single interface {
 	RunOne(ctx context.Context, in replay.Single) (replay.Replayed, error)
+	Resend(ctx context.Context, c api.Call, attempt int, step domain.Step) (verdict.StepEvidence, map[string]string, error)
+}
+
+type Catalogue interface {
+	Get(id domain.FixtureID) (domain.Fixture, bool)
 }
 
 type Fixtures interface {
@@ -301,8 +305,8 @@ type Outcome struct {
 	FixtureProblem  []string
 	Legs            []domain.LegResult // in run order; legs that did not start are not_run
 	Invariants      []domain.InvariantResult
-	StartHash       domain.Hash
-	EndHash         domain.Hash // "" when the end could not be read
+	Start           domain.Manifest
+	End             *domain.Manifest // nil when the end could not be read
 	Filtered        bool
 }
 ```
@@ -324,13 +328,15 @@ type Outcome struct {
 | --- | --- | --- | --- |
 | 1 | `not_run` | `Filtered` | `the journey was not selected` |
 | 2 | `blocked` | `ManifestProblem`, a `FixtureProblem`, the first leg that did not pass ended `blocked` or `inconclusive`, or an invariant is `not_evaluated` | the problem text; `leg pay ended blocked: <its first reason>`; `invariant 1 could not be evaluated: <detail>` |
-| 3 | `stale` | A leg ended `stale`, `EndHash` is empty, or `EndHash` differs from `StartHash` | `a build changed during the journey: orders 9f3c2ab then c0ffee1`; `the manifest could not be read at the end` |
+| 3 | `stale` | A leg ended `stale`, `End` is nil after the journey started, or the hash of `End` differs from that of `Start` | `a build changed during the journey: orders 9f3c2ab then c0ffee1`; `the manifest could not be read at the end` |
 | 4 | `failed` | The first leg that did not pass ended `failed`, or an invariant is false | `leg settled failed: <its first reason>`; `invariant 1 is false: 1000, 1000, 999` |
 | 5 | `passed` | Every leg passed, every invariant is true, and the manifest held | none |
 
 * `FirstFailing` is the first leg in run order whose outcome is not `passed`. It is set for every outcome other than `passed`.
 * A leg outcome `not_run` from step 5 is never the first failing leg.
 * A journey ends in exactly one of the five. `inconclusive` never appears in a `JourneyResult.Outcome`.
+* When no row matches and a leg did not run, the journey is `not_run` with `leg pay was not run: <its reason>`, so a leg that did not run never reads as a pass.
+* A leg's own reasons do not repeat its ID: `waited 30s and $.data.status was never paid (6 attempts)` and `output id has no value`. The journey reason adds it: `leg settled failed: waited 30s ...`.
 
 ### `internal/replay`
 
