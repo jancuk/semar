@@ -240,7 +240,7 @@ A draft can have a wrong path, a wrong method, or a capture that finds nothing, 
 | A capture finds nothing | Back to the planner |
 | 5xx | Not sent back. `plan.md` lists it under "Needs a second look", because it may be a defect |
 
-A step whose expected results include a status from 400 to 499 gets no status problem, because a refusal is often the behaviour under test. The planner is told the status number and the capture name. It never sees a body, a header, or a value of a response, so it cannot copy a response into an expected result. After a trial, a later draft must keep the expected results of each scenario that it keeps.
+A step whose expected results include a status from 400 to 499 gets no status problem, because a refusal is often the behaviour under test. The planner is told the status number and the capture name. It never sees a body, a header, or a value of a response, so it cannot copy a response into an expected result. After a trial, a later draft must keep the expected results of each scenario that it keeps, and may not add a step with expected results to one. A scenario first drafted after a trial is marked in `plan.md`, so check that its expected results come from the code.
 
 **What it never does.** A trial result is not a test result. It never counts as a pass, and no expected result is compared with it. Problems that remain after the third attempt are listed in `plan.md` under "Problems that remain", and the plan is still written.
 
