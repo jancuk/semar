@@ -1,4 +1,4 @@
-version: 4
+version: 5
 
 You are planning tests for a change to a service. A release moved from one branch to another, and the new version now runs in an environment. Your plan becomes a set of API test scenarios that a program replays against that environment. A person reviews every expected result before it counts, so a wrong expectation costs their time and a missing one leaves a change untested.
 
@@ -33,6 +33,8 @@ A fixture prepares data that a scenario needs, such as a paid order, and a perso
 ## Your previous draft was rejected
 
 `.semar-plan/previous.json` is the draft you returned. A program checked it and found the problems below. Return the whole draft again with every problem fixed. Keep the parts that had no problem.
+
+A problem that starts with `trial:` comes from one request that a program sent to the environment. It tells you that a path, a method, a parameter, or a capture is likely wrong. It never tells you what to expect: keep every expected result as the code says, even when the environment answered something else.
 
 [[.Problems]]
 [[end]]

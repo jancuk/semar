@@ -11,8 +11,8 @@ import (
 var update = flag.Bool("update", false, "rewrite the golden files")
 
 func TestPlanVersion(t *testing.T) {
-	if got := PlanVersion(); got != "4" {
-		t.Errorf("PlanVersion() = %q, want 4", got)
+	if got := PlanVersion(); got != "5" {
+		t.Errorf("PlanVersion() = %q, want 5", got)
 	}
 }
 
@@ -251,5 +251,35 @@ func TestSplit(t *testing.T) {
 	v, body, err := split("version: 3\n\nbody\n")
 	if err != nil || v != "3" || body != "body\n" {
 		t.Errorf("split = %q, %q, %v", v, body, err)
+	}
+}
+
+const trialSentence = "A problem that starts with `trial:` comes from one request that a program sent to the environment. " +
+	"It tells you that a path, a method, a parameter, or a capture is likely wrong. " +
+	"It never tells you what to expect: keep every expected result as the code says, even when the environment answered something else."
+
+// The rule about trial problems is pinned word for word. It sits in the section of the previous
+// draft, after the first paragraph and before the list of problems, and a first prompt has none of it.
+func TestPromptExplainsTrialProblems(t *testing.T) {
+	d := PlanData{ChangeTable: "T", Services: "`orders`", Methods: "GET", MaxScenarios: 3}
+	first, err := Plan(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(first, "trial:") || strings.Contains(first, "program sent to the environment") {
+		t.Error("the first prompt explains trial problems")
+	}
+	d.Attempt, d.Problems = true, "- `scenarios[0].steps[1]`: trial: the environment answered 405 for GET /v1/orders/{id}: the method is likely wrong for this route"
+	again, err := Plan(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Return the whole draft again with every problem fixed. Keep the parts that had no problem.\n\n" +
+		trialSentence + "\n\n" + d.Problems + "\n"
+	if !strings.Contains(again, want) {
+		t.Errorf("the second prompt lacks the pinned rule before the problems:\n%s", again)
+	}
+	if strings.Count(again, "\n\n\n") != 0 {
+		t.Error("the prompt holds two blank lines in a row")
 	}
 }

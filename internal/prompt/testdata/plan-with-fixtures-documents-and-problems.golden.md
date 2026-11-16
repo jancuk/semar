@@ -33,6 +33,8 @@ A fixture prepares data that a scenario needs, such as a paid order, and a perso
 
 `.semar-plan/previous.json` is the draft you returned. A program checked it and found the problems below. Return the whole draft again with every problem fixed. Keep the parts that had no problem.
 
+A problem that starts with `trial:` comes from one request that a program sent to the environment. It tells you that a path, a method, a parameter, or a capture is likely wrong. It never tells you what to expect: keep every expected result as the code says, even when the environment answered something else.
+
 - `scenarios[0].given[0].fixture`: a problem
 
 ## The change table
