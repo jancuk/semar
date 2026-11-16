@@ -1,23 +1,23 @@
 # Semar technical requirements
 
-* **Status:** Draft 1. The model-free core (Plan 01) is implemented.
+* **Status:** Draft 1. The model-free core (Plan 01), the plan from a diff and its providers, documents, and progress (Plans 12 to 15), the trial run (Plan 16), fixtures (Plan 17), API journeys (Plan 18), the coverage ledger (Plan 19), and the exports (Plan 20) are implemented.
 * **Author:** azhar
 * **Date:** 2026-11-14
 * **Related:** [product requirements](PRD.md), [user scenarios](USER_SCENARIOS.md), [test workflow](WORKFLOW.md), [workflow diagram](workflow.html), [the main scenario as a page](scenario.html)
 
 **Test data on UAT (2026-11-14):** Semar does change test data on UAT, through the application and as a test account. [What a test may change](#what-a-test-may-change) sets the limits.
 
-**Updated 2026-11-17:** This update adds designs that are planned and not built. Each part says what is not verified.
+**Updated 2026-11-17:** This update adds designs. Parts of them are now built, and each section says which. Each part says what is not verified.
 
 * The promise and four layers in the [summary](#summary-of-the-design), and decisions T61 to T76.
-* [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger): every use case that needs testing ends in a state, or on a short list for a person, with the reason.
-* [Fixtures](#fixtures): reviewed preparation flows across services. They replace the fragments of [Plan 11](implementation/11-configuration.md) for preparation steps.
-* [Trial run](#trial-run): the read-only steps of a plan are sent once before the plan is final.
-* [Journeys](#journeys): product flows across services and surfaces, on one target manifest. They replace the narrow journey of [Plan 10](implementation/10-android.md).
-* [Screens and UI legs](#screens-and-ui-legs): how an agent authors a UI leg and how Semar replays it.
-* [Engines and the gateway](#engines-and-the-gateway): existing MCP servers as engines, behind one gateway that records every call.
-* [Packs and the registry](#packs-and-the-registry), [Standards and interchange](#standards-and-interchange), and [Dashboard views](#dashboard-views).
-* New types in the [domain model](#planned-types-for-obligations-fixtures-journeys-and-engines), new pipeline steps, configuration files, commands, threats, packages, tests, milestone items, spikes S15 to S19, and items under [Not verified](#not-verified).
+* [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger): every use case that needs testing ends in a state, or on a short list for a person, with the reason. Built in Plan 19, from the sources that exist today. Obligations from acceptance criteria, the feature map, and past defects, and obligations proposed by the planner, are not built.
+* [Fixtures](#fixtures): reviewed preparation flows across services. They replace the fragments of [Plan 11](implementation/11-configuration.md) for preparation steps. Built in Plan 17 for one repository and one machine. The Arazzo format, the Postman and HAR imports, and packs are not built.
+* [Trial run](#trial-run): the read-only steps of a plan are sent once before the plan is final. Built in Plan 16.
+* [Journeys](#journeys): product flows across services and surfaces, on one target manifest. They replace the narrow journey of [Plan 10](implementation/10-android.md). Built in Plan 18 for API legs only. Web and Android legs are not built.
+* [Screens and UI legs](#screens-and-ui-legs): how an agent authors a UI leg and how Semar replays it. Not built.
+* [Engines and the gateway](#engines-and-the-gateway): existing MCP servers as engines, behind one gateway that records every call. Not built.
+* [Packs and the registry](#packs-and-the-registry) and [Dashboard views](#dashboard-views). Not built. [Standards and interchange](#standards-and-interchange): the CTRF, JUnit XML, and SARIF exports are built in Plan 20. The schemas, the imports, the Arazzo format, and signed bundles are not built.
+* New types in the [domain model](#planned-types-for-obligations-fixtures-journeys-and-engines), new pipeline steps, configuration files, commands, threats, packages, tests, milestone items, spikes S15 to S19, and items under [Not verified](#not-verified). The types, files, commands, and tests of the built parts are built. The rest are planned.
 
 ## Current scope and role contract
 
@@ -106,7 +106,7 @@ Dashed lines in the diagram are planned and not built.
 2. Every pass has evidence that a person can open and check.
 3. The false-pass rate is measured. `semar sample` checks a random sample of passes, and the detection check runs on the seeded-defect sample app before each release. See [Marking a wrong result and sampling passes](#marking-a-wrong-result-and-sampling-passes).
 
-**Four layers of content (planned).** Semar merges what it tests from four layers:
+**Four layers of content (the repository and the journeys are built, the registry is planned).** Semar merges what it tests from four layers. Today it reads the repository layer and the journeys of the repository, and no organisation registry or pack:
 
 | Layer | Holds | Owner |
 | --- | --- | --- |
@@ -159,8 +159,9 @@ A developer or a QA engineer changes what Semar tests by editing files under `.s
 | `.semar/checks.yaml` | Named checks |
 | `.semar/probes/` | Security probes. Semar's own probes ship in the same format |
 | `.semar/agents/<name>.md` | Extra guidance for one agent |
-| `.semar/fixtures/<id>.yaml` | Planned. Reviewed preparation flows. See [Fixtures](#fixtures) |
-| `.semar/journeys/<id>.yaml` | Planned. Product flows across services and surfaces. See [Journeys](#journeys) |
+| `.semar/fixtures/<id>.yaml` | Built in Plan 17. Reviewed preparation flows. See [Fixtures](#fixtures) |
+| `.semar/journeys/<id>.yaml` | Built in Plan 18 for API legs. Product flows across services. See [Journeys](#journeys) |
+| `.semar/obligations/*.yaml` | Built in Plan 19. The use cases of a change. See [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger) |
 | `.semar/screens/<app>.yaml` | Planned. Screen objects for UI legs. See [Screens and UI legs](#screens-and-ui-legs) |
 | `.semar/packs.lock` | Planned. The exact versions and digests of the packs the repository names. See [Packs and the registry](#packs-and-the-registry) |
 
@@ -366,14 +367,14 @@ Who confirmed the scenario is not written in the file. Semar reads the confirmat
 
 ### Planned types for obligations, fixtures, journeys, and engines
 
-None of these types exists in `internal/domain` today. They reuse the built types where they can: `domain.Outcome`, `domain.Step`, `domain.APIRequest`, `domain.Capture`, `domain.Check`, `domain.BuildRef`, `domain.Reason`, `domain.Hash`, and the `Action` and `Locator` of [Recording and replay](#recording-and-replay).
+The types for fixtures and journeys are built. They are in `internal/domain` (`fixture.go` and `journey.go`), with small differences from the sketches below that [Plan 17](implementation/17-fixtures.md) and [Plan 18](implementation/18-journeys.md) give exactly. `Param.Default` is a pointer, a journey leg has no `Given` of its own, the manifest holds services only, and a journey result also keeps the manifest at the end and the fixture records. The obligation types are built in a package of their own, `internal/obligation`, with other fields than the sketch below (no `Feature`, no `Identity` type, and a `Gap` text): see [Plan 19](implementation/19-coverage-ledger.md). The sketches for screens, engines, and packs are planned and not built. All of these reuse the built types where they can: `domain.Outcome`, `domain.Step`, `domain.APIRequest`, `domain.Capture`, `domain.Check`, `domain.BuildRef`, `domain.Reason`, `domain.Hash`, and the `Action` and `Locator` of [Recording and replay](#recording-and-replay).
 
 A Scenario gains one field. Everything else in it stays.
 
 ```go
 type Scenario struct {
 	// ... the fields above
-	Given []Given // planned. The states the scenario needs, each from a fixture
+	Given []Given // built in Plan 17. The states the scenario needs, each from a fixture
 }
 
 // A Given names a fixture and the name its outputs take in the scenario.
@@ -639,7 +640,7 @@ No stage waits for a person. A scenario with an unconfirmed expected result is t
 | # | Stage | Command | Uses a model | Output |
 | --- | --- | --- | --- | --- |
 | 1 | Plan | `semar plan` | Yes | Test plan with targets, scenario files, and recommendations |
-| 1a | Trial run, planned | part of `semar plan`. `--no-trial` turns it off | No. Its problems go back to the planner | A trial result beside each read-only step in `plan.md`. See [Trial run](#trial-run) |
+| 1a | Trial run, built (Plan 16) | part of `semar plan`. `--no-trial` or `plan.trial: false` turns it off | No. Its problems go back to the planner | A trial result beside each read-only step in `plan.md`. See [Trial run](#trial-run) |
 | 2 | Confirm | Merge request approval, or `semar confirm` | No | Confirmation record |
 | 3 | Gate | `semar gate` | No | Build per service, or `blocked` |
 | 4 | Sign in | part of `semar run`, and `semar login` for a first sign-in by a person | No | Session per auth profile. See [Signing in](#signing-in) |
@@ -653,20 +654,20 @@ No stage waits for a person. A scenario with an unconfirmed expected result is t
 | - | Explore | `semar explore` | Yes | Findings for a person to triage |
 | - | Security | part of `semar verify`, or `semar explore --security` | Yes | Security findings, confirmed by code where code can check |
 | - | Regression | `semar regression run` | No | Evidence and an outcome for every scenario in the suite |
-| - | Journey, planned | `semar journey run` | No, except to author or repair a UI leg | An outcome per journey on one target manifest. See [Journeys](#journeys) |
-| - | Ledger, planned | `semar ledger`, and part of `semar publish` | No | A state per obligation, and the manual checklist. See [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger) |
+| - | Journey, built for API legs (Plan 18) | `semar journey run` | No. A UI leg that needs an agent to author or repair it is planned | An outcome per journey on one target manifest. See [Journeys](#journeys) |
+| - | Ledger, built (Plan 19) | `semar ledger`, and the use case line in the report of `semar run`. `semar publish` is not built | No | A state per obligation, and the manual checklist. See [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger) |
 
 ### Where the planned parts run
 
-The planned parts slot into the stages above without renumbering them:
+The parts added on 2026-11-17 slot into the stages above without renumbering them. Items 1, 2, 4, 5, and 7 are built, and item 6 is built for API legs. The differences from the design are named in each item:
 
-1. **Plan.** The planner drafts obligations and scenarios. Each scenario names its fixtures under `given`. Plan validation checks the draft as today, and also checks that every obligation has a covering scenario or a stated reason, and that every named fixture exists in the merged catalogue.
-2. **Trial run.** After validation passes, code resolves each fixture's `find` steps and sends the read-only steps once. Problems go back to the planner inside the same three attempts. The plan lists journeys whose legs call a touched route.
+1. **Plan.** Built (Plans 17 and 19). Each scenario names its fixtures under `given`. Plan validation checks the draft as today, and also checks that every named fixture exists in the catalogue of the repository and that every output a step uses is an output of that fixture. The planner does not draft obligations. Code writes them after validation from the scenarios, the cases not drafted, the files that no scenario covers, and the document differences of the draft. A check that every obligation has a cover or a stated reason is not part of plan validation. The ledger reports it.
+2. **Trial run.** Built (Plan 16). After validation passes, code resolves each fixture's `find` steps and sends the read-only steps once. Problems go back to the planner inside the same three attempts. The plan lists journeys whose legs call a route that a drafted scenario tests.
 3. **Gate and sign in.** As today.
-4. **Author and Run.** Before the first step of a scenario, code resolves each `given` entry: lease, then `find`, then `create` when `find` gives nothing, then `until`. These actions are recorded in the `setup` pass. After the last step, also after a failure, code runs `cleanup` in the `cleanup` pass and releases the leases.
+4. **Author and Run.** Built (Plan 17), in Run. Before the first step of a scenario, code resolves each `given` entry: lease, then `find`, then `create` when `find` gives nothing, then `until`. These actions are recorded in the `setup` pass. After the last step, also after a failure, code runs `cleanup` in the `cleanup` pass and releases the leases. Author is not built.
 5. **Observe and Verdict.** As today. A fixture that could not give its state ends the scenario `blocked`.
-6. **Journey.** A journey runs after the scenarios of the same run, or alone with `semar journey run`. Code forms the target manifest, runs the legs in `needs` order, checks the invariants, and reads the manifest again at the end.
-7. **Ledger.** After the verdicts, code derives each obligation's state from the outcomes of the scenarios and journeys that cover it. `semar publish` writes the ledger and the manual checklist with the report.
+6. **Journey.** Built for API legs (Plan 18). A journey runs alone with `semar journey run`. It does not run after the scenarios of the same `semar run`. Code forms the target manifest, runs the legs in `needs` order, checks the invariants, and reads the manifest again at the end.
+7. **Ledger.** Built (Plan 19). After the verdicts, code derives each obligation's state from the outcomes of the scenarios and journeys that cover it. `semar ledger` prints the states and the manual checklist, and the report of `semar run` opens with one line. `semar publish` is not built.
 
 ### Plan
 
@@ -676,7 +677,7 @@ Output: a test plan that names every target, the scenario files, and recommendat
 
 The agent job gets the harness's own read-only file tools, the `kb_*` tools, and two more Semar tools: `qa_context` and `qa_submit_plan`. In an unattended job it has no shell, no network, and no write tool. Semar validates the submitted plan. A validation error goes back to the agent as the tool result, for at most three attempts.
 
-The change is not deployed at merge request time, so nothing is executed in this stage. The planned [trial run](#trial-run) is the one exception: code, not the agent, sends the read-only steps once to the build that the environment runs, and never a write.
+The change is not deployed at merge request time, so the agent executes nothing in this stage. The [trial run](#trial-run), built in Plan 16, is the one exception: code, not the agent, sends the read-only steps once to the build that the environment runs, and never a write. With `--no-trial`, with `plan.trial: false`, or when the trial is skipped, `semar plan` sends no request.
 
 ### Gate
 
@@ -1044,7 +1045,7 @@ The reader answers the yes or no items and reads nothing else unless they want t
 
 ## Test obligations and the coverage ledger
 
-Planned, not built. An obligation is one use case that a QA engineer would test by hand. The ledger gives each obligation exactly one state, computed by code, so that nothing that needs testing is silently skipped. The ledger sits above the six scenario outcomes and does not replace them. It extends the change coverage of [Change coverage](#change-coverage) and the criteria table of [Coverage of the ticket's criteria](#coverage-of-the-tickets-criteria) (PRD decisions D25 and D54).
+Built in [Plan 19](implementation/19-coverage-ledger.md), from the sources that exist today. Parts that this section describes are not built, and each is marked below. An obligation is one use case that a QA engineer would test by hand. The ledger gives each obligation exactly one state, computed by code, so that nothing that needs testing is silently skipped. The ledger sits above the six scenario outcomes and does not replace them. It extends the change coverage of [Change coverage](#change-coverage) and the criteria table of [Coverage of the ticket's criteria](#coverage-of-the-tickets-criteria) (PRD decisions D25 and D54).
 
 ### Where obligations come from
 
@@ -1059,34 +1060,66 @@ Planned, not built. An obligation is one use case that a QA engineer would test 
 
 How obligations are imported from existing manual test cases, and how good the imported ones are, is an open question.
 
+**What is built.** Code makes an obligation from what a plan already holds, with no model and no change to the planner: one for each drafted scenario (source `diff`), one for each case the planner listed as not drafted, one for each file that no scenario covers, and one for each difference that the planner reported between a document and the code (source `knowledge`). A person adds the rest by hand in `.semar/obligations/`, for example manual test cases copied from a spreadsheet, or a use case from an acceptance criterion. The planner proposes no obligation. Obligations from the acceptance criteria of a ticket, from the feature map, and from past defects are not built, and neither is the import of manual test cases. A cite for the sources `testcase`, `criterion`, and `defect` is shown and not checked by code.
+
 ### The file
 
-The plan writes the obligations of a ticket beside its scenario files, so the same merge request reviews both:
+The plan writes the obligations of a ticket to `.semar/obligations/<ticket>.plan.yaml`, beside the scenario files, so the same merge request reviews both. The folder is not under `.semar/scenarios/`, because every YAML file there is read as a scenario. A later plan of the same ticket adds entries and never removes or changes one. A person adds obligations in any other file of the folder:
 
 ```yaml
-# .semar/scenarios/SHOP-482/obligations.yaml
+# .semar/obligations/SHOP-482.plan.yaml, written by semar plan
 apiVersion: semar/v1
 kind: Obligations
 ticket: SHOP-482
 obligations:
-  - id: SHOP-482/AC-1
-    title: A refund above the order total is rejected
-    source: criterion
-    cite: "SHOP-482: a refund above the order total must be rejected"
-    covers: [SHOP-482-01, SHOP-482-02]
-  - id: SHOP-482/AC-3
-    title: The customer gets an email about the rejection
-    source: criterion
-    cite: "SHOP-482: the customer is told about the rejection by email"
-    manual: { kind: other, text: The email leaves the test environment }
-  - id: refunds/refund-owner
-    title: A customer cannot refund another customer's order
-    source: feature_map
-    covers: [SHOP-482-04]
-    journeys: []
+  - id: SHOP-482/scenario-SHOP-482-01
+    title: Refund above the order total is rejected
+    source: diff
+    covers: [SHOP-482-01]
+  - id: SHOP-482/not-drafted-1
+    title: A refund of a paid order by another customer
+    source: diff
+    gap: "not drafted: needs fixture order.paid"
+  - id: SHOP-482/uncovered-1
+    title: Changes in internal/refund/notify.go
+    source: diff
+    gap: "no scenario covers internal/refund/notify.go: it only sends an email"
+  - id: SHOP-482/difference-1
+    title: "The document and the code differ: the status of a refund above the total"
+    source: knowledge
+    cite: "docs/refunds.md:14"
+    manual:
+      kind: judgement
+      text: A person decides whether the document or the code is right
+      steps:
+        - "Read docs/refunds.md:14: the refusal is 409."
+        - "Read internal/refund/handler.go:41: the refusal is 422."
+        - Decide which one is right, and change the other, or the scenario.
+      expected: The document and the code agree
+      writtenBy: code
 ```
 
-A deferral and a manual result are not in this file. A person records them with `semar ledger defer` and `semar ledger record`, and Semar stores each as a file in the evidence store under the person's code-host identity, as it does for a confirmation.
+```yaml
+# .semar/obligations/refunds.yaml, written by hand
+apiVersion: semar/v1
+kind: Obligations
+obligations:
+  - id: refunds/refund-email
+    title: The customer gets an email about the rejection
+    source: testcase
+    cite: "TC-1042: the customer is told about the rejection by email"
+    journeys: []
+    manual:
+      kind: other
+      text: The email leaves the test environment
+      steps: ["Sign in to the test mailbox of semar-qa-1.", "Find the email sent after the run."]
+      expected: The customer is told about the rejection by email
+      writtenBy: person
+```
+
+An entry has `covers` (scenario IDs), `journeys` (journey IDs), a `gap` (a declared reason with no cover), or a `manual` reason. A `gap` for a case not drafted or for an uncovered file gives `blocked` with that reason. The key `state` is refused: a state is computed by code and cannot be written.
+
+A deferral and a manual result are not in these files. A person records them with `semar ledger defer` and `semar ledger record`, and Semar stores each as a file in the evidence store under `.semar/store/obligations/`, with the person's name and a "local, unverified identity", as it does for a confirmation. A code-host identity is not built.
 
 ### Rules
 
@@ -1101,9 +1134,16 @@ A deferral and a manual result are not in this file. A person records them with 
 | 7 | The ledger never changes a scenario outcome or a journey outcome |
 | 8 | Readiness reads the ledger. A `failed` or `blocked` obligation makes a ticket "not ready". A `needs_a_person` obligation with no manual result is an open item. A `deferred` obligation is listed like an accepted gap |
 
+Rules 1, 4, 6, and 7 are built. Rules 2, 3, 5, and 8 are built in part or not built:
+
+* **Rule 2.** The ledger lists an obligation with no cover, no `gap`, and no `manual` reason first, as "use case with no test and no reason", and its state is `blocked`. Plan validation does not return it to the planner, because the planner proposes no obligation. A `gap` is a declared reason with no cover, and it still gives `blocked`.
+* **Rule 3.** Not built. The planner proposes no `manual` reason. Code writes `manual` only for a document difference, and a person writes the others by hand.
+* **Rule 5.** Built in part. Every `needs_a_person` obligation has a checklist with steps and an expected result, written by code or by a person. The steps are labelled `written by code`, `written by a person`, or `written by AI`, from the file. The planner writes none, so the label `written by AI` appears only when a person puts it in a hand-written file.
+* **Rule 8.** Not built, because readiness is not built.
+
 ### How code derives a state
 
-The first matching rule gives the state. Only results on the builds that UAT runs now count, as for readiness.
+The first matching rule gives the state. Only results on the builds that UAT runs now count, as for readiness. `semar ledger --env <name>` reads those builds and counts a result on another build as `stale`. Without `--env` it says that the builds were not read. In the report of `semar run`, the builds of that run are the current builds.
 
 | Order | State | Condition |
 | --- | --- | --- |
@@ -1115,47 +1155,55 @@ The first matching rule gives the state. Only results on the builds that UAT run
 
 The five states have no word for "tested, but not decided". A covering scenario that is `inconclusive`, `stale`, or `not_run` therefore gives `blocked`, and the reason names the missing piece: a confirmation, a run on the current build, or a missing engine. The report shows the scenario outcome beside it.
 
-The report opens with one line, for example `42 use cases: 35 verified, 2 failed, 3 blocked, 2 need a person`.
+The report of `semar run` opens with one line, for example `42 use cases: 35 verified, 2 failed, 3 blocked, 2 need a person`, and a second line that names `semar ledger --ticket <key>`. The run counts every obligation whose ticket or `covers` touch a scenario of the run. A run that did not finish prints no line.
+
+A journey that an obligation names under `journeys` counts like a scenario: its outcome comes from the stored results of `semar journey run`.
 
 ### Manual checklist
 
 ```text
 Manual checks for SHOP-482 (1)
-1. SHOP-482/AC-3  The customer gets an email about the rejection
-   Why a person: the email leaves the test environment
-   Steps (written by AI):
-     1. Sign in to the test mailbox of semar-qa-1.
-     2. Find the email sent after run r-20261114-0042.
-   Expected: the customer is told about the rejection by email (SHOP-482)
-   Record:   semar ledger record SHOP-482/AC-3 passed|failed --notes "<what you saw>"
+1. SHOP-482/difference-1  The document and the code differ: the status of a refund above the total
+   Why a person: A person decides whether the document or the code is right
+   Steps (written by code):
+     1. Read docs/refunds.md:14: the refusal is 409.
+     2. Read internal/refund/handler.go:41: the refusal is 422.
+     3. Decide which one is right, and change the other, or the scenario.
+   Expected: The document and the code agree
+   Cite: docs/refunds.md:14 (checked when the plan was made)
+   Record:   semar ledger record SHOP-482/difference-1 passed|failed --notes "<what you saw>"
 ```
+
+`semar ledger --checklist` prints it. `semar ledger --run <id>` prints it after the table for the results of one run.
 
 ### Failure modes
 
 | Case | Result |
 | --- | --- |
-| A cited text does not exist in its source | Plan validation rejects the obligation, like a ticket quote |
+| A cited text does not exist in its source | Not checked for the sources `testcase`, `criterion`, and `defect`: the checklist says "not checked by code". The cite of a document difference was checked when the plan was made |
 | A covering scenario was deleted | `blocked`, "no scenario or journey covers this" |
 | A covering scenario is `stale` | `blocked`, "rerun on the current build" |
-| A person records `failed` for a manual check | The state stays `needs_a_person`, the line reads "failed, checked by a person", and readiness is "not ready" |
-| A deferral expired | The deferral is ignored and the state is derived again |
+| A person records `failed` for a manual check | The state stays `needs_a_person`, the line reads "failed, checked by a person", and `semar ledger` exits 1. Readiness is not built |
+| A deferral expired | The deferral is ignored, the reason says it expired, and the state is derived again |
+| A file under `.semar/obligations/` has a problem | `semar ledger` stops with exit 3 and lists each problem. No state is derived from a file that cannot be trusted |
 
 ### What is not verified
 
-* That the planner proposes the obligations that a QA engineer would list. The shadow milestone compares them.
-* How obligations are imported from existing manual test cases, and their quality.
+* That the obligations that code derives from a plan are the ones a QA engineer would list. They are as good as the plan's scenarios and gaps. The shadow milestone compares them.
+* That the planner can propose obligations that a QA engineer would list. This is not built.
+* How obligations are imported from existing manual test cases, and their quality. This is not built.
 
 ## Trial run
 
-Planned, not built. Today `semar plan` never sends a request, so a script first meets the environment at `semar run`. The trial run sends the read-only steps of the drafted plan once, after plan validation passes, and returns request problems to the planner for repair inside the existing three attempts.
+Built in [Plan 16](implementation/16-trial-run.md). Before it, `semar plan` sent no request, so a script first met the environment at `semar run`. The trial run sends the read-only steps of the drafted plan once, after plan validation passes, and returns request problems to the planner for repair inside the existing three attempts. It is part of `semar plan`, and a plan with `--no-trial`, with `plan.trial: false`, or with a skipped trial sends no request.
 
 ### What is sent
 
-1. Code signs in with each scenario's auth profile, as the sign-in stage does.
+1. Code signs in with the auth profile of the plan, and with the auth profile of each service that a fixture of the plan calls, as the sign-in stage does. The trial uses one auth profile for the scenarios, so a scenario that needs another account is tried as that profile, and a 403 may be the reason.
 2. For each scenario, code resolves the `find` steps of its fixtures. A fixture's `create` is never sent.
-3. Code sends each step that the environment's effects policy classes as a read: `GET` or `HEAD`, or a request listed under `effects.reads`, and not under `effects.deny`. A step whose variables cannot be resolved, for example an ID that only a write would give, is "not tried".
-4. Each request is recorded as an `Action` in a new `trial` pass, redacted like any other. The existing rule that evidence counts only in its own pass keeps a trial action out of every verdict.
-5. The existing request count limit per job bounds the trial.
+3. Code sends each step that a read-only copy of the environment's effects policy classes as a read: `GET` or `HEAD`, or a request listed under `effects.reads`, and not under `effects.deny`. The trial uses that copy whatever `effects.mode` the environment has. A step that matches `effects.once` is not tried. A step whose variables cannot be resolved, for example an ID that only a write would give, is "not tried".
+4. Each request is recorded as an `Action` in a new `trial` pass, in a run of its own with the purpose `trial` and no scenario result, redacted like any other. `semar activity <run>` lists it. The existing rule that evidence counts only in its own pass keeps a trial action out of every verdict.
+5. A trial sends at most 50 requests, each with a 10 second timeout, and stops after 2 minutes in all.
 
 The change is usually not deployed at merge request time, so the trial meets the build that the environment runs now. The plan records that build beside the trial results.
 
@@ -1163,14 +1211,19 @@ The change is usually not deployed at merge request time, so the trial meets the
 
 | Trial result | Back to the planner | Shown in `plan.md` |
 | --- | --- | --- |
-| 404 or 405 on a path that the environment should already have | Yes: the path or the method is likely wrong | Yes |
-| 404 on a path that the change adds, judged by the OpenAPI document at the merge base and at the head | No | "Route not on the environment yet" |
-| 400 or 422 on a read | Yes: a query parameter is likely wrong | Yes |
+| 405 | Yes: the method is likely wrong | Yes |
+| 404 on a route that an API document had at the merge base | Yes: an ID in the path is likely wrong | Yes |
+| 404 on a route that no API document has, before or after the change | Yes: the route is likely wrong | Yes |
+| 404 on a route that only the API document at the head has, or with no API document | No | Under "Needs a second look": the route is not on the environment yet, or the path is wrong |
+| 400 or 422 on a read | Yes: a query parameter or a header is likely wrong | Yes |
 | 401 or 403 | Yes, with the auth profile name | Yes |
 | A capture finds nothing | Yes | Yes |
-| A 5xx response | No. It may be a defect, so a person sees it | Yes, on the double-check list |
+| A 5xx response | No. It may be a defect, so a person sees it | Under "Needs a second look" |
 | A refused host or a denied operation | No request is sent | "Not tried", with the reason |
+| A step whose expected results include a status from 400 to 499 | No status problem and no capture problem. A refusal is often the behaviour under test | Yes |
 | How a response compares with an expected result | Never. Expectations are not evaluated in a trial | No |
+
+The planner is told the status and the capture name only. No body, header, or value of a response reaches it. After a trial, a later draft must keep the expected results of each scenario that it keeps, matched by ticket and title. A change is a validation problem, and a scenario that was first drafted after a trial is marked in `plan.md`.
 
 ### Rules
 
@@ -1178,37 +1231,40 @@ The change is usually not deployed at merge request time, so the trial meets the
 | --- | --- |
 | 1 | Only reads are sent. Steps that write, and fixture creates, are listed as "not tried: writes" |
 | 2 | A trial result is evidence about the script. It never counts as a pass and never changes an expected result. The planner cannot change an expected result because of a trial response. The expected result still comes from the diff, the ticket, a person, or a document |
-| 3 | The trial is on by default when the environment, its address, and an account are configured. Otherwise Semar prints one line, for example "Trial run skipped: no account for support-agent", and goes on. `semar plan --no-trial` and `plan.trial: false` turn it off |
-| 4 | Trial problems and validation errors share the three attempts. Problems that remain after the third attempt are listed beside the steps and on the double-check list. The plan is still written |
+| 3 | The trial is on by default when the environment, its address, and an account are configured. Otherwise Semar prints one line, for example `semar: trial run skipped: no account for support-agent: <error>`, and goes on. A production environment that `--env` did not name is skipped with one line. `semar plan --no-trial` and `plan.trial: false` turn it off, with no line, and `plan.md` says so |
+| 4 | Trial problems and validation errors share the three attempts. Problems that remain after the third attempt are listed under "Problems that remain" in the "Trial run" section of `plan.md`, and the steps for a second look under "Needs a second look" in the same section. The plan is still written. When a later draft fails validation, the plan keeps the last draft that passed, with its trial results |
 | 5 | Code sends the trial. The planner still has no network |
 
-`plan.md` shows each result beside its step:
+`plan.md` shows each result beside its step, with the route as the draft wrote it and never a rendered path:
 
 ```text
-SHOP-482-01 Refund above the order total is rejected
-  given order.paid     trial: find gave order 81234
-  refund-too-much      not tried: writes
-  order-unchanged      trial: GET /v1/orders/81234 -> 200, capture id found
+### SHOP-482-05 A paid order can be read
+
+- given order (order.paid): find found a record
+- read-order: GET /v1/orders/{id} answered 200, capture status found
+- refund: not tried: writes
 ```
 
 ### Failure modes
 
 | Case | Result |
 | --- | --- |
-| The environment does not answer | The trial is skipped with one line. The plan goes on |
-| Sign-in fails | The trial is skipped for that auth profile with one line |
+| The environment does not answer | The trial is skipped with `the environment did not answer`, and `plan.md` says so. The plan goes on |
+| Sign-in fails | The trial is skipped with one line. The trial uses one auth profile for the plan, so it is skipped for the whole plan |
 | A `GET` changes state on this service | The team lists it under `effects.deny`, as today. Semar cannot detect it |
+
+A trial never makes `semar plan` fail.
 
 ### What is not verified
 
 * That trial problems lead the planner to a correct repair.
-* That telling an added route from a wrong path by the OpenAPI document works when a service has no OpenAPI document.
+* That telling an added route from a wrong path by the OpenAPI document works when a service has no OpenAPI document. With no document, every 404 is a second look and none goes back to the planner.
 
 ## Fixtures
 
-Planned, not built. A scenario often needs data in a given state, for example a customer with a completed purchase, and creating it can involve several services. The planner reads one repository and cannot know the other services' calls. A list request followed by "take the first item" fails when the environment holds no such record.
+Built in [Plan 17](implementation/17-fixtures.md) for the fixtures of one repository, on one machine. Not built: the Arazzo format, the Postman and HAR imports, packs, a fixture that uses another fixture, and the dashboard views. Each is marked below. A scenario often needs data in a given state, for example a customer with a completed purchase, and creating it can involve several services. The planner reads one repository and cannot know the other services' calls. A list request followed by "take the first item" fails when the environment holds no such record.
 
-A fixture is a named, reusable, reviewed preparation flow in `.semar/fixtures/<id>.yaml`, or in a pack. For preparation steps it replaces the fragment of [Plan 11](implementation/11-configuration.md). A fixture is a fragment that has `find`, `create`, `cleanup`, `outputs`, and a lease.
+A fixture is a named, reusable, reviewed preparation flow in `.semar/fixtures/<id>.yaml`. A fixture in a pack is planned and not built. For preparation steps it replaces the fragment of [Plan 11](implementation/11-configuration.md). A fixture is a fragment that has `find`, `create`, `cleanup`, `outputs`, and a lease.
 
 ### The file
 
@@ -1245,7 +1301,7 @@ steps:
     hint: { method: GET, path: "/v1/orders/{id}" }   # the script sends {{order.id}}
 ```
 
-Each service in a fixture step uses its own auth profile, set on the service in configuration (`environments.<env>.services[].authProfile`, planned). A fixture holds no secret.
+Each service in a fixture step uses its own auth profile, set on the service in configuration (`environments.<env>.services[].authProfile`, built in Plan 17). When a service sets none, the step uses the auth profile of the scenario. A fixture holds no secret. The data set that `{{data.customers.default}}` reads is the key `environments.<env>.data`, a flat map from a dotted key to a string, built in Plan 17.
 
 ### Rules
 
@@ -1262,11 +1318,13 @@ Each service in a fixture step uses its own auth profile, set on the service in 
 | 9 | A fixture may use another fixture under its own `given`, to a depth of 3. A cycle is an error that names the files |
 | 10 | Fixtures that several services share are defined once in the registry, not generated in each repository. See [Packs and the registry](#packs-and-the-registry) |
 
+Rules 1 to 8 are built. Rules 9 and 10 are not built. A `given` inside a fixture is refused in Plan 17, because nesting adds cycle checks and a cleanup order across fixtures, and the two-service flow of the example needs none of it. The registry is not built, so a fixture lives in the repository only. A person approves a fixture with `semar confirm --fixture <id>`. The approval names the fixture's version and a hash of every field except `apiVersion` and `kind`, and it is stored under `.semar/store/approvals/fixtures/`.
+
 ### How a fixture resolves
 
 For each `given` entry, in file order, before the scenario's first step:
 
-1. **Load.** Find the fixture in the merged catalogue: repository, then organisation packs, then built-in. Check its approval and its health on this environment.
+1. **Load.** Find the fixture in the catalogue of the repository. The merged catalogue of organisation packs and built-in packs is not built. Check its approval and its health on this environment.
 2. **Fill the parameters.** From `with`, else the default. `{{data.x}}` comes from the environment's data set and `{{run.id}}` from the run.
 3. **Lease.** When the entry or the fixture says `lease: exclusive`, take the lease. See [Leases](#leases).
 4. **Find.** Send the `find` steps in order. `find` gives nothing when a step answers 404, a list is empty, or a capture matches nothing. A transport error or another status is recorded, and resolution goes on to `create`.
@@ -1278,24 +1336,24 @@ After the scenario's last step, also after a failure or an interrupt, cleanup ru
 
 1. Fixtures are cleaned up in reverse order of their `given` entries. Only a fixture that `create` resolved is cleaned up. A record that `find` reused is never cleaned up.
 2. A fixture's `cleanup` steps run as written. Each is a write. It obeys the effects policy and is logged in the `cleanup` pass of the activity log.
-3. A cleanup failure is recorded and never sent again. It does not change the scenario outcome. The data ledger lists the record as "still exists".
+3. A cleanup failure is recorded and never sent again. It does not change the scenario outcome. The report lists the record under "Still exists".
 4. The lease is released.
 
 A state that cannot be undone declares no cleanup. `find` then reuses records to limit growth. Cleanup of data that the application cannot delete is an open question.
 
 ### Leases
 
-`lease: exclusive` on a `given` entry reserves the account or the record for one run at a time. The lease key is the fixture ID, the environment, and the resolved parameters. When `find` returns a record that another run holds, resolution treats `find` as giving nothing and goes to `create`. When the fixture has no `create`, Semar waits up to the lease wait, 2 minutes by default, and then ends the scenario `blocked` with "lease not available". This joins the existing account pool, in which parallel scenarios each take a different account.
+`lease: exclusive` on a `given` entry reserves the account or the record for one run at a time. The lease key is the environment, the fixture ID, and the value of the fixture's first output, so one record is leased and not one set of parameters. The lease is taken after `find` returns a record, and after `create` makes one. When `find` returns a record that another run holds, resolution treats `find` as giving nothing and goes to `create`. When the fixture has no `create`, Semar waits up to the lease wait, 2 minutes by default, and then ends the scenario `blocked` with "lease not available". This joins the existing account pool, in which parallel scenarios each take a different account.
 
-On one machine the lease is a file lock under the person's Semar home, held by the running process, so a crash releases it. With parallel runners on several machines a git repository cannot lock. The options are a lock service in the team edition, or a marker on the environment's own record with a time limit. This is an open question.
+On one machine the lease is a file lock under `leases/` in the person's Semar home, held by the running process, so a crash releases it. This is built (Plan 17). The lock on Windows was not tried on a Windows machine. With parallel runners on several machines a git repository cannot lock. The options are a lock service in the team edition, or a marker on the environment's own record with a time limit. This is an open question.
 
 ### Health
 
-A scheduled job runs each fixture's `find` and `create`, and its `cleanup`, on a test environment, and records the result with the environment and the build (`semar fixture check`). A fixture whose last health run failed makes every scenario that uses it end `blocked` with "fixture unhealthy", not `failed`. The dashboard shows the last time `find` and `create` worked.
+`semar fixture check` runs each fixture's `find`, `create`, and `cleanup` on a test environment, and records the result with the environment and the build in `.semar/store/fixture-health/<env>/<id>.json`. A record counts only for the fixture hash it names. A fixture whose last health run failed makes every scenario that uses it end `blocked` with "fixture unhealthy", not `failed`. This is built (Plan 17). Semar has no scheduler: a team runs the command from its own scheduler or pipeline. The dashboard view of the last time `find` and `create` worked is not built. `semar fixture list` shows the same facts.
 
 ### Format and Arazzo
 
-Fixtures are planned to be written in a format compatible with the OpenAPI Initiative's Arazzo workflows, with Semar's own fields under `x-semar` extension keys. The YAML above is Semar's own form. The intended mapping, not verified:
+Not built. Fixtures are planned to be written in a format compatible with the OpenAPI Initiative's Arazzo workflows, with Semar's own fields under `x-semar` extension keys. The built format is Semar's own YAML, as shown above, and nothing reads or writes Arazzo. The intended mapping, not verified:
 
 | Semar field | Arazzo element, to verify in spike S15 |
 | --- | --- |
@@ -1311,7 +1369,7 @@ If Arazzo does not fit, Semar keeps its own YAML and offers an import from Arazz
 
 ### Import
 
-`semar fixture import postman <file>` and `semar fixture import har <file>` write a draft fixture from a Postman collection or a HAR file. A draft never counts. A person reviews it, adds `find` and `cleanup`, and approves it. How faithful these imports are is not verified.
+Not built. `semar fixture import postman <file>` and `semar fixture import har <file>` would write a draft fixture from a Postman collection or a HAR file. A draft never counts. A person reviews it, adds `find` and `cleanup`, and approves it. How faithful these imports are is not verified.
 
 ### Failure modes
 
@@ -1325,7 +1383,7 @@ If Arazzo does not fit, Semar keeps its own YAML and offers an import from Arazz
 | The environment is `read_only` and `find` gives nothing | `blocked` | "this environment is read-only" |
 | A fixture step is on `effects.deny` | `blocked` | The denied operation |
 | The lease is not available in time | `blocked` | "lease not available" |
-| Cleanup fails | Unchanged | The record under "still exists" in the data ledger |
+| Cleanup fails | Unchanged | The record under "Still exists" in the report |
 
 A fixture never makes a scenario `failed`, because a failed preparation is not evidence about the behaviour under test.
 
@@ -1338,7 +1396,7 @@ A fixture never makes a scenario `failed`, because a failed preparation is not e
 
 ## Journeys
 
-Planned, not built. A journey is a business flow that belongs to the product, not to one service: for example a mobile app places an order, a warehouse service packs it, the web app shows it, and a billing service records it. It is the fourth layer, above scenarios. This replaces the narrow journey of [Plan 10](implementation/10-android.md), an ordered list of scenario IDs and shared names, which is a specification that is not built.
+Built in [Plan 18](implementation/18-journeys.md) for journeys whose legs are all on the API. Web legs and Android legs are not built, and the registry owner lookup is not built. Each is marked below. A journey is a business flow that belongs to the product, not to one service: for example a mobile app places an order, a warehouse service packs it, the web app shows it, and a billing service records it. It is the fourth layer, above scenarios. This replaces the narrow journey of [Plan 10](implementation/10-android.md), an ordered list of scenario IDs and shared names, which is a specification that is not built.
 
 ### The file
 
@@ -1376,6 +1434,15 @@ invariants:
 
 The steps of each leg are scenario steps, with hints, expected results, and source labels. UI steps use screen objects, as in [Screens and UI legs](#screens-and-ui-legs).
 
+The built format (Plan 18) differs from this example in these ways:
+
+* `surface` must be `api`. A file with `web` or `android` is refused when it loads, with a message that names the milestone. Screens, and a leg that needs an agent, are not built.
+* An API leg's steps carry their request and captures inline: a step is a scenario step plus `request` and `captures`, because no author stage exists for API scripts.
+* `given` is on the journey only. A leg's `given` is refused. A leg's session comes from its service's `authProfile`, else the journey's `authProfile`.
+* A leg ID matches `^[a-z][a-z0-9_]*$`, so a hyphen is refused, because `{{<leg>.<output>}}` cannot hold one.
+* A journey has at most 12 legs, 20 steps per leg, and 8 invariants.
+* A leg's expected results are confirmed with the existing confirmation store, under the leg's scenario ID `<journey>.<leg>`: `semar confirm --journey <id>`. A journey whose expected results nobody confirmed is `blocked`, and nothing is sent for it.
+
 ### Rules
 
 | # | Rule |
@@ -1397,7 +1464,7 @@ At the start of a journey, code forms the manifest:
 3. For an `android` leg, read the app's package, version, and commit, as Plan 10 rule R3 records them.
 4. Sort the parts by name and hash the canonical form with SHA-256.
 
-A part that cannot be read ends the journey `blocked`. Code reads the manifest again at the end. A stored result is shown as `stale` as soon as a later read of any part differs, whether or not a newer run exists, the same way a sign-off lapses.
+A part that cannot be read ends the journey `blocked`. Code reads the manifest again at the end. A stored result is shown as `stale` as soon as a later read of any part differs, whether or not a newer run exists, the same way a sign-off lapses. In Plan 18 the manifest holds the services only (item 1), and `semar journey list --env <name>` reads the build probes now and marks a stored result `stale`. Items 2 and 3 are not built, because no web or Android leg exists. A service with no build probe needs `--build <service>=<commit>`.
 
 ### Scheduling and waits
 
@@ -1421,9 +1488,9 @@ A journey has no `inconclusive` outcome. A leg that ends `inconclusive`, for exa
 
 ### Impact and triggers
 
-When `semar plan` reads a change, it matches each leg's step hints against the impact map. The plan lists the journeys whose legs call a touched route, so it says which business flows to rerun. A journey runs on three triggers: a change that touches a leg, a release gate that runs every `critical` journey (`semar journey run --critical`), and a nightly schedule.
+When `semar plan` reads a change, it matches each leg's step hints against the hints of the drafted scenarios, because the impact map is not built. The plan lists the journeys whose legs call a route that a drafted scenario tests, under "Journeys to rerun", with the command to run each one. This is built (Plan 18). A journey runs on three triggers: a change that touches a leg, a release gate that runs every `critical` journey (`semar journey run --critical`), and a nightly schedule. Semar has the commands and no scheduler, so the release gate and the nightly run belong to the team's own pipeline.
 
-A failed journey points to the owner of the failing leg's service, read from the registry.
+A failed journey points to the owner of the failing leg's service, read from the registry. Not built, because the registry is not built.
 
 ### Practice
 
@@ -1434,7 +1501,7 @@ A failed journey points to the owner of the failing leg's service, read from the
 
 ### Sequence
 
-API-only journeys come first, in M1.1, because they use the engine that exists. Web legs follow in M2, and Android legs in M3, with no change to the journey format. Until the UI engines exist, a mobile leg may be tested through the API calls that the app itself makes.
+API-only journeys come first, in M1.1, because they use the engine that exists. They are built (Plan 18). Web legs follow in M2, and Android legs in M3, with no change to the journey format. Both are not built. Until the UI engines exist, a mobile leg may be tested through the API calls that the app itself makes.
 
 ### Failure modes
 
@@ -2586,7 +2653,7 @@ Which sources need confirmation is set by `trust.confirm`. The default is `diff`
 
 A scenario that passes on `baseline` expectations alone is reported as "passed, unchanged since baseline", and the report counts it apart from the other passes.
 
-Planned: a fixture that cannot give its state is a failed setup under rule 2, so the scenario ends `blocked` with the fixture and the step. See [Fixtures](#fixtures). Journey outcomes and obligation states are computed by their own rules in [Journeys](#journeys) and [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger), from scenario outcomes. They never change a scenario outcome.
+A fixture that cannot give its state is a failed setup under rule 2, so the scenario ends `blocked` with the fixture and the step. Built in Plan 17. See [Fixtures](#fixtures). Journey outcomes and obligation states are computed by their own rules in [Journeys](#journeys) and [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger), from scenario outcomes. They never change a scenario outcome.
 
 Invariants need no confirmation. They are a fixed list in Semar's code. The agent cannot add one, and a scenario file cannot carry one:
 
@@ -2769,7 +2836,7 @@ Each scenario creates the data it needs and does not depend on data that another
 
 `effects.mode` has no default. `semar init` asks for it, and Semar refuses to run against an environment that does not set it.
 
-**Fixtures (planned).** A [fixture](#fixtures) step obeys the same limits as a scenario step: `effects.mode`, `effects.deny`, `effects.once`, `effects.reads`, the host list, and the test accounts. A fixture's `find` must read. A fixture's `create` is a write, so on a `read_only` environment a fixture that `find` cannot satisfy ends the scenario `blocked`. Cleanup is a write too. It obeys the same policy and is logged in the `cleanup` pass of the activity log, and the data ledger shows what it removed and what is left.
+**Fixtures (built in Plan 17).** A [fixture](#fixtures) step obeys the same limits as a scenario step: `effects.mode`, `effects.deny`, `effects.once`, `effects.reads`, the host list, and the test accounts. A fixture's `find` must read. A fixture's `create` is a write, so on a `read_only` environment a fixture that `find` cannot satisfy ends the scenario `blocked`. Cleanup is a write too. It obeys the same policy and is logged in the `cleanup` pass of the activity log, and the data ledger shows what it removed and what is left.
 
 The rule that each scenario creates its own data changes for fixtures in one way. A fixture's `find` may reuse an existing record that matches its query, to limit growth. The activity log names a reused record as reused, cleanup never touches it, and a scenario that changes such a record must take it with `lease: exclusive`.
 
@@ -3125,15 +3192,16 @@ The `knowledge` key is a list of at most 16 sources, and the built loader refuse
 
 | Path or key | Holds | Validation |
 | --- | --- | --- |
-| `.semar/fixtures/<id>.yaml` | One fixture | `id` matches the file name. `find` steps read. Every `until` has a timeout. `outputs` are capture names. A cycle under `given` is an error |
-| `.semar/journeys/<id>.yaml` | One journey | `needs` has no cycle. A binding names an output of a needed leg. A `wait` follows a read. `owner` is set |
+| `.semar/fixtures/<id>.yaml` | One fixture. Built in Plan 17 | `id` matches the file name. `find` steps read. Every `until` has a timeout. `outputs` are capture names. A `given` inside a fixture is refused |
+| `.semar/journeys/<id>.yaml` | One journey. Built in Plan 18 | `needs` has no cycle. A binding names an output of a needed leg. A `wait` follows a read. `owner` is set. `surface` is `api` |
 | `.semar/screens/<app>.yaml` | Screen objects and known interruptions of one app | Element IDs are unique within a screen. Each element has at least one locator field |
-| `.semar/scenarios/<ticket>/obligations.yaml` | The obligations of a ticket | Every obligation has a cover or a `manual` reason. Every `cite` exists |
+| `.semar/obligations/*.yaml` | The obligations of a change. Built in Plan 19. `semar plan` writes `<ticket>.plan.yaml`, and a person writes the others. It replaces the planned `.semar/scenarios/<ticket>/obligations.yaml`, because every YAML file under `.semar/scenarios/` is read as a scenario | Every id is `<group>/<name>`. `source` is one of six kinds. A `cite` is required for `criterion`, `testcase`, and `defect`, and is shown and not checked. A `state` key is refused |
 | `.semar/packs.lock` | One `LockEntry` per pack | Written by `semar pack add` and `semar pack update` only. A hand edit fails the digest check |
 | `packs:` in `semar.yaml` | Pack names with a version, such as `acme/orders@1.2` | A name only. A URL, a path, or a registry address is refused |
-| `environments.<env>.services[].authProfile` | The auth profile a fixture step uses for that service | The profile exists |
-| `web.build` | A build probe for the web app, for the journey manifest | The same shape as a service build probe |
-| `plan.trial` | `true` by default. `false` turns the trial run off | A boolean |
+| `environments.<env>.services[].authProfile` | The auth profile a fixture step or a journey leg uses for that service. Built in Plan 17 | The profile exists |
+| `environments.<env>.data` | The data set of an environment: a flat map from a dotted key to a string, read as `{{data.<key>}}` in a fixture parameter default or a `with` value. Built in Plan 17 | At most 100 keys. A key matches `^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$` |
+| `web.build` | A build probe for the web app, for the journey manifest. Not built | The same shape as a service build probe |
+| `plan.trial` | `true` by default. `false` turns the trial run off. Built in Plan 16 | A boolean |
 
 ```yaml
 packs:
@@ -3157,7 +3225,7 @@ These live in the person's Semar home (`$SEMAR_HOME`, else `$XDG_CONFIG_HOME/sem
 | --- | --- | --- |
 | `engines.yaml` | Registered engines, their exact versions, adapter profiles, network, and tool approvals | `version` is exact: `latest`, a range, or a tag that moves is refused. A command is an argument list. A URL is on 127.0.0.1 |
 | `registries.yaml` | The address of each registry, by name | The name matches the first part of a pack name. The address is a git URL |
-| `leases/` | File locks for `lease: exclusive` on this machine | Created by Semar. Never edited |
+| `leases/` | File locks for `lease: exclusive` on this machine. Built in Plan 17 | Created by Semar. Never edited |
 | `packs/` | A cache of fetched pack versions | Each version is checked against its digest before use |
 
 ```yaml
@@ -3240,13 +3308,13 @@ A pack counts only after it was reviewed and approved in the registry, and the r
 
 ## Standards and interchange
 
-Planned, not built. Semar's formats should be readable and writable by other tools, and results should reach the tools a team already runs. Semar does not claim to be a standard. Adoption is earned.
+Semar's formats should be readable and writable by other tools, and results should reach the tools a team already runs. Semar does not claim to be a standard. Adoption is earned. The exports of the rows Reports and Findings are built in [Plan 20](implementation/20-exports.md). The other rows are planned and not built.
 
 | Area | Plan | Not verified |
 | --- | --- | --- |
-| Published schemas | The scenario, fixture, journey, screens, evidence, and verdict formats are versioned JSON Schemas under `semar/v1`, which exists today, with a conformance suite that another tool can run | Nothing beyond the design |
-| Reports | `semar export ctrf <run>` and `semar export junit <run>` | The exact version of CTRF and of the JUnit XML dialect |
-| Findings | `semar export sarif <run>` writes security findings and confirmed defects | The exact SARIF version |
+| Published schemas | Planned, not built. The scenario, fixture, journey, screens, evidence, and verdict formats are versioned JSON Schemas under `semar/v1`, which exists today, with a conformance suite that another tool can run | Nothing beyond the design |
+| Reports | Built (Plan 20). `semar export ctrf <run>` and `semar export junit <run>` write one stored run, with every scenario. Each export carries the Semar outcome beside the mapped status, and a `blocked`, `inconclusive`, or `stale` scenario is never written as a pass. CTRF is written without a `reportFormat` or a `specVersion` key, and JUnit XML is the common dialect with no schema claimed | The exact version of CTRF and of the JUnit XML dialect |
+| Findings | Built in part (Plan 20). `semar export sarif <run>` writes the confirmed defects of the run: a false check on a confirmed expected result, and a broken invariant. It writes SARIF version `2.1.0` with no `$schema` key. Security findings and exploration findings are not built | The exact SARIF version, and the published address of its schema |
 | Trace | The W3C `traceparent` header on every API and web request, as [API engine](#api-engine) and [Web engine](#web-engine) say, so a run's requests can be found in the tracing backend | As in spikes S4 and S8 |
 | Import | Postman collections, OpenAPI documents, HAR files, and existing manual test cases. Every import is a draft that a person reviews | Fidelity. Spike S19 for Postman and HAR |
 | Vocabulary | `given` follows Gherkin's Given. A fixture state follows the idea of provider states in consumer-driven contract testing | Not applicable |
@@ -3323,21 +3391,22 @@ A team edition on a shared server is a later stage. It is where single sign-on, 
 | `semar mark <scenario> false-pass\|false-failure <reason>` | Record that a result was wrong |
 | `semar sample --release <name>` | Pick passed scenarios at random for a person to check |
 | `semar import gherkin <file>` | Turn the scenarios of a feature file into Semar scenarios |
-| `semar plan --no-trial` | Planned. Plan without the [trial run](#trial-run) |
-| `semar fixture list` | Planned. List the merged fixture catalogue with the layer, version, approval, and health of each |
-| `semar fixture check [<id>]` | Planned. Run the health check of one fixture or of all: `find`, `create`, and `cleanup` on a test environment |
+| `semar plan --no-trial` | Built (Plan 16). Plan without the [trial run](#trial-run) |
+| `semar confirm --fixture <id>` | Built (Plan 17). Approve a fixture as it is now. `semar confirm --journey <id>` confirms the expected results of every leg of a journey (Plan 18) |
+| `semar fixture list [--env <name>]` | Built (Plan 17). List the fixtures of the repository with the version, owner, approval, the health on an environment, and the scenarios that use each |
+| `semar fixture check (<id>... \| --all) --env <name>` | Built (Plan 17). Run the health check of fixtures: `find`, `create`, and `cleanup` on a test environment. It sends writes under the effects policy |
 | `semar fixture import postman\|har <file>` | Planned. Write a draft fixture for a person to review |
-| `semar journey list` | Planned. List journeys with owner, criticality, and the last outcome per manifest |
-| `semar journey run [<id>] [--critical]` | Planned. Run one journey, or every critical journey |
-| `semar ledger [--ticket <key>]` | Planned. Print the state of each obligation and the manual checklist |
-| `semar ledger defer <obligation> --reason <text> --until <date>` | Planned. Record a deferral as the signed-in code-host user |
-| `semar ledger record <obligation> passed\|failed --notes <text>` | Planned. Record the result of a manual check |
+| `semar journey list [--env <name>]` | Built (Plan 18). List journeys with criticality, owner, legs, and the last stored result. With `--env`, mark a result `stale` when a build differs |
+| `semar journey run (<id>... \| --critical \| --all)` | Built (Plan 18). Run journeys one leg at a time, and write a report. `--env` and `--build` as for `semar run` |
+| `semar ledger [--ticket <key>] [--env <name>] [--run <id>] [--checklist]` | Built (Plan 19). Print the state of each obligation, or the manual checklist |
+| `semar ledger defer <obligation> --reason <text> --until <date>` | Built (Plan 19). Record a deferral under the user's name. The identity is local and not verified. A code-host identity is not built |
+| `semar ledger record <obligation> passed\|failed --notes <text>` | Built (Plan 19). Record the result of a manual check |
 | `semar pack add <name>@<version>` | Planned. Pin a pack and write its lock entry |
 | `semar pack update [<name>]` | Planned. Move a pin and write a new lock entry |
 | `semar engine add`, `semar engine list` | Planned. Register an engine in the person's home, and list engines with their tools and approval state |
 | `semar engine approve <id>` | Planned. Approve each tool whose description hash is new |
 | `semar mcp serve` | Planned. Serve Semar's job-level tools (`plan`, `run`, `verdict`, `ledger`) to another agent harness |
-| `semar export ctrf <run>`, `semar export sarif <run>` | Planned. Write results as CTRF, or findings as SARIF |
+| `semar export ctrf <run>`, `semar export sarif <run>` | Built (Plan 20). Write results as CTRF, or the confirmed defects of a run as SARIF. `semar export junit <run>` writes JUnit XML. `--out <file>` writes a new file, and `--force` replaces one |
 
 ## Security model
 
@@ -3383,8 +3452,8 @@ A team edition on a shared server is a later stage. It is where single sign-on, 
 | Planned. An engine's tool description tells the agent to do something, or a tool changes after approval (tool poisoning, a rug pull) | Engines come from the person's home only, at an exact version. Each tool's name, description, and input schema are hashed, and a changed hash denies the tool until a person approves it again. A tool that no adapter profile maps stays denied. See [Engines and the gateway](#engines-and-the-gateway) |
 | Planned. A page or a response tells the agent to change an expected result, skip a step, or call another tool (prompt injection) | Every engine output is untrusted data. Expected results come from the Scenario file, which the agent cannot write. The agent's only tools are Semar's, behind policy. A trial response cannot change an expected result |
 | Planned. A malicious pack or registry adds a fixture that writes, or remaps an engine | The registry address comes from the person's home only. A repository can only name a pack. Each pack is pinned by digest and counts only after review. A fixture step obeys the effects policy. An adapter profile counts only when `engines.yaml` names it with a digest |
-| Planned. A run holds a lease for ever, or takes an account another run needs (lease abuse) | A lease is held by a running process and released when it ends, so a crash releases it. A lease wait has a limit, after which the scenario is `blocked`. Leases across several machines are an open question |
-| Planned. Fixture cleanup deletes the wrong record | Cleanup runs only for records that the fixture's own `create` made in this run, by the IDs it captured. A record that `find` reused is never cleaned up. Cleanup obeys `effects.deny` and is logged in the `cleanup` pass |
+| A run holds a lease for ever, or takes an account another run needs (lease abuse) | A lease is held by a running process and released when it ends, so a crash releases it. A lease wait has a limit, after which the scenario is `blocked`. Built for one machine in Plan 17. Leases across several machines are an open question |
+| Fixture cleanup deletes the wrong record | Cleanup runs only for records that the fixture's own `create` made in this run, by the IDs it captured. A record that `find` reused is never cleaned up. Cleanup obeys `effects.deny` and is logged in the `cleanup` pass. Built in Plan 17 |
 
 ## Repository layout
 
@@ -3426,12 +3495,13 @@ internal/tracker/       ticket adapters: jira (read ticket, post result comment)
 internal/knowledge/     sources, one search, cache, feature placement, memory notes
 internal/knowledge/testrail/ read cases and results, write runs and results
 internal/gateway/       MCP client for configured servers, tool allowlist. Planned: engine forwarding, adapter profiles, version pins, description hashes
-internal/fixture/       planned: fixture catalogue, resolution, until, cleanup, leases, health, Arazzo and draft imports
-internal/journey/       planned: journey loading, manifest, leg scheduling, invariants, journey outcome
-internal/ledger/        planned: obligations, state derivation, deferrals, manual checklist
+internal/fixture/       built (Plan 17): fixture catalogue, resolution, until, cleanup, leases, health. Planned: Arazzo and draft imports
+internal/trial/         built (Plan 16): the read-only trial of a draft plan
+internal/journey/       built (Plan 18): journey loading, manifest, leg scheduling, invariants, journey outcome
+internal/obligation/    built (Plan 19), in place of the planned internal/ledger: obligations, state derivation, deferrals, manual checklist
 internal/pack/          planned: registries, pinning, lock file, digests, merge by precedence
 internal/screens/       planned: screen objects, interruptions, element to locator
-internal/export/        planned: CTRF, JUnit XML, and SARIF writers
+internal/export/        built (Plan 20): CTRF, JUnit XML, and SARIF writers
 schemas/                planned: the published JSON Schemas and the conformance suite
 internal/evidence/      bundle layout, EvidenceStore, git branch store
 internal/report/        report and roll-up rendering
@@ -3441,7 +3511,7 @@ testdata/sampleapp/     a small service with seeded defects
 
 `internal/domain` and `internal/verdict` import nothing from the other packages.
 
-The planned packages build on what exists. The trial run belongs in `internal/stage/plan`, which holds plan validation today. The person's home files belong beside `internal/userconfig`, which reads `providers.yaml`. The new views belong in `internal/dashboard`. `internal/journey` replaces the `internal/workflow` package that Plan 10 specifies and that is not built. `internal/ledger` is pure, like `internal/verdict`: it reads outcomes and does no I/O.
+The packages build on what exists. The trial run is in `internal/stage/plan`, which holds plan validation, and its runner is in `internal/trial`. The person's home files belong beside `internal/userconfig`, which reads `providers.yaml`. The lease files are built in `internal/fixture`, which opens `<home>/leases`. The new dashboard views are planned for `internal/dashboard`. `internal/journey` replaces the `internal/workflow` package that Plan 10 specifies and that is not built. `internal/obligation` took the place of the planned `internal/ledger`. Its `Derive` is pure, like `internal/verdict`: it reads outcomes and does no I/O. The same package reads and writes the deferrals and manual results.
 
 Candidate dependencies. Confirm each one's current version and maintenance state when adding it:
 
@@ -3482,18 +3552,18 @@ Candidate dependencies. Confirm each one's current version and maintenance state
 * **End to end.** `testdata/sampleapp` is a small HTTP service with a switch for each seeded defect. The suite runs the full pipeline with a scripted fake provider and asserts the outcome per defect. The seeded defects include a wrong business result with status 200, a refund that another user can make, and a reverted change.
 * **Detection check.** The same sample app with a real provider measures how many seeded defects end `failed`. It runs by hand before each release and its result goes in the release notes.
 
-Planned tests for the parts added on 2026-11-17:
+Tests for the parts added on 2026-11-17. The tests of the ledger, fixtures, trial run, journeys, and the sample app are built. The tests of screens, the gateway, packs, the conformance suite, and prompt injection are planned and not built:
 
-* **Ledger.** Table-driven tests, one row per derivation rule and rows for rule order: a failed scenario under a deferral is `failed`, an expired deferral is ignored, an `inconclusive` cover gives `blocked` with its reason, and an obligation with no cover and no reason is a plan validation problem. One test asserts that the ledger never changes a scenario outcome.
-* **Fixtures.** Against the sample app: `find` reuses a record, `create` runs only when `find` gives nothing, `until` polls and times out, outputs reach the scenario, cleanup runs in reverse order after a failure and never touches a reused record, and every failure mode in [Fixtures](#fixtures) ends `blocked`, never `failed`. One test asserts that a `find` step that writes is refused, and one that a fixture step on `effects.deny` is refused. A lease test runs two processes on one machine and asserts that only one holds the lease.
-* **Trial run.** One test asserts that no write and no fixture `create` is sent. One asserts that a trial action never counts as evidence for a scenario. One feeds a planner that tries to change an expected result after a trial response and asserts that validation rejects it.
-* **Journeys.** Scheduling by `needs`, a cycle as an error, a binding to a leg that is not needed as an error, the first failing leg named and later legs `not_run`, an invariant that breaks, a wait that times out, and a manifest that changes during the run giving `stale`. Each row of the outcome table has a test.
+* **Ledger (built).** Table-driven tests, one row per derivation rule and rows for rule order: a failed scenario under a deferral is `failed`, an expired deferral is ignored, an `inconclusive` cover gives `blocked` with its reason, and an obligation with no cover and no reason is listed first as "use case with no test and no reason", not as a plan validation problem. One test asserts that the ledger never changes a scenario outcome.
+* **Fixtures (built).** Against the sample app: `find` reuses a record, `create` runs only when `find` gives nothing, `until` polls and times out, outputs reach the scenario, cleanup runs in reverse order after a failure and never touches a reused record, and every failure mode in [Fixtures](#fixtures) ends `blocked`, never `failed`. One test asserts that a `find` step that writes is refused, and one that a fixture step on `effects.deny` is refused. A lease test runs two processes on one machine and asserts that only one holds the lease.
+* **Trial run (built).** One test asserts that no write and no fixture `create` is sent. One asserts that a trial action never counts as evidence for a scenario. One feeds a planner that tries to change an expected result after a trial response and asserts that validation rejects it.
+* **Journeys (built).** Scheduling by `needs`, a cycle as an error, a binding to a leg that is not needed as an error, the first failing leg named and later legs `not_run`, an invariant that breaks, a wait that times out, and a manifest that changes during the run giving `stale`. Each row of the outcome table has a test.
 * **Screens.** The locator order, a known interruption dismissed, an unknown one giving `inconclusive`, and a script that uses an unapproved screen object giving `inconclusive`.
 * **Gateway.** A fake MCP engine serves tools with set descriptions. The tests assert that an unmapped tool is denied, a changed description denies the tool until it is approved, a version that differs from the pin blocks, a URL off the host list is refused, a result above the cap is cut, secrets never appear in what the engine receives before the checks or in what the agent sees, and every forwarded call is recorded as one `Action`.
 * **Packs.** A local git registry: pinning writes the right lock entry, a changed file fails the digest, precedence replaces whole entries, two packs of one layer with the same ID are an error, and a registry address or an engine in the repository is refused.
 * **Conformance suite.** The published schemas ship with valid files, invalid files with the rule each breaks, and stored evidence with the outcome the verdict rules must give. Semar's own loaders run the suite in CI.
 * **Prompt injection.** A sample-app page and a response tell the agent to change an expected result. The test asserts that plan validation, and the script binding in authoring, reject the change.
-* **Sample app.** The seeded-defect sample app gains a second service for a multi-service fixture, and a two-leg API journey across both services, with a seeded defect in which the two services disagree on a total.
+* **Sample app (built).** The seeded-defect sample app gains a second service for a multi-service fixture, and an API journey across both services, with a seeded defect in which the two services disagree on a total (`PaymentAmountWrong`).
 
 ## Milestones
 
@@ -3501,7 +3571,7 @@ Planned tests for the parts added on 2026-11-17:
 | --- | --- | --- |
 | M0 | Relevant spikes below; baseline of the team's actual verification effort, including developer work and skipped checks | Contracts and pilot criteria are recorded without assuming a QA team exists |
 | M1 | The daemon, `semar mcp`, the Claude Code plugin, the `api`, `observe`, and `db` engines, the recorder, replay, verdict, `claude` and `codex` drivers, the ticket gate with Jira read, the `semar`, `jira`, and `files` knowledge sources with `kb_search`, the feature map, Plan with earlier testing, the impact map, and recommendations, Gate, sign-in, Author, Explore, `regression run` and `regression coverage`, local report, `init`, `doctor`, `egress` | One real ticket runs from plan to a local report on UAT, in both the interactive and the unattended way. A local regression run replays the scenarios that ticket left behind. The sample-app suite passes |
-| M1.1 | Code host adapter, evidence branch, `publish` with the Jira result comment, the `testrail` source and TestRail results, the MCP gateway, memory notes, decisions in the merge request, `sync`, `status`, pipeline templates, promotion on sign-off, `regression bootstrap` with bulk confirmation, the regression comparison report, Postman import, `rollup`, `acp` driver. Planned on 2026-11-17: the trial run, local fixtures with leases on one machine and fixture health, the obligations and the ledger with the manual checklist, API-only journeys, and the CTRF, JUnit XML, and SARIF exports | A ticket goes from an opened merge request to a signed-off report and a Jira comment with no person starting a command, and the nightly regression run publishes its report. Planned: the ticket's report opens with the ledger line, and a two-leg API journey runs on the sample app on one manifest |
+| M1.1 | Code host adapter, evidence branch, `publish` with the Jira result comment, the `testrail` source and TestRail results, the MCP gateway, memory notes, decisions in the merge request, `sync`, `status`, pipeline templates, promotion on sign-off, `regression bootstrap` with bulk confirmation, the regression comparison report, Postman import, `rollup`, `acp` driver. Added on 2026-11-17 and built (Plans 16 to 20): the trial run, local fixtures with leases on one machine and fixture health, the obligations and the ledger with the manual checklist, API-only journeys, and the CTRF, JUnit XML, and SARIF exports. Planned and not built: the Arazzo format and the Postman and HAR imports of fixtures | A ticket goes from an opened merge request to a signed-off report and a Jira comment with no person starting a command, and the nightly regression run publishes its report. Built: the report of a run opens with the use case line when obligations exist, and an API journey runs on the sample app on one manifest. Not built: the ticket report that publishes it |
 | M2 | The `web` engine on brojev, `web_run` with the pilot, locators, script repair, the object-storage evidence store. Planned on 2026-11-17: the engine gateway and the engine registry, packs and the registry, the published schemas and the conformance suite, screen objects, and web legs of journeys | One real web ticket runs from plan to a published report. Planned: a journey with a web leg passes on one manifest, and another tool's loader passes the conformance suite |
 | M3 | Native Android adapter, app/device identity, evidence artifacts, and connected API/web/Android journeys; completes the initial platform scope. Planned on 2026-11-17: Android legs of journeys, in the format of [Journeys](#journeys) | Required checks run across each applicable surface on one target manifest and connected fixture; a QA engineer, a developer, or a product manager can review the evidence |
 | M4 | Native iOS adapter and separately validated runner/device capabilities; extend the existing Android support. Planned on 2026-11-17: signed evidence bundles, and the open question of whether iOS can come earlier through an engine that S7 finds | iOS journeys pass the same evidence/permission contracts without borrowing Android results |
