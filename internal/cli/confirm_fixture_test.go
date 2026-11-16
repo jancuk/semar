@@ -294,3 +294,20 @@ func TestConfirmFixtureRefusesAFixtureThatDoesNotValidate(t *testing.T) {
 		t.Error("an approval was stored")
 	}
 }
+
+// --env names the environment of a journey's legs. Anywhere else it would be ignored, so it is refused.
+func TestConfirmEnvOnlyWithJourney(t *testing.T) {
+	r := newRepo(t, repoOptions{offline: true})
+	r.writeFixture(t, "order.paid.yaml", orderPaidFixture)
+	for _, args := range [][]string{
+		{"confirm", scenarioID, "--env", "uat", "--yes"},
+		{"confirm", "--all", "--env", "uat", "--yes"},
+		{"confirm", "--fixture", "order.paid", "--env", "uat", "--yes"},
+	} {
+		res := r.must(t, cli.ExitError, args...)
+		contains(t, "stderr", res.stderr, "--env is for --journey only")
+	}
+	if exists(t, r.path(".semar", "store")) {
+		t.Error("something was stored")
+	}
+}

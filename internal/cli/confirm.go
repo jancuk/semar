@@ -36,8 +36,10 @@ func newConfirmCommand(o options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "confirm (<scenario id> | --all | --fixture <id>... | --journey <id>...)",
 		Short: "Confirm the expected results of scenarios or journeys, or approve fixtures, that need a person",
-		Args: func(_ *cobra.Command, args []string) error {
+		Args: func(cmd *cobra.Command, args []string) error {
 			switch {
+			case cmd.Flags().Changed("env") && len(f.journeys) == 0:
+				return errors.New("--env is for --journey only: a scenario and a fixture are confirmed for every environment")
 			case len(f.fixtures) > 0 && len(f.journeys) > 0:
 				return errors.New("pass --fixture, or --journey, and not both")
 			case len(f.journeys) > 0 && (f.all || len(args) > 0):
