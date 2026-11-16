@@ -828,7 +828,7 @@ Deferred (1)
   SHOP-482/uncovered-1  Changes in internal/refund/notify.go  deferred by tester until 2026-12-17: the change only sends an internal email
 ```
 
-Results come from the newest complete run that holds them. Only results on the builds that the environment runs now count, and `--env` reads those builds. Without `--env`, Semar says on standard error that the builds were not read. `--run <id>` reads one run only and prints the manual checklist after the table. The exit code is 0 when every use case is `verified` or `deferred` and every manual result passed, 1 when a use case failed or a manual result failed, and 2 otherwise. With no obligation it prints `no use case: there is no obligation in .semar/obligations` and exits 2.
+Results come from the newest complete run that holds them. Only results on the builds that the environment runs now count, and `--env` reads those builds. Without `--env`, Semar says on standard error that the builds were not read. `--run <id>` reads one run only and prints the manual checklist after the table. The exit code is 0 when every use case is `verified` or `deferred`, or needs a person and has a newest manual result that passed on the builds that run now (see below), 1 when a use case failed or a manual result failed, and 2 otherwise. With no obligation it prints `no use case: there is no obligation in .semar/obligations` and exits 2.
 
 **Defer a use case.** Leave it untested until a day, under your name:
 
@@ -858,6 +858,14 @@ Do the steps, then record what you saw:
 ```bash
 semar ledger record SHOP-482/difference-1 passed --notes "the document is right: the code was changed"
 ```
+
+Add `--env <name>` (and `--build`, as for `semar ledger`) to tie the result to the builds that the environment runs now:
+
+```bash
+semar ledger record SHOP-482/difference-1 passed --notes "the document is right" --env uat
+```
+
+The record then stores the service and the commit of each build, and the output line shows them. `semar ledger --env uat` counts a pass toward the exit code only when its record names builds and every service it names runs the same commit now. So the code can be 0 for a ticket whose criteria only a person can check, and it goes back to 2 after a new build, until the check is run and recorded again. A pass recorded without `--env`, or on other builds, keeps the code at 2 at best, and its line says why. A failed result gives 1. The summary line keeps `Checked by a person: 13 passed` and adds `(9 on the builds that run now)` when fewer count.
 
 A manual result is counted apart and shown as "checked by a person". It never makes a use case `verified`. It is only for a use case that needs a person. A record is stored in `.semar/store/obligations/` with your name and "local, unverified identity", and a new record never replaces an old one.
 
@@ -978,7 +986,7 @@ Every command takes `--dir <path>`, the root of the repository that holds `.sema
 | `semar journey run (<id>... \| --critical \| --all)` | Runs journeys one leg at a time and writes a report. Also takes `--env <name>` and `--build` |
 | `semar ledger` | Shows the state of every use case in `.semar/obligations`. Also takes `--ticket <key>`, `--env <name>`, `--build`, `--run <id>`, and `--checklist` |
 | `semar ledger defer <id> --reason <text> --until <YYYY-MM-DD>` | Leaves a use case untested until a day, under your name |
-| `semar ledger record <id> passed\|failed --notes <text>` | Records what a person saw when they ran the manual checklist of a use case |
+| `semar ledger record <id> passed\|failed --notes <text> [--env <name>]` | Records what a person saw when they ran the manual checklist of a use case. With `--env` it stores the builds that the environment runs now |
 | `semar export (ctrf \| junit \| sarif) <run id>` | Writes one stored run in a common format. `--out <file>` writes a new file, and `--force` replaces an existing one |
 | `semar activity <run id\|latest>` | Prints what a run did, in order. `--writes` shows only the requests that change data |
 | `semar version` | Prints the version |
