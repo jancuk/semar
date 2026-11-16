@@ -26,7 +26,7 @@ func repoWith(t *testing.T, files map[string]string) string {
 	return repo
 }
 
-func one(id string) string {
+func oneEntry(id string) string {
 	return fmt.Sprintf("%sobligations:\n  - {id: %s, title: T, source: diff}\n", head, id)
 }
 
@@ -82,8 +82,8 @@ func TestLoadReportsEveryBadFile(t *testing.T) {
 
 func TestDuplicateIDAcrossFiles(t *testing.T) {
 	repo := repoWith(t, map[string]string{
-		"a.yaml": one("SHOP-482/AC-1"),
-		"b.yaml": one("SHOP-482/AC-1"),
+		"a.yaml": oneEntry("SHOP-482/AC-1"),
+		"b.yaml": oneEntry("SHOP-482/AC-1"),
 	})
 	_, problems, err := obligation.Load(repo)
 	if err != nil {
@@ -101,7 +101,7 @@ func TestDuplicateIDAcrossFiles(t *testing.T) {
 
 func TestLoadRefusesLinks(t *testing.T) {
 	target := t.TempDir()
-	if err := os.WriteFile(filepath.Join(target, "x.yaml"), []byte(one("g/x")), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(target, "x.yaml"), []byte(oneEntry("g/x")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tests := []struct {
@@ -168,7 +168,7 @@ func TestLoadLimits(t *testing.T) {
 	t.Run("101 files", func(t *testing.T) {
 		files := map[string]string{}
 		for i := range 101 {
-			files[fmt.Sprintf("f%03d.yaml", i)] = one(fmt.Sprintf("g/n%d", i))
+			files[fmt.Sprintf("f%03d.yaml", i)] = oneEntry(fmt.Sprintf("g/n%d", i))
 		}
 		_, _, err := obligation.Load(repoWith(t, files))
 		if err == nil || !strings.Contains(err.Error(), "more than 100 files") {

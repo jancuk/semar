@@ -1,0 +1,27 @@
+Manual checks for SHOP-482 (2)
+1. SHOP-482/difference-1  The document and the code differ: the status of a refund above the total
+   Why a person: A person decides whether the document or the code is right
+   Steps (written by code):
+     1. Read docs/refunds.md:14: the refusal is 409.
+     2. Read internal/refund/handler.go:41: the refusal is 422.
+     3. Decide which one is right, and change the other, or the scenario.
+   Expected: The document and the code agree
+   Cite: docs/refunds.md:14 (checked when the plan was made)
+   Record:   semar ledger record SHOP-482/difference-1 passed|failed --notes "<what you saw>"
+2. SHOP-482/mailbox  The customer gets an email about the rejection
+   Why a person: A person decides whether the document or the code is right
+   Steps (written by a person):
+     1. Sign in to the test mailbox of semar-qa-1.
+     2. Find the email sent after the run.
+   Expected: The document and the code agree
+   Cite: TC-1042: the customer is told by email (not checked by code)
+   Recorded: failed, checked by a person (tester, 2026-11-17)
+   Record:   semar ledger record SHOP-482/mailbox passed|failed --notes "<what you saw>"
+
+Manual checks for refunds (1)
+1. refunds/ai-case  Case proposed by a model
+   Why a person: A person decides whether the document or the code is right
+   Steps (written by AI):
+     1. Look at the screen.
+   Expected: The document and the code agree
+   Record:   semar ledger record refunds/ai-case passed|failed --notes "<what you saw>"
