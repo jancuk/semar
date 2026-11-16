@@ -113,6 +113,9 @@ type NotDrafted struct {
 	Ticket string `json:"ticket"`
 	What   string `json:"what"`
 	Needs  string `json:"needs"`
+	// Cite starts with <ticket file>:<line> of the acceptance criterion that this entry accounts
+	// for (D9). It is optional: most entries are not about a criterion.
+	Cite string `json:"cite,omitempty"`
 }
 
 type Uncovered struct {
@@ -283,7 +286,8 @@ const schema = `{
         "properties": {
           "ticket": {"type": "string"},
           "what": {"type": "string"},
-          "needs": {"type": "string"}
+          "needs": {"type": "string"},
+          "cite": {"type": "string"}
         }
       }
     },

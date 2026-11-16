@@ -23,6 +23,8 @@ type accepted struct {
 	output    []byte
 	trial     *Trial
 	after     []domain.ScenarioID
+	// unaccounted are the criteria that nothing cites (D9).
+	unaccounted []Criterion
 }
 
 // maxTrialProblems bounds what one trial sends back to the planner.

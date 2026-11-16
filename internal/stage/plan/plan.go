@@ -60,6 +60,9 @@ type Output struct {
 	TrialReturned int
 	// Refused are the drafts that went back to the planner, with their problems, in order.
 	Refused []RefusedDraft
+	// Unaccounted are the acceptance criteria that nothing in the plan cites, after the last
+	// attempt (D9). Code writes each as an obligation with a gap, so the ledger never loses it.
+	Unaccounted []Criterion
 }
 
 // RefusedDraft is a draft that was not used: a problem of its own, or a problem that the trial
@@ -112,6 +115,7 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 			Draft: a.draft, Scenarios: a.scenarios, Scripts: a.scripts, Notes: a.notes,
 			Attempts: attempts, UsedAttempt: a.attempt, Result: total, PlannerID: p.ID(), PlannerKind: p.Kind(),
 			Trial: a.trial, AfterTrial: a.after, TrialReturned: returned, Refused: slices.Clone(refused),
+			Unaccounted: a.unaccounted,
 		}
 	}
 	for attempt := 1; attempt <= MaxAttempts; attempt++ {
@@ -166,8 +170,14 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 		cand := &accepted{
 			draft: d, scenarios: scenarios, scripts: scripts, notes: compare(in, scenarios, scripts),
 			attempt: attempt, output: res.Output, after: afterTrial(frozen, scenarios),
+			unaccounted: Unaccounted(d, in.Tickets),
 		}
 		passed = cand
+		if len(cand.unaccounted) > 0 && attempt < MaxAttempts {
+			problems = unaccountedProblems(cand.unaccounted)
+			refused = append(refused, RefusedDraft{Attempt: attempt, Problems: problems})
+			continue
+		}
 		if in.Trial == nil {
 			return finish(cand, attempt), nil
 		}

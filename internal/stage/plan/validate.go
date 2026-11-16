@@ -94,6 +94,14 @@ func Validate(d Draft, in Input) ([]domain.Scenario, []domain.Script, []Problem)
 		if !v.known[n.Ticket] {
 			v.add(fmt.Sprintf("notDrafted[%d].ticket", i), "ticket %q is not in the change set; use one of %s", n.Ticket, v.ticketList())
 		}
+		if strings.TrimSpace(n.Cite) != "" {
+			p := fmt.Sprintf("notDrafted[%d].cite", i)
+			if !ticketHasFile(v.ticketFiles, n.Ticket) {
+				v.add(p, "ticket %q has no ticket file in the repository, so an entry cannot cite a criterion", n.Ticket)
+			} else {
+				v.ticketCite(p, n.Ticket, n.Cite)
+			}
+		}
 	}
 
 	next := map[string]int{}
