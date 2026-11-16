@@ -305,7 +305,7 @@ func FromPlan(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario, ex
 | --- | --- | --- |
 | Each written scenario | `title` from the scenario, `source: diff`, `covers: [<id>]` | `<ticket>/scenario-<scenario id>` |
 | Each `notDrafted` entry | `title` from `what`, `source: diff`, `gap: "not drafted: needs <needs>"` | `<ticket>/not-drafted-<n>` |
-| Each `uncovered` file | `title: Changes in <file>`, `source: diff`, `gap: "no scenario covers <file>: <reason>"`. The ticket is the first ticket, in key order, whose `TicketChange.Files` holds the file, else the first ticket of the change set | `<ticket>/uncovered-<n>` |
+| Each `uncovered` file | `title: Changes in <file>`, `source: diff`, and a `manual` judgement for a person: "No scenario covers <file>. The planner says: <reason>", with two steps (read the change, decide what covers it). It derives `needs_a_person`, not `blocked` (Plan 21, D15). The ticket is the first ticket, in key order, whose `TicketChange.Files` holds the file, else the first ticket of the change set | `<ticket>/uncovered-<n>` |
 | Each difference of Plan 14 | as in the example: `source: knowledge`, `cite` the document place, a `judgement` manual reason with three steps written by code | `<ticket>/difference-<n>` |
 
 * `<n>` continues after the highest number of that kind in the existing file.

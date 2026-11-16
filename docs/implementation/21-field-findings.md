@@ -1,6 +1,6 @@
 # Plan 21: Findings from a real delivery
 
-* **Status:** Specification, not implemented.
+* **Status:** Implemented. This text describes the system as built. It records the findings of a delivery of a kanban board with a Go backend, a web app, and an Android app, tested with Semar from the plan to the report.
 * **Needs first:** Plans 12 to 20.
 * **Implements:** PRD product rules 3, 4, and 14, decisions D25 and D29, FR-123, FR-261 to FR-270. TRD sections "Planning from a change", "Fixtures", and "Test obligations and the coverage ledger".
 
@@ -26,6 +26,7 @@ A team delivered a feature across a Go backend, a web app, and an Android app, a
 | D12 | An unknown key in any Semar YAML file reports `<file>:<line>: unknown key <name>`, and `in <parent key>` when the key sits under another key. A value of the wrong type reads like `<key> must be a number`, `true or false`, `text`, `a list`, `a mapping`, or `a duration such as 30s`. No message names a Go type | `field as not found in type domain.Leg` tells a person nothing about the file, and a Go type is not part of the format. `yamlfile` turns the decoder's messages into these, and keeps the file and the line |
 | D13 | `count` on a singular JSONPath (names and indexes only, RFC 9535) that selects one array compares the length of that array. On any other path it compares the number of selected nodes, as before | A QA engineer wrote `$.data.lists[0].cards` with `count: 0` for "no cards left", and the check failed with "observed []" because one node, the array, was selected |
 | D14 | `semar journey run` and `semar confirm --journey` give a service that names no auth profile the profile that `semar fixture check` uses: the only one, or the one named default | A journey's fixture on such a service went out with no session and the journey ended blocked with a 401, while `fixture check` of the same fixture signed in |
+| D15 | A changed file that no scenario covers becomes a use case that needs a person, with the planner's reason and two steps, not a `blocked` gap | On the delivery, five such files stayed `blocked` although the planner said manual checks covered them. Blocked means a missing piece; here the next step is a person's decision |
 
 ## Trust
 

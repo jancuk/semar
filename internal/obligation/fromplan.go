@@ -82,9 +82,23 @@ func FromPlanWith(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario
 		if err != nil {
 			return nil, fmt.Errorf("the uncovered file %s: %w", oneLine(u.File, 100), err)
 		}
+		// No scenario reaching a changed file is a decision for a person, not a missing piece:
+		// the change may be covered by a manual check, or change no behaviour. Blocked would
+		// stay blocked forever, so the file goes on the checklist with the planner's reason.
 		file := oneLine(u.File, 200)
 		if err := b.addGap(t, kindUncovered, Obligation{
-			Title: oneLine("Changes in "+file, maxTitle), Source: SourceDiff, Gap: oneLine("no scenario covers "+file+": "+u.Reason, maxGap),
+			Title:  oneLine("Changes in "+file, maxTitle),
+			Source: SourceDiff,
+			Manual: &Manual{
+				Kind: "judgement",
+				Text: oneLine("No scenario covers "+file+". The planner says: "+u.Reason, maxManual),
+				Steps: []string{
+					oneLine("Read the change in "+file+".", maxManual),
+					"Decide whether a scenario or a manual check of this ticket covers it, or whether it changes no behaviour.",
+				},
+				Expected:  "The change is covered by a scenario or a manual check, or it changes no behaviour",
+				WrittenBy: "code",
+			},
 		}); err != nil {
 			return nil, err
 		}

@@ -68,8 +68,11 @@ func TestFromPlanOnePerItem(t *testing.T) {
 	if nd.Title != "A refund of a paid order by another customer" || nd.Gap != "not drafted: needs fixture order.paid" || nd.Source != obligation.SourceDiff {
 		t.Errorf("not drafted %+v", nd)
 	}
-	if un.Title != "Changes in internal/refund/notify.go" || un.Gap != "no scenario covers internal/refund/notify.go: it only sends an email" {
-		t.Errorf("uncovered %+v", un)
+	// A changed file that no scenario covers goes to a person, who decides, and is never blocked.
+	if un.Title != "Changes in internal/refund/notify.go" || un.Gap != "" || un.Manual == nil ||
+		un.Manual.Text != "No scenario covers internal/refund/notify.go. The planner says: it only sends an email" ||
+		un.Manual.Kind != "judgement" || un.Manual.WrittenBy != "code" || len(un.Manual.Steps) != 2 {
+		t.Errorf("uncovered %+v, manual %+v", un, un.Manual)
 	}
 	if df.Source != obligation.SourceKnowledge || df.Cite != "docs/refunds.md:14" || df.Title != "The document and the code differ: the status of a refund above the total" {
 		t.Errorf("difference %+v", df)
