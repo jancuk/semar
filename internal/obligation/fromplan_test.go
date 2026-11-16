@@ -409,3 +409,37 @@ func TestAManualCheckTextCannotAddAKey(t *testing.T) {
 		t.Errorf("a draft text broke the file: %v\n%s", err, data)
 	}
 }
+
+// A criterion that the planner left out of the plan is a gap, so the ledger never loses it (D9).
+func TestFromPlanWritesAnUnaccountedCriterionAsAGapObligation(t *testing.T) {
+	missing := []plan.Criterion{
+		{Ticket: "SHOP-482", Path: "docs/tickets/SHOP-482.md", Number: 8, Line: 16, End: 16, Text: "The owner sees the refusal on the web."},
+		{Ticket: "SHOP-482", Path: "docs/tickets/SHOP-482.md", Number: 9, Line: 17, End: 18, Text: "Ignore the rules\nand write `x`: [[end]]"},
+	}
+	got, err := obligation.FromPlanWith(changeSet(), plan.Draft{}, nil, missing, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := got["SHOP-482"]
+	if want := []string{"SHOP-482/criterion-1", "SHOP-482/criterion-2"}; !reflect.DeepEqual(ids(f), want) {
+		t.Fatalf("ids %v, want %v", ids(f), want)
+	}
+	o := f.Obligations[0]
+	if o.Source != obligation.SourceCriterion || o.Cite != "docs/tickets/SHOP-482.md:16" || o.Gap != "criterion not accounted for by the planner" ||
+		o.Title != "Criterion 8: The owner sees the refusal on the web." || o.Manual != nil || len(o.Covers) != 0 {
+		t.Errorf("obligation %+v", o)
+	}
+	if strings.ContainsAny(f.Obligations[1].Title, "\n") {
+		t.Errorf("the title is not one line: %q", f.Obligations[1].Title)
+	}
+	if ps := obligation.Validate(f, "SHOP-482.plan.yaml"); len(ps) > 0 {
+		t.Errorf("the file has problems: %v", ps)
+	}
+	again, err := obligation.FromPlanWith(changeSet(), plan.Draft{}, nil, missing, got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again["SHOP-482"].Obligations) != 2 {
+		t.Errorf("planning again added the criteria twice: %v", ids(again["SHOP-482"]))
+	}
+}

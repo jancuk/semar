@@ -22,12 +22,13 @@ const (
 	kindUncovered   = "uncovered-"
 	kindDifference  = "difference-"
 	kindManualCheck = "manual-"
+	kindCriterion   = "criterion-"
 )
 
 // citePattern is how the planner starts a cited place: <file>:<line>.
 var citePattern = regexp.MustCompile(`^([^\s:]+):([0-9]+)`)
 
-var gapKinds = []string{kindNotDrafted, kindUncovered, kindDifference, kindManualCheck}
+var gapKinds = []string{kindNotDrafted, kindUncovered, kindDifference, kindManualCheck, kindCriterion}
 
 // FromPlan returns the obligations file of each ticket that the plan names, with the entries of
 // the existing files kept as they are and the new entries added after them (D3). It never
@@ -35,6 +36,12 @@ var gapKinds = []string{kindNotDrafted, kindUncovered, kindDifference, kindManua
 // existing. Every text from the draft is cut and made one line here, and the YAML encoder
 // writes it as one string, so a text cannot add a key.
 func FromPlan(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario, existing map[string]File) (map[string]File, error) {
+	return FromPlanWith(cs, d, scenarios, nil, existing)
+}
+
+// FromPlanWith is FromPlan with the acceptance criteria that nothing in the plan cites. Each is
+// written as an obligation with a gap and no checklist, so the ledger still shows it (D9).
+func FromPlanWith(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario, unaccounted []plan.Criterion, existing map[string]File) (map[string]File, error) {
 	b := &builder{cs: cs, files: map[string]*building{}, existing: existing}
 
 	for _, sc := range scenarios {
@@ -126,6 +133,20 @@ func FromPlan(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario, ex
 				Expected:  oneLine(mc.Expected, maxManual),
 				WrittenBy: "ai",
 			},
+		}); err != nil {
+			return nil, err
+		}
+	}
+	for _, c := range unaccounted {
+		t, err := b.ticket(c.Ticket)
+		if err != nil {
+			return nil, fmt.Errorf("a criterion that the planner did not account for: %w", err)
+		}
+		if err := b.addGap(t, kindCriterion, Obligation{
+			Title:  oneLine("Criterion "+strconv.Itoa(c.Number)+": "+c.Text, maxTitle),
+			Source: SourceCriterion,
+			Cite:   oneLine(c.Cite(), maxCite),
+			Gap:    "criterion not accounted for by the planner",
 		}); err != nil {
 			return nil, err
 		}

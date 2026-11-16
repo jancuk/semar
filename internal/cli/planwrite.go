@@ -323,7 +323,7 @@ func obligationsOf(root *os.Root, in plan.Input, out plan.Output) (files []planF
 		existing[key], old[rel] = f, data
 	}
 
-	made, err := obligation.FromPlan(in.Change, d, out.Scenarios, existing)
+	made, err := obligation.FromPlanWith(in.Change, d, out.Scenarios, out.Unaccounted, existing)
 	if err != nil {
 		return nil, nil, fmt.Errorf("make the obligations: %w; nothing was written", err)
 	}
