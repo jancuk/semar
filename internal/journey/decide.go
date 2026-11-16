@@ -65,7 +65,7 @@ func Decide(in Outcome) (domain.JourneyOutcome, domain.LegID, []domain.Reason) {
 	case in.End == nil && started:
 		add(2, domain.OutcomeStale, reasonNoEnd)
 	case in.End != nil && in.End.Hash != in.Start.Hash:
-		for _, c := range changes(in.Start.Services, in.End.Services) {
+		for _, c := range Changes(in.Start.Services, in.End.Services) {
 			add(2, domain.OutcomeStale, "a build changed during the journey: "+c)
 		}
 	}
@@ -117,8 +117,8 @@ func legText(l domain.LegResult, what string) string {
 	return text
 }
 
-// changes names each service whose build differs between two manifests, in service order.
-func changes(start, end []domain.BuildRef) []string {
+// Changes names each service whose build differs between two manifests, in service order.
+func Changes(start, end []domain.BuildRef) []string {
 	byService := func(bs []domain.BuildRef) map[string]domain.BuildRef {
 		m := make(map[string]domain.BuildRef, len(bs))
 		for _, b := range bs {

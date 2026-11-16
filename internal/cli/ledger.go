@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 	"text/tabwriter"
@@ -201,8 +202,9 @@ func deriveWith(o options, repo string, obs []obligation.Located, res obligation
 }
 
 // storedResults reads the newest result of each scenario that an obligation covers from the
-// complete runs of scenarios, newest first. A run of another purpose is never read: a trial and a
-// fixture check send requests with no verdict. Journey results are not read yet (D11).
+// complete runs of scenarios and of journeys, newest first, and the newest result of each journey
+// that an obligation names. A run of another purpose is never read: a trial and a fixture check
+// send requests with no verdict.
 func storedResults(stderr io.Writer, repo string, only domain.RunID, obs []obligation.Located) (obligation.Results, error) {
 	files, err := scenarioFiles(repo)
 	if err != nil {
@@ -220,7 +222,11 @@ func storedResults(stderr io.Writer, repo string, only domain.RunID, obs []oblig
 			}
 		}
 	}
-	if len(missing) == 0 {
+	missingJourneys, err := journeyCovers(&res, repo, obs)
+	if err != nil {
+		return obligation.Results{}, err
+	}
+	if len(missing) == 0 && len(missingJourneys) == 0 {
 		return res, nil
 	}
 
@@ -235,7 +241,7 @@ func storedResults(stderr io.Writer, repo string, only domain.RunID, obs []oblig
 		}
 	}
 	for _, id := range ids {
-		if len(missing) == 0 {
+		if len(missing) == 0 && len(missingJourneys) == 0 {
 			break
 		}
 		run, _, err := store.LoadRun(id)
@@ -261,8 +267,66 @@ func storedResults(stderr io.Writer, repo string, only domain.RunID, obs []oblig
 				delete(missing, r.Scenario)
 			}
 		}
+		for _, jr := range run.Journeys {
+			if missingJourneys[jr.Journey] {
+				res.Journeys[string(jr.Journey)] = journeyCoverOf(run, jr)
+				delete(missingJourneys, jr.Journey)
+			}
+		}
 	}
 	return res, nil
+}
+
+// journeyCovers makes the journeys that an obligation names known: a key of Results.Journeys for
+// each journey file, with no result yet. With no obligation that names a journey it leaves
+// Results.Journeys alone, and the repository's journeys are not read. A journey file that is not
+// valid is known too, so that a use case is not told its journey was deleted. It returns the
+// journeys that still need a result.
+func journeyCovers(res *obligation.Results, repo string, obs []obligation.Located) (map[domain.JourneyID]bool, error) {
+	named := map[domain.JourneyID]bool{}
+	for _, l := range obs {
+		for _, id := range l.Journeys {
+			named[domain.JourneyID(id)] = true
+		}
+	}
+	if len(named) == 0 {
+		return nil, nil
+	}
+	js, problems, err := loadJourneys(repo)
+	if err != nil {
+		return nil, err
+	}
+	res.Journeys = map[string]obligation.Cover{}
+	for _, j := range js {
+		res.Journeys[string(j.ID)] = obligation.Cover{Journey: string(j.ID)}
+	}
+	for _, p := range problems {
+		stem := strings.TrimSuffix(strings.TrimPrefix(p.File, journeysRel+"/"), filepath.Ext(p.File))
+		if _, ok := res.Journeys[stem]; !ok {
+			res.Journeys[stem] = obligation.Cover{Journey: stem}
+		}
+	}
+	missing := map[domain.JourneyID]bool{}
+	for id := range named {
+		if _, ok := res.Journeys[string(id)]; ok {
+			missing[id] = true
+		}
+	}
+	return missing, nil
+}
+
+// journeyCoverOf is the result of a journey as a use case sees it. The builds are the manifest at
+// the end, or at the start when the end was not read.
+func journeyCoverOf(run domain.Run, jr domain.JourneyResult) obligation.Cover {
+	m := jr.Manifest
+	if jr.ManifestEnd != nil {
+		m = *jr.ManifestEnd
+	}
+	c := obligation.Cover{Journey: string(jr.Journey), Found: true, Outcome: string(jr.Outcome), Run: run.ID, Builds: m.Services}
+	if len(jr.Reasons) > 0 {
+		c.Reason = jr.Reasons[0].Text
+	}
+	return c
 }
 
 // scenarioRun is true for a run that the ledger reads: a run of scenarios, or of a journey.
@@ -511,8 +575,13 @@ func runCoverage(stderr io.Writer, o options, repo string, scenarios []domain.Sc
 			tickets[sc.Ticket] = true
 		}
 	}
+	journeys := map[string]bool{}
+	for _, jr := range rec.Journeys {
+		journeys[string(jr.Journey)] = true
+	}
 	obs := slices.DeleteFunc(all, func(l obligation.Located) bool {
-		return !tickets[l.Ticket] && !slices.ContainsFunc(l.Covers, func(id domain.ScenarioID) bool { return ran[id] })
+		return !tickets[l.Ticket] && !slices.ContainsFunc(l.Covers, func(id domain.ScenarioID) bool { return ran[id] }) &&
+			!slices.ContainsFunc(l.Journeys, func(id string) bool { return journeys[id] })
 	})
 	if len(obs) == 0 {
 		return "", nil
@@ -524,6 +593,11 @@ func runCoverage(stderr io.Writer, o options, repo string, scenarios []domain.Sc
 	for _, r := range rec.Results {
 		if _, ok := res.Scenarios[r.Scenario]; ok {
 			res.Scenarios[r.Scenario] = coverOf(rec, r)
+		}
+	}
+	for _, jr := range rec.Journeys {
+		if _, ok := res.Journeys[string(jr.Journey)]; ok {
+			res.Journeys[string(jr.Journey)] = journeyCoverOf(rec, jr)
 		}
 	}
 	res.Current = rec.BuildsEnd

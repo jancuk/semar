@@ -1,0 +1,45 @@
+apiVersion: semar/v1
+kind: Journey
+id: checkout
+title: An order is placed, paid, and shown as paid
+owner: team-commerce
+criticality: critical
+legs:
+  - id: place
+    surface: api
+    service: orders
+    steps:
+      - id: create
+        action: Create an order of 1000
+        hint: { method: POST, path: /v1/orders }
+        request: { method: POST, path: /v1/orders, json: { amount: 1000, ref: "semar-{{run.id}}" } }
+        captures: [{ name: id, jsonpath: "$.data.id" }, { name: amount, jsonpath: "$.data.amount" }]
+        expect: [{ check: { status: 201 }, source: person }]
+    outputs: [id, amount]
+  - id: pay
+    surface: api
+    service: payments
+    needs: [place]
+    steps:
+      - id: pay
+        action: Pay the order
+        hint: { method: POST, path: /v1/payments }
+        request: { method: POST, path: /v1/payments, json: { orderId: "{{place.id}}" } }
+        captures: [{ name: amount, jsonpath: "$.data.amount" }]
+        expect: [{ check: { status: 202 }, source: person }]
+    outputs: [amount]
+  - id: settled
+    surface: api
+    service: orders
+    needs: [pay]
+    steps:
+      - id: read
+        action: Read the order until it is paid
+        hint: { method: GET, path: "/v1/orders/{id}" }
+        request: { method: GET, path: "/v1/orders/{{place.id}}" }
+        captures: [{ name: amount, jsonpath: "$.data.amount" }]
+        expect: [{ check: { jsonpath: "$.data.status", equals: paid }, source: person }]
+    wait: { until: { jsonpath: "$.data.status", equals: paid }, timeout: 30s, every: 1s }
+    outputs: [amount]
+invariants:
+  - equal: ["{{place.amount}}", "{{pay.amount}}", "{{settled.amount}}"]

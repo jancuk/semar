@@ -26,19 +26,25 @@ type confirmFlags struct {
 	yes      bool
 	all      bool
 	dir      string
+	env      string
 	fixtures []string
+	journeys []string
 }
 
 func newConfirmCommand(o options) *cobra.Command {
 	var f confirmFlags
 	cmd := &cobra.Command{
-		Use:   "confirm (<scenario id> | --all | --fixture <id>...)",
-		Short: "Confirm the expected results of scenarios, or approve fixtures, that need a person",
+		Use:   "confirm (<scenario id> | --all | --fixture <id>... | --journey <id>...)",
+		Short: "Confirm the expected results of scenarios or journeys, or approve fixtures, that need a person",
 		Args: func(_ *cobra.Command, args []string) error {
 			switch {
+			case len(f.fixtures) > 0 && len(f.journeys) > 0:
+				return errors.New("pass --fixture, or --journey, and not both")
+			case len(f.journeys) > 0 && (f.all || len(args) > 0):
+				return errors.New("pass --journey, or the ID of one scenario, or --all, and not several of them")
 			case len(f.fixtures) > 0 && (f.all || len(args) > 0):
 				return errors.New("pass --fixture, or the ID of one scenario, or --all, and not several of them")
-			case len(f.fixtures) > 0:
+			case len(f.fixtures) > 0 || len(f.journeys) > 0:
 				return nil
 			case f.all && len(args) > 0:
 				return errors.New("pass the ID of one scenario, or --all, and not both")
@@ -48,14 +54,19 @@ func newConfirmCommand(o options) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(f.fixtures) > 0 {
+			switch {
+			case len(f.fixtures) > 0:
 				return approveFixtures(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
+			case len(f.journeys) > 0:
+				return confirmJourneys(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
 			}
 			return confirmScenarios(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f, args)
 		},
 	}
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "confirm or approve without asking")
 	cmd.Flags().StringArrayVar(&f.fixtures, "fixture", nil, "approve the fixture with this ID, as it is now in .semar/fixtures (repeatable)")
+	cmd.Flags().StringArrayVar(&f.journeys, "journey", nil, "confirm the expected results of every leg of the journey with this ID (repeatable)")
+	cmd.Flags().StringVar(&f.env, "env", "", "with --journey, the environment whose auth profiles the legs use; needed when there are several")
 	cmd.Flags().BoolVar(&f.all, "all", false, "confirm every scenario in .semar/scenarios that needs a confirmation")
 	addDirFlag(cmd, &f.dir)
 	return cmd
@@ -64,8 +75,28 @@ func newConfirmCommand(o options) *cobra.Command {
 // unconfirmed is a scenario with the expected results that need a person.
 type unconfirmed struct {
 	sc      domain.Scenario
+	label   string // how the heading names it; "scenario <id>" when empty
 	lines   []string
 	sources []domain.Source
+}
+
+// needsConfirmation lists the expected results of a scenario that a person must confirm.
+func needsConfirmation(sc domain.Scenario, trust []domain.Source) unconfirmed {
+	u := unconfirmed{sc: sc}
+	for _, st := range sc.Steps {
+		for _, e := range st.Expect {
+			if !confirm.Needs(e.Source, trust) {
+				continue
+			}
+			line := fmt.Sprintf("step %s: %s (source %s", st.ID, check.DescribeFull(e.Check), e.Source)
+			if e.Cite != "" {
+				line += ", cite: " + e.Cite
+			}
+			u.lines = append(u.lines, terminalSafe(line+")"))
+			u.sources = append(u.sources, e.Source)
+		}
+	}
+	return u
 }
 
 func confirmScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f confirmFlags, args []string) error {
@@ -87,21 +118,7 @@ func confirmScenarios(ctx context.Context, stdout, stderr io.Writer, o options, 
 	}
 	var todo []unconfirmed
 	for _, sc := range scs {
-		u := unconfirmed{sc: sc}
-		for _, st := range sc.Steps {
-			for _, e := range st.Expect {
-				if !confirm.Needs(e.Source, cfg.Policy.Trust.Confirm) {
-					continue
-				}
-				line := fmt.Sprintf("step %s: %s (source %s", st.ID, check.DescribeFull(e.Check), e.Source)
-				if e.Cite != "" {
-					line += ", cite: " + e.Cite
-				}
-				u.lines = append(u.lines, terminalSafe(line+")"))
-				u.sources = append(u.sources, e.Source)
-			}
-		}
-		if len(u.lines) > 0 {
+		if u := needsConfirmation(sc, cfg.Policy.Trust.Confirm); len(u.lines) > 0 {
 			todo = append(todo, u)
 		}
 	}
@@ -113,8 +130,18 @@ func confirmScenarios(ctx context.Context, stdout, stderr io.Writer, o options, 
 		}
 		return nil
 	}
+	return storeConfirmations(ctx, stdout, stderr, o, f, todo)
+}
+
+// storeConfirmations shows what each scenario needs, asks once, and stores one confirmation for the
+// hash of each. The scenarios of a journey's legs go through it as well, so one flow confirms both.
+func storeConfirmations(ctx context.Context, stdout, stderr io.Writer, o options, f confirmFlags, todo []unconfirmed) error {
 	for _, u := range todo {
-		fmt.Fprintf(stdout, "Scenario %s has %d expected results that a person must confirm:\n", u.sc.ID, len(u.lines))
+		label := u.label
+		if label == "" {
+			label = "Scenario " + string(u.sc.ID)
+		}
+		fmt.Fprintf(stdout, "%s has %d expected results that a person must confirm:\n", label, len(u.lines))
 		for _, line := range u.lines {
 			fmt.Fprintf(stdout, "  - %s\n", line)
 		}

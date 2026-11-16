@@ -47,6 +47,10 @@ type options struct {
 	TrialTimeout time.Duration
 	TrialLimit   time.Duration
 
+	// Sleep waits between the attempts of a journey's wait. Nil sleeps for real. A test sets it to
+	// wait for nothing.
+	Sleep func(ctx context.Context, d time.Duration) error
+
 	drop *envDrop
 }
 
@@ -181,6 +185,7 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 		newInitCommand(), newChangesCommand(), newPlanCommand(o), newProvidersCommand(o), newDashboardCmd(o), newFixtureCommand(o))
 	root.AddCommand(newExportCommand())
 	root.AddCommand(newLedgerCommand(o))
+	root.AddCommand(newJourneyCommand(o))
 	return root
 }
 
