@@ -329,6 +329,10 @@ func (r *Runner) step(ctx context.Context, run *scenarioRun, step domain.Step, s
 		skip(why)
 		return nil
 	}
+	if step.As != "" && step.As != run.sc.AuthProfile {
+		skip(fmt.Sprintf("acts as account %s, and a trial sends with the account of the plan only", step.As))
+		return nil
+	}
 	if name := firstUnknown(*req, run.vars); name != "" {
 		skip(r.needs(run, name))
 		return nil

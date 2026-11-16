@@ -331,6 +331,26 @@ func TestOnceNotTried(t *testing.T) {
 	}
 }
 
+// A trial has the session of the plan's account only, so a step that acts as another account is not
+// sent: it would be answered for the wrong account.
+func TestStepActingAsAnotherAccountIsNotTried(t *testing.T) {
+	h := newHarness(t, nil)
+	sc, s := scenario("SHOP-482-01", nil, get("list", "/v1/orders"), get("version", "/version"))
+	sc.Steps[0].As = "outsider"
+	sc.Steps[1].As = profile // the account of the scenario itself is no other account
+	tr := try(t, h, sc, s)
+
+	if got := stepOf(t, tr, "list"); got.Result != plan.TrialNotTried || got.Why != "acts as account outsider, and a trial sends with the account of the plan only" {
+		t.Fatalf("list = %+v, want not tried: acts as account outsider", got)
+	}
+	if got := stepOf(t, tr, "version"); got.Result != plan.TrialSent {
+		t.Fatalf("version = %+v, want sent", got)
+	}
+	if n := h.app.Requests("GET", "/v1/orders"); n != 0 {
+		t.Fatalf("the app received %d GET /v1/orders, want 0", n)
+	}
+}
+
 func TestDeniedNotTried(t *testing.T) {
 	other := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(other.Close)
