@@ -993,3 +993,35 @@ func TestMalformedPath(t *testing.T) {
 		})
 	}
 }
+
+func TestJoinURL(t *testing.T) {
+	for _, tc := range []struct {
+		name, base, path string
+		query            map[string]string
+		want             string
+		wantErr          bool
+	}{
+		{name: "keeps the path prefix of the base", base: "http://127.0.0.1:9/api/", path: "/v1/orders/o-1", want: "http://127.0.0.1:9/api/v1/orders/o-1"},
+		{name: "keeps the escaping as written", base: "http://127.0.0.1:9", path: "/v1/orders/a%20b", want: "http://127.0.0.1:9/v1/orders/a%20b"},
+		{name: "adds the query", base: "http://127.0.0.1:9", path: "/v1/orders", query: map[string]string{"page": "2"}, want: "http://127.0.0.1:9/v1/orders?page=2"},
+		{name: "refuses a path with a host", base: "http://127.0.0.1:9", path: "http://other.example.com/x", wantErr: true},
+		{name: "refuses a path with a query", base: "http://127.0.0.1:9", path: "/x?a=b", wantErr: true},
+		{name: "refuses a base that does not parse", base: "http://[::1", path: "/x", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			u, err := api.JoinURL(tc.base, tc.path, tc.query)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("JoinURL = %v, want an error", u)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if u.String() != tc.want {
+				t.Fatalf("JoinURL = %s, want %s", u, tc.want)
+			}
+		})
+	}
+}

@@ -167,7 +167,7 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 	}
 	missing := captureNames(c.Captures)
 
-	u, err := joinURL(base, c.Path, c.Query)
+	u, err := JoinURL(base, c.Path, c.Query)
 	if err != nil {
 		a.Err = err.Error()
 		return e.record(ctx, label, a, nil, missing)
@@ -420,9 +420,11 @@ func transportText(err error, u *url.URL, label string) string {
 	return text
 }
 
-// joinURL keeps the path prefix of the base URL. The path is parsed so that
-// its escaping reaches the policy and the server as written.
-func joinURL(base, path string, query map[string]string) (*url.URL, error) {
+// JoinURL keeps the path prefix of the base URL. The path is parsed so that
+// its escaping reaches the policy and the server as written. A caller that
+// classifies a request before it sends one builds the URL with this function,
+// so that it judges the same URL that Do sends.
+func JoinURL(base, path string, query map[string]string) (*url.URL, error) {
 	b, err := url.Parse(base)
 	if err != nil {
 		return nil, errors.New("the service base url does not parse")
