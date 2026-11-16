@@ -58,16 +58,21 @@ If the expected behavior is written nowhere outside the code, no tool can detect
 
 ## Status
 
-Four parts are implemented in Go.
+These parts are implemented in Go.
 
 * **The model-free core:** replay of accepted scripts against an HTTP API, an effects policy that limits what a test may change, redaction, an evidence store, the verdict, and the report.
 * **A test plan from a diff:** `semar plan --diff` reads the difference between two branches, finds the tickets in the commits, and has a model draft scenarios and requests from the source. Code validates the draft. The model has read-only tools and a copy of the source, and it never reaches the environment.
 * **Documents of the repository:** `.semar/semar.yaml` can name an API document and a folder of documents. The planner is told to read them before it drafts, and code compares every drafted request with the API document.
 * **Model providers and the dashboard:** `semar plan` works with Claude Code, Codex, the Anthropic API, or any server with the OpenAI chat format. `semar dashboard` manages the providers and shows usage. A harness provider can load your MCP servers and skills.
+* **A trial run after a plan:** after `semar plan` has a valid draft, code sends the read-only steps once to your environment, and a wrong path or an empty capture goes back to the planner before you see the plan. A trial result never counts as a pass.
+* **Fixtures:** a scenario names the data it needs, such as a paid order, and a reviewed file under `.semar/fixtures/` finds or makes it before the first step and cleans it up after the last. See [Prepare data with fixtures](#prepare-data-with-fixtures).
+* **API journeys:** a business flow across services, such as an order that is placed, paid, and shown as paid, runs leg by leg against one set of builds. See [Test a business flow with a journey](#test-a-business-flow-with-a-journey).
+* **The use case ledger:** each use case that needs testing ends in one stated state, so that nothing is skipped without a word. See [See that nothing is skipped: the use case ledger](#see-that-nothing-is-skipped-the-use-case-ledger).
+* **Exports:** `semar export` writes a stored run as CTRF, JUnit XML, or SARIF. See [Send results to your tools](#send-results-to-your-tools).
 
 An environment is declared as `test` or `production`, and Semar acts in it only as its rules allow.
 
-Live recording of scripts by an agent, the tracker and risk levels, security probes, providers and agents, data stores, team mode, web, and Android are specified in `docs/implementation/` and are not built yet. [docs/implementation/README.md](docs/implementation/README.md) gives the sequence of plans and what each one adds. Plans 01 to 04 are the first usable version, from a plan to a report for one API ticket.
+These are specified in `docs/implementation/` and are not built yet: live recording of scripts by an agent, the tracker and risk levels, security probes, providers and agents, data stores, team mode, web and Android, engines and the MCP gateway, screens and UI legs, packs and the registry, the dashboard views of fixtures, journeys, and the ledger, the Arazzo format, the import of Postman collections and HAR files, signed evidence bundles, and the enterprise features. [docs/implementation/README.md](docs/implementation/README.md) gives the sequence of plans and what each one adds. Plans 01 to 04 are the first usable version, from a plan to a report for one API ticket.
 
 ## Build the binary
 
@@ -152,14 +157,15 @@ semar plan --diff main..release \
   --token-env ORDERS_UAT_TOKEN
 ```
 
-`--base-url` and `--token-env` are needed only the first time. They write `.semar/semar.yaml`, and later runs read that file. See [Configuration](#configuration) for the other flags.
+`--base-url` and `--token-env` are needed only the first time. They write `.semar/semar.yaml`, and later runs read that file. Export the token variable before this step, so that the [trial run](#the-trial-run) can sign in. See [Configuration](#configuration) for the other flags.
 
 What `plan` does:
 
 1. It copies the source at the head commit to a temporary directory.
 2. It starts the planner in that copy. The planner can read a file, search, and list files. It cannot read a file outside the copy, and it cannot reach your environment. With a harness provider it can also use your own MCP servers and skills, unless you turn them off. See [Choose the model](#choose-the-model).
 3. The model returns one draft. Code validates it. Problems go back to the model, for at most three attempts.
-4. It writes the files below and removes the copy.
+4. Code sends the read-only steps of a valid draft once to your environment. A request problem goes back to the model inside the same three attempts. See [The trial run](#the-trial-run).
+5. It writes the files below and removes the copy.
 
 While the planner works, a status line on standard error shows the elapsed time, the draft number, and the responses and tool calls of the planner. When standard error is not a terminal, a log gets one line every 30 seconds instead. When the planner ends, `semar` prints how long it took.
 
@@ -167,7 +173,8 @@ While the planner works, a status line on standard error shows the elapsed time,
 | --- | --- |
 | `.semar/scenarios/<ticket>/<ticket>-NN.yaml` | One scenario: its steps and expected results |
 | `.semar/store/scripts/...` | The exact request of each step |
-| `.semar/plans/<head commit>/plan.md` | What changed, the scenarios per ticket, what was not drafted and what it needs, the files that no scenario covers, and the documents that the planner was told to read |
+| `.semar/obligations/<ticket>.plan.yaml` | The use cases of the ticket, for the [ledger](#see-that-nothing-is-skipped-the-use-case-ledger) |
+| `.semar/plans/<head commit>/plan.md` | What changed, the scenarios per ticket, what was not drafted and what it needs, the fixtures needed, the journeys to rerun, the files that no scenario covers, the trial run, and the documents that the planner was told to read |
 
 The output ends with the commands of the next steps:
 
@@ -176,13 +183,14 @@ SHOP-482 (behaviour): 2 scenarios
 SHOP-490 (config): 1 scenario
 not drafted: 1
 plan: .semar/plans/9f3c2ab41d07/plan.md
+tried: 3 of 5 steps, 0 problems returned, 1 for a second look
 next:
   semar run --all --build 9f3c2ab41d07
   semar confirm --all
   semar run --all --build 9f3c2ab41d07
 ```
 
-Read `plan.md` and the scenario files before you run them. The model read them from the code, and nothing was sent yet.
+Read `plan.md` and the scenario files before you run them. The model read them from the code. The only requests sent so far are the read-only ones of the [trial run](#the-trial-run).
 
 **3. Run against the environment.**
 
@@ -209,10 +217,46 @@ semar activity latest        # every request that was sent, in order
 **What `plan` does not do yet:**
 
 * It does not read the tracker. A ticket is its key and the commits that name it.
-* It does not invent data of the environment. A scenario that needs an existing record, such as the ID of an order that the test account may read, is listed in `plan.md` under "Not drafted" with what it needs.
-* It drafts requests from the source. It does not try them against the service first.
+* It does not invent data of the environment. A scenario that needs an existing record, such as the ID of an order that the test account may read, names a [fixture](#prepare-data-with-fixtures) when the repository has one that fits. When none fits, the scenario is listed in `plan.md` under "Not drafted" with what it needs, and under "Fixtures needed" with a proposal. A person writes the fixture.
+* It tries only the read-only steps against the service, once. It never tries a step that writes.
 
-**What leaves your machine.** `plan` sends parts of your source and the diff to the model provider that you chose, through your own account or key. The line that `plan` prints at its start names the provider. It sends no token, no address of your environment, and no file outside the copy. `changes`, `run`, `confirm`, and `activity` send nothing to a model.
+**What leaves your machine.** `plan` sends parts of your source and the diff to the model provider that you chose, through your own account or key. The line that `plan` prints at its start names the provider. It sends no token, no address of your environment, and no file outside the copy. `changes`, `run`, `confirm`, and `activity` send nothing to a model. The trial run sends requests from your machine to your own environment. It sends nothing of the responses to the model except a status number and the name of a capture.
+
+### The trial run
+
+A draft can have a wrong path, a wrong method, or a capture that finds nothing, and none of that shows until the first run. So after a draft passes validation, code sends the read-only steps of the draft to the environment, once, and returns the problems to the planner inside the three attempts that it already has.
+
+**What is sent.** Only a step that the effects policy of the environment calls a read: a `GET` or `HEAD`, or a request that you list under `effects.reads`, and never one under `effects.deny`. A step that writes is "not tried". So is a step that matches `effects.once`, a step that needs a value that no read gave, and a fixture `create`. A fixture `find` is sent, so the trial shows whether a record exists. A trial sends at most 50 requests, each with a 10 second timeout, and stops after 2 minutes. The trial uses the auth profile of the plan, so the token variable of that profile must be set when you run `semar plan`.
+
+**What goes back to the planner.**
+
+| The environment answered | What happens |
+| --- | --- |
+| 405 | Back to the planner: the method is likely wrong |
+| 404 on a route that the API document had before the change, or that no API document has | Back to the planner: the path or the route is likely wrong |
+| 404 on a route that only the new API document has, or when there is no API document | Not sent back. `plan.md` lists it under "Needs a second look", because the route may be new |
+| 400 or 422 | Back to the planner: a parameter or a header is likely wrong |
+| 401 or 403 | Back to the planner, with the name of the auth profile |
+| A capture finds nothing | Back to the planner |
+| 5xx | Not sent back. `plan.md` lists it under "Needs a second look", because it may be a defect |
+
+A step whose expected results include a status from 400 to 499 gets no status problem, because a refusal is often the behaviour under test. The planner is told the status number and the capture name. It never sees a body, a header, or a value of a response, so it cannot copy a response into an expected result. After a trial, a later draft must keep the expected results of each scenario that it keeps.
+
+**What it never does.** A trial result is not a test result. It never counts as a pass, and no expected result is compared with it. Problems that remain after the third attempt are listed in `plan.md` under "Problems that remain", and the plan is still written.
+
+`plan.md` has a section "Trial run" with the result next to each step:
+
+```text
+### SHOP-482-05 A paid order is read back as paid
+
+- given order (order.paid): find found a record
+- read-paid-order: GET /v1/orders/{id} answered 200, capture status found
+- refund: not tried: writes
+```
+
+The section names the build that the environment ran. The change is usually not deployed yet, so that is often the build before it. Every request of the trial is stored in a run of its own, and `semar activity <run id>` lists them.
+
+**Turn it off.** Pass `--no-trial` for one run, or set `plan.trial: false` in `.semar/semar.yaml` (it is `true` by default). The trial is skipped, with one line on standard error, when no account can be prepared, for example because the token variable is not set, or when the environment is a production one that `--env` did not name. A trial never makes `semar plan` fail.
 
 ### Choose the model
 
@@ -424,6 +468,328 @@ semar run --scenario SHOP-482-01 --build 9f3c2ab41d07; echo "exit $?"
 
 `testdata/e2e/` holds these files as a working example. Its configuration points at an address where nothing listens, so a run there ends as `blocked`. The tests in `internal/cli` run the same files against a sample service.
 
+### Prepare data with fixtures
+
+A scenario often needs data in a given state, such as a paid order, and making it can take calls to several services. A fixture is a reviewed file that does this. A scenario names the state it needs and holds no preparation steps.
+
+**1. Write the fixture** in `.semar/fixtures/<id>.yaml`. The file name is the ID, so this one is `order.paid.yaml`:
+
+```yaml
+apiVersion: semar/v1
+kind: Fixture
+id: order.paid
+description: A paid order of 1000 that belongs to the given customer
+version: 1.0.0
+owner: team-orders
+params:
+  customer: { default: "{{data.customers.default}}" }
+find:
+  - request: { service: orders, method: GET, path: /v1/orders, query: { status: paid, customer: "{{customer}}" } }
+    captures: [{ name: id, jsonpath: "$.data[0].id" }]
+create:
+  - request: { service: orders, method: POST, path: /v1/orders, json: { amount: 1000, customer: "{{customer}}", ref: "semar-{{run.id}}" } }
+    captures: [{ name: id, jsonpath: "$.data.id" }]
+  - request: { service: payments, method: POST, path: /v1/payments, json: { orderId: "{{id}}" } }
+  - request: { service: orders, method: GET, path: "/v1/orders/{{id}}" }
+    until: { jsonpath: "$.data.status", equals: paid, timeout: 30s, every: 1s }
+outputs: [id]
+cleanup:
+  - request: { service: orders, method: POST, path: "/v1/orders/{{id}}/cancel" }
+```
+
+What each part does:
+
+* `find` runs first. It must only read. When it gives a record, Semar uses it and `create` does not run. A `find` that gets a 404, an empty list, or a capture with no value gives nothing.
+* `create` runs only when `find` gave nothing. A step with `until` repeats a read until the value matches. It waits `every` first (2 seconds when unset), then doubles the wait up to 15 seconds. `timeout` is required and at most 15 minutes. A fixed sleep does not exist.
+* `outputs` names the captures that a scenario may read, as `{{<as>.<output>}}`.
+* `cleanup` runs after the last step of the scenario, also after a failure or an interrupt, in reverse order of the `given` entries. It runs only for what `create` made. A record that `find` reused is never cleaned up. A state that cannot be undone declares no `cleanup`, and the report then says that the record is kept.
+* `{{run.id}}` is the ID of the run, so that two runs do not share a record. Put it in a note or a reference field of the record, where the service allows. `{{customer}}` is a parameter, and `{{data.customers.default}}` is a value of the environment. See [Configuration](#configuration) for `data`.
+* A fixture holds no secret. A header such as `Authorization` is refused, and a variable that is not a parameter, a capture, `run.id`, or `data.*` is refused. Each step is sent with the session of its service: set `authProfile` on the service. A service with none uses the auth profile of the scenario.
+* Every step goes through the same rules as a scenario step: the host list, the methods, `effects.deny`, `effects.once`, and `effects.mode`. A step on the deny list or the once list is refused. A `find` step that writes is refused. On a `read_only` environment no `create` is sent.
+* A fixture cannot use another fixture.
+
+**2. Name it in a scenario** with `given`, and read its outputs in the script:
+
+```yaml
+apiVersion: semar/v1
+kind: Scenario
+id: SHOP-482-05
+title: A paid order is read back as paid
+ticket: SHOP-482
+intent: >
+  Given a paid order, its owner reads it and sees the status paid.
+surface: api
+authProfile: default
+given:
+  - fixture: order.paid
+    as: order
+steps:
+  - id: read-paid-order
+    action: Read the paid order
+    hint: { method: GET, path: "/v1/orders/{id}" }
+    expect:
+      - check: { status: 200 }
+        source: ticket
+        cite: "SHOP-482: a paid order can be read by its owner"
+      - check: { jsonpath: "$.data.status", equals: paid }
+        source: ticket
+        cite: "SHOP-482: the order stays paid"
+```
+
+The script step is `request: { service: orders, method: GET, path: "/v1/orders/{{order.id}}" }`. A `given` entry can also set `with: { customer: c-2 }` to give a parameter, and `lease: exclusive`. `testdata/e2e-fixtures/` holds these files as a working example. `given` is part of what a person confirms, so adding or changing it lapses the confirmation of the scenario.
+
+**3. Approve it.** A fixture counts only after a person approves it, as an expected result counts only after it is confirmed.
+
+```bash
+semar confirm --fixture order.paid      # prints each step, then asks "Approve it? [y/N]"
+```
+
+`--yes` skips the question, and `--fixture` can repeat. The approval names the version and a hash of the whole fixture. A change to the file lapses it, and you approve again. It is stored under `.semar/store/approvals/fixtures/` with your name and the words "local, unverified identity", as a confirmation is. Until a fixture is approved, a scenario that names it ends `blocked` and sends nothing.
+
+**4. Look at the catalogue and check that it works.**
+
+```bash
+semar fixture list --env uat
+semar fixture check --all --env uat
+```
+
+`list` prints one line for each fixture, then each file that is not valid with its problem. With `--env` it also shows the health on that environment and checks each fixture against the effects policy of that environment:
+
+```text
+order.paid  1.0.0  team-orders  approved  not checked on uat  used by SHOP-482-05
+```
+
+`check` runs `find`, then `create`, then `cleanup`. It runs `create` also when `find` found a record, so that `create` is checked too. This sends writes to the environment, under the effects policy, and a fixture that is not approved is not run. On a `read_only` environment a fixture with `create` steps is not fully checked. A production environment must be named with `--env`. Each check stores a health record in `.semar/store/fixture-health/<env>/<id>.json`. A record counts only for the fixture as it was when it was checked. A fixture whose last check failed blocks every scenario that uses it, with "fixture unhealthy". Semar has no scheduler: run `semar fixture check` from your own scheduler or pipeline. The exit code is 0 when every fixture is healthy, 1 when one is unhealthy, 2 when one was not fully checked, and 3 for an error.
+
+**Where leases live.** A `lease: exclusive` on a fixture or on a `given` entry reserves one record for one run at a time on this machine. The lease is an operating system file lock under `leases/` in the Semar home: `$SEMAR_HOME`, else `$XDG_CONFIG_HOME/semar`, else `~/.config/semar`. It is never in the repository. The lock is released when the process ends, also after a crash. When `find` returns a record that another run holds, Semar treats `find` as giving nothing and goes to `create`. When the fixture has no `create`, Semar waits up to 2 minutes and then ends the scenario `blocked` with "lease not available". A lease covers one machine. Runners on several machines are not covered, and the lock on Windows has not been tried on a Windows machine.
+
+**What the planner does with fixtures.** The planner sees the catalogue: for each fixture its ID, description, parameters, and outputs, and whether it is approved. It picks a fixture by its description and never writes a multi-service flow. When no fixture gives the state that a scenario needs, it does not draft the scenario. `plan.md` lists it under "Not drafted" and under "Fixtures needed", with a proposed fixture. A person writes the fixture, approves it, and plans again. A fixture file that is not valid stays out of the catalogue, and `semar plan` prints one line about it. Read the `Given` lines of `plan.md`: code checks that a fixture and its outputs exist, and not that the fixture gives the state that the scenario needs.
+
+**What `blocked` means.** When a fixture cannot give its state, the scenario ends `blocked` with the reason, and no scenario step is sent. A fixture never makes a scenario `failed`, because a failed preparation says nothing about the behaviour under test.
+
+| What the report says | What to do |
+| --- | --- |
+| `fixture order.paid is not approved` | Run `semar confirm --fixture order.paid` |
+| `fixture order.paid (as order) is missing` | The scenario names a fixture that has no valid file in `.semar/fixtures` |
+| `fixture unhealthy` | The last `semar fixture check` failed. Fix the fixture or the environment, and check again |
+| `find gave nothing and create step 2 answered 500` | The fixture could not make the state. Fix the fixture, or look at the service |
+| `until` waited and the value never matched | The condition did not hold within `timeout`. The text names the step and the number of attempts |
+| `this environment is read-only` | `find` found no record and `create` may not run. Use an environment that allows writes, or make the record |
+| `fixture effect unknown` | A `create` may have reached the service. Nothing was sent again, and the report lists the record as possibly left |
+| `lease not available` | Another run on this machine holds the record |
+
+Cleanup never changes an outcome. A record that cleanup could not remove is listed in the report under "Still exists". Each scenario of the report shows what it was given, for example `Given order: order.paid 1.0.0 (hash 8b38156352ff), made by create; cleanup done`.
+
+### Test a business flow with a journey
+
+A journey is a business flow that crosses services, such as "an order is placed, paid, and shown as paid". A scenario tests one service. No service owns a journey: a named person, the owner, does. A journey runs one leg at a time against one set of builds, and its result is valid only for those builds.
+
+Only API legs are built. A leg on the web or on Android is refused when the file loads.
+
+**1. Write the journey** in `.semar/journeys/<id>.yaml`. The file name is the ID.
+
+```yaml
+apiVersion: semar/v1
+kind: Journey
+id: checkout
+title: An order is placed, paid, and shown as paid
+owner: team-commerce
+criticality: critical
+legs:
+  - id: place
+    surface: api
+    service: orders
+    steps:
+      - id: create
+        action: Create an order of 1000
+        hint: { method: POST, path: /v1/orders }
+        request: { method: POST, path: /v1/orders, json: { amount: 1000, ref: "semar-{{run.id}}" } }
+        captures: [{ name: id, jsonpath: "$.data.id" }, { name: amount, jsonpath: "$.data.amount" }]
+        expect: [{ check: { status: 201 }, source: person }]
+    outputs: [id, amount]
+  - id: pay
+    surface: api
+    service: payments
+    needs: [place]
+    steps:
+      - id: pay
+        action: Pay the order
+        hint: { method: POST, path: /v1/payments }
+        request: { method: POST, path: /v1/payments, json: { orderId: "{{place.id}}" } }
+        captures: [{ name: amount, jsonpath: "$.data.amount" }]
+        expect: [{ check: { status: 202 }, source: person }]
+    outputs: [amount]
+  - id: settled
+    surface: api
+    service: orders
+    needs: [pay]
+    steps:
+      - id: read
+        action: Read the order until it is paid
+        hint: { method: GET, path: "/v1/orders/{id}" }
+        request: { method: GET, path: "/v1/orders/{{place.id}}" }
+        captures: [{ name: amount, jsonpath: "$.data.amount" }]
+        expect: [{ check: { jsonpath: "$.data.status", equals: paid }, source: person }]
+    wait: { until: { jsonpath: "$.data.status", equals: paid }, timeout: 30s, every: 1s }
+    outputs: [amount]
+invariants:
+  - equal: ["{{place.amount}}", "{{pay.amount}}", "{{settled.amount}}"]
+```
+
+* `owner` and `criticality` (`critical` or `standard`) are required.
+* A leg names its `service`. Its steps are scenario steps with a `request` and `captures` written in the file. `needs` lists the legs that must pass first. A later leg reads an output of a leg that it needs, directly or through other legs, as `{{<leg>.<output>}}`. Any other reference is refused when the file loads. A leg ID has no hyphen.
+* `wait` repeats the last step of the leg, which must be a `GET` or `HEAD`, until the condition holds or `timeout` ends (at most 15 minutes). When the time ends, the leg is `failed`.
+* An invariant checks what only a journey can see: the values are the same in every leg. Two values are equal when both are decimals with the same value, or both are the same text. A value that holds a redaction marker is not compared.
+* `given` on the journey names fixtures that the whole flow shares. A leg has no `given` of its own. A leg uses the session of its service (`authProfile` on the service), else the `authProfile` of the journey.
+* Every request goes through the effects policy, as a scenario step does. A journey file has at most 12 legs, 20 steps per leg, and 8 invariants. `testdata/e2e-journeys/` holds this file as a working example.
+
+**2. Confirm the expected results.** A leg's expected results are confirmed as a scenario's are. A journey whose expected results nobody confirmed is `blocked`, and nothing is sent for it.
+
+```bash
+semar confirm --journey checkout        # repeatable. With --env <name>, the environment whose auth profiles the legs use
+```
+
+An expected result with the source `person` needs no confirmation.
+
+**3. List and run.**
+
+```bash
+semar journey list --env uat
+semar journey run checkout --env uat
+semar journey run --critical --env uat
+```
+
+`journey list` prints one line for each journey, with its criticality, owner, legs, and last stored result:
+
+```text
+checkout  critical  team-commerce  3 legs  no result yet
+```
+
+With `--env` it reads the builds that the environment runs now and shows a stored result as `stale` when any of them differs from the builds of that result. `journey run` takes journey IDs, `--critical` for every journey with criticality `critical`, or `--all`. It also takes `--env` and `--build`, as `semar run` does, and a production environment must be named. A journey is not run by `semar run`. Use `--critical` as a release gate in your own pipeline: Semar has no scheduler.
+
+A run writes a report at `.semar/runs/<run id>/report.md` with a section for each journey, and prints a summary and the path of the report. The exit code is 0 when every journey passed, 1 when one failed, and 2 otherwise, also when a journey file was skipped because it is not valid.
+
+**The manifest.** Before the first leg, Semar reads the build of every service that the journey calls, through the build probes of `semar.yaml` or `--build <service>=<commit>`, and hashes them. That is the manifest. It reads the builds again after the last leg. A result is valid only for its manifest. When a build differs at the end, or later, the result is `stale`.
+
+**Outcomes.** A journey has five outcomes. It has no `inconclusive`: a leg that ends `inconclusive` makes the journey `blocked`.
+
+| Outcome | Meaning |
+| --- | --- |
+| `passed` | Every leg passed, every invariant held, and the manifest was the same at the start and at the end |
+| `failed` | The first leg that did not pass ended `failed`, or an invariant is false. The report names the first failing leg, and the legs after it are `not_run` |
+| `blocked` | The manifest could not be read, a fixture of the journey failed, a leg could not start or ended `blocked` or `inconclusive`, an expected result is not confirmed, or an invariant could not be evaluated |
+| `stale` | A build changed during the journey |
+| `not_run` | The journey was not selected |
+
+`semar plan` also lists the journeys to rerun. For each journey that has a leg step with the same method and route as a step that the plan drafted, `plan.md` has a line under "Journeys to rerun" with the command to run it.
+
+### See that nothing is skipped: the use case ledger
+
+A plan can leave a use case untested without anyone noticing. The ledger makes each use case end in one stated state. The state is computed by code from the outcomes of the scenarios and journeys that cover it. It does not change any of those outcomes.
+
+**Where the use cases come from.** A use case is an obligation, in a file under `.semar/obligations/`.
+
+* `semar plan` writes `.semar/obligations/<ticket>.plan.yaml` for each ticket. It holds one obligation for each drafted scenario, one for each case that was not drafted, one for each file that no scenario covers, and one for each difference between a document and the code that the planner reported. A later plan of the same ticket adds entries and never removes or changes one. Delete an entry that no longer applies in a reviewed commit.
+* You write the others by hand in any other file of the folder, for example manual test cases that you copy from a spreadsheet:
+
+```yaml
+apiVersion: semar/v1
+kind: Obligations
+obligations:
+  - id: refunds/refund-email
+    title: The customer gets an email about the rejection
+    source: testcase
+    cite: "TC-1042: the customer is told about the rejection by email"
+    journeys: []
+    manual:
+      kind: other
+      text: The email leaves the test environment
+      steps: ["Sign in to the test mailbox of semar-qa-1.", "Find the email sent after the run."]
+      expected: The customer is told about the rejection by email
+      writtenBy: person
+```
+
+An obligation has an ID like `<group>/<name>`, a title, and a `source`: `criterion`, `diff`, `knowledge`, `testcase`, `feature_map`, or `defect`. It then has one of these: `covers`, a list of scenario IDs; `journeys`, a list of journey IDs; a `gap`, a declared reason with no cover; or a `manual` reason with steps and an expected result. A `cite` is required for `criterion`, `testcase`, and `defect`. Semar shows it and does not check it. A key `state` is refused, because only code gives a state. With `ticket` at the top of the file, every ID starts with the ticket and a slash. A file with a problem stops `semar ledger` with exit 3, and the problems are listed.
+
+**The states.** The first row that matches gives the state.
+
+| State | When |
+| --- | --- |
+| `failed` | A covering scenario or journey failed. This shows even under a deferral or a manual reason |
+| `deferred` | A person deferred it, and the deferral has not expired |
+| `needs_a_person` | It has a `manual` reason |
+| `verified` | At least one scenario or journey covers it, and every one passed on a current build, with the scenario unchanged since the run |
+| `blocked` | Anything else. The reasons name each covering item that is not `passed`, or say that nothing covers it, or give the `gap` |
+
+An `inconclusive`, `stale`, or `not_run` cover gives `blocked`, and the reason names the missing piece, such as a confirmation or a run on the current build. A pass counts only while the scenario file still has the expected results that the run judged. After you edit them, the use case is `blocked` with "rerun". An obligation with no cover, no `gap`, and no `manual` reason is a defect of the plan. It is listed first, as "use case with no test and no reason".
+
+**Show the ledger.**
+
+```bash
+semar ledger --env uat
+```
+
+`semar ledger` prints one line with the counts, then the use cases in groups, with the first reason of each. Its flags are `--ticket <key>` (repeatable), `--env <name>`, `--build <commit>` with `--env`, `--run <id>`, and `--checklist`.
+
+```text
+5 use cases: 0 verified, 2 blocked, 2 need a person, 1 deferred. Checked by a person: 1 passed.
+
+Blocked (2)
+  SHOP-482/scenario-SHOP-482-01  Refund above the order total is rejected      SHOP-482-01 was deleted: no scenario or journey covers this
+  SHOP-482/not-drafted-1         A refund of a paid order by another customer  not drafted: needs fixture order.paid
+
+Needs a person (2)
+  SHOP-482/difference-1  The document and the code differ: the status of a refund above the total  A person decides whether the document or the code is right
+                                                                                                   passed, checked by a person
+  refunds/refund-email   The customer gets an email about the rejection                            The email leaves the test environment
+
+Deferred (1)
+  SHOP-482/uncovered-1  Changes in internal/refund/notify.go  deferred by tester until 2026-12-17: the change only sends an internal email
+```
+
+Results come from the newest complete run that holds them. Only results on the builds that the environment runs now count, and `--env` reads those builds. Without `--env`, Semar says on standard error that the builds were not read. `--run <id>` reads one run only and prints the manual checklist after the table. The exit code is 0 when every use case is `verified` or `deferred` and every manual result passed, 1 when a use case failed or a manual result failed, and 2 otherwise. With no obligation it prints `no use case: there is no obligation in .semar/obligations` and exits 2.
+
+**Defer a use case.** Leave it untested until a day, under your name:
+
+```bash
+semar ledger defer SHOP-482/uncovered-1 --reason "the change only sends an internal email" --until 2026-12-17
+```
+
+The day is after today and at most 180 days ahead, and the reason is one line. The use case shows as `deferred` until then, with your name and the reason. A deferral that expired is ignored, and the ledger says so. A use case that failed still shows as failed.
+
+**Record a manual check.** Every `needs_a_person` use case has a checklist with the steps and the expected result. `semar ledger --checklist` prints it:
+
+```text
+Manual checks for SHOP-482 (1)
+1. SHOP-482/difference-1  The document and the code differ: the status of a refund above the total
+   Why a person: A person decides whether the document or the code is right
+   Steps (written by code):
+     1. Read docs/refunds.md:14: the refusal is 409.
+     2. Read internal/refund/handler.go:41: the refusal is 422.
+     3. Decide which one is right, and change the other, or the scenario.
+   Expected: The document and the code agree
+   Cite: docs/refunds.md:14 (checked when the plan was made)
+   Record:   semar ledger record SHOP-482/difference-1 passed|failed --notes "<what you saw>"
+```
+
+Do the steps, then record what you saw:
+
+```bash
+semar ledger record SHOP-482/difference-1 passed --notes "the document is right: the code was changed"
+```
+
+A manual result is counted apart and shown as "checked by a person". It never makes a use case `verified`. It is only for a use case that needs a person. A record is stored in `.semar/store/obligations/` with your name and "local, unverified identity", and a new record never replaces an old one.
+
+**In the report.** The report of `semar run` opens with one line, and `semar run` prints it after the counts. It counts every use case whose ticket or `covers` touch a scenario of the run, on the builds of that run:
+
+```text
+4 use cases: 1 verified, 2 blocked, 1 needs a person
+```
+
+The next line names `semar ledger --ticket <key>`. A run that did not finish prints no line.
+
+Semar does not read the acceptance criteria of a ticket, the feature map, or past defects into obligations, and the planner proposes no obligation. Copy such use cases into a hand-written file.
+
 ### Configuration
 
 `.semar/semar.yaml` describes the environment to test, a UAT or a production one. `semar init` and the first `semar plan` write it from these flags:
@@ -479,6 +845,27 @@ Three rules to know:
 * **A result belongs to a build.** A run with no recorded build ends as `inconclusive`. With a build probe, Semar asks the service which commit it runs, before and after the run, and a change between the two makes the results `stale`. Without one, declare the build with `semar run --build <commit>`. The report then says that the build was declared and not read from the service.
 * **The harness is yours.** `semar plan` starts the `claude` or the `codex` on your `PATH`, or the absolute path in the environment variable `SEMAR_CLAUDE_BIN` or `SEMAR_CODEX_BIN`. The configuration cannot name a program to start, because it is a file of the repository under test.
 
+**Keys for fixtures, journeys, and the trial run.** `semar init` does not write these. Add them by hand when you need them.
+
+```yaml
+plan:
+  trial: true                                  # false turns the trial run off
+environments:
+  uat:
+    data:
+      customers.default: c-1                   # read as {{data.customers.default}} in a fixture
+    services:
+      - name: payments
+        baseUrl: https://payments.uat.example.com
+        authProfile: payments-tester           # the session of this service in a fixture or a journey leg
+```
+
+| Key | Meaning |
+| --- | --- |
+| `plan.trial` | `true` by default. `false` turns the [trial run](#the-trial-run) off. It must be a boolean |
+| `environments.<env>.data` | The data of the environment: a flat map from a dotted key to a string, at most 100 keys. A fixture reads a value as `{{data.<key>}}`, in a parameter default or in a `with` value |
+| `environments.<env>.services[].authProfile` | The auth profile that a fixture step or a journey leg uses for this service. It must be defined under `authProfiles`. A service with none uses the auth profile of the scenario |
+
 The file also takes `redact`, `policy`, `replay`, `providers`, `tickets`, and `plan` blocks. The [technical requirements](docs/TRD.md) and [Plan 12](docs/implementation/12-plan-from-a-diff.md) describe them.
 
 ### Commands
@@ -488,7 +875,7 @@ Every command takes `--dir <path>`, the root of the repository that holds `.sema
 | Command | What it does |
 | --- | --- |
 | `semar changes --diff <link or range>` | Prints the tickets, commits, and files of a change. No model |
-| `semar plan --diff <link or range>` | Drafts scenarios and scripts for a change, and writes `plan.md`. Tells the planner to read the documents that `knowledge` lists. Also takes `--provider <id>`, `--model <name>`, `--reasoning <level>`, `--no-setup`, `--max-scenarios <n>`, and `--no-fetch` |
+| `semar plan --diff <link or range>` | Drafts scenarios and scripts for a change, and writes `plan.md` and the obligations. Tells the planner to read the documents that `knowledge` lists, and sends the read-only steps of the draft once to the environment. Also takes `--provider <id>`, `--model <name>`, `--reasoning <level>`, `--no-setup`, `--no-trial`, `--max-scenarios <n>`, and `--no-fetch` |
 | `semar dashboard` | Opens a page on your machine to manage the model providers and see usage. `--no-open` prints the address only, `--port <n>` sets the port |
 | `semar providers` | Prints your providers and marks the one that would plan here. No model |
 | `semar init --base-url <url>` | Writes `.semar/semar.yaml`, with a `knowledge` entry for each conventional path that it finds |
@@ -496,6 +883,16 @@ Every command takes `--dir <path>`, the root of the repository that holds `.sema
 | `semar run --all` | Replays every scenario in `.semar/scenarios` |
 | `semar run --scenario <id>` | Replays one scenario. Repeat the flag for more |
 | `semar confirm <scenario id>` | Lists the expected results that need a person, and stores the confirmation. `--all` for every scenario, `--yes` to skip the question |
+| `semar confirm --fixture <id>` | Shows a fixture and approves it as it is now. Repeat the flag for more. It cannot be combined with a scenario ID or `--all` |
+| `semar confirm --journey <id>` | Confirms the expected results of every leg of a journey. Repeat the flag for more. `--env <name>` names the environment whose auth profiles the legs use |
+| `semar fixture list` | Lists the fixtures with their approval, their health, and the scenarios that use them. `--env <name>` shows the health on that environment and checks each fixture against its effects policy |
+| `semar fixture check (<id>... \| --all) --env <name>` | Runs `find`, `create`, and `cleanup` of fixtures on an environment and records their health. It sends writes. Also takes `--auth-profile <name>` and `--build <commit>` or `--build <service>=<commit>` |
+| `semar journey list` | Lists the journeys with their criticality, owner, legs, and last stored result. `--env <name>` marks a result `stale` when a build differs. Also takes `--build` |
+| `semar journey run (<id>... \| --critical \| --all)` | Runs journeys one leg at a time and writes a report. Also takes `--env <name>` and `--build` |
+| `semar ledger` | Shows the state of every use case in `.semar/obligations`. Also takes `--ticket <key>`, `--env <name>`, `--build`, `--run <id>`, and `--checklist` |
+| `semar ledger defer <id> --reason <text> --until <YYYY-MM-DD>` | Leaves a use case untested until a day, under your name |
+| `semar ledger record <id> passed\|failed --notes <text>` | Records what a person saw when they ran the manual checklist of a use case |
+| `semar export (ctrf \| junit \| sarif) <run id>` | Writes one stored run in a common format. `--out <file>` writes a new file, and `--force` replaces an existing one |
 | `semar activity <run id\|latest>` | Prints what a run did, in order. `--writes` shows only the requests that change data |
 | `semar version` | Prints the version |
 
@@ -515,7 +912,7 @@ report: .semar/runs/r-20261115T032840Z-d50b/report.md
 | --- | --- |
 | `passed` | Every expected result held, each one is confirmed where it needs to be, and the evidence is recorded |
 | `failed` | An expected result did not hold |
-| `blocked` | The scenario could not start or continue: no script, a setup step failed, or the environment refused a request |
+| `blocked` | The scenario could not start or continue: no script, a setup step failed, a fixture could not give its state, or the environment refused a request |
 | `inconclusive` | The run gives no verdict: a result is not confirmed, no build was recorded, or a write timed out |
 | `stale` | The build of the service changed during the run |
 | `not_run` | The run stopped before the scenario started |
@@ -535,12 +932,39 @@ The layout of `.semar/`:
 .semar/
   semar.yaml            environments, services, auth profiles, redaction, policy
   scenarios/            one YAML file per scenario, for example SHOP-482/SHOP-482-01.yaml
+  fixtures/             one YAML file per fixture, for example order.paid.yaml
+  journeys/             one YAML file per journey, for example checkout.yaml
+  obligations/          the use cases: <ticket>.plan.yaml from semar plan, and the files that you write
   plans/<head commit>/  plan.md and the accepted draft of one planned change
   runs/<run id>/        run.json, report.md, activity.jsonl, and the recorded exchanges of one run
-  store/                accepted scripts and confirmations
+  store/                accepted scripts and confirmations, fixture approvals and health, deferrals, and manual results
 ```
 
-Commit `semar.yaml` and `scenarios/` so that the team shares them. `runs/` holds recorded requests and responses of your environment, with secrets redacted. Decide with your team whether it belongs in the repository.
+Commit `semar.yaml`, `scenarios/`, `fixtures/`, `journeys/`, and `obligations/` so that the team shares them. `runs/` holds recorded requests and responses of your environment, with secrets redacted. A trial run, a fixture check, and a journey run each make a run directory of their own. Decide with your team whether `runs/` belongs in the repository. `store/` holds records that a person made with a local, unverified identity, so review what a committed `store/` adds.
+
+### Send results to your tools
+
+`semar export` writes one stored run in a common format, from the evidence that Semar stored. It sends nothing, and it computes no outcome.
+
+```bash
+semar export ctrf r-20261115T032840Z-d50b > results.json
+semar export junit r-20261115T032840Z-d50b --out junit.xml
+semar export sarif r-20261115T032840Z-d50b --out semar.sarif
+```
+
+The run ID is in the path on the `report:` line of `semar run`. The report goes to standard output, or with `--out <file>` to a new file. An existing file is refused unless you pass `--force`. The exit code is 0 when the report was written and 3 when it was not. It never shows the outcomes, because an export is not a gate: use the exit code of `semar run` for that.
+
+| Format | What it holds |
+| --- | --- |
+| `ctrf` | A JSON report with one test for each scenario: its name (the scenario ID and title), status, duration, the first reason as a message, every reason as a trace, and the ticket as the suite. It also holds the counts, the start and stop times, the environment, and the builds |
+| `junit` | JUnit XML with one test suite for each ticket and one test case for each scenario. A `failed` scenario is a `failure`, and a `blocked`, `inconclusive`, or `stale` one is an `error`, so that no pipeline shows it as green. The run, the environment, and the builds are properties |
+| `sarif` | SARIF 2.1.0 with the confirmed defects of the run only: one result for each false check on a confirmed expected result, and one for each broken invariant. Each result points at the scenario file and, when known, the line of the step. A `blocked` or `inconclusive` scenario is not a finding about the product, so it gives no result |
+
+Every export also carries the Semar outcome of each scenario beside the status of the format, so that none of the six outcomes is lost. `blocked`, `inconclusive`, and `stale` are never written as a pass. In `ctrf`, `not_run` is `skipped`, and `blocked`, `inconclusive`, and `stale` are `other`. In `junit`, `not_run` is `skipped`.
+
+An export is refused for a run that did not finish, for a run whose stored evidence changed after it was written (the message names the file), and for a run with no scenario result, such as a trial run or a fixture check. The evidence was redacted when it was stored, and an export adds no request and no header.
+
+**The versions of the formats are not verified.** Semar writes the fields that it knows of each format and checks them against a copy of that shape in its own tests. It has not run the output through the official schema of any of them, or through the reader of a CI system. `ctrf` is written without a `reportFormat` or a `specVersion` key, because Semar does not know which values the current schema wants. `junit` is the common dialect, with no schema claimed. `sarif` states version 2.1.0 and has no `$schema` key. Try the output in your own tool before you rely on it.
 
 ### When something goes wrong
 
@@ -554,6 +978,11 @@ Commit `semar.yaml` and `scenarios/` so that the team shares them. `runs/` holds
 | `semar plan` says that the binary `claude` was not found on `PATH` | Install Claude Code, or set `SEMAR_CLAUDE_BIN` to the absolute path of its binary |
 | `semar plan` says that the link names another repository | Run the command inside a clone of the repository in the link |
 | A fetch fails | Check that `git fetch origin` works in this clone, or pass `--no-fetch` to use the branches as they are |
+| `semar plan` prints `trial run skipped` | The trial could not start. The line says why, for example that no account can be prepared because the token variable is not set. Export it, or pass `--no-trial` to turn the trial off |
+| `blocked` with "fixture ... is not approved" | Run `semar confirm --fixture <id>`. [What `blocked` means](#prepare-data-with-fixtures) lists the other fixture reasons |
+| A journey is `blocked` and nothing was sent | Its expected results are not confirmed, or a build could not be read. Run `semar confirm --journey <id>`, or pass `--build <service>=<commit>` for a service with no probe |
+| `semar ledger` says that the builds were not read | Pass `--env <name>`, so that only results on the builds that the environment runs now count |
+| `semar export` is refused | The run did not finish, its stored evidence changed, or it has no scenario result. The message says which |
 
 ## Documents
 
@@ -564,6 +993,7 @@ Commit `semar.yaml` and `scenarios/` so that the team shares them. `runs/` holds
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | The test workflow from intake to release, who acts in each phase, and the exit criteria |
 | [docs/USER_SCENARIOS.md](docs/USER_SCENARIOS.md) | Walkthroughs from the user's side: setup, a failed scenario, pipeline mode, sign-in, and regression |
 | [docs/implementation/README.md](docs/implementation/README.md) | The implementation guide: engineering rules, architecture, dependencies, and the sequence of plans |
+| [Plan 16](docs/implementation/16-trial-run.md), [17](docs/implementation/17-fixtures.md), [18](docs/implementation/18-journeys.md), [19](docs/implementation/19-coverage-ledger.md), and [20](docs/implementation/20-exports.md) | The trial run, fixtures, API journeys, the use case ledger, and the exports, as built: the rules, the file formats, and the tests |
 
 ## Open questions
 
