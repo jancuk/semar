@@ -483,3 +483,30 @@ func TestPlanTrialNotBoolean(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthProfileDescription(t *testing.T) {
+	head := envHead + envBody + "    services:\n      - {name: orders, baseUrl: \"https://api.uat.example.com\"}\nauthProfiles:\n"
+	cfg, err := loadText(t, head+"  carol:\n    description: A member of another board, without the owner's rights\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.AuthProfiles["carol"].Description; got != "A member of another board, without the owner's rights" {
+		t.Fatalf("description = %q", got)
+	}
+	long := strings.Repeat("x", 201)
+	for name, text := range map[string]string{
+		"too long":          "  carol:\n    description: " + long + "\n",
+		"a control char":    "  carol:\n    description: \"two\\nlines\"\n",
+		"an escape":         "  carol:\n    description: \"bell\\x07\"\n",
+		"a bidi control":    "  carol:\n    description: \"a\\u202eb\"\n",
+		"invalid long edge": "  carol:\n    description: " + strings.Repeat("é", 201) + "\n",
+	} {
+		_, err := loadText(t, head+text)
+		if err == nil || !strings.Contains(err.Error(), "authProfiles.carol.description") {
+			t.Errorf("%s: want an error that names authProfiles.carol.description, got %v", name, err)
+		}
+	}
+	if _, err := loadText(t, head+"  carol:\n    description: "+strings.Repeat("é", 200)+"\n"); err != nil {
+		t.Errorf("200 characters must load: %v", err)
+	}
+}

@@ -100,6 +100,9 @@ func validate(c Config, name string) error {
 		if err := idcheck.Check("auth profile name", n); err != nil {
 			add("authProfiles: %v", err)
 		}
+		if problem := descriptionProblem(c.AuthProfiles[n].Description); problem != "" {
+			add("authProfiles.%s.description %s", n, problem)
+		}
 	}
 	return joinErrors(errs)
 }
@@ -244,3 +247,20 @@ func validatePlan(c Config, add func(string, ...any)) {
 
 // MaxPlanTimeout is the longest time that one planner draft may take.
 const MaxPlanTimeout = 24 * time.Hour
+
+const maxDescription = 200
+
+// descriptionProblem says why an account's description is refused, or "".
+func descriptionProblem(d string) string {
+	switch {
+	case !utf8.ValidString(d):
+		return "is not valid UTF-8"
+	case utf8.RuneCountInString(d) > maxDescription:
+		return fmt.Sprintf("is longer than %d characters", maxDescription)
+	case strings.ContainsFunc(d, func(r rune) bool {
+		return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
+	}):
+		return "holds a control or format character; use one plain line"
+	}
+	return ""
+}

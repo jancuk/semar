@@ -67,8 +67,11 @@ type Service struct {
 type BuildProbe struct{ Probe, URL, Commit string }
 
 type AuthProfile struct {
-	Session *SessionSpec      `yaml:"session"`
-	Secrets map[string]string `yaml:"secrets"`
+	// Description is one optional line, at most 200 characters, that tells the planner what the
+	// account can do. It is shown to the model, so it holds no control or format character.
+	Description string            `yaml:"description"`
+	Session     *SessionSpec      `yaml:"session"`
+	Secrets     map[string]string `yaml:"secrets"`
 }
 
 // SessionSpec's Value may hold {{secret.NAME}}.
