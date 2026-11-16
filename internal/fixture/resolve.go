@@ -121,6 +121,7 @@ type entry struct {
 	params  map[string]string // the parameters and run.id
 	vars    map[string]string // params and the captures of create, for cleanup
 	made    bool              // a create write reached the service, or may have
+	check   bool              // a health check: the last health record does not block it, and no lease is taken
 	release []func()
 	rec     domain.FixtureRecord
 }
@@ -195,7 +196,7 @@ func (r *Resolver) prepare(e *entry) []string {
 	if !approved {
 		return []string{fmt.Sprintf("fixture %s is not approved: run semar confirm --fixture %s", f.ID, f.ID)}
 	}
-	if r.d.Health != nil {
+	if r.d.Health != nil && !e.check {
 		rec, found, err := r.d.Health.Latest(r.d.Environment, f.ID)
 		if err != nil {
 			return []string{fmt.Sprintf("fixture %s: its health record could not be read: %v", f.ID, err)}
@@ -277,6 +278,9 @@ func (r *Resolver) params(f domain.Fixture, g domain.Given) (map[string]string, 
 }
 
 func (e *entry) exclusive() bool {
+	if e.check {
+		return false
+	}
 	if e.given.Lease != "" {
 		return e.given.Lease == domain.LeaseExclusive
 	}
