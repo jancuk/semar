@@ -1,0 +1,14 @@
+apiVersion: semar/v1
+kind: Obligations
+obligations:
+  - id: refunds/refund-email
+    title: The customer gets an email about the rejection
+    source: testcase
+    cite: "TC-1042: the customer is told about the rejection by email"
+    journeys: []
+    manual:
+      kind: other
+      text: The email leaves the test environment
+      steps: ["Sign in to the test mailbox of semar-qa-1.", "Find the email sent after the run."]
+      expected: The customer is told about the rejection by email
+      writtenBy: person

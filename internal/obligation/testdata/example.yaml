@@ -1,0 +1,29 @@
+apiVersion: semar/v1
+kind: Obligations
+ticket: SHOP-482
+obligations:
+  - id: SHOP-482/scenario-SHOP-482-01
+    title: Refund above the order total is rejected
+    source: diff
+    covers: [SHOP-482-01]
+  - id: SHOP-482/not-drafted-1
+    title: A refund of a paid order by another customer
+    source: diff
+    gap: "not drafted: needs fixture order.paid"
+  - id: SHOP-482/uncovered-1
+    title: Changes in internal/refund/notify.go
+    source: diff
+    gap: "no scenario covers internal/refund/notify.go: it only sends an email"
+  - id: SHOP-482/difference-1
+    title: "The document and the code differ: the status of a refund above the total"
+    source: knowledge
+    cite: "docs/refunds.md:14"
+    manual:
+      kind: judgement
+      text: A person decides whether the document or the code is right
+      steps:
+        - "Read docs/refunds.md:14: the refusal is 409."
+        - "Read internal/refund/handler.go:41: the refusal is 422."
+        - Decide which one is right, and change the other, or the scenario.
+      expected: The document and the code agree
+      writtenBy: code
