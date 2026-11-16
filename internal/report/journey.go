@@ -166,20 +166,26 @@ func journeyLines(journeys []domain.JourneyResult) []string {
 	return lines
 }
 
-// journeyHead says why a journey is not passed: the first reason of its first failing leg, else the
-// first reason of the journey.
+// journeyHead says why a journey is not passed. When the first reason of the journey comes from its
+// first failing leg, the head is that leg's own first reason. Otherwise, as for a changed build or an
+// invariant, it is the journey's reason, and the first failing leg follows when there is one.
 func journeyHead(j domain.JourneyResult) string {
 	if j.Outcome == domain.JourneyPassed {
 		return ""
 	}
-	if i := slices.IndexFunc(j.Legs, func(l domain.LegResult) bool { return l.Leg == j.FirstFailing }); j.FirstFailing != "" && i >= 0 {
-		if rs := j.Legs[i].Reasons; len(rs) > 0 {
-			return "first failing leg " + string(j.FirstFailing) + ": " + rs[0].Text
+	first := ""
+	if j.FirstFailing != "" {
+		first = "first failing leg " + string(j.FirstFailing)
+	}
+	fromLeg := len(j.Reasons) == 0 || first != "" && strings.HasPrefix(j.Reasons[0].Text, "leg "+string(j.FirstFailing)+" ")
+	if fromLeg {
+		if i := slices.IndexFunc(j.Legs, func(l domain.LegResult) bool { return l.Leg == j.FirstFailing }); i >= 0 && len(j.Legs[i].Reasons) > 0 {
+			return first + ": " + j.Legs[i].Reasons[0].Text
 		}
-		return "first failing leg " + string(j.FirstFailing)
+		return first
 	}
-	if len(j.Reasons) > 0 {
-		return j.Reasons[0].Text
+	if first != "" {
+		return j.Reasons[0].Text + "; " + first
 	}
-	return ""
+	return j.Reasons[0].Text
 }

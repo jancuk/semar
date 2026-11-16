@@ -167,6 +167,21 @@ func TestSummaryJourneyWithoutAFailingLeg(t *testing.T) {
 	}
 }
 
+func TestSummaryJourneyOfAChangedBuildNamesTheBuildAndTheLeg(t *testing.T) {
+	run := journeyFixture().Run
+	run.Journeys = run.Journeys[:1]
+	run.Journeys[0].Outcome = domain.JourneyStale
+	run.Journeys[0].Reasons = []domain.Reason{{Rule: domain.OutcomeStale, Text: "a build changed during the journey: orders 9f3c2ab then c0ffee1"}}
+	var b bytes.Buffer
+	if err := report.Summary(&b, run, ""); err != nil {
+		t.Fatal(err)
+	}
+	want := "checkout   stale  a build changed during the journey: orders 9f3c2ab then c0ffee1; first failing leg settled\n"
+	if !strings.Contains(b.String(), want) {
+		t.Errorf("summary:\n%s\nwant a line %q", b.String(), want)
+	}
+}
+
 func TestSummaryJourneyIsOneLineAndClean(t *testing.T) {
 	run := journeyFixture().Run
 	run.Journeys[0].Legs[2].Reasons[0].Text = "evil \x1b[31mred\x1b[0m\nline\u202e"
