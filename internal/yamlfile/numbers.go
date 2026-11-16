@@ -27,9 +27,9 @@ const (
 func ExactNumbers(data []byte, name string, kindOf func(key string) (NumberKind, bool)) error {
 	var doc yaml.Node
 	if err := yaml.NewDecoder(bytes.NewReader(data)).Decode(&doc); err != nil {
-		return decodeError(name, err)
+		return decodeError(name, data, err)
 	}
-	w := numberWalk{name: name, kindOf: kindOf, seen: map[numberVisit]bool{}}
+	w := numberWalk{name: name, root: &doc, kindOf: kindOf, seen: map[numberVisit]bool{}}
 	return w.find(&doc)
 }
 
@@ -40,6 +40,7 @@ type numberVisit struct {
 
 type numberWalk struct {
 	name   string
+	root   *yaml.Node
 	kindOf func(string) (NumberKind, bool)
 	// seen holds alias targets already walked, so a node that many aliases share is read once
 	seen map[numberVisit]bool
@@ -125,7 +126,7 @@ func (w *numberWalk) scalar(n *yaml.Node, key string, kind NumberKind) error {
 	}
 	got, shown, err := decodedNumber(n, kind)
 	if err != nil {
-		return decodeError(w.name, err)
+		return decodeErrorAt(w.name, w.root, err)
 	}
 	want, ok := textNumber(n.Value)
 	if !ok || got == nil || want.Cmp(got) != 0 {

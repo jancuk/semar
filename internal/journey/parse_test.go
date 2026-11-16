@@ -53,7 +53,7 @@ func TestParseRefusals(t *testing.T) {
 		{"a list", "- a\n- b\n", "x.yaml"},
 		{"too large", "apiVersion: semar/v1\n#" + strings.Repeat("x", MaxFileSize) + "\n", "larger than 256 KiB"},
 		{"leg given", edited(t, "    service: payments\n", "    service: payments\n    given: [{ fixture: order.paid, as: order }]\n"), "x.yaml:22: legs[1].given: put the fixtures of a journey under its given"},
-		{"timeout that is a number", edited(t, "timeout: 30s", "timeout: 30"), "into time.Duration"},
+		{"timeout that is a number", edited(t, "timeout: 30s", "timeout: 30"), "timeout must be a duration such as 30s"},
 		{"number that is not exact", edited(t, "amount: 1000,", "amount: 12345678901234567890123,"), "cannot be held exactly"},
 		{"operand that is not exact", edited(t, "status: 201", "status: 201, equals: 1e400"), "equals"},
 		{"non string key in a body", edited(t, "amount: 1000,", "amount: 1000, 7: x,"), "a mapping key must be a string"},

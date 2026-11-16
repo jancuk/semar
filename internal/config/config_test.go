@@ -510,3 +510,14 @@ func TestAuthProfileDescription(t *testing.T) {
 		t.Errorf("200 characters must load: %v", err)
 	}
 }
+
+func TestUnknownKeyAndTypeMismatchInPlainWords(t *testing.T) {
+	_, err := loadText(t, "version: 1\nenvironments:\n  uat:\n    kindd: test\n")
+	if err == nil || !strings.Contains(err.Error(), "semar.yaml:4: unknown key kindd in uat") {
+		t.Fatalf("unknown key: %v", err)
+	}
+	_, err = loadText(t, "version: yes\n")
+	if err == nil || strings.Contains(err.Error(), "config.") || strings.Contains(err.Error(), "cannot construct") {
+		t.Fatalf("type mismatch: %v", err)
+	}
+}

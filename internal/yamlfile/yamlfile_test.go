@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jancuk/semar/internal/yamlfile"
 )
@@ -19,7 +20,7 @@ func TestDecode(t *testing.T) {
 		want []string // substrings of the error. Empty means success
 	}{
 		{"valid", "a: 1\n", nil},
-		{"unknown key names file line and key", "a: 1\nb: 2\n", []string{"f.yaml:2", "b"}},
+		{"unknown key names file line and key", "a: 1\nb: 2\n", []string{"f.yaml:2: unknown key b"}},
 		{"empty", "", []string{"f.yaml", "empty"}},
 		{"two documents", "a: 1\n---\na: 2\n", []string{"f.yaml", "more than one"}},
 		{"malformed", "a: [1\n", []string{"f.yaml"}},
@@ -77,6 +78,47 @@ func TestJSONable(t *testing.T) {
 			}
 			if _, err := json.Marshal(got); err != nil {
 				t.Fatalf("result is not encodable: %v", err)
+			}
+		})
+	}
+}
+
+func TestDecodeMessagesNameNoGoType(t *testing.T) {
+	type inner struct {
+		N int `yaml:"n"`
+	}
+	type doc struct {
+		A int           `yaml:"a"`
+		F float64       `yaml:"f"`
+		B bool          `yaml:"b"`
+		S string        `yaml:"s"`
+		D time.Duration `yaml:"d"`
+		I inner         `yaml:"in"`
+		L []inner       `yaml:"l"`
+	}
+	cases := []struct{ name, in, want string }{
+		{"top level unknown key", "zz: 1\n", "f.yaml:1: unknown key zz"},
+		{"nested unknown key", "in:\n  q: 1\n", "f.yaml:2: unknown key q in in"},
+		{"unknown key in a list item", "l:\n  - n: 1\n  - q: 2\n", "f.yaml:3: unknown key q in l"},
+		{"int", "a: x\n", "f.yaml:1: a must be a number"},
+		{"float", "f: x\n", "f.yaml:1: f must be a number"},
+		{"nested int", "in:\n  n: x\n", "f.yaml:2: n must be a number"},
+		{"bool", "b: x\n", "f.yaml:1: b must be true or false"},
+		{"string", "s: [1]\n", "f.yaml:1: s must be text"},
+		{"mapping", "in: 3\n", "f.yaml:1: in must be a mapping"},
+		{"list", "l: 3\n", "f.yaml:1: l must be a list"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var d doc
+			err := yamlfile.Decode([]byte(c.in), "f.yaml", &d)
+			if err == nil || err.Error() != c.want {
+				t.Fatalf("got %v, want %q", err, c.want)
+			}
+			for _, bad := range []string{"yamlfile_test", "not found in type", "cannot construct", "int64", "float64", "[]"} {
+				if strings.Contains(err.Error(), bad) {
+					t.Fatalf("error %q names %q", err, bad)
+				}
 			}
 		})
 	}

@@ -228,7 +228,7 @@ invariants:
 
 | # | Rule. A problem is `<file>:<line>: <path>: <message>` | Example message |
 | --- | --- | --- |
-| J1 | Strict decode with `yamlfile.Decode` and `yamlfile.ExactNumbers` on `equals` and check operands. One document. At most 256 KiB | `field schedule not found in type domain.Journey` |
+| J1 | Strict decode with `yamlfile.Decode` and `yamlfile.ExactNumbers` on `equals` and check operands. One document. At most 256 KiB | `unknown key schedule` |
 | J2 | `apiVersion: semar/v1`, `kind: Journey`. `id` passes `idcheck.Check`, has no dot, and equals the file name | `id checkout does not match the file name check-out.yaml` |
 | J3 | `title` is one line. `owner` is set and passes `idcheck.Check` | `owner is required: a named product or QA owner owns a journey` |
 | J4 | `criticality` is `critical` or `standard` | `criticality must be critical or standard` |

@@ -60,7 +60,7 @@ func TestInvalidJourneyFileOneLine(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("%d lines about journey files, want one for the one problem:\n%s", len(lines), res.stderr)
 	}
-	contains(t, "the line", lines[0], "semar: journey file .semar/journeys/broken.yaml:", "field schedule not found", "; plan.md does not use it")
+	contains(t, "the line", lines[0], "semar: journey file .semar/journeys/broken.yaml:", "unknown key schedule", "; plan.md does not use it")
 }
 
 func TestPlanWithNoJourneyFileHasNoSection(t *testing.T) {

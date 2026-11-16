@@ -185,7 +185,7 @@ func TestJourneyListShowsEveryInvalidFileWithItsLine(t *testing.T) {
 	}
 	line := regexp.MustCompile(`^invalid: \.semar/journeys/%s\.yaml:[0-9]+: `)
 	for name, msg := range map[string]string{
-		"broken": "field schedule not found",
+		"broken": "unknown key schedule",
 		"web":    "web legs are not supported yet: this version runs api legs only; web legs come in M2 and android legs in M3",
 	} {
 		l, ok := lines[".semar/journeys/"+name+".yaml"]
@@ -268,7 +268,7 @@ func TestJourneyRunSkipsAnInvalidFileAndIsNotAPass(t *testing.T) {
 	r.writeRel(t, ".semar/journeys/broken.yaml", "apiVersion: semar/v1\nkind: Journey\nid: broken\nschedule: nightly\n")
 	for _, sel := range []string{"--all", "--critical"} {
 		res := r.must(t, cli.ExitUndecided, "journey", "run", sel)
-		contains(t, "stderr", res.stderr, ".semar/journeys/broken.yaml:", "field schedule not found", "this run skips it")
+		contains(t, "stderr", res.stderr, ".semar/journeys/broken.yaml:", "unknown key schedule", "this run skips it")
 		contains(t, "stdout", res.stdout, "checkout")
 		if got := r.lastRun(t); len(got.Journeys) != 1 || got.Journeys[0].Outcome != domain.JourneyPassed {
 			t.Errorf("%s: the valid journey did not run: %+v", sel, got.Journeys)

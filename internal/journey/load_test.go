@@ -111,7 +111,7 @@ func TestLoadReportsInvalidFilesAndKeepsValidOnes(t *testing.T) {
 	}
 	got := strings.Join(problemTexts(ps), "\n")
 	for _, want := range []string{
-		".semar/journeys/bad-key.yaml:7: field schedule not found",
+		".semar/journeys/bad-key.yaml:7: unknown key schedule",
 		".semar/journeys/check-out.yaml:3: id: id checkout does not match the file name check-out.yaml",
 		".semar/journeys/dir.yaml: journeys must be files directly in .semar/journeys",
 		".semar/journeys/empty.yaml: the file is empty",
