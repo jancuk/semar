@@ -21,15 +21,23 @@ func FromAction(a domain.Action, class effects.Class, evidencePath string) domai
 		realPath = pathOf(a.Request.URL)
 		target = method + " " + realPath
 	}
+	verb, object := verbOf(class, method), objectOf(a, class, template, realPath)
+	if a.Use.Pass == domain.PassCleanup && class != effects.Read {
+		// A cleanup step undoes what a fixture made, whatever its method: a cancel is a POST.
+		verb = domain.VerbDelete
+		if o := cleanedObject(a, template, realPath); o != nil {
+			object = o
+		}
+	}
 	return domain.Activity{
 		Seq:      a.Seq,
 		At:       a.At,
 		Actor:    a.By,
 		Use:      a.Use,
 		Surface:  a.Surface,
-		Verb:     verbOf(class, method),
+		Verb:     verb,
 		Target:   target,
-		Object:   objectOf(a, class, template, realPath),
+		Object:   object,
 		Result:   resultOf(a),
 		Why:      a.Why,
 		TraceID:  a.TraceID,
@@ -100,6 +108,28 @@ func objectOf(a domain.Action, class effects.Class, template, realPath string) *
 	}
 	if names := sortedKeys(a.Captures); len(names) > 0 {
 		obj.ID = a.Captures[names[0]]
+	}
+	return obj
+}
+
+// cleanedObject is the record that a cleanup path names: the last parameter of the template, with
+// the noun before it. /v1/orders/{id}/cancel names an order, not a cancel. It is nil when the
+// template has no parameter after a noun.
+func cleanedObject(a domain.Action, template, realPath string) *domain.ObjectRef {
+	segs := strings.Split(strings.Trim(template, "/"), "/")
+	p := -1
+	for i, s := range segs {
+		if isParam(s) {
+			p = i
+		}
+	}
+	if p < 1 || a.Response == nil {
+		return nil
+	}
+	obj := &domain.ObjectRef{Type: singular(segs[p-1])}
+	real := strings.Split(strings.Trim(realPath, "/"), "/")
+	if offset := len(real) - len(segs); offset >= 0 {
+		obj.ID = real[offset+p]
 	}
 	return obj
 }

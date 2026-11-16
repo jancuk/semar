@@ -282,3 +282,57 @@ func TestTimelineFilter(t *testing.T) {
 		})
 	}
 }
+
+// A cleanup step undoes what a fixture made, whatever its method: a cancel is a POST. It is a
+// delete of the record that its path names, so that the ledger marks the record cleaned up.
+func TestFromActionInTheCleanupPass(t *testing.T) {
+	req := func(method, template, rawURL string) *domain.HTTPRequest {
+		return &domain.HTTPRequest{Method: method, PathTemplate: template, URL: rawURL}
+	}
+	cases := []struct {
+		name       string
+		action     domain.Action
+		class      effects.Class
+		wantVerb   domain.Verb
+		wantObject *domain.ObjectRef
+	}{
+		{"cancel names the order", domain.Action{Request: req("POST", "/v1/orders/{{id}}/cancel", "https://t/v1/orders/o-1/cancel"), Response: &domain.HTTPResponse{Status: 200}},
+			effects.Write, domain.VerbDelete, &domain.ObjectRef{Type: "order", ID: "o-1"}},
+		{"delete keeps its object", domain.Action{Request: req("DELETE", "/v1/orders/{{id}}", "https://t/v1/orders/o-1"), Response: &domain.HTTPResponse{Status: 204}},
+			effects.Write, domain.VerbDelete, &domain.ObjectRef{Type: "order", ID: "o-1"}},
+		{"a prefix of the real path", domain.Action{Request: req("POST", "/v1/orders/{{id}}/cancel", "https://t/api/v1/orders/o-1/cancel"), Response: &domain.HTTPResponse{Status: 200}},
+			effects.Write, domain.VerbDelete, &domain.ObjectRef{Type: "order", ID: "o-1"}},
+		{"no parameter falls back to the path", domain.Action{Request: req("POST", "/v1/jobs", "https://t/v1/jobs"), Response: &domain.HTTPResponse{Status: 200}},
+			effects.Write, domain.VerbDelete, &domain.ObjectRef{Type: "job"}},
+		{"a read stays a read", domain.Action{Request: req("GET", "/v1/orders/{{id}}", "https://t/v1/orders/o-1"), Response: &domain.HTTPResponse{Status: 200}},
+			effects.Read, domain.VerbRead, &domain.ObjectRef{Type: "order", ID: "o-1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.action.Seq = 3
+			tc.action.Use.Pass = domain.PassCleanup
+			got := activity.FromAction(tc.action, tc.class, "e")
+			if got.Verb != tc.wantVerb || !reflect.DeepEqual(got.Object, tc.wantObject) {
+				t.Errorf("verb %q object %+v, want %q %+v", got.Verb, got.Object, tc.wantVerb, tc.wantObject)
+			}
+		})
+	}
+	// The same cancel in another pass is an ordinary write.
+	a := domain.Action{Seq: 3, Request: req("POST", "/v1/orders/{{id}}/cancel", "https://t/v1/orders/o-1/cancel"), Response: &domain.HTTPResponse{Status: 200}}
+	a.Use.Pass = domain.PassScenario
+	if got := activity.FromAction(a, effects.Write, "e"); got.Verb != domain.VerbCreate {
+		t.Errorf("verb in the scenario pass = %q, want create", got.Verb)
+	}
+}
+
+func TestLedgerMarksARecordCleanedByACleanupCancel(t *testing.T) {
+	ok := &domain.HTTPResponse{Status: 200}
+	create := domain.Action{Seq: 1, Request: &domain.HTTPRequest{Method: "POST", PathTemplate: "/v1/orders", URL: "https://t/v1/orders"}, Response: &domain.HTTPResponse{Status: 201}, Captures: map[string]string{"id": "o-1"}}
+	cancel := domain.Action{Seq: 2, Request: &domain.HTTPRequest{Method: "POST", PathTemplate: "/v1/orders/{{id}}/cancel", URL: "https://t/v1/orders/o-1/cancel"}, Response: ok}
+	cancel.Use.Pass = domain.PassCleanup
+	entries := []domain.Activity{activity.FromAction(create, effects.Write, ""), activity.FromAction(cancel, effects.Write, "")}
+	want := []activity.LedgerRow{{Verb: domain.VerbCreate, Object: domain.ObjectRef{Type: "order", ID: "o-1"}, CleanedUp: true}}
+	if got := activity.Ledger(entries); !reflect.DeepEqual(got, want) {
+		t.Errorf("ledger = %+v, want %+v", got, want)
+	}
+}
