@@ -45,6 +45,16 @@ func Needs(src domain.Source, trust []domain.Source) bool {
 	return src != domain.SourcePerson && slices.Contains(trust, src)
 }
 
+// NeedsExpectation is Needs for one expectation. An expectation that a model wrote (by: model)
+// always needs a person, whatever its source and whatever trust lists, because a model translated
+// the source into the check. A person's own expectation never needs one.
+func NeedsExpectation(e domain.Expectation, trust []domain.Source) bool {
+	if e.Source == domain.SourcePerson {
+		return false
+	}
+	return e.By == "model" || Needs(e.Source, trust)
+}
+
 // Local keeps one file per user at <root>/store/confirmations/<scenario>/<hash>/<user>.json.
 type Local struct{ root string }
 

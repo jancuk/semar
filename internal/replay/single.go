@@ -62,6 +62,10 @@ func (r *Runner) RunOne(ctx context.Context, in Single) (Replayed, error) {
 		run.blocked = []string{"the scenario has given entries, and RunOne does not resolve given entries: pass their outputs in Vars"}
 		return out(nil)
 	}
+	if blocked := r.unknownAccounts(in.Scenario); len(blocked) > 0 {
+		run.blocked = blocked
+		return out(nil)
+	}
 	vars, outputs := presets(in.Vars)
 	if blocked := scriptBlocked(script.ValidateWith(withHeads(in), withHash(in), outputs)); len(blocked) > 0 {
 		run.blocked = blocked
@@ -118,7 +122,7 @@ func (r *Runner) Resend(ctx context.Context, c api.Call, attempt int, step domai
 	res, err := r.d.Engine.Do(ctx, c)
 	var ev verdict.StepEvidence
 	if res.Action.ID != "" {
-		ev = evaluate(step, res.Action)
+		ev = evaluate(step, res.Action, nil, nil)
 	}
 	return ev, res.Captured, err
 }

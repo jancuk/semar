@@ -581,7 +581,7 @@ func unconfirmedWhy(store confirm.Store, trust []domain.Source, sc domain.Scenar
 	var needed []domain.Source
 	for _, st := range sc.Steps {
 		for _, e := range st.Expect {
-			if confirm.Needs(e.Source, trust) {
+			if confirm.NeedsExpectation(e, trust) {
 				needed = append(needed, e.Source)
 			}
 		}

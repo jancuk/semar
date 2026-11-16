@@ -61,6 +61,9 @@ type Deps struct {
 	Workers  int             // default 4
 	Fixtures Fixtures        // nil: a scenario with given entries ends blocked
 	Run      domain.RunID    // the value of {{run.id}}
+	// Accounts are the auth profiles of the configuration that a step may act as (steps[].as).
+	// The profile of a scenario itself is always known.
+	Accounts []string
 }
 
 type Runner struct{ d Deps }
@@ -71,6 +74,7 @@ func New(d Deps) *Runner {
 	}
 	d.Services = slices.Clone(d.Services)
 	d.Trust = slices.Clone(d.Trust)
+	d.Accounts = slices.Clone(d.Accounts)
 	return &Runner{d: d}
 }
 
@@ -183,7 +187,7 @@ func (r *Runner) probe(ctx context.Context) (builds []domain.BuildRef, failed []
 // confirmation reads the store once per scenario. An expectation counts as confirmed when its
 // source needs no person, or when a record names its source. A store that cannot be read confirms nothing.
 func (r *Runner) confirmation(sc domain.Scenario, run *replayed) func(domain.Expectation) bool {
-	needs := func(e domain.Expectation) bool { return confirm.Needs(e.Source, r.d.Trust) }
+	needs := func(e domain.Expectation) bool { return confirm.NeedsExpectation(e, r.d.Trust) }
 	var sources []domain.Source
 	if r.d.Confirm != nil && slices.ContainsFunc(sc.Steps, func(st domain.Step) bool { return slices.ContainsFunc(st.Expect, needs) }) {
 		rec, found, err := r.d.Confirm.Get(sc.ID, domain.ExpectHash(sc))
@@ -207,6 +211,10 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (run replayed, 
 	run = newReplayed()
 	run.confirmed = r.confirmation(sc, &run)
 
+	if blocked := r.unknownAccounts(sc); len(blocked) > 0 {
+		run.blocked = blocked
+		return run, nil
+	}
 	s, found, err := r.d.Scripts.Script(sc.ID, domain.ExpectHash(sc))
 	switch {
 	case err != nil:
@@ -247,6 +255,22 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (run replayed, 
 		maps.Copy(vars, res.Vars)
 	}
 	return run, r.steps(ctx, sc, s, &run, vars, domain.PassScenario)
+}
+
+// unknownAccounts gives one reason for each auth profile that a step acts as and the configuration
+// does not have. The scenario's own profile is not checked here: it is the configuration's to supply.
+func (r *Runner) unknownAccounts(sc domain.Scenario) []string {
+	var blocked []string
+	for _, st := range sc.Steps {
+		if st.As == "" || st.As == sc.AuthProfile || slices.Contains(r.d.Accounts, st.As) {
+			continue
+		}
+		text := fmt.Sprintf("account %s is not in the configuration", st.As)
+		if !slices.Contains(blocked, text) {
+			blocked = append(blocked, text)
+		}
+	}
+	return blocked
 }
 
 func newReplayed() replayed {
@@ -296,6 +320,9 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 	}
 	var doErr error
 	interrupted := false
+	// shown holds the variables as a report may show them: a capture is the redacted value of
+	// the stored action, so a secret that a response held is never printed.
+	shown := maps.Clone(vars)
 	for i, step := range sc.Steps {
 		ss, ok := bound[step.ID]
 		if !ok || ss.Request == nil {
@@ -310,7 +337,10 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 		res, err := r.d.Engine.Do(ctx, call)
 		run.last = &call
 		if res.Action.ID != "" {
-			run.steps[step.ID] = evaluate(step, res.Action)
+			have, showing := maps.Clone(vars), maps.Clone(shown)
+			maps.Copy(have, res.Captured)
+			maps.Copy(showing, res.Action.Captures)
+			run.steps[step.ID] = evaluate(step, res.Action, have, showing)
 		}
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -332,6 +362,7 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 			break
 		}
 		maps.Copy(vars, res.Captured)
+		maps.Copy(shown, res.Action.Captures)
 	}
 	switch {
 	case ctx.Err() != nil && len(run.steps) == 0:
@@ -360,6 +391,10 @@ func buildCall(sc domain.Scenario, step domain.Step, ss domain.ScriptStep, vars 
 	if step.Hint != nil {
 		template = step.Hint.Path
 	}
+	profile := sc.AuthProfile
+	if step.As != "" {
+		profile = step.As
+	}
 	return api.Call{
 		Use:          domain.UseCase{Pass: pass, Scenario: sc.ID, Step: step.ID},
 		By:           domain.ActorReplay,
@@ -370,17 +405,40 @@ func buildCall(sc domain.Scenario, step domain.Step, ss domain.ScriptStep, vars 
 		Query:        req.Query,
 		Headers:      req.Headers,
 		JSON:         body,
-		AuthProfile:  sc.AuthProfile,
+		AuthProfile:  profile,
 		Why:          step.Action,
 		Captures:     ss.Captures,
 	}, nil
 }
 
-// evaluate reads only the redacted, stored action.
-func evaluate(step domain.Step, a domain.Action) verdict.StepEvidence {
+// evaluate reads only the redacted, stored action. A variable in a string operand is filled in
+// from vars before the check; shown holds the same variables as a report may print them.
+func evaluate(step domain.Step, a domain.Action, vars, shown map[string]string) verdict.StepEvidence {
 	ev := verdict.StepEvidence{Action: &a, Invariants: check.Invariants(step, a)}
 	for _, e := range step.Expect {
-		ev.Checks = append(ev.Checks, check.Eval(e.Check, a))
+		ev.Checks = append(ev.Checks, evalExpectation(e.Check, a, vars, shown))
 	}
 	return ev
+}
+
+func evalExpectation(c domain.Check, a domain.Action, vars, shown map[string]string) check.Result {
+	if len(domain.OperandVariables(c)) == 0 {
+		return check.Eval(c, a)
+	}
+	template := check.Describe(c)
+	lookup := func(from map[string]string) func(string) (string, bool) {
+		return func(name string) (string, bool) { v, ok := from[name]; return v, ok }
+	}
+	filled, missing := domain.FillOperands(c, lookup(vars))
+	if len(missing) > 0 {
+		return check.Result{
+			State:    domain.CheckNotEvaluated,
+			Expected: template,
+			Detail:   "no value for " + strings.Join(missing, ", ") + " in the expected value",
+		}
+	}
+	res := check.Eval(filled, a)
+	display, _ := domain.FillOperands(c, lookup(shown))
+	res.Expected = check.Describe(display) + " (written as " + template + ")"
+	return res
 }

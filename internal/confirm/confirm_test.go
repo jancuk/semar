@@ -339,3 +339,28 @@ func TestGetReadsARecordThatAnEarlierVersionWrote(t *testing.T) {
 		t.Fatalf("Get = %+v, %v, %v", r, ok, err)
 	}
 }
+
+func TestNeedsExpectation(t *testing.T) {
+	trust := []domain.Source{domain.SourceDiff}
+	tests := []struct {
+		name string
+		e    domain.Expectation
+		want bool
+	}{
+		{"a trusted source", domain.Expectation{Source: domain.SourceDiff}, true},
+		{"an untrusted source", domain.Expectation{Source: domain.SourceTicket}, false},
+		{"a model's ticket expectation", domain.Expectation{Source: domain.SourceTicket, By: "model"}, true},
+		{"a model's testcase expectation", domain.Expectation{Source: domain.SourceTestcase, By: "model"}, true},
+		{"a person's own expectation", domain.Expectation{Source: domain.SourcePerson, By: "model"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := confirm.NeedsExpectation(tt.e, trust); got != tt.want {
+				t.Errorf("NeedsExpectation = %v, want %v", got, tt.want)
+			}
+			if got := confirm.NeedsExpectation(tt.e, nil); got != (tt.e.By == "model" && tt.e.Source != domain.SourcePerson) {
+				t.Errorf("with no trust, NeedsExpectation = %v", got)
+			}
+		})
+	}
+}

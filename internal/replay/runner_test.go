@@ -58,6 +58,7 @@ type rigOptions struct {
 	wrap     func(http.Handler) http.Handler // wraps the sample application
 	sink     func(recorder.Sink) recorder.Sink
 	redact   config.Redact
+	sessions map[string]string // profile to token; the default is the token of every profile
 }
 
 func newRig(t *testing.T, o rigOptions) *rig {
@@ -90,7 +91,13 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	red, err := redact.New(o.redact, func() []string { return []string{token} }, key)
+	red, err := redact.New(o.redact, func() []string {
+		out := []string{token}
+		for _, v := range o.sessions {
+			out = append(out, v)
+		}
+		return out
+	}, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +121,10 @@ func newRig(t *testing.T, o rigOptions) *rig {
 		Policy:   pol,
 		Recorder: recorder.New(sink, red, classify, runID),
 		Services: map[string]string{"orders": srv.URL},
-		Session: func(context.Context, string) (string, string, error) {
+		Session: func(_ context.Context, profile string) (string, string, error) {
+			if v, ok := o.sessions[profile]; ok {
+				return "Authorization", "Bearer " + v, nil
+			}
 			return "Authorization", "Bearer " + token, nil
 		},
 		Run:     runID,

@@ -87,7 +87,7 @@ func needsConfirmation(sc domain.Scenario, trust []domain.Source) unconfirmed {
 	u := unconfirmed{sc: sc}
 	for _, st := range sc.Steps {
 		for _, e := range st.Expect {
-			if !confirm.Needs(e.Source, trust) {
+			if !confirm.NeedsExpectation(e, trust) {
 				continue
 			}
 			line := fmt.Sprintf("step %s: %s (source %s", st.ID, check.DescribeFull(e.Check), e.Source)
