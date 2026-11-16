@@ -15,8 +15,6 @@ import (
 	"github.com/jancuk/semar/internal/sampleapp"
 )
 
-const checkoutLeg = "checkout."
-
 var checkoutLegs = []string{"checkout.place", "checkout.pay", "checkout.settled"}
 
 // journeyRepo is a copy of testdata/e2e-journeys, served by orders and payments on 127.0.0.1. A wait
@@ -490,7 +488,7 @@ func TestJourneyRunOfAnInvalidFileShowsItSafely(t *testing.T) {
 	r.writeRel(t, ".semar/journeys/evil.yaml", "apiVersion: semar/v1\nkind: Journey\nid: evil\n\"x\\e[31mred\\u202eblue\": 1\n")
 	for _, args := range [][]string{{"journey", "run", "evil"}, {"journey", "run", "--all"}, {"confirm", "--journey", "evil", "--yes"}} {
 		res := r.semar(t, t.Context(), args...)
-		if strings.ContainsAny(res.stdout+res.stderr, "\x1b‮") {
+		if strings.ContainsAny(res.stdout+res.stderr, "\x1b\u202e") {
 			t.Errorf("semar %s printed a control character:\n%q", strings.Join(args, " "), res.stderr)
 		}
 		contains(t, "stderr", res.stderr, ".semar/journeys/evil.yaml:", `x\x1b[31mred`)
