@@ -6,6 +6,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/knowledge"
@@ -199,30 +200,57 @@ func headDocuments(sources []knowledge.Source) []openapi.Document {
 // scenarioKey matches a scenario between drafts by its ticket and title (D8).
 func scenarioKey(sc domain.Scenario) string { return sc.Ticket + "\x00" + normalTitle(sc.Title) }
 
+// routeKey is the method and route hint of the first step, which a rename keeps. It is "" when the
+// first step has no hint.
+func routeKey(sc domain.Scenario) string {
+	if len(sc.Steps) == 0 || sc.Steps[0].Hint == nil {
+		return ""
+	}
+	h := sc.Steps[0].Hint
+	return strings.ToUpper(h.Method) + " " + h.Path
+}
+
+// frozenScenario is a scenario as the first trial that saw it had it.
+type frozenScenario struct {
+	key, title, route string
+	steps             map[domain.StepID][]domain.Expectation
+}
+
+// frozenSet holds the expected results of every scenario that a trial has seen, in the order the
+// trials saw them.
+type frozenSet struct {
+	byKey map[string]*frozenScenario
+	all   []*frozenScenario
+}
+
+func newFrozen() *frozenSet { return &frozenSet{byKey: map[string]*frozenScenario{}} }
+
 // freeze keeps the expected results of every scenario that a trial has seen. The first trial
 // of a scenario decides, so that a scenario that is dropped and drafted again is held to it.
-func freeze(frozen map[string]map[domain.StepID][]domain.Expectation, scenarios []domain.Scenario) {
+func freeze(frozen *frozenSet, scenarios []domain.Scenario) {
 	for _, sc := range scenarios {
 		key := scenarioKey(sc)
-		if _, ok := frozen[key]; ok {
+		if _, ok := frozen.byKey[key]; ok {
 			continue
 		}
 		steps := make(map[domain.StepID][]domain.Expectation, len(sc.Steps))
 		for _, st := range sc.Steps {
 			steps[st.ID] = st.Expect
 		}
-		frozen[key] = steps
+		fs := &frozenScenario{key: key, title: sc.Title, route: routeKey(sc), steps: steps}
+		frozen.byKey[key] = fs
+		frozen.all = append(frozen.all, fs)
 	}
 }
 
 // afterTrial lists the scenarios that no trial has seen yet.
-func afterTrial(frozen map[string]map[domain.StepID][]domain.Expectation, scenarios []domain.Scenario) []domain.ScenarioID {
-	if len(frozen) == 0 {
+func afterTrial(frozen *frozenSet, scenarios []domain.Scenario) []domain.ScenarioID {
+	if len(frozen.all) == 0 {
 		return nil
 	}
 	var ids []domain.ScenarioID
 	for _, sc := range scenarios {
-		if _, ok := frozen[scenarioKey(sc)]; !ok {
+		if _, ok := frozen.byKey[scenarioKey(sc)]; !ok {
 			ids = append(ids, sc.ID)
 		}
 	}
@@ -232,29 +260,67 @@ func afterTrial(frozen map[string]map[domain.StepID][]domain.Expectation, scenar
 // changedExpectations is D8: a draft written after a trial keeps the expected results of every
 // scenario that it keeps. Only the checks count. A new cite or a new action is a repair. A new step
 // with expected results in a kept scenario is a change.
-func changedExpectations(frozen map[string]map[domain.StepID][]domain.Expectation, scenarios []domain.Scenario) []Problem {
+//
+// A scenario is matched by ticket and title. One that matches none is matched by the method and
+// route of its first step against the tried scenarios that this draft dropped, so that a rename
+// cannot carry a changed expected result. It passes when it keeps the expected results of one of them.
+func changedExpectations(frozen *frozenSet, scenarios []domain.Scenario) []Problem {
+	present := make(map[string]bool, len(scenarios))
+	for _, sc := range scenarios {
+		present[scenarioKey(sc)] = true
+	}
 	var ps []Problem
 	for i, sc := range scenarios {
-		before, ok := frozen[scenarioKey(sc)]
-		if !ok {
+		if before, ok := frozen.byKey[scenarioKey(sc)]; ok {
+			msg := fmt.Sprintf("the expected results of %q changed after the trial run; an expected result comes from the code, "+
+				"never from what the environment answered: keep the expected results of the earlier draft", sc.Title)
+			ps = append(ps, stepChanges(before.steps, sc, i, msg)...)
 			continue
 		}
-		msg := fmt.Sprintf("the expected results of %q changed after the trial run; an expected result comes from the code, "+
-			"never from what the environment answered: keep the expected results of the earlier draft", sc.Title)
-		seen := map[domain.StepID]bool{}
-		for j, st := range sc.Steps {
-			seen[st.ID] = true
-			want, ok := before[st.ID]
-			// A step that the tried draft did not have may not bring expected results of its own.
-			if ok && !sameChecks(want, st.Expect) || !ok && len(st.Expect) > 0 {
-				ps = append(ps, Problem{Path: fmt.Sprintf("scenarios[%d].steps[%d].expect", i, j), Message: msg})
-			}
+		route := routeKey(sc)
+		if route == "" {
+			continue
 		}
-		for _, id := range slices.Sorted(maps.Keys(before)) {
-			if !seen[id] && len(before[id]) > 0 {
-				ps = append(ps, Problem{Path: fmt.Sprintf("scenarios[%d]", i), Message: msg})
+		var first []Problem
+		kept := false
+		for _, fs := range frozen.all {
+			if fs.route != route || present[fs.key] {
+				continue
+			}
+			msg := fmt.Sprintf("the expected results of %q, which has the first step of %q, changed after the trial run; an expected result comes from the code, "+
+				"never from what the environment answered: keep the expected results of the earlier draft", sc.Title, fs.title)
+			changes := stepChanges(fs.steps, sc, i, msg)
+			if len(changes) == 0 {
+				kept = true
 				break
 			}
+			if first == nil {
+				first = changes
+			}
+		}
+		if !kept {
+			ps = append(ps, first...)
+		}
+	}
+	return ps
+}
+
+// stepChanges compares the steps of a scenario with the expected results that a trial froze.
+func stepChanges(before map[domain.StepID][]domain.Expectation, sc domain.Scenario, i int, msg string) []Problem {
+	var ps []Problem
+	seen := map[domain.StepID]bool{}
+	for j, st := range sc.Steps {
+		seen[st.ID] = true
+		want, ok := before[st.ID]
+		// A step that the tried draft did not have may not bring expected results of its own.
+		if ok && !sameChecks(want, st.Expect) || !ok && len(st.Expect) > 0 {
+			ps = append(ps, Problem{Path: fmt.Sprintf("scenarios[%d].steps[%d].expect", i, j), Message: msg})
+		}
+	}
+	for _, id := range slices.Sorted(maps.Keys(before)) {
+		if !seen[id] && len(before[id]) > 0 {
+			ps = append(ps, Problem{Path: fmt.Sprintf("scenarios[%d]", i), Message: msg})
+			break
 		}
 	}
 	return ps

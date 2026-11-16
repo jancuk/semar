@@ -91,7 +91,7 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 	var problems []Problem
 	var previous []byte
 	var passed *accepted
-	frozen := map[string]map[domain.StepID][]domain.Expectation{}
+	frozen := newFrozen()
 	returned := 0
 	headAPI := headDocuments(in.Knowledge)
 	finish := func(a *accepted, attempts int) Output {
