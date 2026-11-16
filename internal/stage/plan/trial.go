@@ -230,7 +230,8 @@ func afterTrial(frozen map[string]map[domain.StepID][]domain.Expectation, scenar
 }
 
 // changedExpectations is D8: a draft written after a trial keeps the expected results of every
-// scenario that it keeps. Only the checks count. A new cite or a new action is a repair.
+// scenario that it keeps. Only the checks count. A new cite or a new action is a repair. A new step
+// with expected results in a kept scenario is a change.
 func changedExpectations(frozen map[string]map[domain.StepID][]domain.Expectation, scenarios []domain.Scenario) []Problem {
 	var ps []Problem
 	for i, sc := range scenarios {
@@ -243,7 +244,9 @@ func changedExpectations(frozen map[string]map[domain.StepID][]domain.Expectatio
 		seen := map[domain.StepID]bool{}
 		for j, st := range sc.Steps {
 			seen[st.ID] = true
-			if want, ok := before[st.ID]; ok && !sameChecks(want, st.Expect) {
+			want, ok := before[st.ID]
+			// A step that the tried draft did not have may not bring expected results of its own.
+			if ok && !sameChecks(want, st.Expect) || !ok && len(st.Expect) > 0 {
 				ps = append(ps, Problem{Path: fmt.Sprintf("scenarios[%d].steps[%d].expect", i, j), Message: msg})
 			}
 		}

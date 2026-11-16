@@ -582,3 +582,30 @@ func TestPlanMarkdownTrialProblemsSkipAndOff(t *testing.T) {
 		}
 	})
 }
+
+// D8 holds for a step that a kept scenario gains after the trial: its expected results did not
+// exist when the trial ran, so they may come from what the environment answered.
+func TestExpectationFrozenCatchesANewStep(t *testing.T) {
+	added := withProblem(t, func(d *Draft) {
+		st := d.Scenarios[0].Steps[1]
+		st.ID = "refund-again"
+		d.Scenarios[0].Steps = append(d.Scenarios[0].Steps, st)
+	})
+	tr := &fakeTrialer{trials: []Trial{{Steps: []TrialStep{readStep(405)}}, {}}}
+	p := scriptedDrafts([]byte(goodDraft), added, []byte(goodDraft))
+	in := input(t)
+	in.Trial = tr
+	if _, err := Run(t.Context(), p, in); err != nil {
+		t.Fatal(err)
+	}
+	want := "- `scenarios[0].steps[2].expect`: the expected results of \"Refund above the order total is rejected\" changed after the trial run"
+	if len(p.jobs) < 3 {
+		t.Fatalf("%d prompts, want 3: the changed draft was accepted", len(p.jobs))
+	}
+	if !strings.Contains(p.jobs[2].Prompt, want) {
+		t.Errorf("the third prompt does not refuse the new step:\n%s", p.jobs[2].Prompt)
+	}
+	if len(tr.calls) != 2 {
+		t.Errorf("%d trials, want 2: the draft with the new step is not tried", len(tr.calls))
+	}
+}
