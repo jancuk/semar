@@ -1225,7 +1225,7 @@ The change is usually not deployed at merge request time, so the trial meets the
 | A step whose expected results include a status from 400 to 499 | No status problem and no capture problem. A refusal is often the behaviour under test | Yes |
 | How a response compares with an expected result | Never. Expectations are not evaluated in a trial | No |
 
-The planner is told the status and the capture name only. No body, header, or value of a response reaches it. After a trial, a later draft must keep the expected results of each scenario that it keeps, matched by ticket and title. A change is a validation problem, and a scenario that was first drafted after a trial is marked in `plan.md`.
+The planner is told the status and the capture name only. No body, header, or value of a response reaches it. After a trial, a later draft must keep the expected results of each scenario that it keeps, matched by ticket and title, or for a renamed scenario by the method and route of its first step. A change is a validation problem, and so is a new step with expected results in a kept scenario. A rename that also changes the first step escapes the match, so a scenario that was first drafted after a trial is marked in `plan.md` for a person to review.
 
 ### Rules
 
