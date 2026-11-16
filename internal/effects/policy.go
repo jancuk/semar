@@ -107,6 +107,10 @@ func (p *Policy) Once(r Request) bool {
 	return matches(p.once, strings.ToUpper(r.Method), r.URL, true)
 }
 
+// ReadOnly reports whether the environment allows reads only. A caller that must not start a
+// sequence of writes it cannot finish, such as a fixture's create, asks before the first one.
+func (p *Policy) ReadOnly() bool { return p.readOnly }
+
 // Denied reports whether the deny list matches the request, whatever its host and the mode. A
 // caller that checks a request before it has a real host uses it, because Admit refuses the host first.
 func (p *Policy) Denied(r Request) bool {

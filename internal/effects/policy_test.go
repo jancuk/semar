@@ -407,3 +407,15 @@ func TestDenyNeverLooserThanPlainMatch(t *testing.T) {
 }
 
 func withParam(path string) string { return path + ";x=1" }
+
+func TestReadOnly(t *testing.T) {
+	for _, mode := range []string{"test_data", "read_only"} {
+		p, err := effects.New(env(mode))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := p.ReadOnly(); got != (mode == "read_only") {
+			t.Errorf("mode %s: ReadOnly() = %v", mode, got)
+		}
+	}
+}
