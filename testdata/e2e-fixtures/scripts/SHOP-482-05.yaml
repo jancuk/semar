@@ -1,0 +1,7 @@
+apiVersion: semar/v1
+kind: Script
+scenario: SHOP-482-05
+authoredBy: { instance: hand, model: none, harness: none }
+steps:
+  - step: read-paid-order
+    request: { service: orders, method: GET, path: "/v1/orders/{{order.id}}" }

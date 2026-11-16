@@ -32,12 +32,16 @@ const (
 	scenarioID = "SHOP-482-01"
 )
 
-// repo is a copy of testdata/e2e, served by one sample application.
+// repo is a copy of a tree of testdata, served by one sample application, and by a payments
+// service when the options ask for one.
 type repo struct {
-	dir    string
-	app    *sampleapp.App
-	opts   cli.Options
-	output []string // every stdout and stderr so far
+	dir         string
+	app         *sampleapp.App
+	pay         *sampleapp.Payments
+	ordersURL   string // "" for a repo that nothing serves
+	paymentsURL string
+	opts        cli.Options
+	output      []string // every stdout and stderr so far
 }
 
 type repoOptions struct {
@@ -46,13 +50,24 @@ type repoOptions struct {
 	offline bool // keep the committed address, where nothing listens
 	// session replaces the session value of the auth profile in semar.yaml.
 	session string
+	// tree is the directory of testdata to copy. The default is e2e.
+	tree string
+	// payments serves a payments service of the orders application on a second address, which
+	// replaces 127.0.0.1:7 in semar.yaml. Nil serves none.
+	payments *sampleapp.PaymentOptions
 }
+
+const paymentsTokenVar = "SEMAR_PAYMENTS_TOKEN"
 
 func newRepo(t *testing.T, o repoOptions) *repo {
 	t.Helper()
 	r := &repo{dir: t.TempDir()}
-	copyTree(t, filepath.Join("..", "..", "testdata", "e2e"), r.dir)
+	if o.tree == "" {
+		o.tree = "e2e"
+	}
+	copyTree(t, filepath.Join("..", "..", "testdata", o.tree), r.dir)
 	t.Setenv(tokenVar, token)
+	t.Setenv(paymentsTokenVar, "tok-pay")
 
 	var clock, ids atomic.Int64
 	start := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
@@ -89,7 +104,21 @@ func newRepo(t *testing.T, o repoOptions) *repo {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.rewriteConfig(t, func(s string) string { return strings.ReplaceAll(s, "127.0.0.1:9", u.Host) })
+	r.ordersURL = srv.URL
+	// One pass, so that an address written for the first service is not rewritten again.
+	replace := []string{"127.0.0.1:9", u.Host}
+	if o.payments != nil {
+		r.pay = sampleapp.NewPayments(r.app, *o.payments)
+		psrv := httptest.NewServer(r.pay)
+		t.Cleanup(psrv.Close)
+		pu, err := url.Parse(psrv.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.paymentsURL = psrv.URL
+		replace = append(replace, "127.0.0.1:7", pu.Host)
+	}
+	r.rewriteConfig(t, strings.NewReplacer(replace...).Replace)
 	return r
 }
 

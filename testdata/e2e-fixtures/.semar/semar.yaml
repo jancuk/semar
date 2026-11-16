@@ -1,0 +1,31 @@
+version: 1
+environments:
+  local:
+    kind: test
+    hosts: ["127.0.0.1:9", "127.0.0.1:7"]
+    methods: [GET, POST]
+    effects:
+      mode: test_data
+    data:
+      customers.default: c-1
+    services:
+      - name: orders
+        baseUrl: http://127.0.0.1:9
+        build:
+          probe: http
+          url: http://127.0.0.1:9/version
+          commit: $.commit
+      - name: payments
+        baseUrl: http://127.0.0.1:7
+        authProfile: payments-tester
+        build:
+          probe: http
+          url: http://127.0.0.1:7/version
+          commit: $.commit
+authProfiles:
+  support-agent:
+    session: {header: Authorization, value: "Bearer {{secret.TOKEN}}"}
+    secrets: {TOKEN: "env:SEMAR_SAMPLE_TOKEN"}
+  payments-tester:
+    session: {header: Authorization, value: "Bearer {{secret.TOKEN}}"}
+    secrets: {TOKEN: "env:SEMAR_PAYMENTS_TOKEN"}

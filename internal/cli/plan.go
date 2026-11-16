@@ -19,7 +19,9 @@ import (
 
 	"github.com/jancuk/semar/internal/changeset"
 	"github.com/jancuk/semar/internal/config"
+	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/knowledge"
 	"github.com/jancuk/semar/internal/provider"
 	"github.com/jancuk/semar/internal/stage/plan"
@@ -145,6 +147,9 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if err != nil {
 		return err
 	}
+	if in.Fixtures, err = planFixtures(stderr, f.dir, cfg); err != nil {
+		return err
+	}
 	scs, err := loadAllScenarios(f.dir)
 	if err != nil {
 		return err
@@ -242,6 +247,24 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		return exitError{ExitUndecided}
 	}
 	return nil
+}
+
+// planFixtures is what the planner may name under given: every valid fixture of the repository,
+// marked approved when a person approved it as it is now. A file that cannot be used stays out,
+// and one line for each of its problems says so.
+func planFixtures(stderr io.Writer, repo string, cfg config.Config) ([]fixture.Entry, error) {
+	cat, err := fixture.Load(repo, allServices(cfg))
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range cat.Problems {
+		fmt.Fprintf(stderr, "semar: fixture file %s: %s; the planner does not see it\n", terminalSafe(p.File), terminalSafe(oneLine(problemText(p))))
+	}
+	approvals := confirm.NewLocal(semarDir(repo))
+	return cat.Entries(func(f domain.Fixture) bool {
+		ok, err := approvals.FixtureApproved(f.ID, domain.FixtureHash(f))
+		return err == nil && ok
+	}), nil
 }
 
 func valueOr(s, fallback string) string {

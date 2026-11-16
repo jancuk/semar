@@ -173,7 +173,7 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 		},
 	})
 	root.AddCommand(newRunCommand(o), newScriptCommand(), newConfirmCommand(o), newActivityCommand(),
-		newInitCommand(), newChangesCommand(), newPlanCommand(o), newProvidersCommand(o), newDashboardCmd(o))
+		newInitCommand(), newChangesCommand(), newPlanCommand(o), newProvidersCommand(o), newDashboardCmd(o), newFixtureCommand(o))
 	root.AddCommand(newExportCommand())
 	return root
 }

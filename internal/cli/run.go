@@ -22,6 +22,7 @@ import (
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/api"
 	"github.com/jancuk/semar/internal/evidence"
+	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/recorder"
 	"github.com/jancuk/semar/internal/redact"
 	"github.com/jancuk/semar/internal/replay"
@@ -85,8 +86,12 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 		return exitError{ExitUndecided}
 	}
 
+	cat, err := runCatalogue(stderr, f.dir, cfg, scenarios)
+	if err != nil {
+		return err
+	}
 	fmt.Fprintf(stderr, "semar: running against %s (%s, %s)\n", envName, env.Kind, effectsWords(env.Effects.Mode))
-	r, err := newReplay(ctx, o, f.dir, cfg, env, declared, scenarios)
+	r, err := newReplay(ctx, o, f.dir, cfg, envName, env, declared, scenarios, cat)
 	if err != nil {
 		return err
 	}
@@ -175,19 +180,94 @@ func selectScenarios(f runFlags) ([]domain.Scenario, error) {
 	return scs, nil
 }
 
-type replayRig struct {
+// runCatalogue loads the fixtures for a run whose scenarios name any. It is nil for a run that
+// names none, so that a repository with no fixtures never reads .semar/fixtures. A file that is not
+// valid stays out of the catalogue, and a scenario that names it is blocked as missing.
+func runCatalogue(stderr io.Writer, repo string, cfg config.Config, scenarios []domain.Scenario) (*fixture.Catalogue, error) {
+	if !slices.ContainsFunc(scenarios, func(sc domain.Scenario) bool { return len(sc.Given) > 0 }) {
+		return nil, nil
+	}
+	cat, err := fixture.Load(repo, allServices(cfg))
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range cat.Problems {
+		fmt.Fprintf(stderr, "semar: fixture file %s: %s; this run does not use it\n", terminalSafe(p.File), terminalSafe(oneLine(problemText(p))))
+	}
+	return &cat, nil
+}
+
+// problemText is what a fixture problem says without its file.
+func problemText(p fixture.Problem) string {
+	if p.Path == "" {
+		return p.Message
+	}
+	return p.Path + ": " + p.Message
+}
+
+// allServices lists the services of every environment, for the rule that a fixture names a service
+// that some environment has.
+func allServices(cfg config.Config) []string {
+	var names []string
+	for _, env := range cfg.Environments {
+		for _, s := range env.Services {
+			names = append(names, s.Name)
+		}
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
+}
+
+// envRig is what a run against one environment needs before it sends anything: the evidence run,
+// the effects policy, the recorder, and the engine that every request goes through.
+type envRig struct {
 	id     domain.RunID
 	store  *evidence.Store
 	run    *evidence.Run
+	policy *effects.Policy
+	engine *api.Engine
+	builds build.Prober
+	probed []string // services that have a build to read
+}
+
+type replayRig struct {
+	*envRig
 	runner *replay.Runner
 }
 
 // newReplay builds every dependency of one run. The secrets come before anything
 // is created or sent, so a missing secret leaves no trace. The redactor follows
-// the store, which holds its key.
-func newReplay(ctx context.Context, o options, repo string, cfg config.Config, env config.Environment, declared map[string]string, scenarios []domain.Scenario) (*replayRig, error) {
+// the store, which holds its key. cat is nil when no scenario names a fixture.
+func newReplay(ctx context.Context, o options, repo string, cfg config.Config, envName string, env config.Environment, declared map[string]string, scenarios []domain.Scenario, cat *fixture.Catalogue) (*replayRig, error) {
+	rg, err := newEnvRig(ctx, o, repo, cfg, env, declared, sessionNeeds(env, scenarios, cat))
+	if err != nil {
+		return nil, err
+	}
+	deps := replay.Deps{
+		Engine:   rg.engine,
+		Scripts:  rg.store,
+		Builds:   rg.builds,
+		Services: rg.probed,
+		Confirm:  confirm.NewLocal(rg.store.Root()),
+		Trust:    cfg.Policy.Trust.Confirm,
+		Workers:  cfg.Replay.Workers,
+		Run:      rg.id,
+	}
+	if cat != nil {
+		fx, err := rg.resolver(o, envName, env, *cat)
+		if err != nil {
+			return nil, err
+		}
+		deps.Fixtures = fx
+	}
+	return &replayRig{envRig: rg, runner: replay.New(deps)}, nil
+}
+
+// newEnvRig loads the sessions of the profiles named in needs, which maps a profile to whoever
+// needs it, and builds the engine of one run.
+func newEnvRig(ctx context.Context, o options, repo string, cfg config.Config, env config.Environment, declared map[string]string, needs map[string]string) (*envRig, error) {
 	secrets := secret.NewEnv(o.LookupEnv)
-	sessions, err := loadSessions(ctx, cfg, secrets, scenarios)
+	sessions, err := loadSessions(ctx, cfg, secrets, needs)
 	if err != nil {
 		return nil, err
 	}
@@ -245,17 +325,82 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 		Version: Version,
 		Clock:   o.Clock,
 	})
+	return &envRig{
+		id: id, store: store, run: run, policy: policy, engine: engine, probed: probed,
+		builds: build.NewDeclared(declared, build.NewHTTP(env.Services, nil)),
+	}, nil
+}
 
-	runner := replay.New(replay.Deps{
-		Engine:   engine,
-		Scripts:  store,
-		Builds:   build.NewDeclared(declared, build.NewHTTP(env.Services, nil)),
-		Services: probed,
-		Confirm:  confirm.NewLocal(store.Root()),
-		Trust:    cfg.Policy.Trust.Confirm,
-		Workers:  cfg.Replay.Workers,
-	})
-	return &replayRig{id: id, store: store, run: run, runner: runner}, nil
+// resolver gives the fixtures of the catalogue through the engine of this run, so that every
+// fixture request meets the same policy and recorder as a step. The leases live in the person's
+// Semar home. A home that cannot be found leaves the leases out, and a fixture that needs one is
+// then blocked with that reason.
+func (rg *envRig) resolver(o options, envName string, env config.Environment, cat fixture.Catalogue) (*fixture.Resolver, error) {
+	var leases *fixture.Leases
+	if home, err := o.home(); err == nil {
+		if leases, err = fixture.OpenLeases(home); err != nil {
+			return nil, err
+		}
+	}
+	names := make([]string, len(env.Services))
+	auth := map[string]string{}
+	for i, s := range env.Services {
+		names[i] = s.Name
+		if s.AuthProfile != "" {
+			auth[s.Name] = s.AuthProfile
+		}
+	}
+	return fixture.New(fixture.Deps{
+		Engine:      rg.engine,
+		Policy:      rg.policy,
+		Catalogue:   cat,
+		Approvals:   confirm.NewLocal(rg.store.Root()),
+		Health:      fixture.NewHealthStore(rg.store.Root()),
+		Leases:      leases,
+		Environment: envName,
+		EnvServices: names,
+		ServiceAuth: auth,
+		Data:        env.Data,
+		Run:         rg.id,
+	}), nil
+}
+
+// sessionNeeds maps each auth profile that a run uses to the first reason it needs it: a scenario,
+// or the service of a fixture that a scenario names.
+func sessionNeeds(env config.Environment, scenarios []domain.Scenario, cat *fixture.Catalogue) map[string]string {
+	needs := map[string]string{}
+	for _, sc := range scenarios {
+		if sc.AuthProfile != "" {
+			needs[sc.AuthProfile] = "scenario " + string(sc.ID)
+		}
+	}
+	if cat == nil {
+		return needs
+	}
+	for _, sc := range scenarios {
+		for _, g := range sc.Given {
+			if f, ok := cat.Get(g.Fixture); ok {
+				addServiceProfiles(needs, env, f, "of fixture "+string(f.ID)+" for scenario "+string(sc.ID))
+			}
+		}
+	}
+	return needs
+}
+
+// addServiceProfiles adds the auth profile of every service that a step of the fixture calls.
+func addServiceProfiles(needs map[string]string, env config.Environment, f domain.Fixture, why string) {
+	for _, steps := range [][]domain.FixtureStep{f.Find, f.Create, f.Cleanup} {
+		for _, st := range steps {
+			for _, s := range env.Services {
+				if s.Name != st.Request.Service || s.AuthProfile == "" {
+					continue
+				}
+				if _, ok := needs[s.AuthProfile]; !ok {
+					needs[s.AuthProfile] = "service " + s.Name + " " + why
+				}
+			}
+		}
+	}
 }
 
 type session struct{ header, value string }
@@ -274,21 +419,15 @@ func sessionSecrets(sessions map[string]session) []string {
 	return slices.DeleteFunc(out, func(v string) bool { return v == "" })
 }
 
-// loadSessions resolves every secret of each auth profile the scenarios use, so the
-// redactor knows all of them. Its errors name a reference, never a value.
-func loadSessions(ctx context.Context, cfg config.Config, r secret.Resolver, scenarios []domain.Scenario) (map[string]session, error) {
-	profiles := map[string]domain.ScenarioID{}
-	for _, sc := range scenarios {
-		if sc.AuthProfile != "" {
-			profiles[sc.AuthProfile] = sc.ID
-		}
-	}
-	sessions := make(map[string]session, len(profiles))
-	for _, name := range slices.Sorted(maps.Keys(profiles)) {
+// loadSessions resolves every secret of each auth profile in needs, which maps a profile to whoever
+// needs it, so the redactor knows all of them. Its errors name a reference, never a value.
+func loadSessions(ctx context.Context, cfg config.Config, r secret.Resolver, needs map[string]string) (map[string]session, error) {
+	sessions := make(map[string]session, len(needs))
+	for _, name := range slices.Sorted(maps.Keys(needs)) {
 		p, ok := cfg.AuthProfiles[name]
 		switch {
 		case !ok:
-			return nil, fmt.Errorf("scenario %s uses auth profile %s, which semar.yaml does not define", profiles[name], name)
+			return nil, fmt.Errorf("%s uses auth profile %s, which semar.yaml does not define", needs[name], name)
 		case p.Session == nil || p.Session.Header == "":
 			return nil, fmt.Errorf("auth profile %s in semar.yaml has no session header", name)
 		}
