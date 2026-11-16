@@ -111,7 +111,8 @@ func andList(words []string) string {
 func knowledgeList(sources []knowledge.Source) string {
 	var b strings.Builder
 	for _, s := range sources {
-		if s.Usable() {
+		// The tickets have a section of their own, with a rule that differs from the one of a document.
+		if s.Usable() && s.Kind != config.KnowledgeTickets {
 			fmt.Fprintf(&b, "- %s: %s\n", code(s.ID), describe(s, code, ""))
 		}
 	}
@@ -127,6 +128,10 @@ func describe(s knowledge.Source, quote func(string) string, why string) string 
 		return fmt.Sprintf("the API document %s (%s %s, %s)", quote(s.Path), apiFamily(s.API.Version), quote(s.API.Version), counted(len(s.API.Operations), "operation"))
 	case s.Kind == config.KnowledgeOpenAPI:
 		return fmt.Sprintf("the API document %s (code could not read its routes%s)", quote(s.Path), why)
+	case s.Kind == config.KnowledgeTickets && s.Files > knowledge.MaxFiles:
+		return fmt.Sprintf("the ticket files under %s (more than %s files)", quote(s.Path), thousands(knowledge.MaxFiles))
+	case s.Kind == config.KnowledgeTickets:
+		return fmt.Sprintf("the ticket files under %s (%s)", quote(s.Path), counted(s.Files, "file"))
 	case s.Folder && s.Files > knowledge.MaxFiles:
 		return fmt.Sprintf("the documents under %s (more than %s files)", quote(s.Path), thousands(knowledge.MaxFiles))
 	case s.Folder:
