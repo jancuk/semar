@@ -41,6 +41,8 @@ type Input struct {
 	LeftOut       []LeftOut          // files of the head commit that the copy of the source lacks
 	Knowledge     []knowledge.Source // the documents that the configuration lists, as found in the copy
 	Fixtures      []fixture.Entry    // the catalogue: what the planner may name under given
+	Journeys      []domain.Journey   // the valid journey files; the plan lists the ones to rerun
+	Environment   string             // the environment that a run command in plan.md names; "" names none
 	Trial         Trialer            // nil turns the trial off
 	TrialOff      string             // why the trial is off, shown in plan.md; "" when the person did not turn it off
 	BaseAPI       []openapi.Document // the API documents at the merge base, to tell a new route from a wrong path

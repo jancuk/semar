@@ -22,6 +22,7 @@ import (
 	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/fixture"
+	"github.com/jancuk/semar/internal/journey"
 	"github.com/jancuk/semar/internal/knowledge"
 	"github.com/jancuk/semar/internal/provider"
 	"github.com/jancuk/semar/internal/stage/plan"
@@ -153,6 +154,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if in.Fixtures, catalogue, err = planFixtures(stderr, f.dir, cfg); err != nil {
 		return err
 	}
+	in.Journeys, in.Environment = planJourneys(stderr, f.dir), envName
 	scs, err := loadAllScenarios(f.dir)
 	if err != nil {
 		return err
@@ -274,6 +276,22 @@ func planFixtures(stderr io.Writer, repo string, cfg config.Config) ([]fixture.E
 		ok, err := approvals.FixtureApproved(f.ID, domain.FixtureHash(f))
 		return err == nil && ok
 	}), cat, nil
+}
+
+// planJourneys is the journeys that plan.md may list as flows to rerun: every valid file of
+// .semar/journeys. A file that cannot be used stays out, and one line for each of its problems says
+// so. A directory that cannot be read at all leaves the section out with one line, because the plan
+// does not depend on journeys.
+func planJourneys(stderr io.Writer, repo string) []domain.Journey {
+	js, problems, err := journey.Load(repo)
+	if err != nil {
+		fmt.Fprintf(stderr, "semar: the journey files could not be read, so plan.md lists no journey: %s\n", terminalSafe(oneLine(err.Error())))
+		return nil
+	}
+	for _, p := range problems {
+		fmt.Fprintf(stderr, "semar: journey file %s; plan.md does not use it\n", problemLine(p))
+	}
+	return js
 }
 
 func valueOr(s, fallback string) string {

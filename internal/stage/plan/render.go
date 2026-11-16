@@ -85,6 +85,7 @@ func Render(w io.Writer, in Input, out Output) error {
 	}
 
 	writeFixturesNeeded(&b, d.FixturesNeeded)
+	writeJourneysToRerun(&b, in, out)
 
 	b.WriteString("\n## Files that no scenario covers\n\n")
 	if len(d.Uncovered) == 0 {
