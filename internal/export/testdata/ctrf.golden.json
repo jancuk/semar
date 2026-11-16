@@ -1,0 +1,116 @@
+{
+  "results": {
+    "tool": {
+      "name": "semar",
+      "version": "0.9.0"
+    },
+    "summary": {
+      "tests": 7,
+      "passed": 1,
+      "failed": 2,
+      "pending": 0,
+      "skipped": 1,
+      "other": 3,
+      "start": 1794906000000,
+      "stop": 1794906012000
+    },
+    "tests": [
+      {
+        "name": "SHOP-482-01 Refund above the order total is rejected",
+        "status": "failed",
+        "duration": 412,
+        "message": "step refund-too-much: expected status 422, observed status 200 (source ticket)",
+        "trace": "step refund-too-much: expected status 422, observed status 200 (source ticket)\nstep refund-too-much broke an invariant: expected no server error, observed status 500",
+        "suite": "SHOP-482",
+        "extra": {
+          "semarEnvironment": "uat",
+          "semarOutcome": "failed",
+          "semarRun": "r-20261117T090000Z-1a2b"
+        }
+      },
+      {
+        "name": "SHOP-482-02 Refund of a partly refunded order",
+        "status": "other",
+        "duration": 85,
+        "message": "setup failed: create-order answered 500",
+        "trace": "setup failed: create-order answered 500",
+        "suite": "SHOP-482",
+        "extra": {
+          "semarEnvironment": "uat",
+          "semarOutcome": "blocked",
+          "semarRun": "r-20261117T090000Z-1a2b"
+        }
+      },
+      {
+        "name": "SHOP-482-03 Refund of the full total",
+        "status": "passed",
+        "duration": 1500,
+        "suite": "SHOP-482",
+        "extra": {
+          "semarEnvironment": "uat",
+          "semarOutcome": "passed",
+          "semarRun": "r-20261117T090000Z-1a2b"
+        }
+      },
+      {
+        "name": "SHOP-482-04 Refund history is listed",
+        "status": "other",
+        "duration": 30,
+        "message": "an expected result is not confirmed",
+        "trace": "an expected result is not confirmed",
+        "suite": "SHOP-482",
+        "extra": {
+          "semarEnvironment": "uat",
+          "semarOutcome": "inconclusive",
+          "semarRun": "r-20261117T090000Z-1a2b"
+        }
+      },
+      {
+        "name": "PAY-9-01 Capture a held payment",
+        "status": "skipped",
+        "duration": 0,
+        "message": "the environment has no payment service",
+        "trace": "the environment has no payment service",
+        "suite": "PAY-9",
+        "extra": {
+          "semarEnvironment": "uat",
+          "semarOutcome": "not_run",
+          "semarRun": "r-20261117T090000Z-1a2b"
+        }
+      },
+      {
+        "name": "PAY-9-02 Void a captured payment",
+        "status": "other",
+        "duration": 2000,
+        "message": "the build changed during the run",
+        "trace": "the build changed during the run",
+        "suite": "PAY-9",
+        "extra": {
+          "semarDurationUnknown": "true",
+          "semarEnvironment": "uat",
+          "semarOutcome": "stale",
+          "semarRun": "r-20261117T090000Z-1a2b"
+        }
+      },
+      {
+        "name": "LEGACY-1",
+        "status": "failed",
+        "duration": 10,
+        "message": "step x: expected status 200, observed status 404 (source person)",
+        "trace": "step x: expected status 200, observed status 404 (source person)",
+        "extra": {
+          "semarEnvironment": "uat",
+          "semarOutcome": "failed",
+          "semarRun": "r-20261117T090000Z-1a2b"
+        }
+      }
+    ],
+    "environment": {
+      "testEnvironment": "uat"
+    },
+    "extra": {
+      "semarBuilds": "orders 9f3c2ab, payments 77aa01c",
+      "semarRun": "r-20261117T090000Z-1a2b"
+    }
+  }
+}
