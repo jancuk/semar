@@ -2,6 +2,7 @@ package plan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -40,16 +41,21 @@ type Planner interface {
 // Output is an accepted plan. Result is the result of the accepted attempt, with the turns, the
 // tokens, the cost, the tool calls and the refused calls summed over every attempt. Run returns
 // the same totals with an error, so that a failed job can still be counted. Notes are where
-// the accepted requests differ from an API document of the configuration.
+// the accepted requests differ from an API document of the configuration. Attempts is the
+// number of drafts asked for, and UsedAttempt the one that was written: they differ only when
+// the last drafts failed and an earlier draft that passed was kept (D9).
 type Output struct {
 	Draft       Draft
 	Scenarios   []domain.Scenario
 	Scripts     []domain.Script
 	Notes       []Note
 	Attempts    int
+	UsedAttempt int
 	Result      provider.Result
 	PlannerID   string
 	PlannerKind string
+	Trial       *Trial              // the trial of the accepted draft; nil when none ran
+	AfterTrial  []domain.ScenarioID // scenarios first drafted after a trial
 }
 
 // Rejected is the end of a plan whose every draft had problems. Nothing may be written (R16).
@@ -82,6 +88,17 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 	var total provider.Result
 	var problems []Problem
 	var previous []byte
+	var passed *accepted
+	frozen := map[string]map[domain.StepID][]domain.Expectation{}
+	headAPI := headDocuments(in.Knowledge)
+	finish := func(a *accepted, attempts int) Output {
+		total.Output = a.output
+		return Output{
+			Draft: a.draft, Scenarios: a.scenarios, Scripts: a.scripts, Notes: a.notes,
+			Attempts: attempts, UsedAttempt: a.attempt, Result: total, PlannerID: p.ID(), PlannerKind: p.Kind(),
+			Trial: a.trial, AfterTrial: a.after,
+		}
+	}
 	for attempt := 1; attempt <= MaxAttempts; attempt++ {
 		if attempt > 1 {
 			if err := atomicfile.Write(filepath.Join(in.SourceDir, PlanDir, "previous.json"), previous); err != nil {
@@ -122,15 +139,41 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 			continue
 		}
 		scenarios, scripts, ps := Validate(d, in)
+		if len(ps) == 0 {
+			ps = changedExpectations(frozen, scenarios)
+		}
 		if len(ps) > 0 {
 			problems = ps
 			continue
 		}
-		total.Output = res.Output
-		return Output{
-			Draft: d, Scenarios: scenarios, Scripts: scripts, Notes: compare(in, scenarios, scripts),
-			Attempts: attempt, Result: total, PlannerID: p.ID(), PlannerKind: p.Kind(),
-		}, nil
+		cand := &accepted{
+			draft: d, scenarios: scenarios, scripts: scripts, notes: compare(in, scenarios, scripts),
+			attempt: attempt, output: res.Output, after: afterTrial(frozen, scenarios),
+		}
+		passed = cand
+		if in.Trial == nil {
+			return finish(cand, attempt), nil
+		}
+		tr, err := in.Trial.Try(ctx, scenarios, scripts)
+		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return Output{Result: total, Attempts: attempt, PlannerID: p.ID(), PlannerKind: p.Kind()}, fmt.Errorf("plan, attempt %d: %w", attempt, err)
+			}
+			tr.Skipped = "the trial stopped: " + err.Error()
+		}
+		cand.trial = &tr
+		if tr.Skipped != "" {
+			return finish(cand, attempt), nil
+		}
+		freeze(frozen, scenarios)
+		back, _ := trialProblems(tr, scenarios, in.BaseAPI, headAPI, in.AuthProfile)
+		if len(back) == 0 || attempt == MaxAttempts {
+			return finish(cand, attempt), nil
+		}
+		problems = back
+	}
+	if passed != nil {
+		return finish(passed, MaxAttempts), nil
 	}
 	return Output{Result: total, Attempts: MaxAttempts, PlannerID: p.ID(), PlannerKind: p.Kind()}, &Rejected{Problems: problems, Attempts: MaxAttempts}
 }

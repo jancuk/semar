@@ -3,11 +3,26 @@ package plan
 import (
 	"context"
 	"fmt"
+	"maps"
+	"reflect"
 	"slices"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/knowledge"
 	"github.com/jancuk/semar/internal/openapi"
 )
+
+// accepted is a draft that passed validation, with what the stage knows of it.
+type accepted struct {
+	draft     Draft
+	scenarios []domain.Scenario
+	scripts   []domain.Script
+	notes     []Note
+	attempt   int
+	output    []byte
+	trial     *Trial
+	after     []domain.ScenarioID
+}
 
 // maxTrialProblems bounds what one trial sends back to the planner.
 const maxTrialProblems = 20
@@ -144,4 +159,88 @@ func secondLookText(status int) string {
 		return "404: the route is not on the environment yet, or the path is wrong"
 	}
 	return fmt.Sprintf("%d: the service failed; this may be a defect", status)
+}
+
+// headDocuments are the API documents of the configuration, as read at the head commit.
+func headDocuments(sources []knowledge.Source) []openapi.Document {
+	var docs []openapi.Document
+	for _, s := range sources {
+		if s.Usable() && s.API != nil {
+			docs = append(docs, *s.API)
+		}
+	}
+	return docs
+}
+
+// scenarioKey matches a scenario between drafts by its ticket and title (D8).
+func scenarioKey(sc domain.Scenario) string { return sc.Ticket + "\x00" + normalTitle(sc.Title) }
+
+// freeze keeps the expected results of every scenario that a trial has seen. The first trial
+// of a scenario decides, so that a scenario that is dropped and drafted again is held to it.
+func freeze(frozen map[string]map[domain.StepID][]domain.Expectation, scenarios []domain.Scenario) {
+	for _, sc := range scenarios {
+		key := scenarioKey(sc)
+		if _, ok := frozen[key]; ok {
+			continue
+		}
+		steps := make(map[domain.StepID][]domain.Expectation, len(sc.Steps))
+		for _, st := range sc.Steps {
+			steps[st.ID] = st.Expect
+		}
+		frozen[key] = steps
+	}
+}
+
+// afterTrial lists the scenarios that no trial has seen yet.
+func afterTrial(frozen map[string]map[domain.StepID][]domain.Expectation, scenarios []domain.Scenario) []domain.ScenarioID {
+	if len(frozen) == 0 {
+		return nil
+	}
+	var ids []domain.ScenarioID
+	for _, sc := range scenarios {
+		if _, ok := frozen[scenarioKey(sc)]; !ok {
+			ids = append(ids, sc.ID)
+		}
+	}
+	return ids
+}
+
+// changedExpectations is D8: a draft written after a trial keeps the expected results of every
+// scenario that it keeps. Only the checks count. A new cite or a new action is a repair.
+func changedExpectations(frozen map[string]map[domain.StepID][]domain.Expectation, scenarios []domain.Scenario) []Problem {
+	var ps []Problem
+	for i, sc := range scenarios {
+		before, ok := frozen[scenarioKey(sc)]
+		if !ok {
+			continue
+		}
+		msg := fmt.Sprintf("the expected results of %q changed after the trial run; an expected result comes from the code, "+
+			"never from what the environment answered: keep the expected results of the earlier draft", sc.Title)
+		seen := map[domain.StepID]bool{}
+		for j, st := range sc.Steps {
+			seen[st.ID] = true
+			if want, ok := before[st.ID]; ok && !sameChecks(want, st.Expect) {
+				ps = append(ps, Problem{Path: fmt.Sprintf("scenarios[%d].steps[%d].expect", i, j), Message: msg})
+			}
+		}
+		for _, id := range slices.Sorted(maps.Keys(before)) {
+			if !seen[id] && len(before[id]) > 0 {
+				ps = append(ps, Problem{Path: fmt.Sprintf("scenarios[%d]", i), Message: msg})
+				break
+			}
+		}
+	}
+	return ps
+}
+
+func sameChecks(a, b []domain.Expectation) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !reflect.DeepEqual(a[i].Check, b[i].Check) {
+			return false
+		}
+	}
+	return true
 }

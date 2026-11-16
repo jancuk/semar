@@ -20,6 +20,7 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/knowledge"
+	"github.com/jancuk/semar/internal/openapi"
 	"github.com/jancuk/semar/internal/scenario"
 	"github.com/jancuk/semar/internal/script"
 )
@@ -40,6 +41,9 @@ type Input struct {
 	LeftOut       []LeftOut          // files of the head commit that the copy of the source lacks
 	Knowledge     []knowledge.Source // the documents that the configuration lists, as found in the copy
 	Fixtures      []fixture.Entry    // the catalogue: what the planner may name under given
+	Trial         Trialer            // nil turns the trial off
+	TrialOff      string             // why the trial is off, shown in plan.md; "" when the person did not turn it off
+	BaseAPI       []openapi.Document // the API documents at the merge base, to tell a new route from a wrong path
 	Progress      func(Progress)     // nil for no reports
 }
 
