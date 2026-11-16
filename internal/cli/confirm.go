@@ -23,18 +23,23 @@ import (
 const localIdentity = "local, unverified identity"
 
 type confirmFlags struct {
-	yes bool
-	all bool
-	dir string
+	yes      bool
+	all      bool
+	dir      string
+	fixtures []string
 }
 
 func newConfirmCommand(o options) *cobra.Command {
 	var f confirmFlags
 	cmd := &cobra.Command{
-		Use:   "confirm (<scenario id> | --all)",
-		Short: "Confirm the expected results of scenarios that need a person",
+		Use:   "confirm (<scenario id> | --all | --fixture <id>...)",
+		Short: "Confirm the expected results of scenarios, or approve fixtures, that need a person",
 		Args: func(_ *cobra.Command, args []string) error {
 			switch {
+			case len(f.fixtures) > 0 && (f.all || len(args) > 0):
+				return errors.New("pass --fixture, or the ID of one scenario, or --all, and not several of them")
+			case len(f.fixtures) > 0:
+				return nil
 			case f.all && len(args) > 0:
 				return errors.New("pass the ID of one scenario, or --all, and not both")
 			case !f.all && len(args) != 1:
@@ -43,10 +48,14 @@ func newConfirmCommand(o options) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(f.fixtures) > 0 {
+				return approveFixtures(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
+			}
 			return confirmScenarios(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f, args)
 		},
 	}
-	cmd.Flags().BoolVar(&f.yes, "yes", false, "confirm without asking")
+	cmd.Flags().BoolVar(&f.yes, "yes", false, "confirm or approve without asking")
+	cmd.Flags().StringArrayVar(&f.fixtures, "fixture", nil, "approve the fixture with this ID, as it is now in .semar/fixtures (repeatable)")
 	cmd.Flags().BoolVar(&f.all, "all", false, "confirm every scenario in .semar/scenarios that needs a confirmation")
 	addDirFlag(cmd, &f.dir)
 	return cmd

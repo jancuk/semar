@@ -165,44 +165,58 @@ func (l *Local) Get(id domain.ScenarioID, h domain.Hash) (Record, bool, error) {
 	return best, found, nil
 }
 
-// read refuses a record that is a link or not a regular file, and one that was swapped
-// between the check and the open.
+// read decodes one confirmation. The file checks are shared with the other record kinds.
 func read(root *os.Root, name string) (Record, error) {
+	data, err := readRegular(root, name, "confirmation")
+	if err != nil {
+		return Record{}, err
+	}
 	p := filepath.Join(root.Name(), name)
-	info, err := root.Lstat(name)
-	if err != nil {
-		return Record{}, fmt.Errorf("read confirmation %s: %w", p, err)
-	}
-	if info.Mode()&fs.ModeSymlink != 0 {
-		return Record{}, fmt.Errorf("confirmation %s is a symbolic link, and Semar reads only real files: replace it with the record", p)
-	}
-	if !info.Mode().IsRegular() {
-		return Record{}, fmt.Errorf("confirmation %s is not a regular file", p)
-	}
-	f, err := root.Open(name)
-	if err != nil {
-		return Record{}, fmt.Errorf("read confirmation %s: %w", p, err)
-	}
-	defer f.Close()
-	opened, err := f.Stat()
-	if err != nil {
-		return Record{}, fmt.Errorf("read confirmation %s: %w", p, err)
-	}
-	if !os.SameFile(info, opened) {
-		return Record{}, fmt.Errorf("confirmation %s changed while it was read", p)
-	}
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return Record{}, fmt.Errorf("read confirmation %s: %w", p, err)
-	}
 	var r Record
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&r); err != nil {
+	if err := decodeStrict(data, &r); err != nil {
 		return Record{}, fmt.Errorf("parse confirmation %s: %w", p, err)
 	}
 	if r.Schema != schema {
 		return Record{}, fmt.Errorf("confirmation %s has schema %d, want %d", p, r.Schema, schema)
 	}
 	return r, nil
+}
+
+func decodeStrict(data []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
+}
+
+// readRegular refuses a file that is a link or not a regular file, and one that was swapped
+// between the check and the open. noun names the kind of record in an error.
+func readRegular(root *os.Root, name, noun string) ([]byte, error) {
+	p := filepath.Join(root.Name(), name)
+	info, err := root.Lstat(name)
+	if err != nil {
+		return nil, fmt.Errorf("read %s %s: %w", noun, p, err)
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%s %s is a symbolic link, and Semar reads only real files: replace it with the record", noun, p)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s %s is not a regular file", noun, p)
+	}
+	f, err := root.Open(name)
+	if err != nil {
+		return nil, fmt.Errorf("read %s %s: %w", noun, p, err)
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("read %s %s: %w", noun, p, err)
+	}
+	if !os.SameFile(info, opened) {
+		return nil, fmt.Errorf("%s %s changed while it was read", noun, p)
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("read %s %s: %w", noun, p, err)
+	}
+	return data, nil
 }
