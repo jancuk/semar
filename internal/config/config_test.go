@@ -315,3 +315,129 @@ plan: {provider: fake, maxScenarios: 3, maxTurns: 7, timeout: 90s}
 		})
 	}
 }
+
+const envBody = "    hosts: [api.uat.example.com]\n    methods: [GET]\n    effects: {mode: read_only}\n"
+
+func TestServiceAuthProfileMustExist(t *testing.T) {
+	services := "    services:\n      - {name: orders, baseUrl: \"https://api.uat.example.com\", authProfile: orders-tester}\n      - {name: payments, baseUrl: \"https://api.uat.example.com\", authProfile: payments-tester}\n"
+	profiles := "authProfiles:\n  orders-tester: {}\n"
+	cfg, err := loadText(t, envHead+envBody+services+profiles+"  payments-tester: {}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := cfg.Environments["uat"].Services
+	if svc[0].AuthProfile != "orders-tester" || svc[1].AuthProfile != "payments-tester" {
+		t.Fatalf("got %+v", svc)
+	}
+
+	_, err = loadText(t, envHead+envBody+services+profiles)
+	want := "environments.uat.services[1].authProfile: auth profile payments-tester is not defined under authProfiles"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("want an error with %q, got %v", want, err)
+	}
+	if strings.Contains(err.Error(), "services[0]") {
+		t.Fatalf("the profile of services[0] is defined: %v", err)
+	}
+
+	// An empty profile is allowed: the scenario's profile is used.
+	cfg, err = loadText(t, envHead+envBody+"    services:\n      - {name: orders, baseUrl: \"https://api.uat.example.com\"}\n")
+	if err != nil || cfg.Environments["uat"].Services[0].AuthProfile != "" {
+		t.Fatalf("got %+v, %v", cfg, err)
+	}
+
+	// No authProfiles block at all.
+	_, err = loadText(t, envHead+envBody+services)
+	if err == nil || !strings.Contains(err.Error(), "services[0].authProfile: auth profile orders-tester is not defined") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestDataKeysAndValues(t *testing.T) {
+	many := func(n int) string {
+		var b strings.Builder
+		b.WriteString("    data:\n")
+		for i := range n {
+			b.WriteString("      k" + strings.Repeat("a", i%3) + "_" + string(rune('a'+i/26)) + string(rune('a'+i%26)) + ": v\n")
+		}
+		return b.String()
+	}
+	cases := []struct{ name, data, want string }{
+		{"flat keys", "    data:\n      customers.default: c-1\n      region: id\n      plan.tier_2: gold\n", ""},
+		{"numbers and booleans are text", "    data:\n      a: 5\n      b: true\n      c: 1.50\n", ""},
+		{"a key in upper case", "    data:\n      Customers: x\n", `environments.uat.data: key "Customers" must match ^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$`},
+		{"a key that starts with a digit", "    data:\n      1a: x\n", `key "1a" must match`},
+		{"a key with a hyphen", "    data:\n      a-b: x\n", `key "a-b" must match`},
+		{"a key that ends with a dot", "    data:\n      \"a.\": x\n", `key "a." must match`},
+		{"a key with an empty part", "    data:\n      \"a..b\": x\n", `key "a..b" must match`},
+		{"a key of 128 bytes", "    data:\n      " + strings.Repeat("a", 128) + ": x\n", ""},
+		{"a key of 129 bytes", "    data:\n      " + strings.Repeat("a", 129) + ": x\n", "is longer than 128 bytes"},
+		{"100 keys", many(100), ""},
+		{"101 keys", many(101), "environments.uat.data: at most 100 keys are allowed, there are 101"},
+		{"a value of 1024 bytes", "    data:\n      a: " + strings.Repeat("x", 1024) + "\n", ""},
+		{"a value of 1025 bytes", "    data:\n      a: " + strings.Repeat("x", 1025) + "\n", "environments.uat.data.a: the value is longer than 1024 bytes"},
+		{"a control character", "    data:\n      a: \"x\\x07y\"\n", "environments.uat.data.a: the value holds a control character"},
+		{"a line feed", "    data:\n      a: \"x\\ny\"\n", "the value holds a control character"},
+		{"an escape", "    data:\n      a: \"x\\ey\"\n", "the value holds a control character"},
+		{"a value that is a list", "    data:\n      a: [1, 2]\n", "semar.yaml:"},
+		{"a value that is a mapping", "    data:\n      a: {b: 1}\n", "semar.yaml:"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := loadText(t, envHead+envBody+c.data)
+			if c.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(cfg.Environments["uat"].Data) == 0 {
+					t.Fatal("the data was not read")
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("want an error with %q, got %v", c.want, err)
+			}
+		})
+	}
+
+	t.Run("values are read as text", func(t *testing.T) {
+		cfg, err := loadText(t, envHead+envBody+"    data:\n      customers.default: c-1\n      n: 5\n      f: 1.50\n      b: true\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]string{"customers.default": "c-1", "n": "5", "f": "1.50", "b": "true"}
+		if !reflect.DeepEqual(cfg.Environments["uat"].Data, want) {
+			t.Fatalf("got %v", cfg.Environments["uat"].Data)
+		}
+	})
+
+	t.Run("a second environment names its own", func(t *testing.T) {
+		text := envHead + envBody + "    data: {a: 1}\n  prod:\n    kind: production\n" + envBody + "    data: {Bad: 1}\n"
+		_, err := loadText(t, text)
+		if err == nil || !strings.Contains(err.Error(), `environments.prod.data: key "Bad"`) || strings.Contains(err.Error(), "environments.uat.data") {
+			t.Fatalf("got %v", err)
+		}
+	})
+}
+
+func TestLoadFixtureConfiguration(t *testing.T) {
+	cfg, err := loadFixture(t, "fixtures.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := cfg.Environments["uat"]
+	if env.Data["customers.default"] != "c-1001" || env.Services[1].AuthProfile != "payments-tester" {
+		t.Fatalf("got %+v", env)
+	}
+}
+
+func TestUnknownKeyUnderServiceStillRefused(t *testing.T) {
+	text := envHead + envBody + "    services:\n      - name: orders\n        baseUrl: https://api.uat.example.com\n        authProfil: x\n"
+	_, err := loadText(t, text)
+	if err == nil || !strings.Contains(err.Error(), "semar.yaml:") || !strings.Contains(err.Error(), "authProfil") {
+		t.Fatalf("got %v", err)
+	}
+	_, err = loadText(t, envHead+envBody+"    dat: {a: b}\n")
+	if err == nil || !strings.Contains(err.Error(), "dat") {
+		t.Fatalf("an unknown key in an environment: got %v", err)
+	}
+}

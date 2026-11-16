@@ -1,0 +1,27 @@
+version: 1
+environments:
+  uat:
+    kind: test
+    hosts: [orders.uat.example.com, payments.uat.example.com]
+    methods: [GET, POST]
+    effects:
+      mode: test_data
+      reads:
+        - {method: POST, path: /v1/orders/search}
+    services:
+      - name: orders
+        baseUrl: https://orders.uat.example.com
+        authProfile: orders-tester
+      - name: payments
+        baseUrl: https://payments.uat.example.com
+        authProfile: payments-tester
+    data:
+      customers.default: c-1001
+      region: id
+authProfiles:
+  orders-tester:
+    session: {header: Authorization, value: "Bearer {{secret.ORDERS_TOKEN}}"}
+    secrets: {ORDERS_TOKEN: "env:SEMAR_ORDERS_TOKEN"}
+  payments-tester:
+    session: {header: Authorization, value: "Bearer {{secret.PAYMENTS_TOKEN}}"}
+    secrets: {PAYMENTS_TOKEN: "env:SEMAR_PAYMENTS_TOKEN"}

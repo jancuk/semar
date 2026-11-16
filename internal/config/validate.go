@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/hostrule"
@@ -93,7 +94,7 @@ func validate(c Config, name string) error {
 		if err := idcheck.Check("environment name", n); err != nil {
 			add("environments: %v", err)
 		}
-		validateEnvironment(n, c.Environments[n], add)
+		validateEnvironment(n, c.Environments[n], c.AuthProfiles, add)
 	}
 	for _, n := range slices.Sorted(maps.Keys(c.AuthProfiles)) {
 		if err := idcheck.Check("auth profile name", n); err != nil {
@@ -103,7 +104,7 @@ func validate(c Config, name string) error {
 	return joinErrors(errs)
 }
 
-func validateEnvironment(name string, e Environment, add func(string, ...any)) {
+func validateEnvironment(name string, e Environment, profiles map[string]AuthProfile, add func(string, ...any)) {
 	p := "environments." + name
 	if e.Kind != KindTest && e.Kind != KindProduction {
 		add("%s.kind must be %s or %s, got %q", p, KindTest, KindProduction, e.Kind)
@@ -135,6 +136,41 @@ func validateEnvironment(name string, e Environment, add func(string, ...any)) {
 			add("%s.baseUrl must be an absolute http or https URL, got %q", sp, s.BaseURL)
 		case !hostrule.Allowed(u, e.Hosts):
 			add("%s: baseUrl host %s is not in hosts", sp, originHost(u))
+		}
+		if _, ok := profiles[s.AuthProfile]; s.AuthProfile != "" && !ok {
+			add("%s.authProfile: auth profile %s is not defined under authProfiles", sp, s.AuthProfile)
+		}
+	}
+	validateData(p+".data", e.Data, add)
+}
+
+const (
+	maxDataKeys     = 100
+	maxDataKeyBytes = 128
+	maxDataValue    = 1024
+)
+
+var dataKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$`)
+
+func validateData(p string, data map[string]string, add func(string, ...any)) {
+	if len(data) > maxDataKeys {
+		add("%s: at most %d keys are allowed, there are %d", p, maxDataKeys, len(data))
+	}
+	for _, k := range slices.Sorted(maps.Keys(data)) {
+		switch {
+		case !dataKeyPattern.MatchString(k):
+			add("%s: key %q must match ^[a-z][a-z0-9_]*(\\.[a-z0-9_]+)*$", p, k)
+		case len(k) > maxDataKeyBytes:
+			add("%s: key %q is longer than %d bytes", p, k, maxDataKeyBytes)
+		}
+		v := data[k]
+		switch {
+		case len(v) > maxDataValue:
+			add("%s.%s: the value is longer than %d bytes", p, k, maxDataValue)
+		case !utf8.ValidString(v):
+			add("%s.%s: the value is not valid UTF-8", p, k)
+		case strings.ContainsFunc(v, unicode.IsControl):
+			add("%s.%s: the value holds a control character", p, k)
 		}
 	}
 }

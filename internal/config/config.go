@@ -41,6 +41,8 @@ type Environment struct {
 	Methods  []string  `yaml:"methods"`
 	Effects  Effects   `yaml:"effects"`
 	Services []Service `yaml:"services"`
+	// Data is the set of values that tests need, keyed by a dotted name such as customers.default.
+	Data map[string]string `yaml:"data"`
 }
 
 type Effects struct {
@@ -56,6 +58,9 @@ type Service struct {
 	Name    string      `yaml:"name"`
 	BaseURL string      `yaml:"baseUrl"`
 	Build   *BuildProbe `yaml:"build"`
+	// AuthProfile is the profile that a fixture step to this service uses. Empty means the
+	// profile of the scenario.
+	AuthProfile string `yaml:"authProfile"`
 }
 
 // BuildProbe's Probe is "http" and Commit is a JSONPath.
