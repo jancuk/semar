@@ -46,7 +46,7 @@ Plan 17, all tasks: `given`, the fixture resolver, the second service of the sam
 | D4 | A leg's expected results are confirmed with the existing confirmation store, under the leg's scenario ID. `semar confirm --journey <id>` confirms every leg | TRD rule 5 says confirmation works as usual. The record and the trust labels stay the same |
 | D5 | A journey file needs no approval of its own | A journey sends requests only through the effects policy, its fixtures need approval (Plan 17), and its expected results need confirmation. A third approval would add a step that proves nothing new |
 | D6 | `given` is on the journey only. A leg's `given` is refused | The TRD type has `Leg.Given`. Fixtures that a whole flow shares are the common case, and one resolution with one cleanup is simpler to reason about |
-| D7 | Each leg's session comes from its service's `authProfile` (Plan 17), else the journey's `authProfile` | A journey crosses services, and each service has its own account (FR-280). The journey-level key covers a service with none |
+| D7 | Each leg's session comes from its service's `authProfile` (Plan 17), else the journey's `authProfile`. Plan 21 D11 adds `as` on a leg or a step, which wins | A journey crosses services, and each service has its own account (FR-280). The journey-level key covers a service with none |
 | D8 | A leg's provisional outcome is computed with the start builds as the end builds, to decide whether the journey goes on. The final outcome of every leg is computed again with the builds read at the end | The end of the journey is not known while it runs. The rule "a leg starts only when every leg it needs has passed" needs an outcome at once |
 | D9 | `wait` repeats the leg's last step, which must be a `GET` or `HEAD`, with the intervals of a fixture's `until`. A timeout makes a leg whose verdict passed `failed`. A worse verdict stays | TRD: a timeout is `failed` with each attempt in the evidence. A state that never arrives is a defect of the flow |
 | D10 | Invariant values are the raw captured values in memory. Two values are equal when both are decimals with the same value, or when both are the same text. A value that holds a redaction marker cannot be compared | TRD rule 6: values compare exactly, as decimals. A redacted value is not evaluated, as for a check. Raw values are never stored |
@@ -244,6 +244,7 @@ invariants:
 | J14 | `wait` needs `timeout` (above 0, at most 15m). `every` is at least 100ms and at most `timeout`. The leg's last step is `GET` or `HEAD`. `until.jsonpath` parses, and `equals` is a scalar | `legs[2].wait: the last step of leg settled is POST; a wait repeats the last step, which must read` |
 | J15 | At most 8 invariants. `equal` has 2 to 6 entries. Each entry is exactly one `{{<leg>.<output>}}` or `{{<alias>.<output>}}`, and nothing else | `invariants[0].equal[1]: "total {{pay.amount}}" must be one variable and nothing else` |
 | J16 | The leg scenario `<journey>.<leg>` passes `idcheck.Check` and is at most 128 bytes | `the leg scenario checkout.settled is too long` |
+| J17 | `as` on a leg or on a step names an auth profile and passes `idcheck.Check`. Added by Plan 21, D11: the account of a step is its `as`, else its leg's `as`, else the profile of the service | `legs[1].as: ...` |
 
 ### `internal/journey` (new)
 

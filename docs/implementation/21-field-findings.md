@@ -22,6 +22,8 @@ A team delivered a feature across a Go backend, a web app, and an Android app, a
 | D8 | `semar init --account <name>=<ENV>` adds an auth profile per account. It can repeat | The first thing a team needs after the first account is a second one |
 | D9 | Every acceptance criterion of a ticket file is accounted for. Code reads the numbered criteria and requires that each is cited by a scenario with `source: ticket`, by a manual check, or by a `notDrafted` entry. What is left after the last attempt becomes a gap obligation | On a real delivery the planner covered the API criteria and drafted no manual check for the web and Android criteria, although the prompt asked for them. A prompt rule is not a guarantee, so code enforces it, and the ledger never loses a criterion |
 | D10 | A not-found or no-access test may use an ID that cannot exist, built from the run, as `missing-{{run.id}}` in a path. No other made-up ID is allowed | The planner refused to draft a 404 test for a list that does not exist, because it may not invent IDs. An ID built from the run id cannot match a real record, and it names no data of the environment |
+| D11 | A journey leg may have `as: <auth profile>`, applied to every step of the leg. A journey step may have its own `as`, which wins. The rules are those of a scenario step: the account must be in the configuration, and an unknown one blocks the journey before any request with `account <name> is not in the configuration`. The leg scenario hash and the journey confirmation cover `as` only when it is set. `semar confirm --journey` shows `as` per leg and step, and the run report shows who each leg acted as | A QA engineer wrote a journey whose web leg is Alice and whose Android leg is Bob, a member who is not the owner. `as: bob` on the leg failed with `field as not found in type domain.Leg`, so a journey could not test access across apps. A leg sets its account once, and a step overrides it for the one odd request. Code puts the leg's `as` on each step of the leg scenario, so the replay, the hash, the confirm screen, and the unknown-account rule are the ones of Plan 21 D3 |
+| D12 | An unknown key in any Semar YAML file reports `<file>:<line>: unknown key <name>`, and `in <parent key>` when the key sits under another key. A value of the wrong type reads like `<key> must be a number`, `true or false`, `text`, `a list`, `a mapping`, or `a duration such as 30s`. No message names a Go type | `field as not found in type domain.Leg` tells a person nothing about the file, and a Go type is not part of the format. `yamlfile` turns the decoder's messages into these, and keeps the file and the line |
 
 ## Trust
 
@@ -46,6 +48,16 @@ A team delivered a feature across a Go backend, a web app, and an Android app, a
 * `steps[].as` (optional): the name of an auth profile. Every request of that step, including a setup step, is sent with that profile's session. Unknown at run time: the scenario is `blocked` with "account <name> is not in the configuration". The expectation hash covers `as` only when it is set, so existing hashes do not change.
 * `expect[].by` (optional): `model` or absent. `by: model` always needs confirmation (D2). The hash covers `by` only when it is set.
 * `equals`, `notEquals`, and `contains` operands that are strings may hold `{{name}}` variables: a capture of an earlier step, an output of a `given` alias, or `run.id`. `secret.` is refused. An unknown name is a load error with the path of the check. At run time the operand is filled in from the variables; a missing value makes the check `not_evaluated`. The report shows the filled-in value next to the template.
+
+### Journey files
+
+* `legs[].as` and `legs[].steps[].as` (optional): the name of an auth profile. A step acts as its own `as`, else the leg's, else the profile of the leg's service (Plan 18, D7). A name passes `idcheck.Check` (rule J17). A name that the configuration lacks gives the journey the outcome `blocked`, with `account <name> is not in the configuration`, before the builds are read and before any request. Each leg result lists `as`: the accounts that its steps acted as, only when there are some. A fixture step has no `as`.
+* The hash of a leg scenario is the one of Plan 21 D3, so a journey that does not use `as` keeps every hash and every confirmation.
+
+### Error text of YAML files
+
+* An unknown key: `<file>:<line>: unknown key <name>`, with ` in <parent key>` when the decoder's position falls under one.
+* A wrong type: `<file>:<line>: <key> must be a number | true or false | text | a list | a mapping | a duration such as 30s`.
 
 ### Plan stage and prompt (version 7)
 

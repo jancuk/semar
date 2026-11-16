@@ -515,7 +515,7 @@ A step uses the auth profile of the scenario. `as` makes one step, a setup step 
         cite: "docs/tickets/SHOP-482.md:14 only a member of the board may move a card"
 ```
 
-A name that `semar.yaml` does not define blocks the scenario before any request, with `account carol is not in the configuration`. A fixture step and a journey leg have no `as`: they use the profile of their service, and a file that sets `as` there is refused.
+A name that `semar.yaml` does not define blocks the scenario before any request, with `account carol is not in the configuration`. A fixture step has no `as`: it uses the profile of its service, and a file that sets `as` there is refused. A journey leg and a journey step have `as` too, as [a journey](#test-a-business-flow-with-a-journey) explains.
 
 ### Expected results from a model, and variables in them
 
@@ -704,6 +704,22 @@ invariants:
 * `wait` repeats the last step of the leg, which must be a `GET` or `HEAD`, until the condition holds or `timeout` ends (at most 15 minutes). When the time ends, the leg is `failed`.
 * An invariant checks what only a journey can see: the values are the same in every leg. Two values are equal when both are decimals with the same value, or both are the same text. A value that holds a redaction marker is not compared.
 * `given` on the journey names fixtures that the whole flow shares. A leg has no `given` of its own. A leg uses the session of its service (`authProfile` on the service), else the `authProfile` of the journey.
+* `as: <auth profile>` on a leg makes every step of the leg act as that account, such as a member who is not the owner. `as` on a step wins over the leg's. Both name an auth profile of `semar.yaml`. A name that it does not define blocks the whole journey before any request, with `account bob is not in the configuration`. `semar journey run` loads the session of every account that the journey uses. `semar confirm --journey` shows `as` for each leg and step, the report shows who each leg acted as, and the hash of a confirmation covers `as` only when it is set, so a journey without `as` keeps its confirmations.
+
+```yaml
+  - id: member
+    surface: api
+    service: orders
+    as: bob                       # the web leg is Alice's, this leg is Bob's
+    needs: [place]
+    steps:
+      - id: read
+        action: Read the order as a member
+        hint: { method: GET, path: "/v1/orders/{id}" }
+        request: { method: GET, path: "/v1/orders/{{place.id}}" }
+        expect: [{ check: { status: 403 }, source: person }]
+```
+
 * Every request goes through the effects policy, as a scenario step does. A journey file has at most 12 legs, 20 steps per leg, and 8 invariants. `testdata/e2e-journeys/` holds this file as a working example.
 
 **2. Confirm the expected results.** A leg's expected results are confirmed as a scenario's are. A journey whose expected results nobody confirmed is `blocked`, and nothing is sent for it.
@@ -932,7 +948,7 @@ environments:
 | --- | --- |
 | `plan.trial` | `true` by default. `false` turns the [trial run](#the-trial-run) off. It must be a boolean |
 | `environments.<env>.data` | The data of the environment: a flat map from a dotted key to a string, at most 100 keys. A fixture reads a value as `{{data.<key>}}`, in a parameter default or in a `with` value |
-| `environments.<env>.services[].authProfile` | The auth profile that a fixture step or a journey leg uses for this service. It must be defined under `authProfiles`. A service with none uses the auth profile of the scenario |
+| `environments.<env>.services[].authProfile` | The auth profile that a fixture step or a journey leg uses for this service, unless the leg or its step has `as`. It must be defined under `authProfiles`. A service with none uses the auth profile of the scenario |
 | `authProfiles.<name>.description` | One line, at most 200 characters, with no control character: what the account can do, such as `a member of another board, without the owner's rights`. The planner reads it to draft access checks |
 
 The file also takes `redact`, `policy`, `replay`, `providers`, `tickets`, and `plan` blocks. The [technical requirements](docs/TRD.md) and [Plan 12](docs/implementation/12-plan-from-a-diff.md) describe them.
