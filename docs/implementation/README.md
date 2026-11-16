@@ -1,6 +1,6 @@
 # Semar implementation guide
 
-* **Status:** Draft 1. No code exists yet.
+* **Status:** Draft 1. Plans 01 and 12 to 20 are implemented. The other plans are specifications.
 * **Date:** 2026-11-14
 * **Spec:** [product requirements](../PRD.md), [technical requirements](../TRD.md), [test workflow](../WORKFLOW.md), [user scenarios](../USER_SCENARIOS.md)
 
@@ -299,6 +299,11 @@ Checked on the Go module proxy on 2026-11-14. Pin the exact version in `go.mod`.
 | 13 | [Model providers and the dashboard](13-model-providers-and-dashboard.md) (implemented) | `semar plan` uses Claude Code, Codex, the Anthropic API, or any server with the OpenAI chat format. Providers live in the person's own file. `semar dashboard` manages them, starts a sign-in, and shows usage. A harness provider loads the person's MCP servers and skills | Plan 12 | None yet |
 | 14 | [Documents the planner reads](14-knowledge-documents.md) (implemented) | `semar.yaml` names the API document and the documents of the repository. The planner reads them first, code compares every drafted request with the API document, and `plan.md` lists the differences. `semar init` finds the conventional paths | Plan 12 | None yet |
 | 15 | [Progress while a plan runs](15-progress-while-planning.md) (implemented) | `semar plan` shows a status line on a terminal while the planner works, and one plain line every 30 seconds elsewhere. Every provider reports its responses and tool calls | Plan 13 | None yet |
+| 16 | [Trial run after a plan](16-trial-run.md) (implemented) | `semar plan` sends the read-only steps of the accepted draft once and returns request problems to the planner inside its three attempts. A trial result never counts as a pass. `--no-trial` and `plan.trial: false` turn it off, and `plan.md` shows each result beside its step | Plans 12, 14, 15, and 17 | FR-283 to 287 |
+| 17 | [Fixtures](17-fixtures.md) (implemented) | A scenario names the state it needs under `given`, and a reviewed fixture in `.semar/fixtures/` makes it with `find`, `create`, `until`, and `cleanup`. A person approves a fixture with `semar confirm --fixture`, `semar fixture check` records its health, and a file lease keeps two runs on one machine apart | Plans 01, 12, and 14 | FR-271 to 282 |
+| 18 | [API journeys](18-journeys.md) (implemented) | `.semar/journeys/` holds business flows across services. `semar journey list` and `semar journey run` run the legs in order on one target manifest and give one of five outcomes. `plan.md` lists the journeys to rerun | Plan 17, and Plans 16 and 19 for the tasks that share files | FR-288 to 298, 300 (API legs) |
+| 19 | [Obligations and the coverage ledger](19-coverage-ledger.md) (implemented) | `.semar/obligations/` holds the use cases of a change, and `semar plan` writes them. `semar ledger` gives each one a state, with `defer` and `record` for a person, and the run report opens with one use case line | Plans 01, 12, and 14, and Plan 17 for task 5 | FR-261 in part, FR-262 to 270 |
+| 20 | [Exports](20-exports.md) (implemented) | `semar export ctrf`, `junit`, and `sarif` write one stored run in a common format, from the stored evidence and with no new outcome | Plan 01 | FR-188, 335, 336 |
 | 11 | [Configuration over code](11-configuration.md) | Cases, fragments, data sets, named checks, company rules, declared probes, passes, schemas, and `semar validate`. Every use case is a YAML edit | Plan 04. Parts need Plans 05 and 06 | FR-246 to 260 |
 
 Plans 01 to 04 are the first usable version: one API ticket from a plan to a report. Plans 05, 06, 07, and 11 do not depend on each other, apart from the tasks that Plan 11 names. They can be built in parallel after Plan 04, and Plan 06 can start after Plan 02. Tasks 1 to 5 and 11 to 13 of Plan 11 are worth doing early, because they are what a first user touches.
