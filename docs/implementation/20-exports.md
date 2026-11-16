@@ -1,6 +1,6 @@
 # Plan 20: Exports
 
-Status: Specification, not implemented.
+Status: Implemented, except task 7: the end-to-end test through `cli.Run` is not written. The text describes the code as built.
 
 ## Goal
 

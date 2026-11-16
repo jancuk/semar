@@ -1,6 +1,6 @@
 # Plan 19: Obligations and the coverage ledger
 
-Status: Specification, not implemented.
+Status: Implemented. The text describes the code as built.
 
 ## Goal
 

@@ -1,6 +1,6 @@
 # Plan 17: Fixtures
 
-Status: Specification, not implemented.
+Status: Implemented. The text describes the code as built.
 
 ## Goal
 

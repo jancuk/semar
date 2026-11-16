@@ -1,6 +1,6 @@
 # Plan 16: Trial run after a plan
 
-Status: Specification, not implemented.
+Status: Implemented. The text describes the code as built.
 
 ## Goal
 
