@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -22,6 +23,7 @@ import (
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/api"
 	"github.com/jancuk/semar/internal/evidence"
+	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/recorder"
 	"github.com/jancuk/semar/internal/redact"
 	"github.com/jancuk/semar/internal/replay"
@@ -43,6 +45,7 @@ type rig struct {
 	url     string // of the sample application
 	store   *evidence.Store
 	confirm *confirm.Local
+	policy  *effects.Policy
 	deps    replay.Deps
 }
 
@@ -132,6 +135,7 @@ func newRig(t *testing.T, o rigOptions) *rig {
 		url:     srv.URL,
 		store:   store,
 		confirm: conf,
+		policy:  pol,
 		deps: replay.Deps{
 			Engine:   eng,
 			Scripts:  store,
@@ -139,6 +143,7 @@ func newRig(t *testing.T, o rigOptions) *rig {
 			Services: []string{"orders"},
 			Confirm:  conf,
 			Trust:    []domain.Source{domain.SourceDiff, domain.SourceBaseline},
+			Run:      runID,
 		},
 	}
 }
@@ -815,4 +820,255 @@ func TestAConfirmationCoversOnlyTheSourcesItNames(t *testing.T) {
 		res, _, _ := r.run(t, sc)
 		expect(t, res[0], domain.OutcomeInconclusive, "an expected result is not confirmed")
 	})
+}
+
+const givenID domain.ScenarioID = "SHOP-482-05"
+
+func loadGivenScenario(t *testing.T) domain.Scenario {
+	t.Helper()
+	p := filepath.Join("testdata", "SHOP-482-05.scenario.yaml")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, err := scenario.Parse(data, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ps := scenario.Validate(sc, scenario.FromFile); len(ps) > 0 {
+		t.Fatalf("scenario problems: %v", ps)
+	}
+	return sc
+}
+
+// givenScript reads the order that the fixture made, at path.
+func givenScript(sc domain.Scenario, path string) domain.Script {
+	return domain.Script{
+		APIVersion: "semar/v1", Kind: "Script", Scenario: sc.ID, ExpectHash: domain.ExpectHash(sc),
+		AuthoredBy: domain.ProviderRef{Instance: "hand", Model: "none", Harness: "none"},
+		Steps: []domain.ScriptStep{{
+			Step:    "read-order",
+			Request: &domain.APIRequest{Service: "orders", Method: "GET", Path: path},
+		}},
+	}
+}
+
+func loadFixture(t *testing.T) domain.Fixture {
+	t.Helper()
+	p := filepath.Join("testdata", "order.new.yaml")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := fixture.Parse(data, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ps := fixture.Validate(f, []string{"orders"}); len(ps) > 0 {
+		t.Fatalf("fixture problems: %v", ps)
+	}
+	return f
+}
+
+// withFixtures gives the rig a real resolver over the one fixture of testdata, through the rig's engine.
+func (r *rig) withFixtures(t *testing.T, approved bool) {
+	t.Helper()
+	f := loadFixture(t)
+	if approved {
+		err := r.confirm.PutFixture(confirm.FixtureApproval{
+			Fixture: f.ID, Version: f.Version, Hash: domain.FixtureHash(f), User: "tester",
+			Identity: "local, unverified identity", At: time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.deps.Fixtures = fixture.New(fixture.Deps{
+		Engine:      r.deps.Engine,
+		Policy:      r.policy,
+		Catalogue:   fixture.Catalogue{Fixtures: []domain.Fixture{f}},
+		Approvals:   r.confirm,
+		Health:      fixture.NewHealthStore(r.store.Root()),
+		Environment: "local",
+		EnvServices: []string{"orders"},
+		Run:         runID,
+	})
+}
+
+func (r *rig) givenScenario(t *testing.T, path string) domain.Scenario {
+	t.Helper()
+	sc := loadGivenScenario(t)
+	r.putScript(t, givenScript(sc, path))
+	return sc
+}
+
+// fixtureActions counts the stored actions that a fixture sent, by phase.
+func (r *rig) fixtureActions(t *testing.T) map[string]int {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(r.store.Root(), "runs", runID, "exchanges", string(givenID), "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]int{}
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var a domain.Action
+		if err := json.Unmarshal(data, &a); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case a.Use.Fixture == nil:
+			out["step"]++
+		default:
+			out[string(a.Use.Pass)+" "+a.Use.Fixture.Phase]++
+			if a.Use.Step != "" {
+				t.Errorf("a fixture action names step %s", a.Use.Step)
+			}
+		}
+	}
+	return out
+}
+
+func TestGivenBlocksWithoutCatalogue(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	sc := r.givenScenario(t, "/v1/orders/{{order.id}}")
+	results, _, _ := r.run(t, sc)
+	expect(t, results[0], domain.OutcomeBlocked, "the scenario names fixtures, and this run has no fixture catalogue")
+	if n := r.app.Requests("", "/v1/orders"); n != 0 {
+		t.Errorf("%d requests were sent", n)
+	}
+}
+
+func TestBadScriptBlocksBeforeFixtures(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	r.withFixtures(t, true)
+	sc := r.givenScenario(t, "/v1/orders/{{order.total}}")
+	results, _, _ := r.run(t, sc)
+	expect(t, results[0], domain.OutcomeBlocked, "order.total is not an output of fixture order.new; its outputs are id")
+	if n := r.app.Requests("", "/v1/orders"); n != 0 {
+		t.Errorf("%d requests were sent", n)
+	}
+	if len(results[0].Fixtures) != 0 {
+		t.Errorf("fixtures = %+v", results[0].Fixtures)
+	}
+}
+
+func TestFixtureBlockedSendsNoStep(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	r.withFixtures(t, false)
+	sc := r.givenScenario(t, "/v1/orders/{{order.id}}")
+	results, _, _ := r.run(t, sc)
+	expect(t, results[0], domain.OutcomeBlocked, "fixture order.new is not approved: run semar confirm --fixture order.new")
+	if n := r.app.Requests("", "/v1/orders"); n != 0 {
+		t.Errorf("%d requests were sent", n)
+	}
+	if len(results[0].Actions) != 0 {
+		t.Errorf("scenario actions = %v", results[0].Actions)
+	}
+	if got := results[0].Fixtures; len(got) != 1 || got[0].Via != fixture.ViaNone {
+		t.Errorf("fixtures = %+v", got)
+	}
+}
+
+func TestFixtureOutputsReachScript(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	r.withFixtures(t, true)
+	sc := r.givenScenario(t, "/v1/orders/{{order.id}}")
+	r.run(t, sc)
+	a := r.storedAction(t, sc.ID, "read-order")
+	if !strings.HasSuffix(a.Request.URL, "/v1/orders/o-1") {
+		t.Errorf("the step was sent to %s", a.Request.URL)
+	}
+}
+
+func TestFixtureRecordsInResult(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	r.withFixtures(t, true)
+	sc := r.givenScenario(t, "/v1/orders/{{order.id}}")
+	results, _, _ := r.run(t, sc)
+	f := loadFixture(t)
+	want := []domain.FixtureRecord{{
+		As: "order", Fixture: "order.new", Version: "1.0.0", Hash: domain.FixtureHash(f), Via: fixture.ViaCreate,
+		Outputs: map[string]string{"id": "o-1"}, Cleanup: fixture.CleanupDone, Actions: []domain.ActionID{"a-0001", "a-0003"},
+	}}
+	if got := results[0].Fixtures; !reflect.DeepEqual(want, got) {
+		t.Errorf("fixtures = %+v\nwant       %+v", got, want)
+	}
+	if got := results[0].Actions; !slices.Equal(got, []domain.ActionID{"a-0002"}) {
+		t.Errorf("scenario actions = %v, want only the step", got)
+	}
+	want2 := map[string]int{"setup create": 1, "step": 1, "cleanup cleanup": 1}
+	if got := r.fixtureActions(t); !reflect.DeepEqual(want2, got) {
+		t.Errorf("stored actions = %v, want %v", got, want2)
+	}
+}
+
+func TestFixtureActionsAreNotStepEvidence(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	r.withFixtures(t, true)
+	sc := r.givenScenario(t, "/v1/orders/{{order.id}}")
+	results, _, _ := r.run(t, sc)
+	expect(t, results[0], domain.OutcomePassed, "")
+	if hasReason(results[0], "does not match") {
+		t.Errorf("a fixture action was taken for step evidence: %+v", results[0].Reasons)
+	}
+}
+
+func TestCleanupAfterFailedStep(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	r.withFixtures(t, true)
+	sc := loadGivenScenario(t)
+	status := 404
+	sc.Steps[0].Expect = sc.Steps[0].Expect[:1]
+	sc.Steps[0].Expect[0].Check.Status = &status
+	r.putScript(t, givenScript(sc, "/v1/orders/{{order.id}}"))
+	results, _, _ := r.run(t, sc)
+	expect(t, results[0], domain.OutcomeFailed, "")
+	if n := r.app.Requests("POST", "/v1/orders/o-1/cancel"); n != 1 {
+		t.Errorf("cleanup was sent %d times, want once", n)
+	}
+	if got := results[0].Fixtures; len(got) != 1 || got[0].Cleanup != fixture.CleanupDone {
+		t.Errorf("fixtures = %+v", got)
+	}
+}
+
+func TestCleanupAfterInterrupt(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	r := newRig(t, rigOptions{wrap: func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Method == "GET" && req.URL.Path == "/v1/orders/o-1" {
+				cancel()
+			}
+			next.ServeHTTP(w, req)
+		})
+	}})
+	r.withFixtures(t, true)
+	sc := r.givenScenario(t, "/v1/orders/{{order.id}}")
+	results, _, _, err := replay.New(r.deps).Run(ctx, []domain.Scenario{sc})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want a cancelled run", err)
+	}
+	if n := r.app.Requests("POST", "/v1/orders/o-1/cancel"); n != 1 {
+		t.Errorf("cleanup was sent %d times after the interrupt, want once", n)
+	}
+	if got := results[0].Fixtures; len(got) != 1 || got[0].Cleanup != fixture.CleanupDone {
+		t.Errorf("fixtures = %+v", got)
+	}
+}
+
+func TestRunIDVariable(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	sc := loadScenario(t)
+	s := loadScript(t)
+	s.Steps[0].Request.JSON = map[string]any{"amount": 100000, "ref": "semar-{{run.id}}"}
+	r.putScript(t, s)
+	r.confirmAll(t, sc)
+	results, _, _ := r.run(t, sc)
+	expect(t, results[0], domain.OutcomePassed, "")
+	if a := r.storedAction(t, sc.ID, "create-order"); !strings.Contains(string(a.Request.Body), `"ref":"semar-r-1"`) {
+		t.Errorf("body = %s", a.Request.Body)
+	}
 }

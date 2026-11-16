@@ -11,6 +11,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/engine/api"
+	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/script"
 	"github.com/jancuk/semar/internal/verdict"
 )
@@ -28,6 +30,10 @@ const (
 
 	reasonNoScript    = "no script was accepted"
 	reasonInterrupted = "the run was interrupted"
+	reasonNoFixtures  = "the scenario names fixtures, and this run has no fixture catalogue"
+
+	// cleanupLimit bounds the cleanup of the fixtures of one scenario (Plan 17, D15).
+	cleanupLimit = 2 * time.Minute
 )
 
 type Doer interface {
@@ -38,6 +44,13 @@ type Scripts interface {
 	Script(id domain.ScenarioID, h domain.Hash) (domain.Script, bool, error)
 }
 
+// Fixtures gives the state that the given entries of a scenario name, and removes it afterwards.
+type Fixtures interface {
+	Resolve(ctx context.Context, req fixture.Request) (*fixture.Resolution, error)
+	Release(ctx context.Context, res *fixture.Resolution) []domain.FixtureRecord
+	Outputs(id domain.FixtureID) ([]string, bool)
+}
+
 type Deps struct {
 	Engine   Doer
 	Scripts  Scripts
@@ -46,6 +59,8 @@ type Deps struct {
 	Confirm  confirm.Store
 	Trust    []domain.Source // the sources whose expectations a person must confirm
 	Workers  int             // default 4
+	Fixtures Fixtures        // nil: a scenario with given entries ends blocked
+	Run      domain.RunID    // the value of {{run.id}}
 }
 
 type Runner struct{ d Deps }
@@ -66,6 +81,7 @@ type replayed struct {
 	notRun    string
 	confirmed func(domain.Expectation) bool
 	notes     []domain.Reason // why the scenario stopped early, when no recorded action says it
+	fixtures  []domain.FixtureRecord
 }
 
 // Run replays each scenario and returns one result per scenario, in input order.
@@ -137,6 +153,7 @@ func (r *Runner) decide(scenarios []domain.Scenario, runs []replayed, start, end
 			res.Reasons = append(res.Reasons, domain.Reason{Rule: domain.OutcomeInconclusive, Text: fmt.Sprintf("the build of %s could not be read after the run", s)})
 		}
 		res.Reasons = append(res.Reasons, run.notes...)
+		res.Fixtures = run.fixtures
 		results[i] = res
 	}
 	return results
@@ -181,8 +198,11 @@ func (r *Runner) confirmation(sc domain.Scenario, run *replayed) func(domain.Exp
 // replay sends the steps in order and never sends one twice. It stops at the first
 // step that has no request in the script, was refused, failed, has no response, or captured no value: a later
 // step then has no action. A response with any status lets the scenario go on.
-func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (replayed, error) {
-	run := replayed{steps: map[domain.StepID]verdict.StepEvidence{}}
+//
+// The given entries are resolved after the script is validated, so a bad script sends nothing.
+// Their cleanup runs when the scenario ends, also after a failure or an interrupt.
+func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (run replayed, doErr error) {
+	run = replayed{steps: map[domain.StepID]verdict.StepEvidence{}}
 	run.confirmed = r.confirmation(sc, &run)
 
 	s, found, err := r.d.Scripts.Script(sc.ID, domain.ExpectHash(sc))
@@ -194,7 +214,7 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (replayed, erro
 		run.blocked = []string{reasonNoScript}
 		return run, nil
 	}
-	if problems := script.Validate(sc, s); len(problems) > 0 {
+	if problems := script.ValidateWith(sc, s, r.outputs(sc)); len(problems) > 0 {
 		for _, p := range problems {
 			text := "the script does not fit the scenario: " + p.Message
 			if p.Step != "" {
@@ -205,6 +225,53 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (replayed, erro
 		return run, nil
 	}
 
+	vars := map[string]string{"run.id": string(r.d.Run)}
+	if len(sc.Given) > 0 {
+		if r.d.Fixtures == nil {
+			run.blocked = []string{reasonNoFixtures}
+			return run, nil
+		}
+		res, err := r.d.Fixtures.Resolve(ctx, fixture.Request{Owner: sc.ID, Given: slices.Clone(sc.Given), AuthProfile: sc.AuthProfile, Pass: domain.PassSetup})
+		defer func() {
+			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupLimit)
+			defer cancel()
+			run.fixtures = r.d.Fixtures.Release(cctx, res)
+		}()
+		switch {
+		case err != nil && ctx.Err() != nil:
+			run.notRun = reasonInterrupted
+			return run, nil
+		case err != nil:
+			run.notes = append(run.notes, domain.Reason{Rule: domain.OutcomeInconclusive, Text: "the fixtures could not be sent or recorded"})
+			return run, fmt.Errorf("replay %s fixtures: %w", sc.ID, err)
+		case len(res.Blocked) > 0:
+			run.blocked = slices.Clone(res.Blocked)
+			return run, nil
+		}
+		maps.Copy(vars, res.Vars)
+	}
+	return run, r.steps(ctx, sc, s, &run, vars)
+}
+
+// outputs maps each alias to the outputs of its fixture, for script validation. With a fixture
+// that is not in the catalogue it returns nil, which accepts any output: Resolve then blocks the
+// scenario as "missing" before any request.
+func (r *Runner) outputs(sc domain.Scenario) map[string][]string {
+	if len(sc.Given) == 0 || r.d.Fixtures == nil {
+		return nil
+	}
+	out := make(map[string][]string, len(sc.Given))
+	for _, g := range sc.Given {
+		outs, ok := r.d.Fixtures.Outputs(g.Fixture)
+		if !ok {
+			return nil
+		}
+		out[g.As] = outs
+	}
+	return out
+}
+
+func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script, run *replayed, vars map[string]string) error {
 	bound := make(map[domain.StepID]domain.ScriptStep, len(s.Steps))
 	for _, ss := range s.Steps {
 		bound[ss.Step] = ss
@@ -212,7 +279,6 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (replayed, erro
 	note := func(step domain.StepID, text string) {
 		run.notes = append(run.notes, domain.Reason{Rule: domain.OutcomeInconclusive, Text: text, Step: step})
 	}
-	vars := map[string]string{}
 	var doErr error
 	interrupted := false
 	for i, step := range sc.Steps {
@@ -256,7 +322,7 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (replayed, erro
 	case interrupted:
 		note("", reasonInterrupted)
 	}
-	return run, doErr
+	return doErr
 }
 
 func buildCall(sc domain.Scenario, step domain.Step, ss domain.ScriptStep, vars map[string]string) (api.Call, error) {
