@@ -53,8 +53,9 @@ const (
 	maxScenarioID = 128
 	maxWait       = 15 * time.Minute
 	minEvery      = 100 * time.Millisecond
-	legIDRule     = `^[a-z][a-z0-9_-]*$`
-	apiOnly       = "legs are not supported yet: this version runs api legs only; web legs come in M2 and android legs in M3"
+	// No hyphen: a leg ID is the head of {{<leg>.<output>}}, and a variable name has none.
+	legIDRule = `^[a-z][a-z0-9_]*$`
+	apiOnly   = "legs are not supported yet: this version runs api legs only; web legs come in M2 and android legs in M3"
 )
 
 var (

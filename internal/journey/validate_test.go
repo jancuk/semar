@@ -110,9 +110,10 @@ func TestValidateRules(t *testing.T) {
 		}},
 
 		{rule: "J6", name: "id used twice", edit: func(j *domain.Journey) { j.Legs[2].ID = "pay"; j.Invariants = nil }, path: "legs[2].id", want: "pay is used twice"},
-		{rule: "J6", name: "upper case id", edit: func(j *domain.Journey) { j.Legs[0].ID = "Place"; j.Legs[1].Needs = nil; j.Invariants = nil }, path: "legs[0].id", want: `id "Place" must match ^[a-z][a-z0-9_-]*$`},
+		{rule: "J6", name: "upper case id", edit: func(j *domain.Journey) { j.Legs[0].ID = "Place"; j.Legs[1].Needs = nil; j.Invariants = nil }, path: "legs[0].id", want: `id "Place" must match ^[a-z][a-z0-9_]*$`},
 		{rule: "J6", name: "id with a dot", edit: func(j *domain.Journey) { j.Legs[0].ID = "a.b"; j.Legs[1].Needs = nil; j.Invariants = nil }, path: "legs[0].id", want: "must match"},
-		{rule: "J6", name: "id with a hyphen", edit: func(j *domain.Journey) { j.Legs[2].ID = "wait-paid"; j.Invariants = nil }},
+		{rule: "J6", name: "id with a hyphen", edit: func(j *domain.Journey) { j.Legs[2].ID = "wait-paid"; j.Invariants = nil }, path: "legs[2].id", want: `id "wait-paid" must match ^[a-z][a-z0-9_]*$`},
+		{rule: "J6", name: "id with an underscore", edit: func(j *domain.Journey) { j.Legs[2].ID = "wait_paid"; j.Invariants = nil }},
 		{rule: "J6", name: "reserved run", edit: func(j *domain.Journey) { j.Legs[2].ID = "run"; j.Invariants = nil }, path: "legs[2].id", want: "the name run is reserved"},
 		{rule: "J6", name: "reserved secret", edit: func(j *domain.Journey) { j.Legs[2].ID = "secret"; j.Invariants = nil }, path: "legs[2].id", want: "the name secret is reserved"},
 		{rule: "J6", name: "no legs", edit: func(j *domain.Journey) { j.Legs, j.Invariants = nil, nil }, path: "legs", want: "a journey needs 1 to 12 legs"},

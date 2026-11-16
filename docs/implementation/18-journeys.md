@@ -233,7 +233,7 @@ invariants:
 | J3 | `title` is one line. `owner` is set and passes `idcheck.Check` | `owner is required: a named product or QA owner owns a journey` |
 | J4 | `criticality` is `critical` or `standard` | `criticality must be critical or standard` |
 | J5 | `given` follows the scenario rules of Plan 17. An alias is not a leg ID | `given[0].as: place is also a leg ID` |
-| J6 | 1 to 12 legs. A leg ID matches `^[a-z][a-z0-9_-]*$` and is unique | `legs[2].id: pay is used twice` |
+| J6 | 1 to 12 legs. A leg ID matches `^[a-z][a-z0-9_]*$` and is unique. A hyphen is refused, because `{{<leg>.<output>}}` cannot hold one | `legs[2].id: pay is used twice` |
 | J7 | `surface` is `api`. Any other value is refused | `legs[0].surface: web legs are not supported yet: this version runs api legs only; web legs come in M2 and android legs in M3` |
 | J8 | `service` is set. A step's `request.service` is empty or equals it | `legs[1].steps[0].request.service: billing differs from the leg's service payments` |
 | J9 | A leg's `given` is refused | `legs[0].given: put the fixtures of a journey under its given` |
