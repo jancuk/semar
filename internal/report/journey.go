@@ -8,7 +8,7 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 )
 
-type journeyLegView struct{ Leg, Outcome, Reason string }
+type journeyLegView struct{ Leg, Outcome, As, Reason string }
 
 type invariantView struct{ Number, State, Values, Detail string }
 
@@ -65,6 +65,9 @@ func journeyViews(d Data) []journeyView {
 		}
 		for _, l := range j.Legs {
 			lv := journeyLegView{Leg: shown(string(l.Leg)), Outcome: shown(string(l.Outcome))}
+			if len(l.As) > 0 {
+				lv.As = shown(strings.Join(l.As, ", "))
+			}
 			if len(l.Reasons) > 0 {
 				lv.Reason = shown(l.Reasons[0].Text)
 			}
@@ -153,6 +156,9 @@ func journeyLines(journeys []domain.JourneyResult) []string {
 		lines = append(lines, line)
 		for _, l := range j.Legs {
 			line := "  " + plain(string(l.Leg)) + "\t" + plain(string(l.Outcome))
+			if len(l.As) > 0 {
+				line += " as " + plain(strings.Join(l.As, ", "))
+			}
 			if len(l.Reasons) > 0 {
 				head, more := cut(l.Reasons[0].Text, maxShown)
 				line += "\t" + plain(head)

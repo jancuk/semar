@@ -220,3 +220,21 @@ func TestJourneyExitCode(t *testing.T) {
 		})
 	}
 }
+
+func TestReportAndSummaryShowWhoALegActedAs(t *testing.T) {
+	d := journeyFixture()
+	d.Journeys[0].Legs[1].As = []string{"bob", "carol"}
+	d.Run.Journeys = d.Journeys
+	if out := render(t, d); !strings.Contains(out, "- Leg pay: passed (as bob, carol)") || strings.Contains(out, "- Leg place: passed (as") {
+		t.Errorf("the report does not show who leg pay acted as:\n%s", out)
+	}
+	var b bytes.Buffer
+	if err := report.Summary(&b, d.Run, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(squashSpaces(b.String()), "pay passed as bob, carol") {
+		t.Errorf("the summary does not show who leg pay acted as:\n%s", b.String())
+	}
+}
+
+func squashSpaces(s string) string { return strings.Join(strings.Fields(s), " ") }

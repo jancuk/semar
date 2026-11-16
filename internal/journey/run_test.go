@@ -803,6 +803,15 @@ func TestLegAsSendsThatSessionOnItsStepsOnly(t *testing.T) {
 	if jr.Outcome != domain.JourneyPassed {
 		t.Fatalf("journey %s: %+v", jr.Outcome, jr.Reasons)
 	}
+	for _, l := range jr.Legs {
+		var want []string
+		if l.Leg == "pay" {
+			want = []string{"bob"}
+		}
+		if !slices.Equal(l.As, want) {
+			t.Errorf("leg %s acted as %v, want %v", l.Leg, l.As, want)
+		}
+	}
 	// leg settled waits, so it sends more than one request, all as its own profile
 	if got, want := r.sentAs(), []string{"orders-tester", "bob", "orders-tester", "orders-tester"}; !slices.Equal(got, want) {
 		t.Errorf("sessions = %v, want %v", got, want)

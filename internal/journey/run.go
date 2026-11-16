@@ -427,7 +427,7 @@ func (r *Runner) judgeAll(runs []*legRun, start domain.Manifest, end *domain.Man
 	for i, lr := range runs {
 		res := r.judge(lr, start.Services, endBuilds)
 		results[i] = res
-		legs[i] = domain.LegResult{Leg: lr.leg.ID, Scenario: res.Scenario, Outcome: res.Outcome, Reasons: slices.Clone(res.Reasons)}
+		legs[i] = domain.LegResult{Leg: lr.leg.ID, Scenario: res.Scenario, Outcome: res.Outcome, Reasons: slices.Clone(res.Reasons), As: ActedAs(lr.sc)}
 	}
 	return legs, results
 }

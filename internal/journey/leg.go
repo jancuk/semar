@@ -3,6 +3,7 @@ package journey
 import (
 	"cmp"
 	"maps"
+	"slices"
 
 	"github.com/jancuk/semar/internal/domain"
 )
@@ -53,4 +54,16 @@ func legScenario(j domain.Journey, leg domain.Leg, authProfile string) (domain.S
 
 func legScenarioID(j domain.JourneyID, leg domain.LegID) domain.ScenarioID {
 	return domain.ScenarioID(string(j) + "." + string(leg))
+}
+
+// ActedAs lists the auth profiles that the steps of a leg scenario act as, each once, in step order.
+// It is nil when no step has an as.
+func ActedAs(sc domain.Scenario) []string {
+	var out []string
+	for _, st := range sc.Steps {
+		if st.As != "" && !slices.Contains(out, st.As) {
+			out = append(out, st.As)
+		}
+	}
+	return out
 }

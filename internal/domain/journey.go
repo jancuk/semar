@@ -91,6 +91,9 @@ type LegResult struct {
 	Scenario ScenarioID `json:"scenario"` // <journey>.<leg>
 	Outcome  Outcome    `json:"outcome"`
 	Reasons  []Reason   `json:"reasons"`
+	// As lists the auth profiles that the steps of the leg acted as, in step order, and only when a
+	// step acted as one by as. A leg that sent with its own profile has none.
+	As []string `json:"as,omitempty"`
 }
 
 type InvariantResult struct {

@@ -25,7 +25,7 @@ Outcome: **{{ .Outcome }}**{{ if .First }}. First failing leg: {{ .First }}.{{ e
 - Manifest at the end: {{ .ManifestEnd }}
 {{ end -}}
 {{ range .Legs -}}
-- Leg {{ .Leg }}: {{ .Outcome }}{{ if .Reason }}: {{ .Reason }}{{ end }}
+- Leg {{ .Leg }}: {{ .Outcome }}{{ if .As }} (as {{ .As }}){{ end }}{{ if .Reason }}: {{ .Reason }}{{ end }}
 {{ end -}}
 {{ range .Invariants -}}
 - Invariant {{ .Number }}: {{ .State }}{{ if .Values }}: {{ .Values }}{{ end }}{{ if .Detail }} ({{ .Detail }}){{ end }}
