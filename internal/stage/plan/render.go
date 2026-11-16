@@ -51,6 +51,11 @@ func Render(w io.Writer, in Input, out Output) error {
 	for _, id := range out.AfterTrial {
 		after[id] = true
 	}
+	ids := make([]domain.ScenarioID, len(out.Scenarios))
+	for i, sc := range out.Scenarios {
+		ids[i] = sc.ID
+	}
+	accounting := Accounting(d, in.Tickets, ids)
 	tickets := slices.Clone(d.Tickets)
 	slices.SortStableFunc(tickets, func(a, b TicketDraft) int { return strings.Compare(a.Key, b.Key) })
 	for _, t := range tickets {
@@ -75,6 +80,7 @@ func Render(w io.Writer, in Input, out Output) error {
 			b.WriteString("\nNo scenario was drafted for this ticket.\n")
 		}
 		writeManualChecks(&b, d.ManualChecks, t.Key)
+		writeCriteria(&b, accounting, t.Key)
 	}
 
 	b.WriteString("\n## Not drafted\n\n")
@@ -337,6 +343,32 @@ func writeManualChecks(b *strings.Builder, checks []ManualCheckDraft, ticket str
 			fmt.Fprintf(b, "   - %s\n", shown(s, maxTextShown))
 		}
 		fmt.Fprintf(b, "   - Expected: %s\n", shown(m.Expected, maxTextShown))
+	}
+}
+
+// writeCriteria is the table of the acceptance criteria of a ticket file, with what cites each
+// one (D9). A criterion that nothing cites says so, and becomes a gap obligation.
+func writeCriteria(b *strings.Builder, accounting []Accounted, ticket string) {
+	var mine []Accounted
+	for _, a := range accounting {
+		if a.Ticket == ticket {
+			mine = append(mine, a)
+		}
+	}
+	if len(mine) == 0 {
+		return
+	}
+	b.WriteString("\nAcceptance criteria:\n\n| Line | No. | Criterion | Cited by |\n| --- | --- | --- | --- |\n")
+	for _, a := range mine {
+		by := "not accounted for"
+		if len(a.CitedBy) > 0 {
+			cited := make([]string, len(a.CitedBy))
+			for i, c := range a.CitedBy {
+				cited[i] = shown(c, maxValueShown)
+			}
+			by = strings.Join(cited, "; ")
+		}
+		fmt.Fprintf(b, "| %d | %d | %s | %s |\n", a.Line, a.Number, shown(a.Text, maxCriterionText), by)
 	}
 }
 
