@@ -376,15 +376,16 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 	}
 
 	fmt.Fprintf(stderr, "semar: running against %s (%s, %s)\n", envName, env.Kind, effectsWords(env.Effects.Mode))
-	rg, err := newEnvRig(ctx, o, f.dir, cfg, env, declared, journeyNeeds(env, chosen, cat))
+	rg, err := newEnvRig(ctx, o, f.dir, cfg, env, declared, journeyNeeds(cfg, env, chosen, cat))
 	if err != nil {
 		return err
 	}
 	confirmations := confirm.NewLocal(rg.store.Root())
 	deps := replay.Deps{
 		Engine: rg.engine, Builds: rg.builds, Confirm: confirmations, Trust: cfg.Policy.Trust.Confirm, Run: rg.id,
+		Accounts: slices.Sorted(maps.Keys(cfg.AuthProfiles)),
 	}
-	jdeps := journey.Deps{Builds: rg.builds, Services: map[string]string{}, Clock: o.Clock, Sleep: o.Sleep}
+	jdeps := journey.Deps{Builds: rg.builds, Services: map[string]string{}, Clock: o.Clock, Sleep: o.Sleep, Accounts: deps.Accounts}
 	for _, s := range env.Services {
 		jdeps.Services[s.Name] = s.AuthProfile
 	}
@@ -482,9 +483,20 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 	return nil
 }
 
+// legStepAccounts is the as of each step of a leg that has one.
+func legStepAccounts(l domain.Leg) []string {
+	var out []string
+	for _, st := range l.Steps {
+		if st.As != "" {
+			out = append(out, st.As)
+		}
+	}
+	return out
+}
+
 // journeyNeeds maps each auth profile that the journeys use to the first reason it is needed: the
 // profile of a leg's service, the journey's own, or the profile of a service that a fixture calls.
-func journeyNeeds(env config.Environment, js []domain.Journey, cat *fixture.Catalogue) map[string]string {
+func journeyNeeds(cfg config.Config, env config.Environment, js []domain.Journey, cat *fixture.Catalogue) map[string]string {
 	needs := map[string]string{}
 	add := func(profile, why string) {
 		if _, ok := needs[profile]; profile != "" && !ok {
@@ -494,6 +506,13 @@ func journeyNeeds(env config.Environment, js []domain.Journey, cat *fixture.Cata
 	for _, j := range js {
 		for _, l := range j.Legs {
 			add(legAuth(env, j, l.Service), "leg "+string(l.ID)+" of journey "+string(j.ID))
+			// An account that the configuration lacks is no reason to stop: the runner blocks the
+			// journey and names it.
+			for _, as := range append([]string{l.As}, legStepAccounts(l)...) {
+				if _, known := cfg.AuthProfiles[as]; known {
+					add(as, "leg "+string(l.ID)+" of journey "+string(j.ID)+" acts as it")
+				}
+			}
 		}
 		if len(j.Given) == 0 || cat == nil {
 			continue
@@ -540,10 +559,12 @@ func unconfirmedJourney(store confirm.Store, trust []domain.Source, env config.E
 		return domain.JourneyResult{}, nil, false
 	}
 	whys := make([]string, len(order))
+	asOf := make([][]string, len(order))
 	first := -1
 	for i, id := range order {
 		leg := j.Legs[slices.IndexFunc(j.Legs, func(l domain.Leg) bool { return l.ID == id })]
 		sc, _ := journey.LegScenario(j, id, legAuth(env, j, leg.Service))
+		asOf[i] = journey.ActedAs(sc)
 		if whys[i] = unconfirmedWhy(store, trust, sc, j.ID); whys[i] != "" && first < 0 {
 			first = i
 		}
@@ -562,7 +583,7 @@ func unconfirmedJourney(store confirm.Store, trust []domain.Source, env config.E
 		if whys[i] != "" {
 			outcome, reason = domain.OutcomeInconclusive, domain.Reason{Rule: domain.OutcomeInconclusive, Text: whys[i]}
 		}
-		legs[i] = domain.LegResult{Leg: id, Scenario: sid, Outcome: outcome, Reasons: []domain.Reason{reason}}
+		legs[i] = domain.LegResult{Leg: id, Scenario: sid, Outcome: outcome, Reasons: []domain.Reason{reason}, As: asOf[i]}
 		results[i] = domain.ScenarioResult{Scenario: sid, Outcome: outcome, Reasons: []domain.Reason{reason}, Checks: []domain.CheckResult{}, Actions: []domain.ActionID{}}
 	}
 	// The builds were not read, because nothing was sent: the manifest is empty at both ends.
@@ -626,6 +647,9 @@ func confirmJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f
 				continue
 			}
 			u.label = fmt.Sprintf("Leg %s of journey %s (scenario %s)", l.ID, j.ID, sc.ID)
+			if as := journey.ActedAs(sc); len(as) > 0 {
+				u.label += ", acts as " + terminalSafe(strings.Join(as, ", "))
+			}
 			todo = append(todo, u)
 		}
 		if len(todo) == before {
