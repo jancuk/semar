@@ -110,6 +110,11 @@ func (r *repo) ledgerFile(t *testing.T, text string) {
 	r.writeRel(t, ".semar/obligations/SHOP-482.plan.yaml", text)
 }
 
+// unread is the summary line of a ledger that was not given --env.
+func unread(line string) string {
+	return strings.TrimSuffix(line, ".") + ". Builds were not read, so no result is matched to the current build."
+}
+
 func TestLedgerGroupsAndExitCodes(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -123,7 +128,7 @@ func TestLedgerGroupsAndExitCodes(t *testing.T) {
 				entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]"),
 				entry("SHOP-482/b", "Left for later", `gap: "not drafted: needs a fixture"`)))
 			r.must(t, cli.ExitOK, "ledger", "defer", "SHOP-482/b", "--reason", "waiting for a fixture", "--until", inDays(7))
-		}, cli.ExitOK, "2 use cases: 1 verified, 1 deferred"},
+		}, cli.ExitUndecided, "2 use cases: 1 verified, 1 deferred"}, // 0 only with --env
 		{"a failed scenario is 1", func(t *testing.T, r *repo) {
 			r.putRun(t, "r-old-1", "", nil, true, scenarioResult(scenarioID, domain.OutcomeFailed, "refund-too-much: expected 422, got 201"))
 			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
@@ -145,8 +150,8 @@ func TestLedgerGroupsAndExitCodes(t *testing.T) {
 			r := ledgerRepo(t)
 			c.setup(t, r)
 			res := r.must(t, c.code, "ledger")
-			if first, _, _ := strings.Cut(res.stdout, "\n"); first != c.line {
-				t.Errorf("the first line is %q, want %q", first, c.line)
+			if first, _, _ := strings.Cut(res.stdout, "\n"); first != unread(c.line) {
+				t.Errorf("the first line is %q, want %q", first, unread(c.line))
 			}
 		})
 	}
@@ -201,13 +206,27 @@ func TestLedgerWithoutEnvSaysSo(t *testing.T) {
 	}
 }
 
+// Without --env, a pass on any build counts, so nothing is confirmed current: the exit code is 2 at
+// best, and the first line says so. A failure still makes it 1.
+func TestLedgerWithoutEnvIsNeverGreen(t *testing.T) {
+	r := ledgerRepo(t)
+	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
+	r.putRun(t, "r-old-1", "", []domain.BuildRef{{Service: "orders", Commit: "9f3c2ab"}}, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
+	res := r.must(t, cli.ExitUndecided, "ledger")
+	if first, _, _ := strings.Cut(res.stdout, "\n"); first != unread("1 use case: 1 verified") {
+		t.Errorf("the first line is %q", first)
+	}
+	r.putRun(t, "r-z-new", "", nil, true, scenarioResult(scenarioID, domain.OutcomeFailed, "boom"))
+	r.must(t, cli.ExitFailed, "ledger")
+}
+
 func TestLedgerEnvMarksStale(t *testing.T) {
 	r := newRepo(t, repoOptions{app: sampleapp.Options{Commit: "c0ffee1"}})
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
 	r.putRun(t, "r-old-1", "", []domain.BuildRef{{Service: "orders", Commit: "9f3c2ab"}}, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
 
-	// With no environment, the old build counts, and the use case is verified.
-	r.must(t, cli.ExitOK, "ledger")
+	// With no environment, the old build counts, and the use case is verified, but not green.
+	r.must(t, cli.ExitUndecided, "ledger")
 
 	res := r.must(t, cli.ExitUndecided, "ledger", "--env", "local")
 	contains(t, "the table", res.stdout,
@@ -412,12 +431,12 @@ func TestLedgerReadsTheNewestCompleteRun(t *testing.T) {
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
 	r.putRun(t, "r-1", "", nil, true, scenarioResult(scenarioID, domain.OutcomeFailed, "old failure"))
 	r.putRun(t, "r-2", "", nil, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
-	res := r.must(t, cli.ExitOK, "ledger")
+	res := r.must(t, cli.ExitUndecided, "ledger")
 	contains(t, "the table", res.stdout, "Verified (1)")
 
 	// A run that did not touch the scenario leaves the result of the run before it.
 	r.putRun(t, "r-3", "", nil, true)
-	r.must(t, cli.ExitOK, "ledger")
+	r.must(t, cli.ExitUndecided, "ledger")
 }
 
 func TestLedgerRunReadsOneRunAndPrintsTheChecklist(t *testing.T) {

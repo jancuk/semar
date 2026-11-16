@@ -41,7 +41,8 @@ func newLedgerCommand(o options) *cobra.Command {
 		Use:   "ledger",
 		Short: "Show the state of every use case, defer one, or record what a person checked",
 		Long: "Show one state for each use case of .semar/obligations: verified, failed, blocked, needs_a_person, or deferred.\n" +
-			"Exit 0 when every use case is verified or deferred and every manual result is passed, 1 when a use case failed or a manual result is failed, and 2 otherwise.",
+			"Exit 0 when every use case is verified or deferred and every manual result is passed, 1 when a use case failed or a manual result is failed, and 2 otherwise.\n" +
+			"Without --env the builds are not read, so a pass on any build counts: the exit code is then 2 at best, and the first line says so.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return showLedger(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
@@ -104,7 +105,7 @@ func showLedger(ctx context.Context, stdout, stderr io.Writer, o options, f ledg
 	case f.checklist:
 		err = printChecklist(stdout, entries)
 	default:
-		if err = printLedger(stdout, entries); err == nil && f.run != "" {
+		if err = printLedger(stdout, entries, f.env != ""); err == nil && f.run != "" {
 			if needsAPerson(entries) {
 				fmt.Fprintln(stdout)
 				err = obligation.Checklist(stdout, entries, "")
@@ -114,7 +115,7 @@ func showLedger(ctx context.Context, stdout, stderr io.Writer, o options, f ledg
 	if err != nil {
 		return err
 	}
-	if code := ledgerExitCode(entries); code != ExitOK {
+	if code := ledgerExitCode(entries, f.env != ""); code != ExitOK {
 		return exitError{code}
 	}
 	return nil
@@ -374,9 +375,16 @@ func groupName(e obligation.Entry) string {
 	return groupNames[e.State]
 }
 
+// buildsUnread ends the summary line when the builds that the environment runs now were not read.
+const buildsUnread = ". Builds were not read, so no result is matched to the current build."
+
 // printLedger writes the summary line, then the entries in groups, in the order that Derive gives.
-func printLedger(w io.Writer, entries []obligation.Entry) error {
-	if _, err := fmt.Fprintln(w, oneLine(terminalSafe(obligation.SummaryLine(entries)))); err != nil {
+func printLedger(w io.Writer, entries []obligation.Entry, buildsRead bool) error {
+	line := obligation.SummaryLine(entries)
+	if !buildsRead {
+		line = strings.TrimSuffix(line, ".") + buildsUnread
+	}
+	if _, err := fmt.Fprintln(w, oneLine(terminalSafe(line))); err != nil {
 		return err
 	}
 	for i := 0; i < len(entries); {
@@ -422,8 +430,9 @@ func printChecklist(w io.Writer, entries []obligation.Entry) error {
 }
 
 // ledgerExitCode is 0 when every use case is verified or deferred and no manual result failed, 1
-// when a use case failed or a manual result failed, and 2 otherwise.
-func ledgerExitCode(entries []obligation.Entry) int {
+// when a use case failed or a manual result failed, and 2 otherwise. With the builds not read, a
+// pass on any build counts, so nothing is confirmed current and the code is 2 at best.
+func ledgerExitCode(entries []obligation.Entry, buildsRead bool) int {
 	code := ExitOK
 	for _, e := range entries {
 		switch {
@@ -432,6 +441,9 @@ func ledgerExitCode(entries []obligation.Entry) int {
 		case e.State != obligation.Verified && e.State != obligation.Deferred:
 			code = ExitUndecided
 		}
+	}
+	if !buildsRead && code == ExitOK {
+		return ExitUndecided
 	}
 	return code
 }
