@@ -1,6 +1,6 @@
 # Semar product requirements
 
-* **Status:** Draft 1 with updated product scope and roles. The model-free core (Plan 01), the test plan from a diff (Plan 12), and the model providers with the dashboard (Plan 13) are implemented. **Updated 2026-11-17:** adds the coverage ledger, fixtures, journeys, engines and the gateway, packs and the registry, and standards and interchange. The new items are requirements and none of them is claimed as built. Facts that are not verified are marked as such.
+* **Status:** Draft 1 with updated product scope and roles. The model-free core (Plan 01), the test plan from a diff (Plan 12), the model providers with the dashboard (Plan 13), the documents of the repository (Plan 14), and progress while a plan runs (Plan 15) are implemented. **Updated 2026-11-17:** adds the coverage ledger, fixtures, journeys, engines and the gateway, packs and the registry, and standards and interchange. These are built, with the limits that each section names: the trial run (Plan 16), fixtures (Plan 17), API-only journeys (Plan 18), the coverage ledger (Plan 19), and the CTRF, JUnit XML, and SARIF exports (Plan 20). These are requirements and are not built: engines and the gateway, packs and the registry, screens and UI legs, the dashboard views, the Arazzo format, the Postman and HAR imports, signed evidence bundles, and enterprise operation. Facts that are not verified are marked as such.
 * **Author:** azhar
 * **Date:** 2026-11-14
 * **Related:** [user scenarios](USER_SCENARIOS.md), [technical requirements](TRD.md), [test workflow](WORKFLOW.md), [workflow diagram](workflow.html)
@@ -20,7 +20,7 @@ Initial product scope: **backend APIs, web, and native Android**. Next platform:
 
 These are support boundaries for delivery, not claims that every company uses all three surfaces. Select applicable surfaces per project and journey. A missing required Android artifact blocks that journey; an API-only service can declare Android not applicable with a reason.
 
-**Journeys (added 2026-11-17).** A journey is a business flow that belongs to the product and crosses services and surfaces. It is a fourth layer above scenarios and runs against one target manifest. API-only journeys come first (M1.1), then web legs (M2), then Android legs (M3), with no change to the journey format. See [Journeys](#journeys) and decisions D58 and D59.
+**Journeys (added 2026-11-17).** A journey is a business flow that belongs to the product and crosses services and surfaces. It is a fourth layer above scenarios and runs against one target manifest. API-only journeys come first (M1.1), then web legs (M2), then Android legs (M3), with no change to the journey format. API-only journeys are built (Plan 18). Web and Android legs are not built. See [Journeys](#journeys) and decisions D58 and D59.
 
 **Engines (added 2026-11-17).** Semar does not build every surface engine itself. It integrates existing MCP servers as engines behind a gateway, and adds what they do not provide: recording, verdicts computed by code, an effects policy, replay, journeys, and fixtures. Which engine serves the web, Android, and iOS is not decided. Spikes compare candidates (D61). **iOS timing depends on that spike:** iOS stays after Android and is planned for M4, and it may come earlier if a candidate engine covers it. This is open question 37.
 
@@ -712,11 +712,13 @@ Delivery sequence: **M1** is an API pilot, **M1.1** adds shared team operation, 
 | FR-259 | An agent can get extra guidance from a file, and a prompt can be replaced. The report says when a prompt was replaced | M1.1 |
 | FR-260 | No setting can turn off a fixed rule, change a verdict rule, or let an agent label an expected result as confirmed | M1 |
 
-The sections below were added on 2026-11-17. Their design is in the matching sections of the [technical requirements](TRD.md). Where a row extends an earlier one, it names that row.
+The sections below were added on 2026-11-17. Their design is in the matching sections of the [technical requirements](TRD.md). Where a row extends an earlier one, it names that row. Each section says below which of its rows are built.
 
 ### Obligations and the ledger
 
 Design: [TRD, Test obligations and the coverage ledger](TRD.md#test-obligations-and-the-coverage-ledger). Decisions D53 and D54.
+
+Built in [Plan 19](implementation/19-coverage-ledger.md): FR-262 to FR-270, and FR-261 in part. Obligations come from the scenarios of a plan, the cases it did not draft, the files that no scenario covers, the document differences that the planner reports, and files that a person writes in `.semar/obligations/`. Not built: obligations from acceptance criteria, the feature map, and past defects, obligations that the planner proposes, and the import of manual test cases. FR-267 is built as a ledger line, "use case with no test and no reason", and not as a plan validation. A deferral and a manual result carry a local identity that is not verified.
 
 | ID | Requirement | Milestone |
 | --- | --- | --- |
@@ -735,6 +737,8 @@ Design: [TRD, Test obligations and the coverage ledger](TRD.md#test-obligations-
 
 Design: [TRD, Fixtures](TRD.md#fixtures). Decisions D55 and D56. A fixture takes the place of a fragment (FR-248) for preparation steps.
 
+Built in [Plan 17](implementation/17-fixtures.md): FR-271 to FR-282, in Semar's own YAML, for one repository and one machine. FR-281 is built as a file lease on one machine. FR-282 is built as the command `semar fixture check`: Semar has no scheduler, so a team runs the command from its own scheduler or pipeline. Not built: the Arazzo format (FR-334), the Postman and HAR imports (FR-338), fixtures in packs, and a fixture that uses another fixture.
+
 | ID | Requirement | Milestone |
 | --- | --- | --- |
 | FR-271 | A fixture is a file `.semar/fixtures/<id>.yaml` with `apiVersion: semar/v1`, `kind: Fixture`, an ID, a description, a version, an owner, parameters, `find`, `create`, `outputs`, and `cleanup` | M1.1 |
@@ -752,7 +756,7 @@ Design: [TRD, Fixtures](TRD.md#fixtures). Decisions D55 and D56. A fixture takes
 
 ### Trial run after a plan
 
-Design: [TRD, Trial run](TRD.md#trial-run). Decision D57.
+Design: [TRD, Trial run](TRD.md#trial-run). Decision D57. Built in [Plan 16](implementation/16-trial-run.md): FR-283 to FR-287. The trial uses the one auth profile of the plan. That a trial leads the planner to a correct repair is not verified.
 
 | ID | Requirement | Milestone |
 | --- | --- | --- |
@@ -765,6 +769,8 @@ Design: [TRD, Trial run](TRD.md#trial-run). Decision D57.
 ### Journeys
 
 Design: [TRD, Journeys](TRD.md#journeys). Decisions D58 and D59. FR-134 stays as it is: it places journeys that cross surfaces at M2 for the API and the web and at M3 for Android. The rows below add API-only journeys at M1.1.
+
+Built in [Plan 18](implementation/18-journeys.md): FR-288 to FR-298, and FR-300 for API legs. The manifest holds the services only. FR-292 is built as the commands `semar journey run` and `semar journey run --critical` and the "Journeys to rerun" section of `plan.md`: Semar has no scheduler, so the release gate and the nightly run belong to the team's own pipeline. Not built: FR-299 (it needs the registry), web legs, and Android legs.
 
 | ID | Requirement | Milestone |
 | --- | --- | --- |
@@ -837,7 +843,7 @@ Design: [TRD, Packs and the registry](TRD.md#packs-and-the-registry). Decisions 
 
 ### Standards and interchange
 
-Design: [TRD, Standards and interchange](TRD.md#standards-and-interchange). Decisions D56, D67, and D68. The exact version of each export format is not verified. JUnit XML export is FR-188. Importing a Postman collection as scenarios is FR-71. In a scenario, `given` follows the Given of Gherkin, and fixture states follow the idea of provider states in consumer-driven contract testing, such as Pact.
+Design: [TRD, Standards and interchange](TRD.md#standards-and-interchange). Decisions D56, D67, and D68. The exact version of each export format is not verified. Built in [Plan 20](implementation/20-exports.md): FR-188 (JUnit XML), FR-335 (CTRF), and FR-336 (SARIF, for the confirmed defects of a run). Not built: FR-333, FR-334, FR-338, FR-339, and FR-340. JUnit XML export is FR-188. Importing a Postman collection as scenarios is FR-71. In a scenario, `given` follows the Given of Gherkin, and fixture states follow the idea of provider states in consumer-driven contract testing, such as Pact.
 
 | ID | Requirement | Milestone |
 | --- | --- | --- |
@@ -852,7 +858,7 @@ Design: [TRD, Standards and interchange](TRD.md#standards-and-interchange). Deci
 
 ### Dashboard
 
-Design: [TRD, Dashboard views](TRD.md#dashboard-views). Decision D65. The local dashboard exists and serves model settings. Each view below arrives with the feature that it shows. The dashboard holds no data of record. Git is the source of truth, and the dashboard is a view and an approval interface.
+Design: [TRD, Dashboard views](TRD.md#dashboard-views). Decision D65. The local dashboard exists and serves model settings. None of the views below is built: `semar fixture list`, `semar journey list`, and `semar ledger` show the same facts on the command line. Each view below arrives with the feature that it shows. The dashboard holds no data of record. Git is the source of truth, and the dashboard is a view and an approval interface.
 
 | ID | Requirement | Milestone |
 | --- | --- | --- |
