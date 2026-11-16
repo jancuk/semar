@@ -20,6 +20,8 @@ A team delivered a feature across a Go backend, a web app, and an Android app, a
 | D6 | `plan.md` lists the problems of every draft that was refused, and the summary says why a trial tried nothing | A person cannot judge a plan whose rejected drafts are invisible |
 | D7 | The planner drafts a manual check for each acceptance criterion that only a person can check on a screen or a device. It becomes an obligation that needs a person, with steps and an expected result | "Not covered" is a gap with no next step. A checklist is something a person can do |
 | D8 | `semar init --account <name>=<ENV>` adds an auth profile per account. It can repeat | The first thing a team needs after the first account is a second one |
+| D9 | Every acceptance criterion of a ticket file is accounted for. Code reads the numbered criteria and requires that each is cited by a scenario with `source: ticket`, by a manual check, or by a `notDrafted` entry. What is left after the last attempt becomes a gap obligation | On a real delivery the planner covered the API criteria and drafted no manual check for the web and Android criteria, although the prompt asked for them. A prompt rule is not a guarantee, so code enforces it, and the ledger never loses a criterion |
+| D10 | A not-found or no-access test may use an ID that cannot exist, built from the run, as `missing-{{run.id}}` in a path. No other made-up ID is allowed | The planner refused to draft a 404 test for a list that does not exist, because it may not invent IDs. An ID built from the run id cannot match a real record, and it names no data of the environment |
 
 ## Trust
 
@@ -45,24 +47,29 @@ A team delivered a feature across a Go backend, a web app, and an Android app, a
 * `expect[].by` (optional): `model` or absent. `by: model` always needs confirmation (D2). The hash covers `by` only when it is set.
 * `equals`, `notEquals`, and `contains` operands that are strings may hold `{{name}}` variables: a capture of an earlier step, an output of a `given` alias, or `run.id`. `secret.` is refused. An unknown name is a load error with the path of the check. At run time the operand is filled in from the variables; a missing value makes the check `not_evaluated`. The report shows the filled-in value next to the template.
 
-### Plan stage and prompt (version 6)
+### Plan stage and prompt (version 7)
 
 * Input gains `Tickets` (the ticket files of the tickets in the change, with path and text) and `Accounts` (names and descriptions of the auth profiles).
 * The prompt gains:
   * "The tickets' acceptance criteria": each ticket file, numbered by line, as data, with the rule of D1. Each criterion that a caller of the API can observe gets at least one expectation with `source: ticket` and a cite of the form `<ticket file>:<line> <one sentence>`. Where the code does not meet it, the planner still expects what the criterion says, adds a `differences` entry, and names the scenario after the requirement, not after the code.
   * "Accounts you can act as": the names and descriptions, and the rule of D3: for each changed entry point, add a scenario for the most likely access mistake (an account outside the board, a member without the owner's rights) with `as`.
   * The rule of D7: a criterion that only a person can check (a screen, a device, a gesture) goes under `manualChecks` with the ticket, a title, 1 to 20 steps, the expected result, and the cite of the criterion.
-* Draft schema: `ExpectDraft.source` is `diff` or `ticket` (default `diff`). `StepDraft.as`. `manualChecks: [{ticket, title, steps, expected, cite}]`.
+* Draft schema: `ExpectDraft.source` is `diff` or `ticket` (default `diff`). `StepDraft.as`. `manualChecks: [{ticket, title, steps, expected, cite}]`. `notDrafted[].cite` (optional, D9): the cite of the criterion that the entry accounts for.
 * Validation adds:
   * A `ticket` expectation's cite names the ticket file of the scenario's ticket and a line that exists in it. Otherwise a problem goes back to the planner.
   * `as` names an account of `Input.Accounts`.
   * Variables in operands follow the rule above.
   * A manual check names a ticket of the change and cites a line of its ticket file.
+  * A `notDrafted` entry with a `cite` names a ticket that has a file and cites a line of it, as a manual check does.
 * Every drafted expectation is written with `by: model`.
+* Accounting of criteria (D9). Code reads the acceptance criteria of each ticket file of the change: the lines that start with `<n>. ` under a heading whose text contains "Acceptance criteria" (any case), up to the next heading. A criterion is one numbered line and the lines that continue it, up to the next numbered line, a blank line, or a heading. A fenced block never holds a heading. A file with no such heading has no criterion, and no rule applies to it. After a draft passes every other rule, each criterion must be cited, by a line within the criterion, by at least one of: an expectation with `source: ticket`; a manual check; a `notDrafted` entry with `cite`. A criterion that nothing cites is a problem that goes back to the planner, in the form `docs/tickets/SHOP-482.md:16 criterion 8 is not accounted for: add a scenario with source ticket, a manual check, or a notDrafted entry that cites it`. The text of the criterion is not in the message. A draft that only misses criteria counts as a draft that passed when a later draft fails. After the last attempt such a draft is written, and `Output.Unaccounted` lists the criteria.
+* The prompt (version 7) states the accounting rule once, in the tickets section. It allows the form of D10 in place of the rule that forbids invented IDs. Validation needs no change for D10: `{{run.id}}` is a known name in a path, and it matches a hint parameter. Code never refused a literal ID, so the rule that no other made-up ID is allowed stays a prompt rule, and `plan.md` still tells a person to read the requests.
+* Each criterion in `Output.Unaccounted` becomes an obligation `<ticket>/criterion-<n>` with `source: criterion`, `cite: <file>:<line>`, the title `Criterion <number>: <text>`, and the gap "criterion not accounted for by the planner". It has no checklist. It derives a gap in the ledger, so the criterion is never lost.
 * The obligations of a ticket gain one obligation per manual check, with `manual: {kind: judgement, text, steps, expected, writtenBy: ai}`, so it derives `needs_a_person` and its checklist.
 * `plan.md`:
   * "How this plan was made" lists the problems of each refused draft, at most 30 per draft, escaped.
   * Each ticket section shows its manual checks.
+  * Each ticket section with a ticket file shows the table "Acceptance criteria" with the columns Line, No., Criterion, and Cited by: the scenarios, manual checks, and notDrafted entries that cite each criterion, or "not accounted for".
   * A scenario with an expectation that the code is known not to meet (a `differences` entry for the same ticket and the cited criterion line) is marked "expected to fail on this build: the code does not meet <ticket file>:<line>".
 * The summary line of the trial names the main reason when it tried nothing, for example `tried: 0 of 27 steps (every step needs a write or a fixture create, which a trial never sends)`.
 
@@ -79,7 +86,7 @@ The confirm screen prints, for a `ticket` expectation whose cite names a file of
 | # | Task | Owner | Files |
 | --- | --- | --- | --- |
 | A | Runtime: `as`, `by`, operand variables, accounts in config, `init --account`, `.semar/.gitignore`, confirm screen, fixture check message | Agent B | `internal/domain`, `internal/scenario`, `internal/script`, `internal/check`, `internal/replay`, `internal/engine/api`, `internal/config`, `internal/confirm`, `internal/cli/init.go`, `confirm*.go`, `fixture.go` |
-| B | Planner: tickets kind, prompt version 6, schema, validation, `by: model`, manual checks to obligations, `plan.md` additions, trial reason | Agent A | `internal/knowledge`, `internal/stage/plan`, `internal/prompt`, `internal/obligation/fromplan.go`, `internal/cli/plan.go`, `planwrite.go`, `plantrial.go` |
+| B | Planner: tickets kind, prompt version 7, schema, validation, `by: model`, manual checks to obligations, `plan.md` additions, trial reason | Agent A | `internal/knowledge`, `internal/stage/plan`, `internal/prompt`, `internal/obligation/fromplan.go`, `internal/cli/plan.go`, `planwrite.go`, `plantrial.go` |
 
 Task A commits the domain fields (`Step.As`, `Expectation.By`) first, so that task B can use them.
 

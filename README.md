@@ -174,7 +174,7 @@ While the planner works, a status line on standard error shows the elapsed time,
 | `.semar/scenarios/<ticket>/<ticket>-NN.yaml` | One scenario: its steps and expected results |
 | `.semar/store/scripts/...` | The exact request of each step |
 | `.semar/obligations/<ticket>.plan.yaml` | The use cases of the ticket, for the [ledger](#see-that-nothing-is-skipped-the-use-case-ledger) |
-| `.semar/plans/<head commit>/plan.md` | What changed, the scenarios per ticket, what was not drafted and what it needs, the fixtures needed, the journeys to rerun, the manual checks for a person, the files that no scenario covers, the trial run, the documents that the planner was told to read, and the problems of every draft that went back to the planner |
+| `.semar/plans/<head commit>/plan.md` | What changed, the scenarios per ticket, the acceptance criteria and what cites each one, what was not drafted and what it needs, the fixtures needed, the journeys to rerun, the manual checks for a person, the files that no scenario covers, the trial run, the documents that the planner was told to read, and the problems of every draft that went back to the planner |
 
 The output ends with the commands of the next steps:
 
@@ -416,11 +416,13 @@ knowledge:
 
 `semar init` writes this entry when `docs/tickets/` exists. A `tickets` source names a folder, and it has no `service`. Semar reads `<folder>/<ticket key>.md` for each ticket of the change from the copy of the source at the head commit. A ticket with no file there is named in one line on standard error, and its expected results come from the code, as before. A file that is not a regular file is not read, and a file above 64 KiB is cut with a marker that says so.
 
-**What the planner is told.** The prompt (version 6) shows each file as data, numbered by line, inside a fence that its own text cannot end. It cannot change the schema, the rules, or a result: a person still confirms every expected result. The planner is told to:
+**What the planner is told.** The prompt (version 7) shows each file as data, numbered by line, inside a fence that its own text cannot end. It cannot change the schema, the rules, or a result: a person still confirms every expected result. The planner is told to:
 
 * give each criterion that a caller of the API can observe at least one expected result with `source: ticket` and a `cite` of the form `<ticket file>:<line> <one sentence>`. Code checks that the file is the ticket file of the scenario's ticket and that the line exists. A scenario whose ticket has no file cannot use `source: ticket`, and the problem goes back to the planner;
 * expect what the criterion says where the code does not meet it, add a `differences` entry, and name the scenario after the requirement. `plan.md` marks that scenario with `This scenario is expected to fail on this build: the code does not meet docs/tickets/SHOP-482.md:14.` The mark is a prediction that a person can check in the run;
-* put a criterion that only a person can check, on a screen, on a device, or by a gesture, under `manualChecks`: the ticket, a title, 1 to 20 steps, the expected result, and the cite of the criterion.
+* put a criterion that only a person can check, on a screen, on a device, or by a gesture, under `manualChecks`: the ticket, a title, 1 to 20 steps, the expected result, and the cite of the criterion;
+* account for every numbered criterion under a heading that contains "Acceptance criteria". Code reads those lines and checks that each one is cited by a scenario with `source: ticket`, by a manual check, or by a `notDrafted` entry with a `cite`. A criterion that nothing cites goes back to the planner. If it is still missing after the last draft, the plan is written and the criterion becomes an obligation `<ticket>/criterion-<n>` with the gap "criterion not accounted for by the planner", so the ledger keeps it. `plan.md` shows a table "Acceptance criteria" in each ticket's section, with what cites each one;
+* test a record that is not found with an ID that cannot exist, `missing-{{run.id}}`, in the path. It may not use any other made-up ID.
 
 **Manual checks.** Each manual check is listed in `plan.md` under its ticket, and becomes an obligation `<ticket>/manual-<n>` in `.semar/obligations/<ticket>.plan.yaml`, with `source: criterion` and a `manual` reason of the kind `judgement` that is written by `ai`. It derives `needs_a_person`, and `semar ledger --checklist` prints its steps and its expected result. A person records the result with `semar ledger record`.
 
