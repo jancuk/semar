@@ -42,9 +42,9 @@ func TestStatusShowsTheUseCasesOfTheChange(t *testing.T) {
 	contains(t, "the status", out,
 		"On feature/refund-limit against main · local",
 		"1 use case of SHOP-482, SHOP-490",
-		"no test 1 SHOP-482/a not drafted → semar plan",
-		"not planned 1 SHOP-490 → semar plan",
-		`A commit has no ticket: `, `"tidy the logger"`,
+		"no test 1 → semar plan\n SHOP-482/a Refund limit\n not drafted",
+		"not planned 1 → semar plan\n SHOP-490",
+		`1 commit has no ticket: `, `"tidy the logger"`,
 		"Ship: no. 2 open.")
 	if strings.Contains(out, "SHOP-480") {
 		t.Errorf("a use case of a ticket that the change does not name is listed:\n%s", res.stdout)

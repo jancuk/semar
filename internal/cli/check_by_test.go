@@ -38,15 +38,15 @@ func TestCheckByLetsAScenarioDoTheManualCheck(t *testing.T) {
 
 	// From now on the state comes from the scenario: it has no result yet.
 	before := r.must(t, cli.ExitUndecided, "status")
-	contains(t, "before a run", squash(before.stdout), "blocked 1 SHOP-482/person "+scenarioID+" has no result: run it → semar run")
+	contains(t, "before a run", squash(before.stdout), "blocked 1 → semar run\n SHOP-482/person The refund receipt\n "+scenarioID+" has no result: run it")
 
 	r.putRun(t, "r-old-1", "", nil, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
 	after := r.must(t, cli.ExitUndecided, "status")
-	contains(t, "after a pass", squash(after.stdout), "verified 1 SHOP-482/person by test "+scenarioID+", linked by tester")
+	contains(t, "after a pass", squash(after.stdout), "verified 1\n SHOP-482/person The refund receipt\n by test "+scenarioID+", linked by tester")
 
 	r.putRun(t, "r-z-new", "", nil, true, scenarioResult(scenarioID, domain.OutcomeFailed, "boom"))
 	failed := r.must(t, cli.ExitFailed, "status")
-	contains(t, "after a failure", squash(failed.stdout), "failing 1 SHOP-482/person "+scenarioID+" failed in r-z-new: boom")
+	contains(t, "after a failure", squash(failed.stdout), "failing 1\n SHOP-482/person The refund receipt\n "+scenarioID+" failed in r-z-new: boom")
 }
 
 func TestCheckByIsRepeatableAndBlocksAHandResult(t *testing.T) {

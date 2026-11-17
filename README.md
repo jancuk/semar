@@ -447,7 +447,7 @@ knowledge:
 
 **What `plan.md` adds.** "How this plan was made" lists the problems of every draft that went back to the planner, at most 30 for each draft, escaped. When a trial sent nothing, the summary line of `semar plan` says why, for example `tried: 0 of 27 steps (every step needs a write or a fixture create, which a trial never sends)`.
 
-Code cannot check that a cited line says what the planner claims. `semar review` prints that line next to the result, and prints the scenario as the Gherkin file that it is, so a person compares them.
+Code cannot check that a cited line says what the planner claims. `semar review` opens each item with that line, and shows the test in the words of its Gherkin file, so a person compares them. `d` prints the whole file.
 
 ### Plan with a small model
 
@@ -590,7 +590,7 @@ A name that `semar.yaml` does not define blocks the scenario before any request,
 
 ### Expected results from a model, and variables in them
 
-`, by model` at the end of the comment under a `Then` line says that a model wrote the expected result. It always needs a person's confirmation, whatever its source and whatever `policy.trust.confirm` lists. `semar review` prints the scenario file as it is, and then each result that needs a person. For a `ticket` result whose cite starts with `<file of the repository>:<line>` it prints the cited line, read from your working tree as one escaped line of at most 300 characters, and `as` for each step that has it. A cite to a file or a line that is not there prints `line not found`, so you can see that it does not hold up.
+`, by model` at the end of the comment under a `Then` line says that a model wrote the expected result. It always needs a person's confirmation, whatever its source and whatever `policy.trust.confirm` lists. `semar review` opens an item with the ticket and the cited lines of the results that need a person. For a result whose cite starts with `<file of the repository>:<line>` it prints that line, read from your working tree as one escaped line of at most 300 characters. A cite to a file or a line that is not there prints `line not found`, so you can see that it does not hold up. Under it comes the test: its title, and its `Given`, `When`, and `Then` lines as the scenario file has them, with `as` for each step that has it. `(by model)` ends a result that a model wrote, and `(source diff)` a result whose source is not the ticket. `d` prints the whole file as Gherkin.
 
 A string value after `equals`, `does not equal`, or `contains` may hold `{{name}}`: a capture of this or an earlier step, an output of a `given` entry such as `{{card.board}}`, or `{{run.id}}`. Semar fills it in before it checks. A `secret.` or `data.` name, a malformed `{{`, or a name that nothing provides is refused when the files are loaded, and a value that is missing at run time makes the check `not_evaluated`. The report shows the filled-in value next to what was written, and a value that the redaction hides stays hidden.
 
@@ -928,23 +928,27 @@ An `inconclusive`, `stale`, or `not_run` cover gives `blocked`, and the reason n
 semar status uat
 ```
 
-`semar status` prints one line with the counts, then the use cases in groups, with the first reason of each. Its flags are `--ticket <key>` (repeatable), `--env <name>`, `--build <commit>` with `--env`, `--run <id>`, and `--checklist`.
+`semar status` prints the first line, the count of use cases, each group with one line for each use case, and the verdict. A use case is its ID and its title. A group whose use cases continue with one command names it once, on the line of the group. The reasons of a use case are printed under it, except in `needs review`. Its flags are `--ticket <key>` (repeatable), `--env <name>`, `--build <commit>` with `--env`, `--run <id>`, `--all`, `--checklist`, and `--html <file>`.
 
 ```text
-5 use cases: 0 verified, 2 blocked, 2 need a person, 1 deferred. Checked by a person: 1 passed.
+On feature/refund-limit against main · uat · orders at 4f2a91c
+5 use cases of SHOP-482
 
-Blocked (2)
-  SHOP-482/scenario-SHOP-482-01  Refund above the order total is rejected      SHOP-482-01 was deleted: no scenario or journey covers this
-  SHOP-482/not-drafted-1         A refund of a paid order by another customer  not drafted: needs fixture order.paid
+  verified      1
+  blocked       1
+    SHOP-482/not-drafted-1  A refund of a paid order by another customer
+      not drafted: needs fixture order.paid
+  for a person  2  → semar check <id> pass
+    SHOP-482/difference-1  The document and the code differ: the status of a refund above the total
+    refunds/refund-email   The customer gets an email about the rejection
+  deferred      1
+    SHOP-482/uncovered-1  Changes in internal/refund/notify.go
+      deferred by tester until 2026-12-17: the change only sends an internal email
 
-Needs a person (2)
-  SHOP-482/difference-1  The document and the code differ: the status of a refund above the total  A person decides whether the document or the code is right
-                                                                                                   passed, checked by a person
-  refunds/refund-email   The customer gets an email about the rejection                            The email leaves the test environment
-
-Deferred (1)
-  SHOP-482/uncovered-1  Changes in internal/refund/notify.go  deferred by tester until 2026-12-17: the change only sends an internal email
+Ship: no. 3 open.
 ```
+
+Commits of the change that name no ticket are one line before the verdict: `4 commits have no ticket: 7c1d2aa "tidy the logger", 4405647 "start without the tool", and 2 more`. A commit that changes only files under `.semar/` is Semar's own setup and is not counted.
 
 Results come from the newest complete run that holds them. Only results on the builds that the environment runs now count, and `--env` reads those builds. Without `--env`, Semar says on standard error that the builds were not read. `--run <id>` reads one run only and prints the manual checklist after the table. The exit code is 0 when every use case is `verified` or `deferred`, or needs a person and has a newest manual result that passed on the builds that run now (see below), 1 when a use case failed or a manual result failed, and 2 otherwise. With no obligation it prints `no use case: there is no obligation in .semar/obligations` and exits 2.
 
@@ -1100,7 +1104,7 @@ The change is the range from the base branch to `HEAD`. The base is `change.base
 
 `semar run` prints what it selected before it sends anything: the change, the environment with its kind and build, the number of scenarios and journeys, and the gaps. A gap is a ticket of the change with no use cases, a commit with no ticket, or a scenario that cannot run here. A ticket that has a ticket file and no use cases is not planned: on a terminal, `run` offers to plan it, with the provider, the model, and an estimate, and plans only when you answer `y`. A change with no ticket ends with exit code 2 and names `--all`.
 
-A result has one of these words: `passed`, `failed`, `blocked`, `needs review`, `stale`. `needs review` is a missing approval of a scenario, a fixture, or a screens file. `stale` is a pass on another build, or of a scenario that changed since. Every line that has a next step ends with the command, such as `needs review → semar review SHOP-482-03`.
+A result has one of these words: `passed`, `failed`, `blocked`, `needs review`, `stale`. `needs review` is a missing approval of a scenario, a fixture, or a screens file. `stale` is a pass on another build, or of a scenario that changed since. Every line of a result that has a next step ends with the command, such as `needs review → semar review SHOP-482-03`. `semar status` names the command once on the line of a group when every use case of the group continues with it, such as `needs review  3  → semar review`.
 
 `semar review` stores the `user.email` of git with each approval, when it is set. `semar status` marks a use case whose every approval came from an author of a commit of the change with `approved by an author of the change`. The mark changes no state and no exit code.
 

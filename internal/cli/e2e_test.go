@@ -715,7 +715,7 @@ func TestReviewListsTheWholeOperandAndNothingHostile(t *testing.T) {
 	}
 
 	res := r.must(t, cli.ExitOK, "review", scenarioID, "--yes")
-	contains(t, "the listing", res.stdout, head+`\x1b[31mB`+`\t`+tail)
+	contains(t, "the listing", res.stdout, head+`\u001b[31mB`+`\t`+tail)
 	for _, hostile := range []string{"\x1b", "\u202e", "\u200b"} {
 		if strings.Contains(res.stdout, hostile) {
 			t.Errorf("the listing holds the character %+q", hostile)

@@ -126,22 +126,22 @@ func TestStatusGroupsAndExitCodes(t *testing.T) {
 				entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]"),
 				entry("SHOP-482/b", "Left for later", `gap: "not drafted: needs a fixture"`)))
 			r.must(t, cli.ExitOK, "defer", "SHOP-482/b", "--reason", "waiting for a fixture", "--until", inDays(7))
-		}, cli.ExitUndecided, []string{"2 use cases", "verified 1", "deferred 1 SHOP-482/b", "Ship: no. " + unreadShip}},
+		}, cli.ExitUndecided, []string{"2 use cases", "verified 1", "deferred 1\n SHOP-482/b Left for later", "Ship: no. " + unreadShip}},
 		{"a failed scenario is 1", func(t *testing.T, r *repo) {
 			r.putRun(t, "r-old-1", "", nil, true, scenarioResult(scenarioID, domain.OutcomeFailed, "refund-too-much: expected 422, got 201"))
 			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
-		}, cli.ExitFailed, []string{"1 use case", "failing 1 SHOP-482/a SHOP-482-01 failed in r-old-1: refund-too-much: expected 422, got 201", "Ship: no. 1 failing."}},
+		}, cli.ExitFailed, []string{"1 use case", "failing 1\n SHOP-482/a Covered\n SHOP-482-01 failed in r-old-1: refund-too-much: expected 422, got 201", "Ship: no. 1 failing."}},
 		{"a failed manual result is 1", func(t *testing.T, r *repo) {
 			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "By hand", manualEntryFields)))
 			r.must(t, cli.ExitOK, "check", "SHOP-482/a", "fail", "--note", "no")
-		}, cli.ExitFailed, []string{"failing 1 SHOP-482/a A person decides"}},
+		}, cli.ExitFailed, []string{"failing 1\n SHOP-482/a By hand\n failed, checked by a person"}},
 		{"a use case that never ran is blocked, and is 2", func(t *testing.T, r *repo) {
 			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Never run", "covers: ["+scenarioID+"]")))
-		}, cli.ExitUndecided, []string{"blocked 1 SHOP-482/a SHOP-482-01 has no result: run it → semar run", "Ship: no. 1 open."}},
+		}, cli.ExitUndecided, []string{"blocked 1 → semar run\n SHOP-482/a Never run\n SHOP-482-01 has no result: run it", "Ship: no. 1 open."}},
 		{"a use case for a person is 2 when the pass names no build", func(t *testing.T, r *repo) {
 			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "By hand", manualEntryFields)))
 			r.must(t, cli.ExitOK, "check", "SHOP-482/a", "pass", "--note", "ok")
-		}, cli.ExitUndecided, []string{"for a person 1 SHOP-482/a A person decides", "passed, checked by a person", "→ semar check SHOP-482/a pass"}},
+		}, cli.ExitUndecided, []string{"for a person 1 → semar check <id> pass\n SHOP-482/a By hand"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -184,11 +184,11 @@ func TestStatusGroupsInOrderAndAddUp(t *testing.T) {
 	}
 	contains(t, "the status", out,
 		"6 use cases",
-		"SHOP-482/nothing use case with no test and no reason → semar plan",
+		"no test 1 → semar plan\n SHOP-482/nothing N\n use case with no test and no reason",
 		"SHOP-482-02 failed in r-old-1: refund-too-much: expected 422, got 201",
-		"SHOP-482-03 needs review in r-old-1: an expected result is not confirmed → semar review SHOP-482-03",
-		"A person decides",
-		"deferred by tester until "+inDays(3)+": later",
+		"needs review 1 → semar review\n SHOP-482/review B",
+		"for a person 1 → semar check <id> pass\n SHOP-482/person P",
+		"deferred 1\n SHOP-482/deferred D",
 		"Ship: no. 1 failing, 3 open.")
 }
 
@@ -223,7 +223,7 @@ func TestStatusEnvMarksStale(t *testing.T) {
 	// The only environment is read with no argument, and an old build is stale.
 	res := r.must(t, cli.ExitUndecided, "status")
 	contains(t, "the status", squash(res.stdout), "local · orders at c0ffee1",
-		"stale 1 SHOP-482/a SHOP-482-01 ran on orders 9f3c2ab, and the environment runs c0ffee1: rerun on the current build → semar run")
+		"stale 1 → semar run\n SHOP-482/a Covered\n SHOP-482-01 ran on orders 9f3c2ab, and the environment runs c0ffee1: rerun on the current build")
 	if strings.Contains(res.stderr, "not read") {
 		t.Errorf("the note about unread builds is printed although the environment was read:\n%s", res.stderr)
 	}
@@ -345,12 +345,12 @@ func TestRecordIsANewRecordAndKeepsTheState(t *testing.T) {
 
 	r.must(t, cli.ExitOK, "check", "SHOP-482/person", "fail", "--note", "no")
 	res := r.must(t, cli.ExitFailed, "status")
-	contains(t, "the table", squash(res.stdout), "failing 1 SHOP-482/person", "A person decides", "failed, checked by a person")
+	contains(t, "the table", squash(res.stdout), "failing 1\n SHOP-482/person P\n failed, checked by a person")
 
 	r.opts.Clock = func() time.Time { return time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC) }
 	r.must(t, cli.ExitOK, "check", "SHOP-482/person", "pass", "--note", "yes, after a fix")
 	res = r.must(t, cli.ExitUndecided, "status")
-	contains(t, "the table", res.stdout, "passed, checked by a person")
+	contains(t, "the table", squash(res.stdout), "for a person 1 → semar check <id> pass\n SHOP-482/person P")
 	if strings.Contains(res.stdout, "verified") {
 		t.Errorf("a manual result with no build counted as a pass:\n%s", res.stdout)
 	}
@@ -412,7 +412,7 @@ func TestLedgerDoesNotCountAPassOfAScenarioThatChanged(t *testing.T) {
 
 	// The expected result is edited after the pass.
 	r.editScenario(t, "the status is 422", "the status is 400")
-	contains(t, "the table", squash(r.ledgerTable(t)), "stale 1", scenarioID+": rerun: the scenario changed since r-1 → semar run")
+	contains(t, "the table", squash(r.ledgerTable(t)), "stale 1 → semar run\n SHOP-482/a Covered\n "+scenarioID+": rerun: the scenario changed since r-1")
 }
 
 func TestLedgerCountsAPassOfAnOldRunWithNoHash(t *testing.T) {
@@ -566,7 +566,7 @@ func TestRunSummaryHasCoverageLine(t *testing.T) {
 
 	res := r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 	// The scenario line, the path of the report, and the status of the use cases of the ticket.
-	contains(t, "summary", squash(res.stdout), scenarioID+" passed", "report: ", "2 use cases of SHOP-482", "verified 1", "no test 1 SHOP-482/b not drafted → semar plan", "Ship: no. 1 open.")
+	contains(t, "summary", squash(res.stdout), scenarioID+" passed", "report: ", "2 use cases of SHOP-482", "verified 1", "no test 1 → semar plan\n SHOP-482/b Gap\n not drafted", "Ship: no. 1 open.")
 	if strings.Contains(res.stdout, "SHOP-480") {
 		t.Errorf("a use case of another ticket is in the status:\n%s", res.stdout)
 	}
@@ -684,18 +684,18 @@ func TestStatusExitCodeWithManualResults(t *testing.T) {
 		want                 int
 		lines                []string
 	}{
-		{"no manual result", "", "", false, []string{"--env", "local"}, cli.ExitUndecided, []string{"for a person 1 SHOP-482/a"}},
+		{"no manual result", "", "", false, []string{"--env", "local"}, cli.ExitUndecided, []string{"for a person 1 → semar check <id> pass\n SHOP-482/a By hand"}},
 		{"passed on the builds that run now", "passed", buildsNow, false, []string{"--env", "local"}, cli.ExitOK,
-			[]string{"verified 1 SHOP-482/a checked by tester", "Ship: yes."}},
+			[]string{"verified 1\n SHOP-482/a By hand\n checked by tester", "Ship: yes."}},
 		{"passed without builds", "passed", "", false, []string{"--env", "local"}, cli.ExitUndecided,
-			[]string{"for a person 1 SHOP-482/a", "recorded without --env, so it is not tied to a build"}},
+			[]string{"for a person 1 → semar check <id> pass\n SHOP-482/a By hand", "recorded without --env, so it is not tied to a build"}},
 		{"passed on another commit", "passed", buildsOther, false, []string{"--env", "local"}, cli.ExitUndecided,
 			[]string{"checked by a person on another build: rerun the check and record it with --env"}},
 		{"failed on the builds that run now", "failed", buildsNow, false, []string{"--env", "local"}, cli.ExitFailed,
-			[]string{"failing 1 SHOP-482/a", "failed, checked by a person"}},
-		{"passed beside a failed scenario", "passed", buildsNow, true, []string{"--env", "local"}, cli.ExitFailed, []string{"failing 1 SHOP-482/b"}},
+			[]string{"failing 1\n SHOP-482/a By hand\n failed, checked by a person"}},
+		{"passed beside a failed scenario", "passed", buildsNow, true, []string{"--env", "local"}, cli.ExitFailed, []string{"failing 1\n SHOP-482/b Covered"}},
 		{"passed, with the only environment read by default", "passed", buildsNow, false, nil, cli.ExitOK,
-			[]string{"verified 1 SHOP-482/a checked by tester"}},
+			[]string{"verified 1\n SHOP-482/a By hand\n checked by tester"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -70,7 +70,7 @@ func htmlItemOf(it Item) htmlItem {
 	e := it.Entry
 	hi := htmlItem{ID: line(e.Obligation.ID), Title: line(e.Obligation.Title), Next: it.Next, Notes: lines(it.Notes)}
 	if it.Group != Verified {
-		hi.Reasons = lines(e.Reasons)
+		hi.Reasons = lines(withoutSentence(e))
 	}
 	for _, c := range e.Covers {
 		if !c.Found {

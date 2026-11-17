@@ -47,7 +47,7 @@ func TestRunRunsTheChangeAndEndsWithTheStatus(t *testing.T) {
 		"Target local (test), orders at 9f3c2ab",
 		"Selected 1 scenario",
 		scenarioID+" needs review", "not confirmed → semar review "+scenarioID,
-		"1 use case of SHOP-482", "needs review 1 SHOP-482/1", "Ship: no. 1 open.")
+		"1 use case of SHOP-482", "needs review 1 → semar review\n SHOP-482/1 A refund above the paid amount is refused", "Ship: no. 1 open.")
 	if strings.Contains(first.stdout, "SHOP-480-01") {
 		t.Errorf("a scenario of another ticket ran:\n%s", first.stdout)
 	}
@@ -67,6 +67,9 @@ func TestRunNamesTheGapsBeforeItSendsAnything(t *testing.T) {
 	r := dailyRepo(t)
 	r.git(t, "commit", "--quiet", "--allow-empty", "-m", "SHOP-490 show the limit in the receipt")
 	r.git(t, "commit", "--quiet", "--allow-empty", "-m", "tidy the logger")
+	r.writeRel(t, ".semar/notes.md", "setup\n")
+	r.git(t, "add", ".semar/notes.md")
+	r.git(t, "commit", "--quiet", "-m", "Set up Semar")
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
 	r.must(t, cli.ExitOK, "review", "--yes")
 
@@ -76,7 +79,7 @@ func TestRunNamesTheGapsBeforeItSendsAnything(t *testing.T) {
 		"Change feature/refund-limit against main: SHOP-482, SHOP-490",
 		"Gaps SHOP-490 is not planned → semar plan",
 		"1 commit has no ticket:", `"tidy the logger"`,
-		scenarioID+" passed", "not planned 1 SHOP-490 → semar plan", "Ship: no.")
+		scenarioID+" passed", "not planned 1 → semar plan\n SHOP-490", "Ship: no.")
 	if strings.Contains(res.stdout, "Plan it now") || strings.Contains(res.stderr, "Plan it now") {
 		t.Error("run offered to plan with no terminal")
 	}

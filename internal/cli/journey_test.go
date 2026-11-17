@@ -455,7 +455,7 @@ func TestLedgerReadsJourneyOutcome(t *testing.T) {
 	contains(t, "the summary", run.stdout, "1 use case: 1 verified")
 
 	res := r.must(t, cli.ExitUndecided, "status", "--env", "local")
-	contains(t, "the ledger", squash(res.stdout), "2 use cases", "verified 1", "blocked 1 SHOP-482/gone")
+	contains(t, "the ledger", squash(res.stdout), "2 use cases", "verified 1", "blocked 1\n SHOP-482/gone A journey that no file defines")
 
 	// A failed journey makes the use case failed, whatever the build.
 	r2 := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{Defects: defects(sampleapp.PaymentAmountWrong)})

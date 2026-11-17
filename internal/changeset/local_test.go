@@ -132,3 +132,19 @@ func TestLocalOnTheBaseBranchItselfIsEmpty(t *testing.T) {
 		t.Errorf("commits %d no-ticket %d, want none on the base branch", len(cs.Commits), len(cs.NoTicket))
 	}
 }
+
+func TestCommitsThatOnlyChangeSemarsOwnFilesAreNotCommitsWithNoTicket(t *testing.T) {
+	r, g := shop(t)
+	r.Commit("Set up Semar", map[string]*string{".semar/semar.yaml": gittest.S("a: b\n"), ".semar/obligations/x.yaml": gittest.S("c: d\n")})
+	r.Commit("QA: setup with a fix", map[string]*string{".semar/semar.yaml": gittest.S("a: c\n"), "fix.go": gittest.S("package shop\n")})
+	cs, err := changeset.Local(context.Background(), g, changeset.LocalOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cs.NoTicket) != 2 {
+		t.Fatalf("%d commits with no ticket, want the logger commit and the one that also changes code: %v", len(cs.NoTicket), cs.NoTicket)
+	}
+	if len(cs.Commits) != 4 {
+		t.Errorf("%d commits, want all 4 kept in the change", len(cs.Commits))
+	}
+}

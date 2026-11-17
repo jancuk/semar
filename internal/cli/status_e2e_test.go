@@ -44,8 +44,8 @@ func TestLedgerEndToEnd(t *testing.T) {
 	// The hand-written entry has no cover and no reason, so it comes first among the use cases with no test.
 	status := r.must(t, cli.ExitUndecided, "status")
 	out := squash(status.stdout)
-	contains(t, "the status", out, "4 use cases", "verified 1", "for a person 1 "+manualObligation, "no test 2 "+handObligation+" use case with no test and no reason",
-		gapObligation+" not drafted: needs fixture order.paid")
+	contains(t, "the status", out, "4 use cases", "verified 1", "for a person 1 → semar check <id> pass\n "+manualObligation, "no test 2 → semar plan\n "+handObligation, "use case with no test and no reason",
+		"not drafted: needs fixture order.paid")
 	if first := strings.Index(out, handObligation); first > strings.Index(out, gapObligation) {
 		t.Errorf("%s does not come first:\n%s", handObligation, status.stdout)
 	}
@@ -56,12 +56,12 @@ func TestLedgerEndToEnd(t *testing.T) {
 	rec := r.must(t, cli.ExitOK, "check", manualObligation, "fail", "--note", "x")
 	contains(t, "the record", rec.stdout, "checked by a person", "local, unverified identity")
 	failed := r.must(t, cli.ExitFailed, "status")
-	contains(t, "the status", squash(failed.stdout), "verified 1", "failing 1 "+manualObligation, "failed, checked by a person", "Ship: no. 1 failing, 2 open.")
+	contains(t, "the status", squash(failed.stdout), "verified 1", "failing 1\n "+manualObligation, "failed, checked by a person", "Ship: no. 1 failing, 2 open.")
 
 	// A deferral turns the hand-written entry into deferred.
 	r.must(t, cli.ExitOK, "defer", handObligation, "--reason", "r", "--until", inDays(7))
 	deferred := r.must(t, cli.ExitFailed, "status")
-	contains(t, "the status", squash(deferred.stdout), "no test 1 "+gapObligation, "deferred 1 "+handObligation+" deferred by tester until "+inDays(7)+": r")
+	contains(t, "the status", squash(deferred.stdout), "no test 1 → semar plan\n "+gapObligation, "deferred 1\n "+handObligation)
 	if strings.Contains(deferred.stdout, "use case with no test and no reason") {
 		t.Errorf("a deferred use case is still listed with no reason:\n%s", deferred.stdout)
 	}
@@ -106,6 +106,6 @@ func TestLedgerEndToEndManualResultOnTheBuild(t *testing.T) {
 
 	r.must(t, cli.ExitOK, "check", manualObligation, "pass", "--note", "looks right", "--env", "local")
 	res := r.must(t, cli.ExitOK, "status", "--env", "local")
-	contains(t, "the ledger", squash(res.stdout), "verified 2 "+manualObligation+" checked by tester", "deferred 2", "Ship: yes. 2 deferred.")
+	contains(t, "the ledger", squash(res.stdout), "verified 2\n "+manualObligation, "checked by tester", "deferred 2", "Ship: yes. 2 deferred.")
 	r.must(t, cli.ExitOK, "status")
 }

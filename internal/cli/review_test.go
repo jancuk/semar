@@ -31,7 +31,7 @@ func TestReviewShowsTheRequirementBeforeTheFile(t *testing.T) {
 	res := r.must(t, cli.ExitOK, "review", "--yes")
 	out := res.stdout
 
-	fixtureAt, scenarioAt := strings.Index(out, "1 of 2 · fixture order.paid"), strings.Index(out, "2 of 2 · SHOP-482 (docs/tickets/SHOP-482.md:5)")
+	fixtureAt, scenarioAt := strings.Index(out, "1 of 2 · fixture order.paid"), strings.Index(out, "2 of 2 · SHOP-482 · docs/tickets/SHOP-482.md:5")
 	if fixtureAt < 0 || scenarioAt < fixtureAt {
 		t.Fatalf("the fixture does not come before the scenario:\n%s", out)
 	}
@@ -41,9 +41,9 @@ func TestReviewShowsTheRequirementBeforeTheFile(t *testing.T) {
 		"Removes afterwards:", "POST orders /v1/orders/{{id}}/cancel")
 	contains(t, "the scenario", out[scenarioAt:],
 		`"A refund larger than the paid amount is refused."`,
-		"Test "+scenarioID+" · Refund above the order total is rejected · API · as support-agent",
+		"Test "+scenarioID+" · API · as support-agent\n    Refund above the order total is rejected\n",
 		"When  Request a refund of 150000 for that order",
-		"Then  status 422", "$.error.code equals REFUND_EXCEEDS_TOTAL (source diff)",
+		"Then  the status is 422\n", `And   $.error.code equals "REFUND_EXCEEDS_TOTAL" (source diff)`,
 		"approved "+scenarioID)
 	contains(t, "the fixture approval", out, "approved fixture order.paid")
 	if strings.Contains(out, "hash ") {
@@ -115,7 +115,7 @@ func TestReviewNarrowsToTheIDsNamed(t *testing.T) {
 		scenarioOK bool
 	}{
 		{"a fixture", []string{"order.paid"}, []string{"1 of 1 · fixture order.paid"}, []string{"Test "}, true, false},
-		{"a scenario", []string{scenarioID}, []string{"1 of 1 · SHOP-482 (docs/tickets/SHOP-482.md:5)"}, []string{"fixture order.paid"}, false, true},
+		{"a scenario", []string{scenarioID}, []string{"1 of 1 · SHOP-482 · docs/tickets/SHOP-482.md:5"}, []string{"fixture order.paid"}, false, true},
 		{"a ticket", []string{"SHOP-482"}, []string{"Test " + scenarioID}, []string{"fixture order.paid"}, false, true},
 		{"both", []string{"order.paid", "SHOP-482"}, []string{"1 of 2 · fixture", "2 of 2 · SHOP-482"}, nil, true, true},
 	}
