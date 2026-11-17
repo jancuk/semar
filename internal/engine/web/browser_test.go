@@ -414,6 +414,65 @@ func TestFillReplacesWhatAFieldWasGivenWhenItTookFocus(t *testing.T) {
 	}
 }
 
+const timePage = `<!doctype html><html><head><title>Due</title></head><body>
+<input id="date" type="date"><input id="when" type="datetime-local"><input id="time" type="time">
+<input id="month" type="month"><input id="week" type="week"><input id="plain" type="text">
+<p id="log"></p>
+<script>
+const log = document.getElementById('log');
+for (const type of ['input', 'change']) {
+  document.addEventListener(type, e => {
+    log.textContent += type + ':' + e.target.id + ':' + (document.activeElement === e.target) + ':' + e.target.value + ' ';
+  });
+}
+</script></body></html>`
+
+func TestFillSetsADateOrTimeFieldAndSendsInputAndChange(t *testing.T) {
+	needChrome(t)
+	r := newRig(t, rigOptions{handler: func(m *http.ServeMux) {
+		m.HandleFunc("/due", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, timePage) })
+	}})
+	r.do(open("/due"), nil)
+	cases := []struct{ id, value string }{
+		{"date", "2026-03-09"}, {"when", "2026-03-09T14:30"}, {"time", "14:30"}, {"month", "2026-03"}, {"week", "2026-W11"},
+	}
+	locs := map[string]domain.Locator{"log": {CSS: "#log"}}
+	for _, c := range cases {
+		locs[c.id] = domain.Locator{CSS: "#" + c.id}
+		f := domain.WebAction{Do: domain.WebFill, Screen: "Due", Element: c.id, Value: c.value}
+		res := r.do(f, locs, text(c.id), text("log"))
+		if res.Action.Err != "" {
+			t.Errorf("fill of %s: %s", c.id, res.Action.Err)
+			continue
+		}
+		if got := res.Action.Web.Elements[c.id].Text; got != c.value {
+			t.Errorf("%s holds %q, want %q", c.id, got, c.value)
+		}
+		want := "input:" + c.id + ":true:" + c.value + " change:" + c.id + ":true:" + c.value
+		if got := res.Action.Web.Elements["log"].Text; !strings.Contains(got, want) {
+			t.Errorf("the page heard %q, want it to hold %q", got, want)
+		}
+	}
+}
+
+func TestFillOfADateFieldThatKeepsNothingNamesTheForm(t *testing.T) {
+	needChrome(t)
+	r := newRig(t, rigOptions{handler: func(m *http.ServeMux) {
+		m.HandleFunc("/due", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, timePage) })
+	}})
+	r.do(open("/due"), nil)
+	locs := map[string]domain.Locator{"when": {CSS: "#when"}, "plain": {CSS: "#plain"}}
+	f := domain.WebAction{Do: domain.WebFill, Screen: "Due", Element: "when", Value: "9 March 2026 2.30pm"}
+	res := r.do(f, locs)
+	if !strings.Contains(res.Action.Err, "2026-03-09T14:30") {
+		t.Errorf("the error does not name the form of the field: %q", res.Action.Err)
+	}
+	f = domain.WebAction{Do: domain.WebFill, Screen: "Due", Element: "plain", Value: "any text"}
+	if res := r.do(f, locs, text("plain")); res.Action.Err != "" || res.Action.Web.Elements["plain"].Text != "any text" {
+		t.Errorf("a text field is filled as before: %+v", res.Action)
+	}
+}
+
 func TestPressAKeyOnThePage(t *testing.T) {
 	needChrome(t)
 	r := newRig(t, rigOptions{})

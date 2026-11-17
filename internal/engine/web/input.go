@@ -111,6 +111,11 @@ func (r *reader) fill(id cdp.BackendNodeID, text string) error {
 	if _, _, err := r.center(id); err != nil {
 		return err
 	}
+	if form, ok, err := r.temporalForm(h); err != nil {
+		return err
+	} else if ok {
+		return r.setTemporal(h, text, form)
+	}
 	for try := 0; try < 3; try++ {
 		if try > 0 {
 			time.Sleep(100 * time.Millisecond)
@@ -143,6 +148,58 @@ func (r *reader) fill(id cdp.BackendNodeID, text string) error {
 		}
 	}
 	return errors.New("the field held other text after typing: the page or a sign-in saved in the browser changed it")
+}
+
+// temporalForms are the fields that the browser draws with a picker, and the form that their value
+// takes. Key events do not reach them in a way that holds from one browser to the next.
+var temporalForms = map[string]string{
+	"date": "2026-03-09", "datetime-local": "2026-03-09T14:30", "time": "14:30", "month": "2026-03", "week": "2026-W11",
+}
+
+// temporalForm gives the example form of the value of a date or time field, and false for any other element.
+func (r *reader) temporalForm(h runtime.RemoteObjectID) (string, bool, error) {
+	res, err := chromedp.Call(r.ctx, runtime.CallFunctionOn, runtime.CallFunctionOnParams{
+		FunctionDeclaration: `function(){ return this instanceof HTMLInputElement ? this.type : ''; }`,
+		ObjectID:            h,
+		ReturnByValue:       ptr(true),
+	})
+	if err != nil {
+		return "", false, err
+	}
+	var kind string
+	if res.Result != nil {
+		_ = json.Unmarshal(res.Result.Value, &kind)
+	}
+	form, ok := temporalForms[kind]
+	return form, ok, nil
+}
+
+// setTemporal sets the value through the native setter of the element, so that a framework that wraps
+// the setter of the instance still sees a change, and then sends the events that a person's pick would.
+func (r *reader) setTemporal(h runtime.RemoteObjectID, text, form string) error {
+	arg, err := json.Marshal(text)
+	if err != nil {
+		return err
+	}
+	res, err := chromedp.Call(r.ctx, runtime.CallFunctionOn, runtime.CallFunctionOnParams{
+		FunctionDeclaration: `function(t){
+  this.focus();
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(this, t);
+  this.dispatchEvent(new Event('input', { bubbles: true }));
+  this.dispatchEvent(new Event('change', { bubbles: true }));
+  return this.value === t;
+}`,
+		ObjectID:      h,
+		Arguments:     []*runtime.CallArgument{{Value: arg}},
+		ReturnByValue: ptr(true),
+	})
+	if err != nil {
+		return err
+	}
+	if res.Result == nil || string(res.Result.Value) != "true" {
+		return fmt.Errorf("the field did not keep %q: a field of this kind takes its value in the form %s", text, form)
+	}
+	return nil
 }
 
 // holds says whether a field holds exactly the text. It returns only the answer, so a secret
