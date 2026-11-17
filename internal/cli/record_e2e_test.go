@@ -361,6 +361,25 @@ func TestRecordMakesAFixtureAndWritesItsValuesAsVariables(t *testing.T) {
 	}
 }
 
+func TestRecordInterruptedWritesNothingAndCleansUpItsFixture(t *testing.T) {
+	r, _ := recordRepoWith(t, repoOptions{tree: "e2e-fixtures", app: sampleapp.Options{}, payments: &sampleapp.PaymentOptions{}})
+	r.approveFixture(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	res := r.record(t, ctx, cli.ExitError, func(d webtest.Driver) {
+		must(t, d.OptionClick("#shown"))
+		cancel()
+	}, "SHOP-482-15", "--given", "order.paid as o", "--open", "/orders/{{o.id}}", "--service", "orders", "--as", "support-agent")
+	contains(t, "the error", res.stderr, "the recording was interrupted, and nothing was written")
+	if exists(t, r.path(".semar", "scenarios", "SHOP-482", "SHOP-482-15.feature")) || exists(t, r.path(".semar", "screens")) {
+		t.Error("a file was written for an interrupted recording")
+	}
+	if got := r.orderStatus(t, "o-1"); got != sampleapp.StatusCancelled {
+		t.Errorf("order o-1 is %s, want cancelled by the cleanup", got)
+	}
+}
+
 func TestRecordHasNoWindowToCloseWithoutChrome(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
 	r.rewriteConfig(t, func(s string) string {

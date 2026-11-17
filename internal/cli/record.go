@@ -230,8 +230,8 @@ func recordTest(ctx context.Context, cmd *cobra.Command, o options, f recordTest
 	if err != nil {
 		return err
 	}
-	for _, p := range scenario.Validate(draft.Scenario, scenario.FromFile) {
-		return fmt.Errorf("the recording makes a scenario that is not valid: %s: %s", p.Path, p.Message)
+	if ps := scenario.Validate(draft.Scenario, scenario.FromFile); len(ps) > 0 {
+		return fmt.Errorf("nothing was written: the recording makes a scenario that is not valid: %s: %s", ps[0].Path, terminalSafe(oneLine(ps[0].Message)))
 	}
 
 	if ps := script.Validate(draft.Scenario, draft.Script); len(ps) > 0 {
