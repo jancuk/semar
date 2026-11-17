@@ -181,7 +181,7 @@ func (r *rig) do(w domain.WebAction, locs map[string]domain.Locator, watch ...we
 
 func (r *rig) try(w domain.WebAction, locs map[string]domain.Locator, watch ...web.Watched) (web.Result, error) {
 	r.step++
-	w.Service, w.App = "app", "lanes"
+	w.Service, w.App = "app", "kanban"
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	return r.eng.Do(ctx, web.Call{

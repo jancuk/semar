@@ -12,7 +12,7 @@ func webScenario(check string) string {
 kind: Scenario
 id: board-web
 title: The board shows the card
-ticket: LANE-1
+ticket: BOARD-1
 intent: The board shows the card
 surface: web
 authProfile: alice

@@ -48,7 +48,7 @@ legs:
   - id: web_read
     surface: web
     service: board
-    app: lanes
+    app: kanban
     as: alice
     needs: [move]
     steps:

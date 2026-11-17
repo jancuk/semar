@@ -35,7 +35,7 @@ legs:
   - id: web_read
     surface: web
     service: board
-    app: lanes
+    app: kanban
     as: alice
     needs: [move]
     steps:
@@ -55,9 +55,9 @@ invariants:
   - equal: ["{{move.title}}", "{{web_read.shown}}"]
 `
 
-const lanesScreens = `apiVersion: semar/v1
+const kanbanScreens = `apiVersion: semar/v1
 kind: Screens
-app: lanes
+app: kanban
 screens:
   Board:
     doing-card: { role: heading, name: Buy milk }
@@ -91,7 +91,7 @@ func problemsOf(ps []Problem) string {
 
 func TestAWebLegIsValid(t *testing.T) {
 	j := parseWeb(t, webJourney)
-	if ps := ValidateWithScreens(j, nil, screensOf(lanesScreens)); len(ps) != 0 {
+	if ps := ValidateWithScreens(j, nil, screensOf(kanbanScreens)); len(ps) != 0 {
 		t.Fatalf("problems:\n%s", problemsOf(ps))
 	}
 	if ps := Validate(j, nil); len(ps) != 0 {
@@ -112,7 +112,7 @@ func TestAWebLegBecomesAWebScenario(t *testing.T) {
 		t.Errorf("the check lost its element: %+v", sc.Steps[1].Expect)
 	}
 	w := sr.Steps[1].Web
-	if sr.Steps[1].Request != nil || w == nil || w.Service != "board" || w.App != "lanes" || w.Element != "doing-card" {
+	if sr.Steps[1].Request != nil || w == nil || w.Service != "board" || w.App != "kanban" || w.Element != "doing-card" {
 		t.Errorf("script step = %+v", sr.Steps[1])
 	}
 	if sr.Steps[1].Captures[0].Element != "doing-card" {
@@ -132,47 +132,47 @@ func TestWebLegProblemsArePlain(t *testing.T) {
 		screens    string
 		path, want string
 	}{
-		"no app": {func(s string) string { return strings.Replace(s, "    app: lanes\n", "", 1) }, lanesScreens,
+		"no app": {func(s string) string { return strings.Replace(s, "    app: kanban\n", "", 1) }, kanbanScreens,
 			"legs[1].app", "app is required for a web leg"},
 		"an app on an api leg": {func(s string) string {
-			return strings.Replace(s, "    service: board\n    steps:\n      - id: move", "    service: board\n    app: lanes\n    steps:\n      - id: move", 1)
-		}, lanesScreens,
+			return strings.Replace(s, "    service: board\n    steps:\n      - id: move", "    service: board\n    app: kanban\n    steps:\n      - id: move", 1)
+		}, kanbanScreens,
 			"legs[0].app", "app is for a web leg"},
 		"a request on a web step": {func(s string) string {
 			return strings.Replace(s, "        web: { do: open, path: \"/\" }", "        web: { do: open, path: \"/\" }\n        request: { method: GET, path: \"/\" }", 1)
-		}, lanesScreens, "legs[1].steps[0].request", "a web action, and not a request"},
+		}, kanbanScreens, "legs[1].steps[0].request", "a web action, and not a request"},
 		"a hint on a web step": {func(s string) string {
 			return strings.Replace(s, "        web: { do: open, path: \"/\" }", "        web: { do: open, path: \"/\" }\n        hint: { method: GET, path: \"/\" }", 1)
-		}, lanesScreens, "legs[1].steps[0].hint", "a step of a web leg has no hint"},
+		}, kanbanScreens, "legs[1].steps[0].hint", "a step of a web leg has no hint"},
 		"a web action on an api step": {func(s string) string {
 			return strings.Replace(s, "        request: { method: POST, path: \"/v1/cards/c1/move\" }", "        request: { method: POST, path: \"/v1/cards/c1/move\" }\n        web: { do: open, path: \"/\" }", 1)
-		}, lanesScreens, "legs[0].steps[0].web", "a step of an api leg has a request"},
-		"a web step with no action": {func(s string) string { return strings.Replace(s, "        web: { do: open, path: \"/\" }\n", "", 1) }, lanesScreens,
+		}, kanbanScreens, "legs[0].steps[0].web", "a step of an api leg has a request"},
+		"a web step with no action": {func(s string) string { return strings.Replace(s, "        web: { do: open, path: \"/\" }\n", "", 1) }, kanbanScreens,
 			"legs[1].steps[0].web", "needs web: its one browser action"},
-		"an unknown action": {func(s string) string { return strings.Replace(s, "do: open", "do: tap", 1) }, lanesScreens,
+		"an unknown action": {func(s string) string { return strings.Replace(s, "do: open", "do: tap", 1) }, kanbanScreens,
 			"legs[1].steps[0].web", "do must be one of open, click, fill, press, drag, wait"},
 		"a wait": {func(s string) string {
 			return strings.Replace(s, "    needs: [move]\n", "    needs: [move]\n    wait: { until: { jsonpath: \"$.a\", equals: 1 }, timeout: 10s }\n", 1)
-		}, lanesScreens, "legs[1].wait", "a web leg cannot wait"},
+		}, kanbanScreens, "legs[1].wait", "a web leg cannot wait"},
 		"a screens file that is not there": {func(s string) string { return s }, "",
-			"legs[1].app", "the screens of lanes were not found: .semar/screens/lanes.yaml"},
-		"a screen that the file lacks": {func(s string) string { return strings.Replace(s, "screen: Board", "screen: Basket", 1) }, lanesScreens,
-			"legs[1].steps[1].web", "screen Basket is not in the screens of lanes; its screens are Board"},
+			"legs[1].app", "the screens of kanban were not found: .semar/screens/kanban.yaml"},
+		"a screen that the file lacks": {func(s string) string { return strings.Replace(s, "screen: Board", "screen: Basket", 1) }, kanbanScreens,
+			"legs[1].steps[1].web", "screen Basket is not in the screens of kanban; its screens are Board"},
 		"an element that the file lacks": {func(s string) string {
 			return strings.Replace(s, "element: doing-card }\n        expect", "element: nothing }\n        expect", 1)
-		}, lanesScreens,
-			"legs[1].steps[1].web", "element nothing is not on screen Board of lanes; its elements are doing-card"},
+		}, kanbanScreens,
+			"legs[1].steps[1].web", "element nothing is not on screen Board of kanban; its elements are doing-card"},
 		"a check on an element that the file lacks": {func(s string) string {
 			return strings.Replace(s, "check: { element: doing-card,", "check: { element: ghost,", 1)
-		}, lanesScreens,
+		}, kanbanScreens,
 			"legs[1].steps[1].web", "element ghost is not on screen Board"},
 		"an output of a leg that is not needed": {func(s string) string {
 			return strings.Replace(strings.Replace(s, "    needs: [move]\n", "", 1), `web: { do: open, path: "/" }`, `web: { do: open, path: "/{{move.title}}" }`, 1)
-		}, lanesScreens, "legs[1].steps[0].web", "is an output of leg move, which leg web_read does not need"},
+		}, kanbanScreens, "legs[1].steps[0].web", "is an output of leg move, which leg web_read does not need"},
 		"a variable that is not an output": {func(s string) string {
 			return strings.Replace(s, `web: { do: open, path: "/" }`, `web: { do: open, path: "/{{move.nope}}" }`, 1)
-		}, lanesScreens, "legs[1].steps[0].web", "{{move.nope}} is not an output of leg move; its outputs are title"},
-		"an element capture that is not an output": {func(s string) string { return strings.Replace(s, "outputs: [shown]", "outputs: [other]", 1) }, lanesScreens,
+		}, kanbanScreens, "legs[1].steps[0].web", "{{move.nope}} is not an output of leg move; its outputs are title"},
+		"an element capture that is not an output": {func(s string) string { return strings.Replace(s, "outputs: [shown]", "outputs: [other]", 1) }, kanbanScreens,
 			"legs[1].outputs", "other is not captured by any step of leg web_read"},
 	}
 	for name, c := range cases {
@@ -203,7 +203,7 @@ func TestWebLegProblemsArePlain(t *testing.T) {
 func TestAScreensFileThatCannotBeUsedIsAProblemOfTheLeg(t *testing.T) {
 	j := parseWeb(t, webJourney)
 	ps := ValidateWithScreens(j, nil, func(string) (domain.Screens, error) { return domain.Screens{}, errors.New("line 3: unknown key roll") })
-	if !hasProblem(ps, "legs[1].app", "the screens of lanes cannot be used: line 3: unknown key roll") {
+	if !hasProblem(ps, "legs[1].app", "the screens of kanban cannot be used: line 3: unknown key roll") {
 		t.Errorf("problems:\n%s", problemsOf(ps))
 	}
 }

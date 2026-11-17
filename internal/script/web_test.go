@@ -24,8 +24,8 @@ func webScript(sc domain.Scenario) domain.Script {
 	return domain.Script{
 		APIVersion: "semar/v1", Kind: "Script", Scenario: sc.ID, ExpectHash: domain.ExpectHash(sc),
 		Steps: []domain.ScriptStep{
-			{Step: "open", Web: &domain.WebAction{Service: "board", App: "lanes", Do: domain.WebOpen, Path: "/"}},
-			{Step: "read", Web: &domain.WebAction{Service: "board", App: "lanes", Do: domain.WebWait, Screen: "Board", Element: "card"},
+			{Step: "open", Web: &domain.WebAction{Service: "board", App: "kanban", Do: domain.WebOpen, Path: "/"}},
+			{Step: "read", Web: &domain.WebAction{Service: "board", App: "kanban", Do: domain.WebWait, Screen: "Board", Element: "card"},
 				Captures: []domain.Capture{{Name: "shown", Element: "card"}}},
 		},
 	}

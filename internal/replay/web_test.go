@@ -16,7 +16,7 @@ import (
 
 const boardScreens = `apiVersion: semar/v1
 kind: Screens
-app: lanes
+app: kanban
 screens:
   Board:
     card: { role: heading, name: "{{leg.title}}" }
@@ -82,8 +82,8 @@ func webScript(sc domain.Scenario) domain.Script {
 	return domain.Script{
 		APIVersion: "semar/v1", Kind: "Script", Scenario: sc.ID, ExpectHash: domain.ExpectHash(sc),
 		Steps: []domain.ScriptStep{
-			{Step: "open", Web: &domain.WebAction{Service: "orders", App: "lanes", Do: domain.WebOpen, Path: "/boards/{{leg.board}}"}},
-			{Step: "read", Web: &domain.WebAction{Service: "orders", App: "lanes", Do: domain.WebWait, Screen: "Board", Element: "card"},
+			{Step: "open", Web: &domain.WebAction{Service: "orders", App: "kanban", Do: domain.WebOpen, Path: "/boards/{{leg.board}}"}},
+			{Step: "read", Web: &domain.WebAction{Service: "orders", App: "kanban", Do: domain.WebWait, Screen: "Board", Element: "card"},
 				Captures: []domain.Capture{{Name: "shown", Element: "card"}}},
 		},
 	}
@@ -136,7 +136,7 @@ func TestWebStepsOfAnUnapprovedScreensFileEndInconclusive(t *testing.T) {
 	if res.Outcome != domain.OutcomeInconclusive {
 		t.Fatalf("outcome = %s: %+v", res.Outcome, res.Reasons)
 	}
-	if !hasReason(res, "the screens of lanes are not approved: semar confirm --screens lanes") {
+	if !hasReason(res, "the screens of kanban are not approved: semar confirm --screens kanban") {
 		t.Errorf("reasons = %+v", res.Reasons)
 	}
 	if len(fw.calls) != 0 {
@@ -148,7 +148,7 @@ func TestWebStepsNeedTheirScreensFile(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	sc, s := webScenario(), webScript(webScenario())
 	res := r.runWeb(t, sc, s, &fakeWeb{}, &fakeScreens{missing: true, approved: true})
-	if res.Outcome != domain.OutcomeBlocked || !hasReason(res, "the screens of lanes were not found: .semar/screens/lanes.yaml") {
+	if res.Outcome != domain.OutcomeBlocked || !hasReason(res, "the screens of kanban were not found: .semar/screens/kanban.yaml") {
 		t.Errorf("outcome = %s, reasons = %+v", res.Outcome, res.Reasons)
 	}
 }
@@ -165,7 +165,7 @@ func TestWebStepNamesAnElementThatTheFileLacks(t *testing.T) {
 	if res.Outcome != domain.OutcomeBlocked {
 		t.Fatalf("outcome = %s: %+v", res.Outcome, res.Reasons)
 	}
-	if !hasReason(res, "element gone is not on screen Board of lanes; its elements are card, done") {
+	if !hasReason(res, "element gone is not on screen Board of kanban; its elements are card, done") {
 		t.Errorf("reasons = %+v", res.Reasons)
 	}
 	if len(fw.calls) != 0 {
@@ -297,7 +297,7 @@ func TestAMissedTargetDecidesNoOtherCheck(t *testing.T) {
 	s := webScript(sc)
 	s.ExpectHash = domain.ExpectHash(sc)
 	s.Steps[0].Web.Path = "/"
-	s.Steps[1].Web = &domain.WebAction{Service: "orders", App: "lanes", Do: domain.WebClick, Screen: "Board", Element: "card"}
+	s.Steps[1].Web = &domain.WebAction{Service: "orders", App: "kanban", Do: domain.WebClick, Screen: "Board", Element: "card"}
 	s.Steps[1].Captures = nil
 	fw := &fakeWeb{reply: func(c web.Call, n int) (web.Result, error) {
 		a := domain.Action{ID: domain.ActionID(fmt.Sprintf("a-%d", n)), Surface: domain.SurfaceWeb, Op: string(c.Action.Do), Use: c.Use,
