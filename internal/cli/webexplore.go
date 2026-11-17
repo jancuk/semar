@@ -283,6 +283,14 @@ func (b *flowBrowser) Act(ctx context.Context, a plan.Action) (string, error) {
 	return "", fmt.Errorf("the action %q is not one that a flow does", a.Kind)
 }
 
+func (b *flowBrowser) Compare(ctx context.Context, ref, expect string) (string, bool, error) {
+	shown, err := b.x.Shows(ctx, ref)
+	if err != nil {
+		return "", false, err
+	}
+	return shown, shown == strings.ReplaceAll(expect, web.RunIDVariable, b.x.RunID), nil
+}
+
 // Given makes the fixtures and loads the first page again, so that the page shows their data and the
 // recording starts there.
 func (b *flowBrowser) Given(ctx context.Context, given []plan.AnswerGiven) ([]plan.GivenOutput, error) {

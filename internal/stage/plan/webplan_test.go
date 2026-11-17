@@ -231,7 +231,8 @@ func TestFlowsRunOneAtATime(t *testing.T) {
 }
 
 func TestACheckThatFailsNowIsInTheDraftWithWhatThePageShows(t *testing.T) {
-	w := newWebPlanner(webTurn1, webTurn2, webTurn3)
+	// The model sends the check twice: the first time it learns what the page shows.
+	w := newWebPlanner(webTurn1, webTurn2, webTurn2, webTurn3)
 	x := &failingExplorer{fakeExplorer: &fakeExplorer{shown: "Nothing"}}
 	out, err := webRun(t, w, x, "haiku")
 	if err != nil {

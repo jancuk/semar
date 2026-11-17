@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -118,7 +119,10 @@ func TestACheckThatThePageDoesNotMeetIsWrittenWithItsClaimAndFailsOnReplay(t *te
 	r.rewriteConfig(t, func(s string) string {
 		return strings.Replace(s, "baseUrl: "+r.ordersURL, "baseUrl: "+r.ordersURL+"\n        web: {start: /refund}", 1)
 	})
-	out, err := explorerOf(t, r, "").Explore(t.Context(), plan.WebRequest{ID: "SHOP-482-05", Ticket: "SHOP-482", Cite: flowCite}, scriptedFlow(t, refundTurns(t, "6.00")...))
+	// The model is told once that the total shows another text, and sends its checks again.
+	turns := refundTurns(t, "6.00")
+	turns = slices.Insert(turns, 2, turns[1])
+	out, err := explorerOf(t, r, "").Explore(t.Context(), plan.WebRequest{ID: "SHOP-482-05", Ticket: "SHOP-482", Cite: flowCite}, scriptedFlow(t, turns...))
 	if err != nil {
 		t.Fatal(err)
 	}

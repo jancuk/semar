@@ -57,6 +57,13 @@ func (b *scriptedBrowser) Act(_ context.Context, a Action) (string, error) {
 	return b.shown[a.Ref], nil
 }
 
+func (b *scriptedBrowser) Compare(_ context.Context, ref, expect string) (string, bool, error) {
+	if why, ok := b.fail[ref]; ok {
+		return "", false, errors.New(why)
+	}
+	return b.shown[ref], b.shown[ref] == expect, nil
+}
+
 func (b *scriptedBrowser) Given(_ context.Context, g []AnswerGiven) ([]GivenOutput, error) {
 	b.given = append(b.given, g)
 	return b.outputs, nil
@@ -257,5 +264,39 @@ func TestAPageThatCannotBeReadEndsTheFlow(t *testing.T) {
 	end := runFlow(t, &scriptedModel{}, &scriptedBrowser{listErr: errors.New("the browser is gone")}, DefaultFlowLimits)
 	if end.Done != nil || !strings.Contains(end.Manual, "the browser is gone") {
 		t.Errorf("end = %+v", end)
+	}
+}
+
+func checkOf(expect string) Action { return Action{Kind: ActionCheck, Ref: "e3", Expect: expect} }
+
+// A text that differs from the page is the model's mistake more often than a defect, and it would be
+// written as a test that fails: the model is told what the element shows before anything is recorded.
+func TestACheckThatDiffersFromThePageIsNotRecordedUntilTheModelHasSeenWhatThePageShows(t *testing.T) {
+	m := &scriptedModel{turns: []Turn{act(checkOf("Stored"), clickSave), act(checkOf("Saved")), finished}}
+	b := &scriptedBrowser{shown: map[string]string{"e3": "Saved"}}
+	end := runFlow(t, m, b, DefaultFlowLimits)
+	if end.Manual != "" || len(end.Checks) != 1 || end.Checks[0] != (FlowCheck{Ref: "e3", Expect: "Saved", Shown: "Saved"}) {
+		t.Fatalf("end = %+v", end)
+	}
+	if len(b.acted) != 1 {
+		t.Errorf("the browser did %v: the first check and the click after it must not be done", b.acted)
+	}
+	note := m.asked[1].Note
+	for _, want := range []string{`"Stored"`, `"Saved"`, "Nothing was recorded", "click e2"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("the note lacks %s: %s", want, note)
+		}
+	}
+}
+
+func TestACheckThatDiffersIsRecordedWhenTheModelSendsItAgain(t *testing.T) {
+	m := &scriptedModel{turns: []Turn{act(checkOf("Stored")), act(checkOf("Stored")), finished}}
+	b := &scriptedBrowser{shown: map[string]string{"e3": "Saved"}}
+	end := runFlow(t, m, b, DefaultFlowLimits)
+	if end.Manual != "" || len(end.Checks) != 1 || end.Checks[0] != (FlowCheck{Ref: "e3", Expect: "Stored", Shown: "Saved"}) {
+		t.Fatalf("end = %+v", end)
+	}
+	if m.asked[2].Note != "" {
+		t.Errorf("the model was asked twice: %s", m.asked[2].Note)
 	}
 }

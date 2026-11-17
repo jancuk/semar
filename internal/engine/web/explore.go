@@ -222,6 +222,37 @@ func (x *Explorer) Drag(ctx context.Context, from, to string) error {
 	return a.rd.drag(a.id, b.id)
 }
 
+// shownJS gives the text that a check of the element would read. It must read as checkPointJS does.
+const shownJS = `function(){
+  const el = this;
+  const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+  if (el.tagName === 'INPUT' && ((el.getAttribute('type') || '').toLowerCase() === 'password' || /password/i.test(el.getAttribute('autocomplete') || ''))) return null;
+  return (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') ? norm(el.value) : norm(el.innerText);
+}`
+
+// Shows gives the text that the element shows, as a check reads it, and records nothing.
+func (x *Explorer) Shows(ctx context.Context, ref string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	t, err := x.find(ref)
+	if err != nil {
+		return "", err
+	}
+	defer t.release()
+	res, err := chromedp.Call(x.rec.tab, runtime.CallFunctionOn, runtime.CallFunctionOnParams{
+		FunctionDeclaration: shownJS, ObjectID: t.obj, ReturnByValue: ptr(true),
+	})
+	if err != nil {
+		return "", err
+	}
+	var text string
+	if res.Result == nil || json.Unmarshal(res.Result.Value, &text) != nil {
+		return "", fmt.Errorf("%s cannot be read", t.name)
+	}
+	return text, nil
+}
+
 // checkPointJS scrolls to the element and gives a point on it where the pointer meets the element, or
 // a part of it that shows all of its text, so that the recorder reads the element and not a cover.
 const checkPointJS = `function(){

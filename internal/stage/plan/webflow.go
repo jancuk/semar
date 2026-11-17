@@ -107,6 +107,9 @@ type FlowBrowser interface {
 	List(ctx context.Context) (pagelist.List, error)
 	// Act does one action as a person does it. For a check it returns what the element shows.
 	Act(ctx context.Context, a Action) (shown string, err error)
+	// Compare reads what the element shows, with no check recorded, and says whether it is the
+	// expected text. The ID of the run and its variable are the same text.
+	Compare(ctx context.Context, ref, expect string) (shown string, same bool, err error)
 	// Given makes the fixtures, and loads the first page again.
 	Given(ctx context.Context, given []AnswerGiven) ([]GivenOutput, error)
 }
@@ -161,6 +164,8 @@ func playFlow(ctx context.Context, lim FlowLimits, in TurnInput, model FlowModel
 	ctx, cancel := context.WithTimeout(ctx, lim.Time)
 	defer cancel()
 	var end FlowEnd
+	// doubted holds the checks that the model was told differ from the page, so that each is asked once.
+	doubted := map[string]bool{}
 	// over says whether the flow must stop now because of the clock or the caller. A cancel of the
 	// caller is an error of the plan, and the time limit is a manual check.
 	over := func() (bool, error) {
@@ -237,6 +242,15 @@ func playFlow(ctx context.Context, lim FlowLimits, in TurnInput, model FlowModel
 					return manual("the model did not finish after %d actions", lim.Actions)
 				}
 				end.Actions++
+				if a.Kind == ActionCheck {
+					// An element that cannot be read is left to Act, which says why.
+					if shown, same, err := br.Compare(ctx, a.Ref, a.Expect); err == nil && !same && !doubted[a.Expect+"\x00"+shown] {
+						doubted[a.Expect+"\x00"+shown] = true
+						in.Note = doubtNote(i+1, t.Actions, shown)
+						in.Done = append(in.Done, a.String()+" (not recorded: the element shows other text)")
+						break
+					}
+				}
 				shown, err := br.Act(ctx, a)
 				if err != nil {
 					if stop, perr := over(); stop {
@@ -255,17 +269,35 @@ func playFlow(ctx context.Context, lim FlowLimits, in TurnInput, model FlowModel
 	}
 }
 
+// doubtNote tells the model that its check expects a text that the element does not show, before
+// the check is recorded. A check that differs is written as a test that fails now, so the model
+// sends it again only when the page is what is wrong.
+func doubtNote(n int, actions []Action, shown string) string {
+	a := actions[n-1]
+	var b strings.Builder
+	fmt.Fprintf(&b, "Action %d of your last answer, %s, expects %q, and the element shows %q. Nothing was recorded.", n, a, a.Expect, oneLine(shown, maxProblemRunes))
+	b.WriteString(" A check whose text differs from the page is written as a test that fails now. That is right only when the criterion requires your text and the page is wrong: then send the same check again. When your text was wrong, send the check with the text that the criterion requires.")
+	b.WriteString(notDone(actions[n:]))
+	return b.String()
+}
+
+// notDone lists the actions of a turn that were left out.
+func notDone(rest []Action) string {
+	if len(rest) == 0 {
+		return ""
+	}
+	list := make([]string, len(rest))
+	for i, a := range rest {
+		list[i] = a.String()
+	}
+	return " The actions after it were not done: " + strings.Join(list, "; ") + "."
+}
+
 // failedNote tells the model which action of its turn failed and why, and which were not done.
 func failedNote(n int, actions []Action, err error) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Action %d of your last answer, %s, could not be done: %s.", n, actions[n-1], strings.TrimRight(oneLine(err.Error(), maxProblemRunes), "."))
-	if rest := actions[n:]; len(rest) > 0 {
-		list := make([]string, len(rest))
-		for i, a := range rest {
-			list[i] = a.String()
-		}
-		fmt.Fprintf(&b, " The actions after it were not done: %s.", strings.Join(list, "; "))
-	}
+	b.WriteString(notDone(actions[n:]))
 	return b.String()
 }
 

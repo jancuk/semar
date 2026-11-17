@@ -178,7 +178,7 @@ func TestThePlanNamesTheSurfaceOfAManualCheck(t *testing.T) {
 
 func TestThePlanListsTheWebTestsAndWhatTheWebPartDid(t *testing.T) {
 	in := shopInput(t)
-	w := newWebPlanner(webTurn1, webTurn2, webTurn3)
+	w := newWebPlanner(webTurn1, webTurn2, webTurn2, webTurn3)
 	w.crit.byLine[":10"] = manualAnswer
 	in.Ladder = ladder(Rung{Planner: w.fake("p"), Model: "haiku"})
 	in.JobDir = t.TempDir()
@@ -192,9 +192,9 @@ func TestThePlanListsTheWebTestsAndWhatTheWebPartDid(t *testing.T) {
 		"Web tests that a model wrote, replayed once, and not approved: read each one with semar review:",
 		"1. SHOP-482-01: A board is saved. Cite: " + ticket482 + ":10 ",
 		`Fails now: e3 should show "Saved", and the page shows "Nothing".`,
-		"- Web: 2 criteria explored in a browser, 2 tests written (2 checks fail on this build), 0 left for a person, 6 turns with 6 calls,",
+		"- Web: 2 criteria explored in a browser, 2 tests written (2 checks fail on this build), 0 left for a person, 8 turns with 8 calls,",
 		"- Web model haiku (haiku, provider p)",
-		"- Web criterion " + ticket482 + ":11: test SHOP-482-02 written by haiku in 3 turns",
+		"- Web criterion " + ticket482 + ":11: test SHOP-482-02 written by haiku in 4 turns",
 		"web test: SHOP-482-02",
 		"web 4\n",
 		"| " + ticket482 + ":11 | web test | haiku | 0 |",
