@@ -40,9 +40,28 @@ func addScript(ctx context.Context, stdout, stderr io.Writer, repo, file string)
 	if err != nil {
 		return err
 	}
-	sc, err := loadScenario(repo, s.Scenario)
+	sc, s, problems, err := storeScript(repo, s)
 	if err != nil {
 		return err
+	}
+	if len(problems) > 0 {
+		fmt.Fprintf(stderr, "semar: script %s does not fit scenario %s, and nothing was stored:\n", file, sc.ID)
+		for _, p := range problems {
+			fmt.Fprintf(stderr, "  - %s\n", p)
+		}
+		return exitError{ExitError}
+	}
+	fmt.Fprintf(stdout, "stored the script of scenario %s for expectation hash %s\n", sc.ID, s.ExpectHash)
+	return nil
+}
+
+// storeScript checks a script against the scenario that it names and, when nothing is wrong, stores
+// it under the hash of the scenario's expected results. A script with no hash gets the current one.
+// It returns the scenario, the script as stored, and the reasons for storing nothing.
+func storeScript(repo string, s domain.Script) (domain.Scenario, domain.Script, []string, error) {
+	sc, err := loadScenario(repo, s.Scenario)
+	if err != nil {
+		return domain.Scenario{}, s, nil, err
 	}
 	want := domain.ExpectHash(sc)
 	var problems []string
@@ -61,20 +80,14 @@ func addScript(ctx context.Context, stdout, stderr io.Writer, repo, file string)
 		}
 	}
 	if len(problems) > 0 {
-		fmt.Fprintf(stderr, "semar: script %s does not fit scenario %s, and nothing was stored:\n", file, sc.ID)
-		for _, p := range problems {
-			fmt.Fprintf(stderr, "  - %s\n", p)
-		}
-		return exitError{ExitError}
+		return sc, s, problems, nil
 	}
-
 	store, err := evidence.Open(semarDir(repo))
 	if err != nil {
-		return err
+		return sc, s, nil, err
 	}
 	if err := store.PutScript(s); err != nil {
-		return err
+		return sc, s, nil, err
 	}
-	fmt.Fprintf(stdout, "stored the script of scenario %s for expectation hash %s\n", sc.ID, s.ExpectHash)
-	return nil
+	return sc, s, nil, nil
 }
