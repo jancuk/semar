@@ -37,7 +37,10 @@ type FixturePacket struct {
 	Need       FixtureNeed
 	Operations []PacketOperation
 	Account    string
-	Version    string
+	// Accounts are the auth profiles that a step may act as. With fewer than two there is no choice,
+	// and the schema and the prompt leave the question out.
+	Accounts []Account
+	Version  string
 	// shim is the packet whose checks of an operation's parameters, body, and response fields a
 	// fixture step goes through, as the step of a scenario does.
 	shim Packet
@@ -46,7 +49,7 @@ type FixturePacket struct {
 // NewFixturePacket takes the operations that the criteria which need the fixture could call.
 func NewFixturePacket(in Input, need FixtureNeed, ops []PacketOperation, version string) FixturePacket {
 	return FixturePacket{
-		Need: need, Operations: ops, Account: in.AuthProfile, Version: version,
+		Need: need, Operations: ops, Account: in.AuthProfile, Accounts: in.Accounts, Version: version,
 		shim: Packet{Operations: ops, Account: in.AuthProfile},
 	}
 }
@@ -60,6 +63,7 @@ type FixtureAnswer struct {
 }
 
 type FixtureAnswerStep struct {
+	As        string         `json:"as"`
 	Operation string         `json:"operation"`
 	Path      []NamedValue   `json:"path"`
 	Query     []NamedValue   `json:"query"`
@@ -105,16 +109,22 @@ func (fp FixturePacket) Schema() json.RawMessage {
 	return data
 }
 
+func (fp FixturePacket) choosesAccount() bool { return len(fp.Accounts) >= 2 }
+
 func (fp FixturePacket) stepSchema() any {
 	var branches []any
 	for _, op := range fp.Operations {
-		branches = append(branches, object(map[string]any{
+		props := map[string]any{
 			"operation": enum("string", op.Key),
 			"path":      array(pathItems(op), "The path parameters. Each is {{name}} of an earlier capture."),
 			"query":     array(queryItems(op), "The query parameters."),
 			"body":      array(bodyItems(op), "The fields of the JSON body."),
 			"captures":  array(captureItem(op), "Values of this response that a later request uses as {{name}}."),
-		}))
+		}
+		if fp.choosesAccount() {
+			props["as"] = Packet{Accounts: fp.Accounts, Account: fp.Account}.accountSchema()
+		}
+		branches = append(branches, object(props))
 	}
 	if len(branches) == 0 {
 		return object(map[string]any{"operation": text("No operation exists.")})
@@ -130,6 +140,9 @@ func (fp FixturePacket) Prompt(previous []byte, problems []Problem) (string, err
 		Fixture:    fenced("text", b.String()),
 		Operations: operationList(fp.Operations),
 		Account:    fp.Account,
+	}
+	if fp.choosesAccount() {
+		d.Accounts = accountList(fp.Accounts)
 	}
 	if len(problems) > 0 {
 		d.Correction = true
@@ -162,7 +175,15 @@ func (fp FixturePacket) Convert(a FixtureAnswer, in Input) (domain.Fixture, []Pr
 	if len(ps.list) > 0 {
 		return domain.Fixture{}, ps.list
 	}
-	for _, p := range fixture.Validate(fx, in.Services) {
+	var opts []fixture.Option
+	if len(in.Accounts) > 0 {
+		names := make([]string, len(in.Accounts))
+		for i, a := range in.Accounts {
+			names[i] = a.Name
+		}
+		opts = append(opts, fixture.Accounts(names...))
+	}
+	for _, p := range fixture.Validate(fx, in.Services, opts...) {
 		ps.add(p.Path, "%s", p.Message)
 	}
 	if len(ps.list) > 0 {
@@ -192,6 +213,9 @@ func (fp FixturePacket) steps(list []FixtureAnswerStep, phase string, in Input, 
 		}}
 		for _, c := range sd.Captures {
 			step.Captures = append(step.Captures, domain.Capture{Name: c.Name, JSONPath: c.JSONPath})
+		}
+		if st.As != fp.Account {
+			step.As = st.As
 		}
 		out = append(out, step)
 	}
