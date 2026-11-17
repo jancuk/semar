@@ -50,10 +50,10 @@ func TestRemoveAgentFiles(t *testing.T) {
 
 func TestNextRunNamesAProductionEnvironment(t *testing.T) {
 	prod := config.Environment{Kind: config.KindProduction}
-	if got := nextRun(prod, "production", "", "0123456789abcdef"); got != "semar run --all --env production" {
+	if got := nextRun(prod, "production", "", "0123456789abcdef"); got != "semar run --env production" {
 		t.Errorf("nextRun = %q", got)
 	}
-	if got := nextRun(config.Environment{Kind: config.KindTest}, "uat", "", "0123456789abcdef"); got != "semar run --all" {
+	if got := nextRun(config.Environment{Kind: config.KindTest}, "uat", "", "0123456789abcdef"); got != "semar run" {
 		t.Errorf("nextRun = %q", got)
 	}
 }

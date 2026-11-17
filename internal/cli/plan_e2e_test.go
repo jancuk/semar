@@ -258,8 +258,8 @@ func TestPlanFromADiffEndToEnd(t *testing.T) {
 	contains(t, "stdout", res.stdout,
 		"SHOP-482 (behaviour): 1 scenario", "SHOP-483 (behaviour): 1 scenario", "not drafted: 1",
 		"plan: "+p.path(".semar", "plans", p.head(t)[:12], "plan.md"),
-		"next:\n  semar run --all --build "+p.head(t)[:12]+"\n  semar confirm --all\n  semar run --all --build "+p.head(t)[:12]+"\n",
-		"The first run shows whether the drafted requests fit the service, and the second gives the result.")
+		"next:\n  semar review SHOP-482-01   ",
+		"  semar run --build "+p.head(t)[:12]+"   run the approved scenarios against the service\n  semar status   where things stand\n")
 	contains(t, "stderr", res.stderr, "wrote "+p.path(".semar", "semar.yaml"), "export "+planTokenEnv, "several minutes")
 	if n := jobs.Load(); n != 1 {
 		t.Errorf("the planner ran %d times, want 1", n)

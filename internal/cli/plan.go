@@ -266,7 +266,10 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	in.Model = model
 	in.Reasoning = pc.Reasoning
 	in.SetupOn = provider.IsHarness(pc.Kind) && (pc.Setup.MCP || pc.Setup.Skills)
+	var fxRig *fixtureRig
 	if criteria {
+		fxRig = planFixtureTrial(o, f, cfg, envName, env, in.AuthProfile)
+		in.FixtureTrial = fxRig
 		fmt.Fprintln(stderr, criteriaStartLine(ladder, rungConfigs, cs.Head))
 	} else {
 		fmt.Fprintln(stderr, startLine(pc, cs.Head, model, pc.Reasoning))
@@ -286,6 +289,10 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if rig != nil {
 		rig.close(stderr, o.Clock())
 	}
+	if fxRig != nil {
+		fxRig.close(stderr)
+	}
+	in.Fixtures = append(slices.Clone(in.Fixtures), out.DraftedEntries()...)
 	if err == nil {
 		fmt.Fprintf(stderr, "semar: the planner finished in %s\n", formatElapsed(rep.Elapsed()))
 	}
@@ -571,7 +578,7 @@ func planFailed(ctx context.Context, stderr io.Writer, err error) error {
 // nextRun is the run command that can reach passed: a service with no build probe needs its
 // build declared, and the head of the plan is what the test environment is meant to run.
 func nextRun(env config.Environment, envName, envFlag, head string) string {
-	cmd := "semar run --all"
+	cmd := "semar run"
 	// A production environment is run only when it is named.
 	if envFlag != "" || env.Kind == config.KindProduction {
 		cmd += " --env " + terminalSafe(envName)
@@ -607,6 +614,20 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, p
 		fmt.Fprintf(w, "%s (%s): %s\n", terminalSafe(t.Key), terminalSafe(t.Kind), plural(count[t.Key], "scenario"))
 	}
 	fmt.Fprintf(w, "not drafted: %d\n", len(out.Draft.NotDrafted))
+	for _, d := range out.FixtureDrafts {
+		if d.Drafted {
+			fmt.Fprintf(w, "fixture drafted: %s. %s Not approved: semar review %s\n", terminalSafe(d.Need.ID), terminalSafe(plan.FixtureRunWords(d)), terminalSafe(d.Need.ID))
+			continue
+		}
+		why := d.Reason
+		if why == "" && len(d.Problems) > 0 {
+			why = d.Problems[0].Message
+			if d.Problems[0].Path != "" {
+				why = d.Problems[0].Path + ": " + why
+			}
+		}
+		fmt.Fprintf(w, "fixture not drafted: %s: %s\n", terminalSafe(d.Need.ID), terminalSafe(oneLine(why)))
+	}
 	if st := out.Pipeline; st != nil && st.Unanswered > 0 {
 		fmt.Fprintf(w, "criteria that no model answered: %d, listed as gaps in the plan\n", st.Unanswered)
 	}
@@ -621,9 +642,19 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, p
 		fmt.Fprintln(w, modelUse)
 	}
 	if len(out.Scenarios) > 0 {
-		fmt.Fprintf(w, "next:\n  %s\n  semar confirm --all\n  %s\n", run, run)
-		fmt.Fprintln(w, "The first run shows whether the drafted requests fit the service, and the second gives the result.")
+		fmt.Fprintf(w, "next:\n  semar review %s   read what the plan drafted, a fixture before the scenarios that use it, and approve it\n", terminalSafe(firstToReview(out)))
+		fmt.Fprintf(w, "  %s   run the approved scenarios against the service\n  semar status   where things stand\n", run)
 	}
+}
+
+// firstToReview is what a person reads first: a drafted fixture, then the first scenario.
+func firstToReview(out plan.Output) string {
+	for _, d := range out.FixtureDrafts {
+		if d.Drafted {
+			return d.Need.ID
+		}
+	}
+	return string(out.Scenarios[0].ID)
 }
 
 func plural(n int, noun string) string {

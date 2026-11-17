@@ -110,6 +110,9 @@ func pipelineUseLine(out plan.Output) string {
 			jobs += " (" + strings.Join(by, ", ") + ")"
 		}
 		parts = append(parts, jobs, plural(st.Corrections, "correction"))
+		if st.FixtureJobs > 0 {
+			parts = append(parts, plural(st.FixturesDrafted, "fixture")+" drafted")
+		}
 	}
 	input := tokenCount(r.InputTokens) + " input"
 	if r.CacheReadTokens > 0 {

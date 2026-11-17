@@ -94,6 +94,7 @@ func Render(w io.Writer, in Input, out Output) error {
 		fmt.Fprintf(&b, "- %s: %s. Needs: %s\n", shown(n.Ticket, maxValueShown), shown(n.What, maxTextShown), shown(n.Needs, maxTextShown))
 	}
 
+	writeFixturesDrafted(&b, out)
 	writeFixturesNeeded(&b, d.FixturesNeeded)
 	writeJourneysToRerun(&b, in, out)
 
@@ -283,7 +284,7 @@ func writeScenario(b *strings.Builder, sc domain.Scenario, fixtures map[domain.F
 	for _, g := range sc.Given {
 		note := ""
 		if e, ok := fixtures[g.Fixture]; ok && !e.Approved {
-			note = fmt.Sprintf(" (not approved yet: semar confirm --fixture %s)", shown(string(g.Fixture), maxValueShown))
+			note = fmt.Sprintf(" (not approved yet: semar review %s)", shown(string(g.Fixture), maxValueShown))
 		}
 		fmt.Fprintf(b, "Given: %s from %s%s\n\n", shown(g.As, maxValueShown), shown(string(g.Fixture), maxValueShown), note)
 	}
@@ -398,6 +399,68 @@ func writeCriteriaTip(b *strings.Builder, accounting []Accounted, ticket string)
 	}
 }
 
+// FixtureRunWords says whether a drafted fixture was run, as the end of a sentence: "Ran once: ok." or
+// "Not run: <why>.", with what may still exist after the cleanup.
+func FixtureRunWords(d FixtureDraft) string {
+	if !d.Trial.Ran {
+		return "Not run: " + strings.TrimRight(oneLine(valueOr(d.Trial.Skipped, "no run was set up"), maxTextShown), ".") + "."
+	}
+	words := "Ran once: ok."
+	if len(d.Trial.Left) > 0 {
+		words += " Left behind: " + strings.TrimRight(oneLine(strings.Join(d.Trial.Left, "; "), maxTextShown), ".") + "."
+	}
+	return words
+}
+
+// DraftedEntries are the drafted fixtures as the catalogue shows them, not approved, in the order of
+// the drafts. plan.md names them like any fixture that a scenario uses.
+func (o Output) DraftedEntries() []fixture.Entry {
+	var out []fixture.Entry
+	for _, d := range o.FixtureDrafts {
+		if d.Drafted {
+			out = append(out, entryOf(d.Fixture))
+		}
+	}
+	return out
+}
+
+// writeFixturesDrafted lists the fixtures that the plan drafted, which scenarios use them, and the
+// ones that no model could write.
+func writeFixturesDrafted(b *strings.Builder, out Output) {
+	if len(out.FixtureDrafts) == 0 {
+		return
+	}
+	b.WriteString("\n## Fixtures drafted\n\n")
+	for _, d := range out.FixtureDrafts {
+		id := shown(d.Need.ID, maxValueShown)
+		if !d.Drafted {
+			why := d.Reason
+			if why == "" {
+				why = firstProblem(d.Problems)
+			}
+			fmt.Fprintf(b, "- %s: not drafted. %s. Needed by %s.\n", id, strings.TrimRight(shown(why, maxTextShown), "."), shown(strings.Join(d.Need.Cites, ", "), maxTextShown))
+			continue
+		}
+		clean := "no cleanup"
+		if len(d.Fixture.Cleanup) > 0 {
+			clean = "cleans up"
+		}
+		var users []string
+		for _, sc := range out.Scenarios {
+			if slices.ContainsFunc(sc.Given, func(g domain.Given) bool { return g.Fixture == d.Fixture.ID }) {
+				users = append(users, string(sc.ID))
+			}
+		}
+		used := "no scenario"
+		if len(users) > 0 {
+			used = strings.Join(users, ", ")
+		}
+		fmt.Fprintf(b, "- %s: %s. %s, %s. %s\n", id, strings.TrimRight(shown(d.Fixture.Description, maxTextShown), "."),
+			counted(len(d.Fixture.Create)+len(d.Fixture.Cleanup), "request"), clean, FixtureRunWords(d))
+		fmt.Fprintf(b, "  Used by %s. Not approved → semar review %s\n", shown(used, maxTextShown), id)
+	}
+}
+
 // writePipeline says how the criteria pipeline made a plan: the models, the calls, and for each
 // criterion which model answered it and how many corrections it took.
 func writePipeline(b *strings.Builder, out Output) {
@@ -409,8 +472,12 @@ func writePipeline(b *strings.Builder, out Output) {
 	}
 	fmt.Fprintf(b, "- Criteria: %d, with %d calls, %d corrections, %d escalated to a higher model, %d reused from an earlier plan, and %d that no model answered\n",
 		st.Criteria, st.Calls, st.Corrections, st.Escalated, st.Reused, st.Unanswered)
+	if st.FixtureJobs > 0 {
+		fmt.Fprintf(b, "- Fixtures: %s drafted of %d that criteria needed. A job with no tools drafted each one, code checked it, and a run on the test environment tried it once\n",
+			counted(st.FixturesDrafted, "fixture"), st.FixtureJobs)
+	}
 	fmt.Fprintf(b, "- Tokens: %d input, %d output\n", r.InputTokens, r.OutputTokens)
-	fmt.Fprintf(b, "- Prompt version: criterion %s\n", shown(prompt.CriterionVersion(), maxValueShown))
+	fmt.Fprintf(b, "- Prompt version: criterion %s, fixture %s\n", shown(prompt.CriterionVersion(), maxValueShown), shown(prompt.FixtureVersion(), maxValueShown))
 	if len(out.Outcomes) == 0 {
 		return
 	}

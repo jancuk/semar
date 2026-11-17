@@ -38,7 +38,7 @@ Before: accepted. Now: 422.
 
 Given: order from order.paid
 
-Given: buyer from customer.verified (not approved yet: semar confirm --fixture customer.verified)
+Given: buyer from customer.verified (not approved yet: semar review customer.verified)
 
 1. POST /v1/orders/{id}/refunds: Request a refund of 150000
    - Expects status 422. Cite: internal/refund/handler.go:41 returns 422 when the amount is above the rest
