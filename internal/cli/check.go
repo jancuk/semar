@@ -2,16 +2,21 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/obligation"
 )
 
 type checkFlags struct {
+	by     string
 	note   string
 	env    string
 	builds []string
@@ -21,15 +26,26 @@ type checkFlags struct {
 func newCheckCommand(o options) *cobra.Command {
 	var f checkFlags
 	cmd := &cobra.Command{
-		Use:   "check <id> pass|fail [--note <text>]",
-		Short: "Record what a person checked by hand",
+		Use:   "check <id> (pass|fail [--note <text>] | --by <scenario id>)",
+		Short: "Record what a person checked by hand, or say that a scenario does the check",
 		Long: "Store the result of a manual check as a new record, under your name. A pass on the build that the environment runs now makes the use case verified, and it is shown as checked by you.\n" +
-			"The builds come from the environment of semar.yaml: the one you name with --env, or the only one there is. A pass that names no build stays open for a person.",
-		Args: cobra.ExactArgs(2),
+			"The builds come from the environment of semar.yaml: the one you name with --env, or the only one there is. A pass that names no build stays open for a person.\n" +
+			"With --by, say that a scenario does the manual check. The scenario is added to the covers of the use case, and your name is kept as the person who said so. From then on the state of the use case comes from the scenario. Semar never links the two by itself: only a person can say that a test checks the same requirement under the same conditions.",
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if f.by != "" {
+				if len(args) != 1 {
+					return errors.New("--by takes no pass or fail: it says that a scenario does the check")
+				}
+				return linkUseCase(cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f, args[0])
+			}
+			if len(args) != 2 {
+				return errors.New("say pass or fail, or name the scenario that does the check with --by")
+			}
 			return checkUseCase(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f, args[0], args[1])
 		},
 	}
+	cmd.Flags().StringVar(&f.by, "by", "", "the ID of a scenario that does the manual check")
 	cmd.Flags().StringVar(&f.note, "note", "", "what you saw, at most 2000 characters")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment whose builds the result names (default: the only environment of semar.yaml)")
 	cmd.Flags().StringArrayVar(&f.builds, "build", nil, "with --env, the commit that a service with no build probe runs, as <commit> or <service>=<commit>; repeat for more")
@@ -92,5 +108,49 @@ func checkUseCase(ctx context.Context, stdout, stderr io.Writer, o options, f ch
 		on = " on " + strings.Join(parts, ", ")
 	}
 	fmt.Fprintf(stdout, "recorded %s for %s as %s (%s), checked by a person%s\n", result, terminalSafe(id), terminalSafe(oneLine(name)), obligation.LocalIdentity, on)
+	return nil
+}
+
+// linkUseCase adds the scenario to the covers of a manual use case and stores who said so. The
+// file comes first: a link that fails to store leaves a scenario in covers that no record backs, and
+// the use case then still waits for a person, so a second run of the command finishes the job.
+func linkUseCase(stdout, stderr io.Writer, o options, f checkFlags, id string) error {
+	if err := idcheck.Scenario(f.by); err != nil {
+		return err
+	}
+	repo := f.dir
+	obs, err := loadObligations(repo)
+	if err != nil {
+		return err
+	}
+	l, err := findObligation(obs, id)
+	if err != nil {
+		return err
+	}
+	if l.Manual == nil {
+		return fmt.Errorf("%s has no manual check, so no scenario can do it", terminalSafe(oneLine(id)))
+	}
+	if _, err := loadScenario(repo, domain.ScenarioID(f.by)); err != nil {
+		return err
+	}
+	name, err := person(o, "the person who links")
+	if err != nil {
+		return err
+	}
+	sid := domain.ScenarioID(f.by)
+	if err := obligation.Edit(repo, id, func(ob *obligation.Obligation) error {
+		if !slices.Contains(ob.Covers, sid) {
+			ob.Covers = append(ob.Covers, sid)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	link := obligation.Link{Obligation: id, Scenario: sid, User: name, Identity: obligation.LocalIdentity, At: o.Clock().UTC()}
+	if err := obligation.NewStore(semarDir(repo)).Link(link); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "%s is checked by test %s, linked by %s (%s)\nIts state comes from the scenario now: run it with semar run --scenario %s\n",
+		terminalSafe(oneLine(id)), sid, terminalSafe(oneLine(name)), obligation.LocalIdentity, sid)
 	return nil
 }
