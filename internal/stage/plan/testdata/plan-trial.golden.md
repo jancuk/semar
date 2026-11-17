@@ -39,6 +39,7 @@ Before: accepted. Now: 422.
 Given: order from order.paid
 
 1. POST /v1/orders/{id}/refunds: Request a refund of 150000
+   - Sends POST /v1/orders/{{order.id}}/refunds; json {"amount":150000}
    - Expects status 422. Cite: internal/refund/handler.go:41 returns 422 when the amount is above the rest
    - Expects \$.error.code equals REFUND_EXCEEDS_TOTAL. Cite: internal/refund/handler.go:42 names the code
 
@@ -53,7 +54,9 @@ Behaviour: none
 The read must stay the same.
 
 1. POST /v1/orders (setup): Create an order
+   - Sends json {"amount":5}
 2. GET /v1/orders/{id}: Read it
+   - Sends GET /v1/orders/{{order_id}}
    - Expects \$.data.amount equals 5. Cite: internal/orders/read.go:3 returns the amount
 
 #### SHOP-483-02: The summary of an order can be read
@@ -63,7 +66,9 @@ The read must stay the same.
 First drafted after the trial run. Check that its expected results come from the code.
 
 1. POST /v1/orders (setup): Create an order
+   - Sends json {"amount":5}
 2. GET /v1/orders/{id}/summary: Read it
+   - Sends GET /v1/orders/{{order_id}}/summary
    - Expects \$.data.amount equals 5. Cite: internal/orders/read.go:3 returns the amount
 
 ## Not drafted

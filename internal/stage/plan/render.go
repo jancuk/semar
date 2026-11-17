@@ -16,11 +16,14 @@ import (
 	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/prompt"
 	"github.com/jancuk/semar/internal/provider"
+	"github.com/jancuk/semar/internal/sends"
 )
 
 const (
 	maxTextShown  = 2000
 	maxValueShown = 200
+	// maxSendsShown bounds the Sends line of a step.
+	maxSendsShown = 600
 )
 
 // Render writes plan.md: what the planner found, what it drafted, what it left out, and how
@@ -76,7 +79,7 @@ func Render(w io.Writer, in Input, out Output) error {
 				continue
 			}
 			drafted++
-			writeScenario(&b, sc, fixtures, after[sc.ID], d.Differences)
+			writeScenario(&b, sc, scriptOf(out.Scripts, sc.ID), fixtures, after[sc.ID], d.Differences)
 		}
 		if drafted == 0 {
 			b.WriteString("\nNo scenario was drafted for this ticket.\n")
@@ -269,7 +272,7 @@ func writeFixturesNeeded(b *strings.Builder, needed []FixtureNeeded) {
 	}
 }
 
-func writeScenario(b *strings.Builder, sc domain.Scenario, fixtures map[domain.FixtureID]fixture.Entry, afterTrial bool, differences []Difference) {
+func writeScenario(b *strings.Builder, sc domain.Scenario, script *domain.Script, fixtures map[domain.FixtureID]fixture.Entry, afterTrial bool, differences []Difference) {
 	fmt.Fprintf(b, "\n#### %s: %s\n\n", shown(string(sc.ID), maxValueShown), shown(sc.Title, maxValueShown))
 	if s := strings.TrimSpace(sc.Intent); s != "" {
 		fmt.Fprintf(b, "%s\n\n", paragraph(shown(s, maxTextShown)))
@@ -305,6 +308,9 @@ func writeScenario(b *strings.Builder, sc domain.Scenario, fixtures map[domain.F
 			as = " as " + shown(st.As, maxValueShown)
 		}
 		fmt.Fprintf(b, "%d. %s%s%s: %s\n", i+1, shown(route, maxValueShown), setup, as, shown(st.Action, maxTextShown))
+		if line := sendsLine(script, st.ID, route); line != "" {
+			fmt.Fprintf(b, "   - Sends %s\n", shown(line, maxSendsShown))
+		}
 		for _, e := range st.Expect {
 			from := ""
 			if e.Source == domain.SourceTicket {
@@ -313,6 +319,33 @@ func writeScenario(b *strings.Builder, sc domain.Scenario, fixtures map[domain.F
 			fmt.Fprintf(b, "   - Expects %s.%s Cite: %s\n", shown(check.DescribeFull(e.Check), maxValueShown), from, shown(e.Cite, maxTextShown))
 		}
 	}
+}
+
+func scriptOf(scripts []domain.Script, id domain.ScenarioID) *domain.Script {
+	for i := range scripts {
+		if scripts[i].Scenario == id {
+			return &scripts[i]
+		}
+	}
+	return nil
+}
+
+// sendsLine is what the script sends for a step, in one line. The step already shows the route that
+// the planner named, so the route of the script is added only when it differs, as it does for a path
+// with a variable. It is empty when the script has no such step or the step sends nothing.
+func sendsLine(script *domain.Script, id domain.StepID, hintRoute string) string {
+	if script == nil {
+		return ""
+	}
+	i := slices.IndexFunc(script.Steps, func(st domain.ScriptStep) bool { return st.Step == id })
+	if i < 0 {
+		return ""
+	}
+	lines := sends.Lines(script.Steps[i])
+	if r := script.Steps[i].Request; r != nil && r.Method+" "+r.Path == hintRoute {
+		lines = lines[1:]
+	}
+	return strings.Join(lines, "; ")
 }
 
 // unmetCriteria are the places in a ticket file that a scenario expects and that the planner says

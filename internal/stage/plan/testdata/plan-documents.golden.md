@@ -37,7 +37,9 @@ Behaviour: a refund above the total gets 422
 Before: accepted. Now: 422.
 
 1. POST /v1/orders (setup): Create a paid order for 100000
+   - Sends json {"amount":100000}
 2. POST /v1/orders/{id}/refunds: Request a refund of 150000
+   - Sends POST /v1/orders/{{order_id}}/refunds; json {"amount":150000}
    - Expects status 422. Cite: internal/refund/handler.go:41 returns 422 when the amount is above the rest
    - Expects \$.error.code equals REFUND_EXCEEDS_TOTAL. Cite: internal/refund/handler.go:42 names the code
 
@@ -52,7 +54,9 @@ Behaviour: none
 The read must stay the same.
 
 1. POST /v1/orders (setup): Create an order
+   - Sends json {"amount":5}
 2. GET /v1/orders/{id}: Read it
+   - Sends GET /v1/orders/{{order_id}}
    - Expects \$.data.amount equals 5. Cite: internal/orders/read.go:3 returns the amount
 
 ## Not drafted
