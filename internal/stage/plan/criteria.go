@@ -11,6 +11,9 @@ import (
 // maxCriterionText bounds the text of a criterion that code writes into plan.md and an obligation.
 const maxCriterionText = 200
 
+// maxCriterionFull bounds the text of a criterion that a packet gives to a job.
+const maxCriterionFull = 1200
+
 var (
 	headingPattern   = regexp.MustCompile(`^ {0,3}#{1,6}(?:[ \t]+(.*?))?[ \t#]*$`)
 	criterionPattern = regexp.MustCompile(`^([0-9]{1,6})\. +(.*)$`)
@@ -29,6 +32,7 @@ type Criterion struct {
 	Line   int
 	End    int
 	Text   string // one clean line, cut; the number is not part of it
+	Full   string // the same line with more room, for a packet
 }
 
 // Cite is the place of the first line of the criterion.
@@ -53,7 +57,8 @@ func Criteria(t knowledge.Ticket) []Criterion {
 	flush := func() {
 		if open {
 			c := &out[len(out)-1]
-			c.Text = cutRunes(oneLine(strings.Join(parts, " "), 1<<20), maxCriterionText)
+			line := oneLine(strings.Join(parts, " "), 1<<20)
+			c.Text, c.Full = cutRunes(line, maxCriterionText), cutRunes(line, maxCriterionFull)
 		}
 		open, gwt, parts = false, false, nil
 	}
