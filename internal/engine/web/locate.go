@@ -301,7 +301,12 @@ func (r *reader) search(kind, arg string, scope runtime.RemoteObjectID) ([]cdp.B
 	if res.Result == nil || res.Result.ObjectID == "" {
 		return nil, nil
 	}
-	props, err := chromedp.Call(r.ctx, runtime.GetProperties, runtime.GetPropertiesParams{ObjectID: res.Result.ObjectID, OwnProperties: ptr(true)})
+	return r.elementsOf(res.Result.ObjectID)
+}
+
+// elementsOf gives the backend IDs of the elements that a page array holds.
+func (r *reader) elementsOf(array runtime.RemoteObjectID) ([]cdp.BackendNodeID, error) {
+	props, err := chromedp.Call(r.ctx, runtime.GetProperties, runtime.GetPropertiesParams{ObjectID: array, OwnProperties: ptr(true)})
 	if err != nil {
 		return nil, err
 	}
