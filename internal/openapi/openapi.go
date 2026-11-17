@@ -75,6 +75,16 @@ type Operation struct {
 	Line     int      // the line of the operation in a YAML document, 0 when unknown
 	ID       string   // operationId, "" when the operation has none
 	Summary  string   // summary, "" when the operation has none
+
+	// Key names the operation: its operationId when that is a plain name, else a name made from the
+	// method and the path, such as post_v1_cards_cardId_move. It is the same on every run.
+	Key          string
+	Params       []Param    // the path, query, and header parameters, those of the path item included
+	Body         []Field    // the properties of the JSON request body, when the document describes them
+	BodyRequired bool       // the request body is required
+	BodyKnown    bool       // the document describes a JSON request body
+	BodyOpen     bool       // the body may hold properties that Body does not list
+	Responses    []Response // the statuses that describe a JSON body, in status order
 }
 
 // Match is the answer of Lookup.
@@ -127,6 +137,7 @@ func Parse(data []byte, name string) (Document, error) {
 		return a.Method < b.Method
 	})
 	doc.index = buildIndex(doc.Prefixes, doc.Operations)
+	doc.readDetail(data, name)
 	return doc, nil
 }
 

@@ -125,7 +125,12 @@ func TestParse(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse: %v", err)
 			}
-			// The index is an unexported detail of a parsed document.
+			// The index is an unexported detail of a parsed document, and the details of an operation
+			// have their own tests.
+			for i := range got.Operations {
+				op := &got.Operations[i]
+				op.Key, op.Params, op.Body, op.Responses = "", nil, nil, nil
+			}
 			if got.Version != tt.want.Version || !reflect.DeepEqual(got.Prefixes, tt.want.Prefixes) || !reflect.DeepEqual(got.Operations, tt.want.Operations) {
 				t.Errorf("Parse =\n%+v\nwant\n%+v", got, tt.want)
 			}
