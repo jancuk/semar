@@ -32,6 +32,22 @@ func CheckModel(model string) error {
 	return nil
 }
 
+// ParseRung reads one step of a plan ladder, <provider id>:<model>, such as claude:haiku. A model
+// name may hold a colon, so the provider ends at the first one.
+func ParseRung(s string) (provider, model string, err error) {
+	provider, model, ok := strings.Cut(strings.TrimSpace(s), ":")
+	if !ok || provider == "" || model == "" {
+		return "", "", fmt.Errorf("%q is not a step of a ladder: write <provider id>:<model>, such as claude:haiku", s)
+	}
+	if err := idcheck.Check("provider id", provider); err != nil {
+		return "", "", fmt.Errorf("%q: %w", s, err)
+	}
+	if err := CheckModel(model); err != nil {
+		return "", "", fmt.Errorf("%q: %w", s, err)
+	}
+	return provider, model, nil
+}
+
 var reasoningPattern = regexp.MustCompile(`^[a-z]{1,16}$`)
 
 // CheckReasoning accepts a reasoning level that cannot be read as a flag or hold a control

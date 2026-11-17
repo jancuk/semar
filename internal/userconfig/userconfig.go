@@ -73,6 +73,11 @@ type Plan struct {
 	// provider's setup allows. They add tokens to every turn, so a plan runs without them
 	// unless this is true or the run passes --with-setup.
 	WithSetup bool `yaml:"withSetup,omitempty"`
+	// Ladder is the models of a plan that runs with --pipeline criteria, the cheapest first, each
+	// as <provider id>:<model>. A job goes up a step when the answer of the step below it fails
+	// its checks twice. It is the person's choice and never the repository's, because it decides
+	// which provider receives the repository's code.
+	Ladder []string `yaml:"ladder,omitempty"`
 }
 
 // Provider is one entry. BaseURL and APIKey belong to the API kinds and Setup to the
@@ -236,6 +241,15 @@ func (f File) Validate() error {
 		add("%s: default must name a provider", FileName)
 	case !seen[f.Default]:
 		add("%s: default %q is not one of the providers", FileName, f.Default)
+	}
+	for _, step := range f.Plan.Ladder {
+		id, _, err := config.ParseRung(step)
+		switch {
+		case err != nil:
+			add("%s: plan.ladder: %v", FileName, err)
+		case !seen[id]:
+			add("%s: plan.ladder: %q names the provider %q, which is not one of the providers", FileName, step, id)
+		}
 	}
 	return errors.Join(errs...)
 }

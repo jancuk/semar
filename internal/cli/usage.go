@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -56,6 +57,75 @@ func (o options) recordUsage(stderr io.Writer, inst provider.Instance, model, re
 	if err != nil {
 		fmt.Fprintf(stderr, "semar: the usage of this job was not recorded: %v\n", err)
 	}
+}
+
+// recordPipelineUsage appends one record for each model that the criteria pipeline called, so the
+// usage log says what each provider and model used.
+func (o options) recordPipelineUsage(stderr io.Writer, insts []provider.Instance, out plan.Output, outcome, ref string) {
+	if out.Pipeline == nil {
+		return
+	}
+	for _, u := range out.Pipeline.Uses {
+		if u.Calls == 0 {
+			continue
+		}
+		i := slices.IndexFunc(insts, func(in provider.Instance) bool { return in.ID() == u.PlannerID })
+		if i < 0 {
+			continue
+		}
+		o.recordUsage(stderr, insts[i], u.Model, u.Reasoning, plan.Output{Result: u.Result, Attempts: u.Calls}, outcome, ref, u.Took)
+	}
+}
+
+// useLine is the model use line of a plan, whichever pipeline made it.
+func useLine(out plan.Output, setupOn bool) string {
+	if out.Pipeline != nil {
+		return pipelineUseLine(out)
+	}
+	return modelUseLine(out.Result, out.Attempts, setupOn)
+}
+
+// pipelineUseLine is the line of the criteria pipeline, for example
+// "model use: 16 jobs (14 haiku, 2 sonnet), 3 corrections, 92k input, 21k output, $0.09". A job is a
+// criterion, counted under the model that gave its accepted answer. A correction is a call that
+// repaired an answer. A reused answer and a criterion that no model answered follow when there are
+// any. A plan that stopped before it had answers says how many calls it made.
+func pipelineUseLine(out plan.Output) string {
+	st, r := out.Pipeline, out.Result
+	if st.Calls == 0 && st.Reused == 0 {
+		return ""
+	}
+	var parts []string
+	if st.Criteria == 0 {
+		parts = append(parts, plural(st.Calls, "call"))
+	} else {
+		jobs := plural(st.Criteria-st.Unanswered, "job")
+		var by []string
+		for _, m := range st.ByModel {
+			if m.Answers > 0 {
+				by = append(by, fmt.Sprintf("%d %s", m.Answers, terminalSafe(m.Model)))
+			}
+		}
+		if len(by) > 0 {
+			jobs += " (" + strings.Join(by, ", ") + ")"
+		}
+		parts = append(parts, jobs, plural(st.Corrections, "correction"))
+	}
+	input := tokenCount(r.InputTokens) + " input"
+	if r.CacheReadTokens > 0 {
+		input += " (" + tokenCount(r.CacheReadTokens) + " cached)"
+	}
+	parts = append(parts, input, tokenCount(r.OutputTokens)+" output")
+	if r.CostUSD > 0 {
+		parts = append(parts, fmt.Sprintf("$%.2f", r.CostUSD))
+	}
+	if st.Reused > 0 {
+		parts = append(parts, fmt.Sprintf("%d reused", st.Reused))
+	}
+	if st.Unanswered > 0 {
+		parts = append(parts, fmt.Sprintf("%d unanswered", st.Unanswered))
+	}
+	return "model use: " + strings.Join(parts, ", ")
 }
 
 // modelUseLine is the one line that says what a plan used, summed over its attempts, for example

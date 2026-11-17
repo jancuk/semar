@@ -81,6 +81,9 @@ func Render(w io.Writer, in Input, out Output) error {
 		}
 		writeManualChecks(&b, d.ManualChecks, t.Key)
 		writeCriteria(&b, accounting, t.Key)
+		if out.Pipeline != nil {
+			writeCriteriaTip(&b, accounting, t.Key)
+		}
 	}
 
 	b.WriteString("\n## Not drafted\n\n")
@@ -117,18 +120,23 @@ func Render(w io.Writer, in Input, out Output) error {
 
 	r := out.Result
 	b.WriteString("\n## How this plan was made\n\n")
-	fmt.Fprintf(&b, "- Provider: %s (%s)\n", shown(out.PlannerID, maxValueShown), shown(out.PlannerKind, maxValueShown))
-	fmt.Fprintf(&b, "- Model: %s\n", shown(valueOr(r.Model, "the harness default"), maxValueShown))
-	if level := valueOr(r.Reasoning, in.Reasoning); level != "" {
-		fmt.Fprintf(&b, "- Reasoning: %s\n", shown(level, maxValueShown))
+	if out.Pipeline != nil {
+		writePipeline(&b, out)
+		writeRefused(&b, out.Refused)
+	} else {
+		fmt.Fprintf(&b, "- Provider: %s (%s)\n", shown(out.PlannerID, maxValueShown), shown(out.PlannerKind, maxValueShown))
+		fmt.Fprintf(&b, "- Model: %s\n", shown(valueOr(r.Model, "the harness default"), maxValueShown))
+		if level := valueOr(r.Reasoning, in.Reasoning); level != "" {
+			fmt.Fprintf(&b, "- Reasoning: %s\n", shown(level, maxValueShown))
+		}
+		fmt.Fprintf(&b, "- Attempts: %d of %d\n", out.Attempts, MaxAttempts)
+		writeRefused(&b, out.Refused)
+		fmt.Fprintf(&b, "- Tokens: %d input, %d output\n", r.InputTokens, r.OutputTokens)
+		fmt.Fprintf(&b, "- Setup: %s\n", setupLine(in.SetupOn, r.Loaded))
+		fmt.Fprintf(&b, "- Tool calls: %s\n", toolLine(r.Tools))
+		fmt.Fprintf(&b, "- Refused tool calls: %d\n", r.Denied)
+		fmt.Fprintf(&b, "- Prompt version: %s\n", shown(prompt.PlanVersion(), maxValueShown))
 	}
-	fmt.Fprintf(&b, "- Attempts: %d of %d\n", out.Attempts, MaxAttempts)
-	writeRefused(&b, out.Refused)
-	fmt.Fprintf(&b, "- Tokens: %d input, %d output\n", r.InputTokens, r.OutputTokens)
-	fmt.Fprintf(&b, "- Setup: %s\n", setupLine(in.SetupOn, r.Loaded))
-	fmt.Fprintf(&b, "- Tool calls: %s\n", toolLine(r.Tools))
-	fmt.Fprintf(&b, "- Refused tool calls: %d\n", r.Denied)
-	fmt.Fprintf(&b, "- Prompt version: %s\n", shown(prompt.PlanVersion(), maxValueShown))
 	b.WriteString("\nEvery expected result here was read from the code by a model. Confirm each scenario before its result counts.\n")
 	if trialRan(out) {
 		b.WriteString("\nThe read-only requests were tried once. The others were not sent before the first run.\n")
@@ -369,6 +377,61 @@ func writeCriteria(b *strings.Builder, accounting []Accounted, ticket string) {
 			by = strings.Join(cited, "; ")
 		}
 		fmt.Fprintf(b, "| %d | %d | %s | %s |\n", a.Line, a.Number, shown(a.Text, maxCriterionText), by)
+	}
+}
+
+// writeCriteriaTip suggests the form that a small model plans best, once for a ticket whose
+// criteria are all prose.
+func writeCriteriaTip(b *strings.Builder, accounting []Accounted, ticket string) {
+	has := false
+	for _, a := range accounting {
+		if a.Ticket != ticket {
+			continue
+		}
+		if strings.HasPrefix(a.Full, "Given ") {
+			return
+		}
+		has = true
+	}
+	if has {
+		b.WriteString("\nTip: write each criterion as Given, When, and Then lines in the ticket file. A small model plans a criterion in that form more reliably than a sentence of prose, and the plan cites its first line.\n")
+	}
+}
+
+// writePipeline says how the criteria pipeline made a plan: the models, the calls, and for each
+// criterion which model answered it and how many corrections it took.
+func writePipeline(b *strings.Builder, out Output) {
+	st, r := out.Pipeline, out.Result
+	b.WriteString("- Pipeline: criteria. One job with no tools for each acceptance criterion. Code checked each answer, an answer with a problem went back once to the same model with the problems in plain words, and then to the next model of the ladder.\n")
+	for _, u := range st.Uses {
+		fmt.Fprintf(b, "- Model %s (%s, provider %s): %d calls, %d input tokens, %d output tokens\n",
+			shown(u.Model, maxValueShown), shown(valueOr(u.Result.Model, "reported no model name"), maxValueShown), shown(u.PlannerID, maxValueShown), u.Calls, u.Result.InputTokens, u.Result.OutputTokens)
+	}
+	fmt.Fprintf(b, "- Criteria: %d, with %d calls, %d corrections, %d escalated to a higher model, %d reused from an earlier plan, and %d that no model answered\n",
+		st.Criteria, st.Calls, st.Corrections, st.Escalated, st.Reused, st.Unanswered)
+	fmt.Fprintf(b, "- Tokens: %d input, %d output\n", r.InputTokens, r.OutputTokens)
+	fmt.Fprintf(b, "- Prompt version: criterion %s\n", shown(prompt.CriterionVersion(), maxValueShown))
+	if len(out.Outcomes) == 0 {
+		return
+	}
+	b.WriteString("\n| Criterion | Answer | Model | Corrections |\n| --- | --- | --- | --- |\n")
+	for _, o := range out.Outcomes {
+		kind, model := "none", "-"
+		switch {
+		case o.Result.Scenario != nil:
+			kind = "scenario"
+		case o.Result.Manual != nil:
+			kind = "manual check"
+		case o.Result.NotDrafted != nil:
+			kind = "not drafted"
+		}
+		if o.Answered {
+			model = valueOr(st.modelOf(o.Rung), "-")
+			if o.Reused {
+				model += " (reused)"
+			}
+		}
+		fmt.Fprintf(b, "| %s | %s | %s | %d |\n", shown(o.Packet.Cite, maxValueShown), kind, shown(model, maxValueShown), o.Corrections)
 	}
 }
 

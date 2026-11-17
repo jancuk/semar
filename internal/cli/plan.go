@@ -37,6 +37,8 @@ type planFlags struct {
 	withSetup    bool
 	withSetupSet bool
 	noTrial      bool
+	pipeline     string
+	ladder       string
 	maxScenarios int
 	env          string
 	authProfile  string
@@ -69,6 +71,8 @@ func newPlanCommand(o options) *cobra.Command {
 	cmd.Flags().StringVar(&f.reasoning, "reasoning", "", "the reasoning level of the planner, such as high (default: the provider's reasoning, else its own default)")
 	cmd.Flags().StringVar(&f.provider, "provider", "", "the provider that plans (default: see semar providers)")
 	cmd.Flags().BoolVar(&f.withSetup, "with-setup", false, "plan with your MCP servers and skills, which add tokens to every turn (default: plan.withSetup of your providers file, else off)")
+	cmd.Flags().StringVar(&f.pipeline, "pipeline", pipelineSingle, "how the plan is made: single, one job that reads the repository, or criteria, one job with no tools for each acceptance criterion, which suits small models")
+	cmd.Flags().StringVar(&f.ladder, "ladder", "", "with --pipeline criteria, the models from the cheapest up, each as <provider id>:<model>, such as claude:haiku,claude:sonnet,claude:opus (default: plan.ladder of your providers file, else the provider and model of the plan)")
 	cmd.Flags().BoolVar(&f.noTrial, "no-trial", false, "do not send the read-only steps of the draft to the environment before the plan is written, for this run")
 	cmd.Flags().IntVar(&f.maxScenarios, "max-scenarios", 0, "the most scenarios to draft (default: plan.maxScenarios)")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to plan for; needed when there are several. With --base-url, the name of the new environment (default uat, or production with --kind production)")
@@ -81,6 +85,9 @@ func newPlanCommand(o options) *cobra.Command {
 func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f planFlags) error {
 	if f.maxScenarios < 0 {
 		return errors.New("--max-scenarios must be positive")
+	}
+	if err := checkPipelineFlags(f); err != nil {
+		return err
 	}
 	if f.model != "" {
 		if err := config.CheckModel(f.model); err != nil {
@@ -177,26 +184,40 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if err != nil {
 		return err
 	}
-	pc, _, err := src.choose(f.provider)
-	if err != nil {
-		return err
-	}
-	pc.Setup = planSetup(pc, src.withSetup(f.withSetup, f.withSetupSet))
-	if f.reasoning != "" {
-		pc.Reasoning = f.reasoning
-	}
-	model, err := planModel(f.model, pc, src.filePath)
-	if err != nil {
-		return err
-	}
-	o.drop.set(append(secretEnvNames(cfg), keyEnvNames(src.file)...))
-	inst, err := o.Providers(f.dir).New(pc)
-	if err != nil {
-		return err
-	}
-	if h := inst.Health(ctx); !h.Installed {
-		fmt.Fprintf(stderr, "semar: provider %s (%s) cannot plan: %s\n", inst.ID(), inst.Kind(), terminalSafe(h.Detail))
-		return exitError{ExitError}
+	criteria := f.pipeline == pipelineCriteria
+	var pc config.Provider
+	var model string
+	var inst provider.Instance
+	var ladder []plan.Rung
+	var rungConfigs []config.Provider
+	var rungInsts []provider.Instance
+	if criteria {
+		if ladder, rungConfigs, rungInsts, err = criteriaLadder(ctx, stderr, o, f, src, cfg); err != nil {
+			return err
+		}
+		pc, model, inst = rungConfigs[0], ladder[0].Model, rungInsts[0]
+	} else {
+		pc, _, err = src.choose(f.provider)
+		if err != nil {
+			return err
+		}
+		pc.Setup = planSetup(pc, src.withSetup(f.withSetup, f.withSetupSet))
+		if f.reasoning != "" {
+			pc.Reasoning = f.reasoning
+		}
+		model, err = planModel(f.model, pc, src.filePath)
+		if err != nil {
+			return err
+		}
+		o.drop.set(append(secretEnvNames(cfg), keyEnvNames(src.file)...))
+		inst, err = o.Providers(f.dir).New(pc)
+		if err != nil {
+			return err
+		}
+		if h := inst.Health(ctx); !h.Installed {
+			fmt.Fprintf(stderr, "semar: provider %s (%s) cannot plan: %s\n", inst.ID(), inst.Kind(), terminalSafe(h.Detail))
+			return exitError{ExitError}
+		}
 	}
 
 	root, err := sourceCopyRoot(o)
@@ -211,6 +232,15 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	var leftOut []vcs.Skipped
 	if in.SourceDir, in.Diff, leftOut, err = prepareSource(ctx, g, cs, tmp); err != nil {
 		return err
+	}
+	if criteria {
+		// The jobs of the criteria pipeline read nothing, so they run in a directory of their own
+		// that holds nothing: no job can see the copy of the source.
+		in.JobDir = filepath.Join(tmp, "empty")
+		if err := os.Mkdir(in.JobDir, 0o700); err != nil {
+			return fmt.Errorf("create a directory for the jobs: %w", err)
+		}
+		in.Ladder, in.Previous = ladder, loadAnswers(f.dir)
 	}
 	for _, s := range leftOut {
 		in.LeftOut = append(in.LeftOut, plan.LeftOut{Path: s.Path, Reason: s.Reason})
@@ -230,13 +260,22 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	in.Model = model
 	in.Reasoning = pc.Reasoning
 	in.SetupOn = provider.IsHarness(pc.Kind) && (pc.Setup.MCP || pc.Setup.Skills)
-	fmt.Fprintln(stderr, startLine(pc, cs.Head, model, pc.Reasoning))
+	if criteria {
+		fmt.Fprintln(stderr, criteriaStartLine(ladder, rungConfigs, cs.Head))
+	} else {
+		fmt.Fprintln(stderr, startLine(pc, cs.Head, model, pc.Reasoning))
+	}
 
 	started := time.Now()
 	rep := startProgress(stderr, o.Clock, o.StderrTerminal(), o.Tick)
 	defer rep.Stop() // so a panic or an early return cannot leave the status line on the screen
 	in.Progress = rep.Report
-	out, err := plan.Run(ctx, inst, in)
+	var out plan.Output
+	if criteria {
+		out, err = plan.RunCriteria(ctx, in)
+	} else {
+		out, err = plan.Run(ctx, inst, in)
+	}
 	rep.Stop()
 	if rig != nil {
 		rig.close(stderr, o.Clock())
@@ -244,20 +283,27 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if err == nil {
 		fmt.Fprintf(stderr, "semar: the planner finished in %s\n", formatElapsed(rep.Elapsed()))
 	}
+	record := func(outcome, ref string) {
+		if criteria {
+			o.recordPipelineUsage(stderr, rungInsts, out, outcome, ref)
+			return
+		}
+		o.recordUsage(stderr, inst, model, pc.Reasoning, out, outcome, ref, time.Since(started))
+	}
 	if err != nil {
-		o.recordUsage(stderr, inst, model, pc.Reasoning, out, usageOutcome(ctx, err), "", time.Since(started))
-		if line := modelUseLine(out.Result, out.Attempts, in.SetupOn); line != "" {
+		record(usageOutcome(ctx, err), "")
+		if line := useLine(out, in.SetupOn); line != "" {
 			fmt.Fprintf(stderr, "semar: %s\n", line)
 		}
 		return planFailed(ctx, stderr, err)
 	}
 	planFile, err := writePlan(f.dir, in, out, known)
 	if err != nil {
-		o.recordUsage(stderr, inst, model, pc.Reasoning, out, "failed:not_written", "", time.Since(started))
+		record("failed:not_written", "")
 		return err
 	}
-	o.recordUsage(stderr, inst, model, pc.Reasoning, out, "ok", filepath.Base(filepath.Dir(planFile)), time.Since(started))
-	printPlanDone(stdout, out, len(cfg.Knowledge) > 0, trialSummary(in, out), modelUseLine(out.Result, out.Attempts, in.SetupOn), planFile, nextRun(env, envName, f.env, cs.HeadCommit))
+	record("ok", filepath.Base(filepath.Dir(planFile)))
+	printPlanDone(stdout, out, len(cfg.Knowledge) > 0, trialSummary(in, out), useLine(out, in.SetupOn), planFile, nextRun(env, envName, f.env, cs.HeadCommit))
 	if len(out.Scenarios) == 0 {
 		return exitError{ExitUndecided}
 	}
@@ -555,6 +601,9 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, p
 		fmt.Fprintf(w, "%s (%s): %s\n", terminalSafe(t.Key), terminalSafe(t.Kind), plural(count[t.Key], "scenario"))
 	}
 	fmt.Fprintf(w, "not drafted: %d\n", len(out.Draft.NotDrafted))
+	if st := out.Pipeline; st != nil && st.Unanswered > 0 {
+		fmt.Fprintf(w, "criteria that no model answered: %d, listed as gaps in the plan\n", st.Unanswered)
+	}
 	if listed {
 		fmt.Fprintf(w, "differs from the documents: %d\n", len(out.Notes)+len(out.Draft.Differences))
 	}

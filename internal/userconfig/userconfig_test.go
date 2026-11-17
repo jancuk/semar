@@ -417,3 +417,29 @@ func TestPlanWithSetupRoundTrip(t *testing.T) {
 		t.Errorf("an unset switch is written:\n%s", data)
 	}
 }
+
+func TestPlanLadderRoundTripAndRules(t *testing.T) {
+	home := t.TempDir()
+	f := valid()
+	f.Plan.Ladder = []string{"claude:haiku", "claude:sonnet", "acme:acme-chat:big"}
+	if err := Save(home, f); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := Load(home)
+	if err != nil || !reflect.DeepEqual(got.Plan.Ladder, f.Plan.Ladder) {
+		t.Fatalf("Load = %+v, %v", got.Plan, err)
+	}
+	for name, step := range map[string]string{
+		"no model":         "claude",
+		"no provider":      ":haiku",
+		"an empty model":   "claude:",
+		"a model flag":     "claude:--bare",
+		"unknown provider": "gemini:flash",
+	} {
+		bad := valid()
+		bad.Plan.Ladder = []string{step}
+		if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "plan.ladder") {
+			t.Errorf("%s: Validate = %v", name, err)
+		}
+	}
+}

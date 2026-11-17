@@ -200,6 +200,9 @@ func (r *progressReporter) Elapsed() time.Duration {
 // statusLine drops parts from the end until the line fits.
 func statusLine(frame string, elapsed time.Duration, p plan.Progress) string {
 	parts := []string{frame + " planning", formatElapsed(elapsed)}
+	if p.Total > 0 {
+		return strings.Join(append(parts, fmt.Sprintf("%d of %d criteria answered", p.Done, p.Total)), " · ")
+	}
 	if p.Attempt > 1 {
 		parts = append(parts, fmt.Sprintf("draft %d of %d", p.Attempt, plan.MaxAttempts))
 	}
@@ -224,6 +227,9 @@ func statusLine(frame string, elapsed time.Duration, p plan.Progress) string {
 
 // plainLine has no tool name and always names the draft.
 func plainLine(elapsed time.Duration, p plan.Progress) string {
+	if p.Total > 0 {
+		return fmt.Sprintf("semar: still planning: %s, %d of %d criteria answered", formatElapsed(elapsed), p.Done, p.Total)
+	}
 	parts := []string{formatElapsed(elapsed), fmt.Sprintf("draft %d of %d", max(p.Attempt, 1), plan.MaxAttempts)}
 	if p.Turns > 0 {
 		parts = append(parts, plural(p.Turns, "response"))

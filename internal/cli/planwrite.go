@@ -89,7 +89,9 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 		scenarioFiles = append(scenarioFiles, f)
 		s := out.Scripts[i]
 		s.ExpectHash = domain.ExpectHash(sc)
-		s.AuthoredBy = domain.ProviderRef{Instance: out.PlannerID, Model: out.Result.Model, Harness: out.PlannerKind}
+		if s.AuthoredBy == (domain.ProviderRef{}) { // the criteria pipeline names the model of each script
+			s.AuthoredBy = domain.ProviderRef{Instance: out.PlannerID, Model: out.Result.Model, Harness: out.PlannerKind}
+		}
 		scripts = append(scripts, s)
 		rel, err := evidence.ScriptPath(s.Scenario, s.ExpectHash)
 		if err != nil {
@@ -106,6 +108,13 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 	draft, err := atomicfile.EncodeJSON(out.Draft)
 	if err != nil {
 		return "", fmt.Errorf("encode the draft: %w", err)
+	}
+
+	var answers []byte
+	if len(out.Answers) > 0 {
+		if answers, err = atomicfile.EncodeJSON(out.Answers); err != nil {
+			return "", fmt.Errorf("encode the answers: %w", err)
+		}
 	}
 
 	root, err := os.OpenRoot(dir)
@@ -169,7 +178,11 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 		}
 		w.files = append(w.files, scriptFiles[i])
 	}
-	for _, f := range []planFile{{filepath.Join(planDir, "plan.md"), md.Bytes()}, {filepath.Join(planDir, "draft.json"), draft}} {
+	files := []planFile{{filepath.Join(planDir, "plan.md"), md.Bytes()}, {filepath.Join(planDir, "draft.json"), draft}}
+	if len(answers) > 0 {
+		files = append(files, planFile{filepath.Join(planDir, answersFile), answers})
+	}
+	for _, f := range files {
 		if err := w.writeFile(f); err != nil {
 			return w.undo(err)
 		}

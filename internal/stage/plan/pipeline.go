@@ -75,6 +75,15 @@ type PipelineStats struct {
 	Reused      int          // criteria whose stored answer was reused without a call
 	Unanswered  int          // criteria that no rung answered
 	Uses        []ModelUse   // one for each rung that was called, in the order of the ladder
+	Labels      []string     // the label of each rung of the ladder
+}
+
+// modelOf is the label of the model of a rung, "" when there is none.
+func (st *PipelineStats) modelOf(rung int) string {
+	if rung < 0 || rung >= len(st.Labels) {
+		return ""
+	}
+	return st.Labels[rung]
 }
 
 // CriterionOutcome says how one criterion was answered.
@@ -118,11 +127,16 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 	for i, r := range in.Ladder {
 		rs.uses[i] = ModelUse{PlannerID: r.Planner.ID(), Kind: r.Planner.Kind(), Model: r.Label(), Reasoning: r.Reasoning}
 	}
-	for _, a := range in.Previous {
-		rs.cache[a.Hash] = a
+	for _, a := range in.Previous { // the newest plan comes first and wins
+		if _, ok := rs.cache[a.Hash]; !ok {
+			rs.cache[a.Hash] = a
+		}
 	}
 
 	outcomes := make([]CriterionOutcome, len(packets))
+	if in.Progress != nil {
+		in.Progress(Progress{Total: len(packets)})
+	}
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(MaxParallelJobs)
 	for i, p := range packets {
@@ -214,6 +228,9 @@ func (rs *runState) output(outcomes []CriterionOutcome) Output {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	st := &PipelineStats{Criteria: len(outcomes), Calls: rs.calls, Corrections: rs.corr}
+	for _, r := range rs.in.Ladder {
+		st.Labels = append(st.Labels, r.Label())
+	}
 	counts := make([]int, len(rs.in.Ladder))
 	var answers []StoredAnswer
 	for _, o := range outcomes {
