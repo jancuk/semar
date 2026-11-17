@@ -60,9 +60,11 @@ type ModelCount struct {
 // ModelUse is what the calls to one rung used.
 type ModelUse struct {
 	PlannerID, Kind, Model, Reasoning string
-	Calls                             int
-	Took                              time.Duration
-	Result                            provider.Result
+	// Asked is the model as the ladder names it, "" for the provider's own model. Model is its label.
+	Asked  string
+	Calls  int
+	Took   time.Duration
+	Result provider.Result
 }
 
 // PipelineStats is what a plan of the criteria pipeline did.
@@ -151,7 +153,7 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 	}
 	rs := &runState{in: in, uses: make([]ModelUse, len(in.Ladder)), cache: map[string]StoredAnswer{}}
 	for i, r := range in.Ladder {
-		rs.uses[i] = ModelUse{PlannerID: r.Planner.ID(), Kind: r.Planner.Kind(), Model: r.Label(), Reasoning: r.Reasoning}
+		rs.uses[i] = ModelUse{PlannerID: r.Planner.ID(), Kind: r.Planner.Kind(), Model: r.Label(), Asked: r.Model, Reasoning: r.Reasoning}
 	}
 	for _, a := range in.Previous { // the newest plan comes first and wins
 		if _, ok := rs.cache[a.Hash]; !ok {

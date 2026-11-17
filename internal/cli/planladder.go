@@ -119,17 +119,8 @@ func criteriaLadder(ctx context.Context, stderr io.Writer, o options, f planFlag
 		list = append(list, rungStep{id, model})
 	}
 	if len(list) == 0 {
-		pc, _, err := src.choose(f.provider)
-		if err != nil {
+		if list, err = src.defaultLadder(f.provider, f.model); err != nil {
 			return nil, nil, nil, err
-		}
-		model, err := planModel(f.model, pc, src.filePath)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		list = []rungStep{{pc.ID, model}}
-		if pc.Kind == provider.KindClaude && f.model == "" {
-			list = defaultClaudeLadder(pc.ID, model)
 		}
 	}
 	o.drop.set(append(secretEnvNames(cfg), keyEnvNames(src.file)...))
@@ -167,6 +158,45 @@ func criteriaLadder(ctx context.Context, stderr io.Writer, o options, f planFlag
 		insts = append(insts, inst)
 	}
 	return rungs, configs, insts, nil
+}
+
+// defaultLadder is the ladder of a person who set none: the provider and model of the plan, and for
+// Claude Code with no --model, haiku, sonnet, and then the model of the provider.
+func (s providerSources) defaultLadder(flagProvider, flagModel string) ([]rungStep, error) {
+	pc, _, err := s.choose(flagProvider)
+	if err != nil {
+		return nil, err
+	}
+	model, err := planModel(flagModel, pc, s.filePath)
+	if err != nil {
+		return nil, err
+	}
+	if pc.Kind == provider.KindClaude && flagModel == "" {
+		return defaultClaudeLadder(pc.ID, model), nil
+	}
+	return []rungStep{{pc.ID, model}}, nil
+}
+
+// firstRung is the provider and the model that do the first job of a plan by criteria, which is what
+// an offer to plan estimates: the first step of the ladder of your providers file, else the first of
+// the default ladder. model is "" for the provider's own model.
+func firstRung(o options, dir string, cfg config.Config) (providerID, model string, err error) {
+	src, err := loadSources(o, dir, cfg)
+	if err != nil {
+		return "", "", err
+	}
+	steps, err := src.ladderSteps("")
+	if err != nil {
+		return "", "", err
+	}
+	if len(steps) > 0 {
+		return config.ParseRung(steps[0])
+	}
+	list, err := src.defaultLadder("", "")
+	if err != nil {
+		return "", "", err
+	}
+	return list[0].id, list[0].model, nil
 }
 
 // defaultClaudeLadder is the ladder of a person who set none and plans with Claude Code: the small

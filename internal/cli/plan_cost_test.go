@@ -14,6 +14,7 @@ import (
 	"github.com/jancuk/semar/internal/provider/claude"
 	"github.com/jancuk/semar/internal/provider/fake"
 	"github.com/jancuk/semar/internal/sampleapp"
+	"github.com/jancuk/semar/internal/usage"
 	"github.com/jancuk/semar/internal/vcs/gittest"
 )
 
@@ -125,4 +126,48 @@ func TestPlanSingleStopsBetweenAttemptsAtTheCostLimit(t *testing.T) {
 	res := p.must(t, cli.ExitUndecided, "plan", "--diff", "main..release", "--pipeline", "single", "--max-cost", "1.5")
 	contains(t, "stderr", res.stderr, "the cost limit of $1.50 was reached after 2 attempts, which spent $2.00, and no draft passed; nothing was written")
 	p.assertNothingPlanned(t)
+}
+
+func TestTheFirstRungIsWhatAnOfferToPlanEstimates(t *testing.T) {
+	p := newPlanRepo(t, sampleapp.Options{})
+	p.opts.Home = t.TempDir()
+	cfg := config.Config{}
+
+	// Built-in Claude Code, with no ladder: the small model plans first.
+	if id, model, err := cli.FirstRung(p.opts, p.dir, cfg); err != nil || id != "claude" || model != "haiku" {
+		t.Errorf("default = %q %q %v, want claude haiku", id, model, err)
+	}
+
+	// A ladder of your file: its first step.
+	file := "version: 1\ndefault: claude\nplan:\n  ladder: [claude:sonnet, claude:opus]\nproviders:\n  - id: claude\n    kind: claude\n"
+	if err := os.WriteFile(p.opts.Home+"/providers.yaml", []byte(file), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if id, model, err := cli.FirstRung(p.opts, p.dir, cfg); err != nil || id != "claude" || model != "sonnet" {
+		t.Errorf("ladder = %q %q %v, want claude sonnet", id, model, err)
+	}
+
+	// Another provider plans with its own model.
+	file = "version: 1\ndefault: luna\nproviders:\n  - id: luna\n    kind: codex\n    model: gpt-6-luna\n"
+	if err := os.WriteFile(p.opts.Home+"/providers.yaml", []byte(file), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if id, model, err := cli.FirstRung(p.opts, p.dir, cfg); err != nil || id != "luna" || model != "gpt-6-luna" {
+		t.Errorf("codex = %q %q %v, want luna gpt-6-luna", id, model, err)
+	}
+}
+
+func TestAPlanByCriteriaGivesTheNextEstimateItsRecords(t *testing.T) {
+	p := newPlanRepo(t, sampleapp.Options{})
+	p.commitManyCriteria(t, 4)
+	p.costing(0.01)
+	p.must(t, cli.ExitOK, "plan", "--diff", "main..release", "--no-trial", "--ladder", "planner:small")
+
+	e, err := usage.EstimateCost(p.opts.Home, "planner", "small", 10)
+	if err != nil || !e.Known || e.Jobs != 4 {
+		t.Fatalf("estimate = %+v, %v", e, err)
+	}
+	if got, want := e.String(), "about $0.10 for 10 criteria, from 4 earlier jobs of planner small"; got != want {
+		t.Errorf("String = %q, want %q", got, want)
+	}
 }
