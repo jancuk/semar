@@ -82,6 +82,19 @@ func Marshal(f File) ([]byte, error) {
 			put(mn, "writtenBy", str(p+".manual.writtenBy", m.WrittenBy))
 			put(n, "manual", mn)
 		}
+		if len(o.Retired) > 0 {
+			rs := &yaml.Node{Kind: yaml.SequenceNode}
+			for j, r := range o.Retired {
+				rp := fmt.Sprintf("%s.retired[%d]", p, j)
+				rn := &yaml.Node{Kind: yaml.MappingNode}
+				put(rn, "scenario", str(rp+".scenario", string(r.Scenario)))
+				put(rn, "reason", str(rp+".reason", r.Reason))
+				put(rn, "user", str(rp+".user", r.User))
+				put(rn, "day", str(rp+".day", r.Day))
+				rs.Content = append(rs.Content, rn)
+			}
+			put(n, "retired", rs)
+		}
 		list.Content = append(list.Content, n)
 	}
 	put(root, "obligations", list)
@@ -140,7 +153,7 @@ func sameFile(a, b File) bool {
 
 func sameObligation(a, b Obligation) bool {
 	if a.ID != b.ID || a.Title != b.Title || a.Source != b.Source || a.Cite != b.Cite || a.Ticket != b.Ticket || a.Gap != b.Gap ||
-		!slices.Equal(a.Covers, b.Covers) || !slices.Equal(a.Journeys, b.Journeys) || (a.Manual == nil) != (b.Manual == nil) {
+		!slices.Equal(a.Covers, b.Covers) || !slices.Equal(a.Retired, b.Retired) || !slices.Equal(a.Journeys, b.Journeys) || (a.Manual == nil) != (b.Manual == nil) {
 		return false
 	}
 	if a.Manual == nil {

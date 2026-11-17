@@ -22,6 +22,7 @@ import (
 type diffFlags struct {
 	diff    string
 	noFetch bool
+	base    string // with no diff, the branch that the change of this branch is measured against
 }
 
 func addDiffFlags(cmd *cobra.Command, f *diffFlags) {
@@ -127,4 +128,20 @@ func displayRemote(raw string) string {
 	}
 	u.User = nil
 	return u.String()
+}
+
+// readPlanChange reads the change to plan: the one that --diff names, or with no --diff the change of
+// the checked-out branch against its base, from the clone, with no fetch (Plan 26, D18).
+func readPlanChange(ctx context.Context, stderr io.Writer, dir string, f diffFlags, cfg config.Config, ticket *regexp.Regexp) (*vcs.Git, domain.ChangeSet, error) {
+	if f.diff != "" {
+		return readChange(ctx, stderr, dir, f, ticket)
+	}
+	lc, err := readLocalChange(ctx, dir, cfg, f.base)
+	if err != nil {
+		return nil, domain.ChangeSet{}, err
+	}
+	if !lc.Repo {
+		return nil, domain.ChangeSet{}, errors.New("this directory is not in a git repository, so there is no change to plan: pass --diff <link or range>")
+	}
+	return lc.Git, lc.Change, nil
 }

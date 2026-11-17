@@ -116,7 +116,7 @@ func TestJourneyEndToEndPassed(t *testing.T) {
 	if n := r.pay.Requests("POST", "/v1/payments"); n != 1 {
 		t.Errorf("%d payments were made", n)
 	}
-	writes := r.must(t, cli.ExitOK, "activity", "latest", "--writes")
+	writes := r.must(t, cli.ExitOK, "show", "--activity", "--writes")
 	contains(t, "the writes", writes.stdout, "POST /v1/orders", "POST /v1/payments")
 
 	// The two-leg journey passes too, and the list shows both.
@@ -223,8 +223,8 @@ func TestJourneyEndToEndConfirmationOfTheExpectedResults(t *testing.T) {
 		t.Errorf("%d requests were sent", n)
 	}
 
-	confirmed := r.must(t, cli.ExitOK, "confirm", "--journey", "checkout", "--yes")
-	contains(t, "the confirmation", confirmed.stdout, "Leg place of journey checkout (scenario checkout.place)", "confirmed scenario checkout.place", "local, unverified identity")
+	confirmed := r.must(t, cli.ExitOK, "review", "checkout", "--yes")
+	contains(t, "the confirmation", confirmed.stdout, "Leg place of journey checkout (scenario checkout.place)", "approved journey checkout", "local, unverified identity")
 	if strings.Contains(confirmed.stdout, "checkout.pay") {
 		t.Errorf("a leg whose expected result is the person's own was listed:\n%s", confirmed.stdout)
 	}

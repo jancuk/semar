@@ -238,10 +238,13 @@ func deriveOne(o Located, r Results, deferrals map[string]Deferral, manual map[s
 	default:
 		e.State = Blocked
 		e.Reasons = append(e.Reasons, notPassed...)
+		for _, r := range o.Retired {
+			e.Reasons = append(e.Reasons, fmt.Sprintf("%s was retired by %s on %s: %s", r.Scenario, r.User, r.Day, r.Reason))
+		}
 		if o.Gap != "" {
 			e.Reasons = append(e.Reasons, o.Gap)
 		}
-		if !covered && o.Gap == "" {
+		if !covered && o.Gap == "" && len(o.Retired) == 0 {
 			e.NoReason = true
 			e.Reasons = append(e.Reasons, "use case with no test and no reason")
 		}

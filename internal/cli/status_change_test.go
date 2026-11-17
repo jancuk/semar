@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jancuk/semar/internal/cli"
+	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/vcs/gittest"
 )
 
@@ -107,4 +108,34 @@ func TestStatusWritesOneHTMLFileThatNeedsNoNetwork(t *testing.T) {
 		}
 	}
 	contains(t, "the text", res.stdout, "Ship: no.")
+}
+
+func TestStatusMarksAUseCaseApprovedOnlyByAnAuthorOfTheChange(t *testing.T) {
+	for _, tc := range []struct {
+		name, email string
+		want        bool
+	}{
+		{"an author of a commit of the change", "ada@example.com", true},
+		{"someone else", "grace@example.com", false},
+		{"no email recorded", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := ledgerRepo(t)
+			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Refund limit", "covers: ["+scenarioID+"]")))
+			r.putRun(t, "r-old-1", "", nil, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
+			r.git(t, "init", "--quiet", "--initial-branch=main")
+			r.git(t, "add", "--all")
+			r.git(t, "commit", "--quiet", "-m", "base")
+			r.git(t, "checkout", "--quiet", "-b", "feature/refund-limit")
+			r.git(t, "commit", "--quiet", "--allow-empty", "-m", "SHOP-482 limit a refund")
+			r.opts.Email = func(string) string { return tc.email }
+			r.must(t, cli.ExitOK, "review", "--yes", scenarioID)
+
+			res := r.semar(t, t.Context(), "status")
+			if got := strings.Contains(res.stdout, "approved by an author of the change"); got != tc.want {
+				t.Errorf("mark = %v, want %v:\n%s", got, tc.want, res.stdout)
+			}
+			contains(t, "the status", squash(res.stdout), "verified 1")
+		})
+	}
 }

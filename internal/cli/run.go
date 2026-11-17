@@ -34,76 +34,76 @@ import (
 const reportFile = "report.md"
 
 type runFlags struct {
-	scenarios []string
-	all       bool
-	env       string
-	builds    []string
-	dir       string
-	headed    bool
+	scenarios  []string
+	all        bool
+	noJourneys bool
+	noPlan     bool
+	env        string
+	builds     []string
+	base       string
+	dir        string
+	headed     bool
 }
 
 func newRunCommand(o options) *cobra.Command {
 	var f runFlags
 	cmd := &cobra.Command{
-		Use:   "run (--scenario <id>... | --all)",
-		Short: "Replay scenarios against an environment and write a report",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runScenarios(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
+		Use:   "run [environment]",
+		Short: "Run the tests of the change against an environment, and say where it stands",
+		Long: "Run every scenario whose ticket is a ticket of the change, then every journey with criticality critical, and end with the status of the change.\n" +
+			"The change is the commits from the base branch to HEAD. --all runs every scenario and every critical journey, and --scenario <id> runs the scenarios named and no journey.\n" +
+			"A ticket of the change that has a ticket file and no use cases is not planned. On a terminal, run offers to plan it and asks first. With no terminal, or with --no-plan, it never plans, and its exit code is at least 2.\n" +
+			"Exit 0 when everything that ran passed, 1 when something failed, and 2 otherwise.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				if f.env != "" {
+					return errors.New("name the environment once: as an argument or with --env")
+				}
+				f.env = args[0]
+			}
+			return runDaily(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
 		},
 	}
-	cmd.Flags().StringArrayVar(&f.scenarios, "scenario", nil, "the ID of a scenario to run; repeat for more")
-	cmd.Flags().BoolVar(&f.all, "all", false, "run every scenario in .semar/scenarios")
-	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to run against; needed when there are several, and always for a production environment")
+	cmd.Flags().StringArrayVar(&f.scenarios, "scenario", nil, "run the scenario with this ID, and no journey; repeat for more")
+	cmd.Flags().BoolVar(&f.all, "all", false, "run every scenario and every critical journey, not only those of the change")
+	cmd.Flags().BoolVar(&f.noJourneys, "no-journeys", false, "leave the critical journeys out")
+	cmd.Flags().BoolVar(&f.noPlan, "no-plan", false, "never offer to plan a ticket that has no use cases")
+	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to run against (the same as the argument); needed when there are several, and always for a production environment")
 	cmd.Flags().StringArrayVar(&f.builds, "build", nil, "the commit that a service with no build probe runs, as <commit> or <service>=<commit>; repeat for more")
+	cmd.Flags().StringVar(&f.base, "base", "", "the branch that the change is measured against (default: change.base, else the default branch of origin, else main)")
 	cmd.Flags().BoolVar(&f.headed, "headed", false, "show the browser window of a web step")
 	addDirFlag(cmd, &f.dir)
 	return cmd
 }
 
-func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f runFlags) error {
-	if (len(f.scenarios) > 0) == f.all {
-		return errors.New("name the scenarios with --scenario <id>, or use --all, and not both")
-	}
-	cfg, err := config.Load(f.dir)
-	if err != nil {
-		return err
-	}
-	envName, env, err := cfg.Environment(f.env)
-	if err != nil {
-		return err
-	}
-	if env.Kind == config.KindProduction && f.env == "" {
-		return fmt.Errorf("the environment %q is a production environment; name it with --env %s to run against it", envName, envName)
-	}
-	declared, err := build.ParseDeclared(f.builds, env.Services)
-	if err != nil {
-		return err
-	}
-	scenarios, err := selectScenarios(f)
-	if err != nil {
-		return err
-	}
-	if len(scenarios) == 0 {
-		fmt.Fprintf(stdout, "no scenario ran: there is no scenario file in %s\n", scenariosDir(f.dir))
-		return exitError{ExitUndecided}
-	}
+// finishedRun is a run that was written to the evidence store. An interrupted run has no run.json.
+type finishedRun struct {
+	record      domain.Run
+	reportPath  string
+	interrupted bool
+	coverage    string // the use case line of the report
+}
 
-	cat, err := runCatalogue(stderr, f.dir, cfg, scenarios)
+// executeScenarios replays the scenarios against one environment, writes the report, and closes the
+// run. It prints nothing but the line that names the target on stderr.
+func executeScenarios(ctx context.Context, stderr io.Writer, o options, dir string, cfg config.Config, envName string, env config.Environment, declared map[string]string, scenarios []domain.Scenario, headed bool, announce func()) (finishedRun, error) {
+	cat, err := runCatalogue(stderr, dir, cfg, scenarios)
 	if err != nil {
-		return err
+		return finishedRun{}, err
 	}
 	fmt.Fprintf(stderr, "semar: running against %s (%s, %s)\n", envName, env.Kind, effectsWords(env.Effects.Mode))
-	r, err := newReplay(ctx, o, f.dir, cfg, envName, env, declared, scenarios, cat, f.headed)
+	r, err := newReplay(ctx, o, dir, cfg, envName, env, declared, scenarios, cat, headed)
 	if err != nil {
-		return err
+		return finishedRun{}, err
 	}
 	defer r.web.Close()
+	announce()
 	record := domain.Run{ID: r.id, Environment: envName, EnvironmentKind: env.Kind, StartedAt: o.Clock()}
 	results, start, end, runErr := r.runner.Run(ctx, scenarios)
 	interrupted := ctx.Err() != nil
 	if runErr != nil && !interrupted {
-		return fmt.Errorf("run %s stopped: %w; its evidence may be incomplete, so it reports no outcome", r.id, runErr)
+		return finishedRun{}, fmt.Errorf("run %s stopped: %w; its evidence may be incomplete, so it reports no outcome", r.id, runErr)
 	}
 	record.BuildsStart, record.BuildsEnd, record.Results = start, end, results
 	if !interrupted {
@@ -112,13 +112,13 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 
 	acts, err := r.store.Activity(r.id)
 	if err != nil {
-		return err
+		return finishedRun{}, err
 	}
 	byID := make(map[domain.ScenarioID]domain.Scenario, len(scenarios))
 	for _, sc := range scenarios {
 		byID[sc.ID] = sc
 	}
-	coverage, tickets := runCoverage(stderr, o, f.dir, scenarios, record)
+	coverage, tickets := runCoverage(stderr, o, dir, scenarios, record)
 	writeReport := func(rec domain.Run) error {
 		var md bytes.Buffer
 		if err := report.Markdown(&md, report.Data{Run: rec, Scenarios: byID, Activity: acts, Coverage: coverage, CoverageTickets: tickets}); err != nil {
@@ -127,7 +127,7 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 		return r.run.WriteFile(reportFile, md.Bytes())
 	}
 	if err := writeReport(record); err != nil {
-		return err
+		return finishedRun{}, err
 	}
 	// An interrupted run keeps no run.json, so that it loads as interrupted.
 	if !interrupted {
@@ -136,24 +136,12 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 			unfinished := record
 			unfinished.EndedAt = time.Time{}
 			if werr := writeReport(unfinished); werr != nil {
-				return errors.Join(err, fmt.Errorf("rewrite %s as unfinished: %w", reportFile, werr))
+				return finishedRun{}, errors.Join(err, fmt.Errorf("rewrite %s as unfinished: %w", reportFile, werr))
 			}
-			return err
+			return finishedRun{}, err
 		}
 	}
-
-	if err := report.Summary(stdout, record, coverage); err != nil {
-		return err
-	}
-	fmt.Fprintf(stdout, "report: %s\n", filepath.Join(r.store.Root(), "runs", string(r.id), reportFile))
-	if interrupted {
-		fmt.Fprintf(stderr, "semar: the run was interrupted: run %s is incomplete\n", r.id)
-		return exitError{ExitUndecided}
-	}
-	if code := report.ExitCode(results); code != ExitOK {
-		return exitError{code}
-	}
-	return nil
+	return finishedRun{record: record, reportPath: filepath.Join(r.store.Root(), "runs", string(r.id), reportFile), interrupted: interrupted, coverage: coverage}, nil
 }
 
 // effectsWords says what a test may change in an environment of this effects mode.
@@ -162,27 +150,6 @@ func effectsWords(mode string) string {
 		return "read only"
 	}
 	return "test data"
-}
-
-func selectScenarios(f runFlags) ([]domain.Scenario, error) {
-	if f.all {
-		return loadAllScenarios(f.dir)
-	}
-	var scs []domain.Scenario
-	seen := map[domain.ScenarioID]bool{}
-	for _, raw := range f.scenarios {
-		id := domain.ScenarioID(raw)
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		sc, err := loadScenario(f.dir, id)
-		if err != nil {
-			return nil, err
-		}
-		scs = append(scs, sc)
-	}
-	return scs, nil
 }
 
 // runCatalogue loads the fixtures for a run whose scenarios name any. It is nil for a run that

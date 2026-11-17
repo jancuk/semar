@@ -194,9 +194,9 @@ func TestTrialSendsReadsOnly(t *testing.T) {
 	if len(runs) != 1 || runs[0].Purpose != domain.PurposeTrial || len(runs[0].Results) != 0 || runs[0].Environment != "uat" {
 		t.Fatalf("runs = %+v", runs)
 	}
-	acts := p.must(t, cli.ExitOK, "activity", string(runs[0].ID), "--pass", "trial")
+	acts := p.must(t, cli.ExitOK, "show", string(runs[0].ID), "--activity", "--pass", "trial")
 	contains(t, "the activity", acts.stdout, "GET /v1/orders")
-	other := p.must(t, cli.ExitOK, "activity", string(runs[0].ID), "--pass", "scenario")
+	other := p.must(t, cli.ExitOK, "show", string(runs[0].ID), "--activity", "--pass", "scenario")
 	if strings.Contains(other.stdout, "GET /v1/orders") {
 		t.Errorf("a trial request is in another pass:\n%s", other.stdout)
 	}

@@ -22,6 +22,7 @@ type ScreensApproval struct {
 	App      string                               `json:"app"`
 	Hash     domain.Hash                          `json:"hash"`
 	User     string                               `json:"user"`
+	Email    string                               `json:"email,omitempty"`
 	Identity string                               `json:"identity"` // "local, unverified identity"
 	At       time.Time                            `json:"at"`
 	Locators map[string]map[string]domain.Locator `json:"locators"`

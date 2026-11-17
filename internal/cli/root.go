@@ -19,6 +19,7 @@ import (
 	"github.com/jancuk/semar/internal/keychain"
 	"github.com/jancuk/semar/internal/provider"
 	"github.com/jancuk/semar/internal/userconfig"
+	"github.com/jancuk/semar/internal/vcs"
 )
 
 // Version is set at build time with -ldflags and never changed at run time.
@@ -35,9 +36,14 @@ type options struct {
 	TempRoot  string                 // where plan copies the source; "" is a directory in the user cache directory
 	CacheDir  func() (string, error) // the user cache directory; nil is os.UserCacheDir
 	Providers func(repoRoot string) *provider.Registry
-	Environ   func() []string // the person's environment, for a harness that runs with their setup
-	Home      string          // where providers.yaml and usage.jsonl live; "" is $SEMAR_HOME or ~/.config/semar
-	Keychain  keychain.Store  // nil is the keychain of the operating system
+	// Email is the user.email of git for the repository in dir, or "" when it is not set. A review
+	// stores it with each approval.
+	Email func(dir string) string
+	// PlanEstimate says what planning will cost, for the offer of semar run. Nil knows nothing yet.
+	PlanEstimate planEstimator
+	Environ      func() []string // the person's environment, for a harness that runs with their setup
+	Home         string          // where providers.yaml and usage.jsonl live; "" is $SEMAR_HOME or ~/.config/semar
+	Keychain     keychain.Store  // nil is the keychain of the operating system
 
 	StderrTerminal func() bool // whether standard error is a terminal that takes a status line
 	Tick           ticker      // the ticks of the progress line; nil is a real ticker
@@ -91,6 +97,12 @@ func (o options) withDefaults() options {
 	}
 	if o.Tick == nil {
 		o.Tick = realTicker
+	}
+	if o.PlanEstimate == nil {
+		o.PlanEstimate = noEstimateYet
+	}
+	if o.Email == nil {
+		o.Email = gitEmail
 	}
 	if o.Environ == nil {
 		o.Environ = os.Environ
@@ -172,7 +184,10 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 	}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.AddCommand(&cobra.Command{
+	root.AddGroup(&cobra.Group{ID: groupDaily, Title: "Every day"}, &cobra.Group{ID: groupMore, Title: "More"})
+	root.SetHelpCommandGroupID(groupMore)
+	root.SetCompletionCommandGroupID(groupMore)
+	version := &cobra.Command{
 		Use:   "version",
 		Short: "Print the semar version",
 		Args:  cobra.NoArgs,
@@ -180,15 +195,56 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 			_, err := fmt.Fprintf(cmd.OutOrStdout(), "semar %s\n", Version)
 			return err
 		},
-	})
-	root.AddCommand(newRunCommand(o), newScriptCommand(), newConfirmCommand(o), newActivityCommand(), newStatusCommand(o), newCheckCommand(o), newDeferCommand(o),
-		newInitCommand(), newChangesCommand(), newPlanCommand(o), newProvidersCommand(o), newDashboardCmd(o), newFixtureCommand(o))
-	root.AddCommand(newExportCommand())
-	root.AddCommand(newJourneyCommand(o))
-	root.AddCommand(newLoginCommand(o), newScreensCommand(o), newScenariosCommand())
+	}
+	grouped := func(group string, cmds ...*cobra.Command) {
+		for _, c := range cmds {
+			c.GroupID = group
+			root.AddCommand(c)
+		}
+	}
+	// semar record joins this group when it exists.
+	grouped(groupDaily, newInitCommand(), newRunCommand(o), newReviewCommand(o), newStatusCommand(o), newCheckCommand(o),
+		newDeferCommand(o), newLogCommand(), newShowCommand(), newRmCommand(o), newPlanCommand(o))
+	grouped(groupMore, newChangesCommand(), newExportCommand(), newFixtureCommand(o), newJourneyCommand(o), newProvidersCommand(o),
+		newDashboardCmd(o), newScenariosCommand(), newScreensCommand(o), newScriptCommand(), newLoginCommand(o), version)
+	root.AddCommand(removedCommand("confirm", "use semar review"), removedCommand("ledger", "use semar status, semar check, or semar defer"),
+		removedCommand("activity", "use semar show --activity"))
 	return root
+}
+
+const (
+	groupDaily = "daily"
+	groupMore  = "more"
+)
+
+// removedCommand answers a name that Semar no longer has with one line that names the new command.
+// It has no alias: the old arguments mean something else now.
+func removedCommand(name, instead string) *cobra.Command {
+	return &cobra.Command{
+		Use:                name,
+		Hidden:             true,
+		DisableFlagParsing: true,
+		Args:               cobra.ArbitraryArgs,
+		RunE: func(*cobra.Command, []string) error {
+			return fmt.Errorf("semar %s was removed: %s", name, instead)
+		},
+	}
 }
 
 func addDirFlag(cmd *cobra.Command, dir *string) {
 	cmd.Flags().StringVar(dir, "dir", ".", "the root of the repository that holds .semar")
+}
+
+// gitEmail is the user.email that git has for the repository in dir. A directory that is not in a
+// repository, and a setting that is not there, give "".
+func gitEmail(dir string) string {
+	g, err := vcs.Open(dir)
+	if err != nil {
+		return ""
+	}
+	email, err := g.Config(context.Background(), "user.email")
+	if err != nil {
+		return ""
+	}
+	return email
 }

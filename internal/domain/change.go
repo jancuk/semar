@@ -8,10 +8,12 @@ type ChangeCommit struct {
 	Subject string
 	Body    string
 	Author  string // name only
-	At      time.Time
-	Merge   bool
-	Tickets []string // keys found in the subject and the body, sorted
-	Files   []string // paths the commit touched. Empty for a merge
+	// AuthorEmail is the address in the author line, as git records it. It can be empty.
+	AuthorEmail string
+	At          time.Time
+	Merge       bool
+	Tickets     []string // keys found in the subject and the body, sorted
+	Files       []string // paths the commit touched. Empty for a merge
 }
 
 // TicketChange is what one ticket key brought into a range.

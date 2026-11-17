@@ -39,11 +39,7 @@ func TestLedgerEndToEnd(t *testing.T) {
 	if md[0] != "# Semar report r-test-0001" || md[1] != "" || md[2] != line || md[3] != "Details: `semar status --ticket SHOP-482`" {
 		t.Errorf("the report does not open with the summary line:\n%s", strings.Join(md[:5], "\n"))
 	}
-	contains(t, "the run summary", res.stdout, line, scenarioID+"  passed")
-	counts := strings.Index(res.stdout, "failed 0, blocked 0")
-	if counts < 0 || strings.Index(res.stdout, line) < counts {
-		t.Errorf("the line is not after the counts:\n%s", res.stdout)
-	}
+	contains(t, "the run summary", squash(res.stdout), scenarioID+" passed", "4 use cases", "verified 1", "for a person 1", "no test 2", "Ship: no. 3 open.")
 
 	// The hand-written entry has no cover and no reason, so it comes first among the use cases with no test.
 	status := r.must(t, cli.ExitUndecided, "status")

@@ -347,3 +347,42 @@ func TestConcurrentFixtureApprovalsKeepOneRecord(t *testing.T) {
 		t.Fatalf("got %v, %v", ok, err)
 	}
 }
+
+func TestApprovalsKeepTheEmailOfTheApprover(t *testing.T) {
+	t0 := time.Date(2026, 11, 17, 8, 0, 0, 0, time.UTC)
+	l := confirm.NewLocal(t.TempDir())
+
+	fx := approval("alice", t0)
+	fx.Email = "alice@example.com"
+	if err := l.PutFixture(fx); err != nil {
+		t.Fatal(err)
+	}
+	noEmail := approval("bob", t0)
+	if err := l.PutFixture(noEmail); err != nil {
+		t.Fatal(err)
+	}
+	got, err := l.FixtureApprovals("order.paid", fixtureHash)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("%d approvals, %v", len(got), err)
+	}
+	if got[0].User != "alice" || got[0].Email != "alice@example.com" || got[1].User != "bob" || got[1].Email != "" {
+		t.Errorf("approvals %+v", got)
+	}
+	if none, err := l.FixtureApprovals("order.paid", "0000"); err != nil || len(none) != 0 {
+		t.Errorf("an unapproved hash gave %v, %v", none, err)
+	}
+
+	r := rec("carol", t0)
+	r.Email = "carol@example.com"
+	if err := l.Put(r); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := l.Confirmations(r.Scenario, r.ExpectHash)
+	if err != nil || len(recs) != 1 || recs[0].Email != "carol@example.com" {
+		t.Errorf("confirmations %+v, %v", recs, err)
+	}
+	data, err := os.ReadFile(filepath.Join(l.Root(), "store", "confirmations", string(r.Scenario), string(r.ExpectHash), "carol.json"))
+	if err != nil || !strings.Contains(string(data), `"email": "carol@example.com"`) {
+		t.Errorf("the record does not hold the email: %v\n%s", err, data)
+	}
+}

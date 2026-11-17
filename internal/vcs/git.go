@@ -24,6 +24,7 @@ const (
 // Commit is one commit of a log.
 type Commit struct {
 	ID, Subject, Body, Author string
+	AuthorEmail               string
 	At                        time.Time
 	Parents                   []string
 	Files                     []string
@@ -231,9 +232,9 @@ func (g *Git) Log(ctx context.Context, from, to string) ([]Commit, error) {
 	if err := checkName("commit", to); err != nil {
 		return nil, err
 	}
-	const fields = 6
+	const fields = 7
 	out, err := g.run(ctx, maxOutputBytes, "log", "-z", "--topo-order", "--reverse", "--no-color", "--no-show-signature",
-		"--format=%H%x00%P%x00%an%x00%at%x00%s%x00%b", "--end-of-options", from+".."+to)
+		"--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%s%x00%b", "--end-of-options", from+".."+to)
 	if err != nil {
 		return nil, fmt.Errorf("log %s..%s: %w", from, to, err)
 	}
@@ -246,17 +247,18 @@ func (g *Git) Log(ctx context.Context, from, to string) ([]Commit, error) {
 	}
 	var commits []Commit
 	for i := 0; i < len(tokens); i += fields {
-		sec, err := strconv.ParseInt(strings.TrimSpace(tokens[i+3]), 10, 64)
+		sec, err := strconv.ParseInt(strings.TrimSpace(tokens[i+4]), 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("log %s..%s: commit date: %w", from, to, err)
 		}
 		c := Commit{
-			ID:      strings.TrimSpace(tokens[i]),
-			Parents: strings.Fields(tokens[i+1]),
-			Author:  tokens[i+2],
-			At:      time.Unix(sec, 0).UTC(),
-			Subject: tokens[i+4],
-			Body:    strings.TrimRight(tokens[i+5], "\n"),
+			ID:          strings.TrimSpace(tokens[i]),
+			Parents:     strings.Fields(tokens[i+1]),
+			Author:      tokens[i+2],
+			AuthorEmail: tokens[i+3],
+			At:          time.Unix(sec, 0).UTC(),
+			Subject:     tokens[i+5],
+			Body:        strings.TrimRight(tokens[i+6], "\n"),
 		}
 		if len(c.Parents) < 2 {
 			files, err := g.commitFiles(ctx, c.ID)

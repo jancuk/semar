@@ -631,3 +631,30 @@ func TestADeclaredBuildIsStored(t *testing.T) {
 		t.Errorf("builds at the end = %+v", run.BuildsEnd)
 	}
 }
+
+func TestRemoveScriptsRemovesEveryHashOfOneScenarioOnly(t *testing.T) {
+	s := openStore(t)
+	for _, sc := range []domain.Script{scriptFixture("refund", "aaa"), scriptFixture("refund", "bbb"), scriptFixture("other", "aaa")} {
+		if err := s.PutScript(sc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := s.RemoveScripts("refund")
+	if err != nil || n != 2 {
+		t.Fatalf("RemoveScripts = %d, %v, want 2 removed", n, err)
+	}
+	for _, h := range []domain.Hash{"aaa", "bbb"} {
+		if _, ok, _ := s.Script("refund", h); ok {
+			t.Errorf("the script %s of refund is still there", h)
+		}
+	}
+	if _, ok, err := s.Script("other", "aaa"); !ok || err != nil {
+		t.Errorf("the script of another scenario went too: %v %v", ok, err)
+	}
+	if n, err := s.RemoveScripts("refund"); err != nil || n != 0 {
+		t.Errorf("a second call = %d, %v, want 0 and no error", n, err)
+	}
+	if _, err := s.RemoveScripts("../x"); err == nil {
+		t.Error("an unsafe ID was accepted")
+	}
+}

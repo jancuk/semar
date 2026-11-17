@@ -152,7 +152,7 @@ func TestLog(t *testing.T) {
 			f2 = c
 		}
 	}
-	if f2.Subject != "rename and delete" || f2.Body != "body line one\nbody line two" || f2.Author != "Ada Author" {
+	if f2.Subject != "rename and delete" || f2.Body != "body line one\nbody line two" || f2.Author != "Ada Author" || f2.AuthorEmail != "ada@example.com" {
 		t.Fatalf("commit fields: %+v", f2)
 	}
 	if want := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC); !f2.At.After(want) || f2.At.Location() != time.UTC {

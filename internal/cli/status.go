@@ -86,6 +86,7 @@ func showStatus(ctx context.Context, stdout, stderr io.Writer, o options, f stat
 	}
 
 	in := status.Input{}
+	var changed *domain.ChangeSet
 	var obs []obligation.Located
 	switch {
 	case len(f.tickets) > 0:
@@ -125,6 +126,7 @@ func showStatus(ctx context.Context, stdout, stderr io.Writer, o options, f stat
 				in.NotPlanned = append(in.NotPlanned, t)
 			}
 		}
+		changed = &lc.Change
 		for _, id := range lc.Change.NoTicket {
 			in.NoTicket = append(in.NoTicket, noTicketCommit(lc, id))
 		}
@@ -139,12 +141,11 @@ func showStatus(ctx context.Context, stdout, stderr io.Writer, o options, f stat
 	if err != nil {
 		return err
 	}
-	in.Builds = current
-	if in.Entries, err = deriveEntries(stderr, o, f.dir, obs, domain.RunID(f.run), current); err != nil {
+	rep, err := statusReport(stderr, o, f.dir, in, obs, domain.RunID(f.run), current, changed)
+	if err != nil {
 		return err
 	}
-
-	rep := status.Build(in)
+	in = rep.Input
 	if f.html != "" {
 		var page bytes.Buffer
 		if err := status.HTML(&page, rep); err != nil {

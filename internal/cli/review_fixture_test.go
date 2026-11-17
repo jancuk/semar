@@ -59,22 +59,21 @@ func hashOfFixture(t *testing.T, text string) domain.Hash {
 
 func (r *repo) approvals(t *testing.T) *confirm.Local { return confirm.NewLocal(r.path(".semar")) }
 
-func TestConfirmFixtureApproves(t *testing.T) {
+func TestReviewFixtureApproves(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
 	r.writeFixture(t, "order.paid.yaml", orderPaidFixture)
 
-	res := r.must(t, cli.ExitOK, "confirm", "--fixture", "order.paid", "--yes")
+	res := r.must(t, cli.ExitOK, "review", "order.paid", "--yes")
 	h := hashOfFixture(t, orderPaidFixture)
 	contains(t, "stdout", res.stdout,
-		"Fixture order.paid 1.0.0 (owner team-orders), hash "+string(h)+":",
-		"find 1: GET orders /v1/orders query customer={{customer}} status=paid, captures id=$.data[0].id\n",
+		"1 of 1 · fixture order.paid 1.0.0 (owner team-orders)",
+		"GET orders /v1/orders query customer={{customer}} status=paid, captures id=$.data[0].id\n",
+		"find 1: GET orders /v1/orders",
 		"create 1: POST orders /v1/orders json {\"amount\":1000,\"customer\":\"{{customer}}\",\"ref\":\"semar-{{run.id}}\"}, captures id=$.data.id\n",
 		"create 2: POST payments /v1/payments json {\"orderId\":\"{{id}}\"}",
 		"create 3: GET orders /v1/orders/{{id}} until $.data.status equals \"paid\" within 30s every 1s",
 		"cleanup 1: POST orders /v1/orders/{{id}}/cancel",
-		`customer (default "{{data.customers.default}}")`,
-		"outputs: id",
-		"approved fixture order.paid 1.0.0 for hash "+string(h)+" as tester (local, unverified identity)",
+		"approved fixture order.paid as tester (local, unverified identity)",
 	)
 	if ok, err := r.approvals(t).FixtureApproved("order.paid", h); !ok || err != nil {
 		t.Fatalf("FixtureApproved = %v, %v", ok, err)
@@ -82,12 +81,12 @@ func TestConfirmFixtureApproves(t *testing.T) {
 
 	// A second approval changes nothing and asks nothing.
 	r.opts.Terminal = func() bool { return false }
-	res = r.must(t, cli.ExitOK, "confirm", "--fixture", "order.paid")
+	res = r.must(t, cli.ExitOK, "review", "order.paid")
 	contains(t, "stdout", res.stdout, "fixture order.paid 1.0.0 is already approved for hash "+string(h))
 
 	// A change to the fixture lapses the approval: the new hash needs its own.
 	r.writeFixture(t, "order.paid.yaml", strings.Replace(orderPaidFixture, "amount: 1000", "amount: 2000", 1))
-	r.must(t, cli.ExitUndecided, "confirm", "--fixture", "order.paid")
+	r.must(t, cli.ExitUndecided, "review", "order.paid")
 	changed := hashOfFixture(t, strings.Replace(orderPaidFixture, "amount: 1000", "amount: 2000", 1))
 	if changed == h {
 		t.Fatal("the change did not change the hash")
@@ -97,7 +96,7 @@ func TestConfirmFixtureApproves(t *testing.T) {
 	}
 }
 
-func TestConfirmFixtureNeedsYesWithoutTerminal(t *testing.T) {
+func TestReviewFixtureNeedsYesWithoutTerminal(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		terminal bool
@@ -105,7 +104,7 @@ func TestConfirmFixtureNeedsYesWithoutTerminal(t *testing.T) {
 		want     int
 		stored   bool
 	}{
-		{"no terminal", false, "yes\n", cli.ExitUndecided, false},
+		{"no terminal", false, "y\n", cli.ExitUndecided, false},
 		{"answer no", true, "n\n", cli.ExitUndecided, false},
 		{"no answer", true, "", cli.ExitUndecided, false},
 		{"answer yes", true, "yes\n", cli.ExitOK, true},
@@ -115,10 +114,10 @@ func TestConfirmFixtureNeedsYesWithoutTerminal(t *testing.T) {
 			r.writeFixture(t, "order.paid.yaml", orderPaidFixture)
 			r.opts.Stdin = strings.NewReader(tc.answer)
 			r.opts.Terminal = func() bool { return tc.terminal }
-			res := r.must(t, tc.want, "confirm", "--fixture", "order.paid")
-			contains(t, "stdout", res.stdout, "Fixture order.paid 1.0.0")
+			res := r.must(t, tc.want, "review", "order.paid")
+			contains(t, "stdout", res.stdout, "fixture order.paid 1.0.0")
 			if tc.terminal {
-				contains(t, "stdout", res.stdout, "Approve it? [y/N]")
+				contains(t, "stdout", res.stdout, "[y] approve  [n] skip  [d] details  [q] stop")
 			}
 			if got := exists(t, r.path(".semar", "store", "approvals")); got != tc.stored {
 				t.Errorf("stored = %v, want %v", got, tc.stored)
@@ -127,13 +126,13 @@ func TestConfirmFixtureNeedsYesWithoutTerminal(t *testing.T) {
 	}
 }
 
-func TestConfirmFixturePrintsStepsSafely(t *testing.T) {
+func TestReviewFixturePrintsStepsSafely(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
 	text := strings.Replace(orderPaidFixture, "path: /v1/orders, query", `path: "/v1/orders\u001b[2J", query`, 1)
 	text = strings.Replace(text, "A paid order of 1000 that belongs to the given customer", `"x\n  find 9: GET orders /v1/fake\u202e"`, 1)
 	r.writeFixture(t, "order.paid.yaml", text)
-	res := r.must(t, cli.ExitOK, "confirm", "--fixture", "order.paid", "--yes")
-	contains(t, "stdout", res.stdout, `/v1/orders\x1b[2J`, `description: x\n  find 9: GET orders /v1/fake`)
+	res := r.must(t, cli.ExitOK, "review", "order.paid", "--yes")
+	contains(t, "stdout", res.stdout, `/v1/orders\x1b[2J`, `x\n  find 9: GET orders /v1/fake`)
 	for _, bad := range []string{"\x1b", "\u202e"} {
 		if strings.Contains(res.stdout, bad) {
 			t.Errorf("stdout holds %q", bad)
@@ -146,58 +145,64 @@ func TestConfirmFixturePrintsStepsSafely(t *testing.T) {
 	}
 }
 
-func TestConfirmFixtureAndScenarioTogetherRefused(t *testing.T) {
+// The details of a fixture are everything that its hash covers.
+func TestReviewFixtureDetailsShowTheHashAndEveryField(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
 	r.writeFixture(t, "order.paid.yaml", orderPaidFixture)
-	for _, args := range [][]string{
-		{"confirm", "--fixture", "order.paid", scenarioID, "--yes"},
-		{"confirm", "--fixture", "order.paid", "--all", "--yes"},
-	} {
-		res := r.must(t, cli.ExitError, args...)
-		contains(t, "stderr", res.stderr, "pass --fixture, or the ID of one scenario, or --all, and not several of them")
-	}
-	if exists(t, r.path(".semar", "store")) {
-		t.Error("something was stored")
-	}
+	r.opts.Terminal = func() bool { return true }
+	r.opts.Stdin = strings.NewReader("d\ny\n")
+	res := r.must(t, cli.ExitOK, "review", "order.paid")
+	h := hashOfFixture(t, orderPaidFixture)
+	contains(t, "stdout", res.stdout,
+		"Fixture order.paid 1.0.0 (owner team-orders), hash "+string(h)+":",
+		"description: A paid order of 1000 that belongs to the given customer",
+		`customer (default "{{data.customers.default}}")`, "outputs: id")
 }
 
-func TestConfirmFixtureRefusesWhatItCannotRead(t *testing.T) {
-	r := newRepo(t, repoOptions{offline: true})
-	r.writeFixture(t, "order.paid.yaml", orderPaidFixture)
-	r.writeFixture(t, "order-other.yaml", strings.Replace(orderPaidFixture, "id: order.paid", "id: order.paid", 1))
-	r.writeFixture(t, "bad-key.yaml", strings.Replace(orderPaidFixture, "id: order.paid", "id: bad-key\nretries: 3", 1))
-	r.writeFixture(t, "bad-kind.yaml", strings.Replace(strings.Replace(orderPaidFixture, "id: order.paid", "id: bad-kind", 1), "kind: Fixture", "kind: Scenario", 1))
-	r.writeFixture(t, "twice.yaml", strings.Replace(orderPaidFixture, "id: order.paid", "id: twice", 1))
-	r.writeFixture(t, "twice.yml", strings.Replace(orderPaidFixture, "id: order.paid", "id: twice", 1))
-	r.writeFixture(t, "huge.yaml", "apiVersion: semar/v1\nkind: Fixture\nid: huge\n#"+strings.Repeat("x", 257<<10)+"\n")
-	if err := os.Symlink(r.path(".semar", "fixtures", "order.paid.yaml"), r.path(".semar", "fixtures", "linked.yaml")); err != nil {
-		t.Skip("symlinks are not available:", err)
-	}
-
-	for _, tc := range []struct{ id, want string }{
-		{"../order.paid", "invalid fixture ID"},
-		{"order/paid", "invalid fixture ID"},
-		{"Order.paid", "invalid fixture ID"},
-		{"", "invalid fixture ID"},
-		{"missing", "fixture missing was not found"},
-		{"order-other", "id order.paid does not match the file name order-other.yaml"},
-		{"bad-key", "retries"},
-		{"bad-kind", "kind must be Fixture"},
-		{"twice", "has two files"},
-		{"huge", "larger than 256 KiB"},
-		{"linked", "symbolic link"},
+func TestReviewFixtureRefusesWhatItCannotRead(t *testing.T) {
+	long := "apiVersion: semar/v1\nkind: Fixture\nid: huge\n#" + strings.Repeat("x", 257<<10) + "\n"
+	for _, tc := range []struct{ id, file, text, want string }{
+		{"../order.paid", "", "", "invalid ID"},
+		{"order/paid", "", "", "invalid ID"},
+		{"", "", "", "invalid ID"},
+		{"missing", "", "", "missing is not a scenario, a ticket, a fixture, a journey, or the app of a screens file"},
+		{"order-other", "order-other.yaml", orderPaidFixture, "id order.paid does not match the file name order-other.yaml"},
+		{"bad-key", "bad-key.yaml", strings.Replace(orderPaidFixture, "id: order.paid", "id: bad-key\nretries: 3", 1), "retries"},
+		{"bad-kind", "bad-kind.yaml", strings.Replace(strings.Replace(orderPaidFixture, "id: order.paid", "id: bad-kind", 1), "kind: Fixture", "kind: Scenario", 1), "kind must be Fixture"},
+		{"huge", "huge.yaml", long, "larger than 256 KiB"},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
-			res := r.must(t, cli.ExitError, "confirm", "--fixture", tc.id, "--yes")
+			r := newRepo(t, repoOptions{offline: true})
+			if tc.file != "" {
+				r.writeFixture(t, tc.file, tc.text)
+			}
+			res := r.must(t, cli.ExitError, "review", tc.id, "--yes")
 			contains(t, "stderr", res.stderr, tc.want)
 			if exists(t, r.path(".semar", "store", "approvals")) {
 				t.Fatal("an approval was stored")
 			}
 		})
 	}
+
+	t.Run("two files", func(t *testing.T) {
+		r := newRepo(t, repoOptions{offline: true})
+		r.writeFixture(t, "twice.yaml", strings.Replace(orderPaidFixture, "id: order.paid", "id: twice", 1))
+		r.writeFixture(t, "twice.yml", strings.Replace(orderPaidFixture, "id: order.paid", "id: twice", 1))
+		res := r.must(t, cli.ExitError, "review", "twice", "--yes")
+		contains(t, "stderr", res.stderr, "has two files")
+	})
+	t.Run("a link", func(t *testing.T) {
+		r := newRepo(t, repoOptions{offline: true})
+		r.writeFixture(t, "order.paid.yaml", orderPaidFixture)
+		if err := os.Symlink(r.path(".semar", "fixtures", "order.paid.yaml"), r.path(".semar", "fixtures", "linked.yaml")); err != nil {
+			t.Skip("symlinks are not available:", err)
+		}
+		res := r.must(t, cli.ExitError, "review", "linked", "--yes")
+		contains(t, "stderr", res.stderr, "symbolic link")
+	})
 }
 
-func TestConfirmFixtureRefusesALinkedFixturesDirectory(t *testing.T) {
+func TestReviewFixtureRefusesALinkedFixturesDirectory(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
 	elsewhere := t.TempDir()
 	if err := os.WriteFile(filepath.Join(elsewhere, "order.paid.yaml"), []byte(orderPaidFixture), 0o600); err != nil {
@@ -206,44 +211,37 @@ func TestConfirmFixtureRefusesALinkedFixturesDirectory(t *testing.T) {
 	if err := os.Symlink(elsewhere, r.path(".semar", "fixtures")); err != nil {
 		t.Skip("symlinks are not available:", err)
 	}
-	res := r.must(t, cli.ExitError, "confirm", "--fixture", "order.paid", "--yes")
+	res := r.must(t, cli.ExitError, "review", "order.paid", "--yes")
 	contains(t, "stderr", res.stderr, "symbolic link")
 }
 
-func TestConfirmFixtureSeveralAndRepeated(t *testing.T) {
+func TestReviewFixtureSeveralAndRepeated(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
 	r.writeFixture(t, "order.paid.yaml", orderPaidFixture)
 	r.writeFixture(t, "customer.verified.yaml", strings.NewReplacer("id: order.paid", "id: customer.verified", "outputs: [id]", "outputs: [id]").Replace(orderPaidFixture))
-	r.opts.Stdin = strings.NewReader("y\n")
+	r.opts.Stdin = strings.NewReader("y\ny\n")
 	r.opts.Terminal = func() bool { return true }
-	res := r.must(t, cli.ExitOK, "confirm", "--fixture", "order.paid", "--fixture", "customer.verified", "--fixture", "order.paid")
-	contains(t, "stdout", res.stdout, "Approve them? [y/N]", "approved fixture order.paid", "approved fixture customer.verified")
+	res := r.must(t, cli.ExitOK, "review", "order.paid", "customer.verified", "order.paid")
+	contains(t, "stdout", res.stdout, "1 of 2 · fixture customer.verified", "2 of 2 · fixture order.paid", "approved fixture order.paid", "approved fixture customer.verified")
 	if n := strings.Count(res.stdout, "approved fixture order.paid"); n != 1 {
 		t.Errorf("order.paid was approved %d times in one run", n)
 	}
 }
 
-func TestConfirmFixtureNeedsAnApprover(t *testing.T) {
+func TestReviewFixtureNeedsAnApprover(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
 	r.writeFixture(t, "order.paid.yaml", orderPaidFixture)
 	r.opts.User = func() (string, error) { return " ", nil }
-	res := r.must(t, cli.ExitError, "confirm", "--fixture", "order.paid", "--yes")
+	res := r.must(t, cli.ExitError, "review", "order.paid", "--yes")
 	contains(t, "stderr", res.stderr, "the approver has no name; set git config user.name")
 	if exists(t, r.path(".semar", "store", "approvals")) {
 		t.Error("an approval was stored")
 	}
 }
 
-func TestConfirmWithoutFixtureStillNeedsAScenarioOrAll(t *testing.T) {
-	r := newRepo(t, repoOptions{offline: true})
-	res := r.must(t, cli.ExitError, "confirm", "--yes")
-	contains(t, "stderr", res.stderr, "pass the ID of one scenario, or --all")
-}
-
-// The hash that confirm --fixture shows and stores is the hash that the catalogue gives for the same
-// file, whatever form a number takes. A run asks the catalogue, so a difference would make every
-// approval miss.
-func TestConfirmFixtureHashIsTheCatalogueHash(t *testing.T) {
+// The hash that review stores is the hash that the catalogue gives for the same file, whatever form
+// a number takes. A run asks the catalogue, so a difference would make every approval miss.
+func TestReviewFixtureHashIsTheCatalogueHash(t *testing.T) {
 	body := func(amount string) string {
 		return strings.Replace(orderPaidFixture, "amount: 1000", "amount: "+amount, 1)
 	}
@@ -272,8 +270,8 @@ func TestConfirmFixtureHashIsTheCatalogueHash(t *testing.T) {
 			}
 			want := domain.FixtureHash(f)
 
-			res := r.must(t, cli.ExitOK, "confirm", "--fixture", "order.paid", "--yes")
-			contains(t, "stdout", res.stdout, "hash "+string(want)+":", "approved fixture order.paid 1.0.0 for hash "+string(want))
+			res := r.must(t, cli.ExitOK, "review", "order.paid", "--yes")
+			contains(t, "stdout", res.stdout, "approved fixture order.paid")
 			if ok, err := r.approvals(t).FixtureApproved("order.paid", want); !ok || err != nil {
 				t.Fatalf("the hash of the catalogue is not approved: %v, %v", ok, err)
 			}
@@ -285,29 +283,12 @@ func TestConfirmFixtureHashIsTheCatalogueHash(t *testing.T) {
 	}
 }
 
-func TestConfirmFixtureRefusesAFixtureThatDoesNotValidate(t *testing.T) {
+func TestReviewFixtureRefusesAFixtureThatDoesNotValidate(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
 	r.writeFixture(t, "order.paid.yaml", strings.Replace(orderPaidFixture, "version: 1.0.0", "version: 1", 1))
-	res := r.must(t, cli.ExitError, "confirm", "--fixture", "order.paid", "--yes")
+	res := r.must(t, cli.ExitError, "review", "order.paid", "--yes")
 	contains(t, "stderr", res.stderr, "version 1 must be MAJOR.MINOR.PATCH")
 	if exists(t, r.path(".semar", "store", "approvals")) {
 		t.Error("an approval was stored")
-	}
-}
-
-// --env names the environment of a journey's legs. Anywhere else it would be ignored, so it is refused.
-func TestConfirmEnvOnlyWithJourney(t *testing.T) {
-	r := newRepo(t, repoOptions{offline: true})
-	r.writeFixture(t, "order.paid.yaml", orderPaidFixture)
-	for _, args := range [][]string{
-		{"confirm", scenarioID, "--env", "uat", "--yes"},
-		{"confirm", "--all", "--env", "uat", "--yes"},
-		{"confirm", "--fixture", "order.paid", "--env", "uat", "--yes"},
-	} {
-		res := r.must(t, cli.ExitError, args...)
-		contains(t, "stderr", res.stderr, "--env is for --journey only")
-	}
-	if exists(t, r.path(".semar", "store")) {
-		t.Error("something was stored")
 	}
 }

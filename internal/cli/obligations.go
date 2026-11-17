@@ -342,7 +342,7 @@ func person(o options, what string) (string, error) {
 func findObligation(obs []obligation.Located, id string) (obligation.Located, error) {
 	i := slices.IndexFunc(obs, func(l obligation.Located) bool { return l.ID == id })
 	if i < 0 {
-		return obligation.Located{}, fmt.Errorf("obligation %s was not found in .semar/obligations; list them with semar ledger", terminalSafe(oneLine(id)))
+		return obligation.Located{}, fmt.Errorf("obligation %s was not found in .semar/obligations; list them with semar status --all", terminalSafe(oneLine(id)))
 	}
 	return obs[i], nil
 }
@@ -365,7 +365,7 @@ func runCoverage(stderr io.Writer, o options, repo string, scenarios []domain.Sc
 	case err != nil:
 		return skip(err)
 	case len(problems) > 0:
-		return skip(fmt.Errorf("%s; semar ledger names every problem", problems[0]))
+		return skip(fmt.Errorf("%s; semar status names every problem", problems[0]))
 	}
 	ran := map[domain.ScenarioID]bool{}
 	tickets := map[string]bool{}

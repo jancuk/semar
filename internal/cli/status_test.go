@@ -565,10 +565,10 @@ func TestRunSummaryHasCoverageLine(t *testing.T) {
 	r.writeRel(t, ".semar/obligations/other.yaml", obligations("SHOP-480", entry("SHOP-480/c", "Another ticket", `gap: "not drafted"`)))
 
 	res := r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
-	lines := strings.Split(strings.TrimRight(res.stdout, "\n"), "\n")
-	// The scenario line, the counts, the coverage line, and the path of the report.
-	if len(lines) != 4 || lines[2] != "2 use cases: 1 verified, 1 blocked" || !strings.HasPrefix(lines[3], "report: ") {
-		t.Errorf("summary:\n%s", res.stdout)
+	// The scenario line, the path of the report, and the status of the use cases of the ticket.
+	contains(t, "summary", squash(res.stdout), scenarioID+" passed", "report: ", "2 use cases of SHOP-482", "verified 1", "no test 1 SHOP-482/b not drafted → semar plan", "Ship: no. 1 open.")
+	if strings.Contains(res.stdout, "SHOP-480") {
+		t.Errorf("a use case of another ticket is in the status:\n%s", res.stdout)
 	}
 	if md := r.lastReport(t); !strings.Contains(md, "\n2 use cases: 1 verified, 1 blocked\nDetails: `semar status --ticket SHOP-482`\n") {
 		t.Errorf("report:\n%s", md)
@@ -658,7 +658,7 @@ func TestLedgerRefusesStoredRecordsThatTheCommandsWouldRefuse(t *testing.T) {
 func TestAScenarioIDOfTheFormOfALegIsRefused(t *testing.T) {
 	r := ledgerRepo(t)
 	r.copyScenario(t, "checkout.pay")
-	for _, args := range [][]string{{"confirm", "checkout.pay", "--yes"}, {"run", "--scenario", "checkout.pay"}} {
+	for _, args := range [][]string{{"review", "checkout.pay", "--yes"}, {"run", "--scenario", "checkout.pay"}} {
 		res := r.must(t, cli.ExitError, args...)
 		contains(t, "stderr", res.stderr, "invalid scenario ID", "checkout.pay")
 	}

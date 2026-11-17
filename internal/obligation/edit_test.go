@@ -98,3 +98,50 @@ func TestEditRefusesWhatItCannotKeepValid(t *testing.T) {
 		t.Errorf("a refused edit changed the file:\n%s", after)
 	}
 }
+
+func TestRetiredScenariosAreKeptInTheFile(t *testing.T) {
+	dir := oneFileRepo(t, twoUseCases)
+	err := obligation.Edit(dir, "SHOP-482/2", func(o *obligation.Obligation) error {
+		o.Covers = nil
+		o.Retired = append(o.Retired, obligation.Retired{Scenario: "SHOP-482-02", Reason: "the refund rule moved to SHOP-490", User: "tester", Day: "2026-11-17"})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := loaded(t, dir, "SHOP-482/2")
+	if len(got.Covers) != 0 || len(got.Retired) != 1 || got.Retired[0].Scenario != "SHOP-482-02" || got.Retired[0].User != "tester" || got.Retired[0].Day != "2026-11-17" {
+		t.Errorf("entry %+v", got)
+	}
+}
+
+func TestARetiredEntryNeedsEveryField(t *testing.T) {
+	dir := oneFileRepo(t, twoUseCases)
+	for name, r := range map[string]obligation.Retired{
+		"no reason":      {Scenario: "SHOP-482-02", User: "tester", Day: "2026-11-17"},
+		"a long reason":  {Scenario: "SHOP-482-02", Reason: strings.Repeat("r", 301), User: "tester", Day: "2026-11-17"},
+		"two lines":      {Scenario: "SHOP-482-02", Reason: "a\nb", User: "tester", Day: "2026-11-17"},
+		"no user":        {Scenario: "SHOP-482-02", Reason: "r", Day: "2026-11-17"},
+		"a bad day":      {Scenario: "SHOP-482-02", Reason: "r", User: "tester", Day: "yesterday"},
+		"a bad scenario": {Scenario: "../x", Reason: "r", User: "tester", Day: "2026-11-17"},
+	} {
+		err := obligation.Edit(dir, "SHOP-482/2", func(o *obligation.Obligation) error { o.Retired = []obligation.Retired{r}; return nil })
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestAUseCaseThatLostItsLastTestIsNoTestAndSaysWho(t *testing.T) {
+	o := ob("g/a", func(o *obligation.Obligation) {
+		o.Retired = []obligation.Retired{{Scenario: "A-1", Reason: "the rule moved", User: "tester", Day: "2026-11-17"}}
+	})
+	e := one(t, o, results(), nil, nil)
+	if e.State != obligation.Blocked || e.NoReason {
+		t.Fatalf("state %s, no reason %v: a retired test is a reason", e.State, e.NoReason)
+	}
+	mustReason(t, e, "A-1 was retired by tester on 2026-11-17: the rule moved")
+	if len(e.Covers) != 0 {
+		t.Errorf("covers %v, want none", e.Covers)
+	}
+}

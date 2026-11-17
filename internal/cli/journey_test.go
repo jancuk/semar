@@ -374,29 +374,29 @@ func (r *repo) confirmationFiles(t *testing.T, scenario string) []string {
 	return files
 }
 
-func TestConfirmJourneyStoresOnePerLeg(t *testing.T) {
+func TestReviewJourneyStoresOnePerLeg(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	r.requireConfirmation(t)
 	r.opts.Terminal = func() bool { return false }
 
 	// Without --yes and without a terminal, nothing is stored.
-	refused := r.must(t, cli.ExitUndecided, "confirm", "--journey", "checkout")
-	contains(t, "stdout", refused.stdout, "Leg place of journey checkout (scenario checkout.place) has 1 expected results that a person must confirm:",
-		"Leg pay of journey checkout (scenario checkout.pay)", "Leg settled of journey checkout (scenario checkout.settled)", "(source diff)")
-	contains(t, "stderr", refused.stderr, "nothing was confirmed")
+	refused := r.must(t, cli.ExitUndecided, "review", "checkout")
+	contains(t, "stdout", refused.stdout, "journey checkout (3 legs)")
+	contains(t, "stderr", refused.stderr, "nothing was approved")
 	for _, id := range checkoutLegs {
 		if n := len(r.confirmationFiles(t, id)); n != 0 {
 			t.Errorf("%s has %d confirmations after a refusal", id, n)
 		}
 	}
 
-	res := r.must(t, cli.ExitOK, "confirm", "--journey", "checkout", "--yes")
-	contains(t, "stdout", res.stdout, "local, unverified identity")
+	res := r.must(t, cli.ExitOK, "review", "checkout", "--yes")
+	contains(t, "stdout", res.stdout, "journey checkout, 3 legs with expected results to confirm", "Leg place of journey checkout (scenario checkout.place)",
+		"Leg pay of journey checkout (scenario checkout.pay)", "Leg settled of journey checkout (scenario checkout.settled)", "(source diff)",
+		"approved journey checkout as tester (local, unverified identity)")
 	for _, id := range checkoutLegs {
 		if n := len(r.confirmationFiles(t, id)); n != 1 {
 			t.Errorf("%s has %d confirmation files, want 1", id, n)
 		}
-		contains(t, "stdout", res.stdout, "confirmed scenario "+id+" for expectation hash ")
 	}
 
 	run := r.must(t, cli.ExitOK, "journey", "run", "checkout")
@@ -408,16 +408,13 @@ func TestConfirmJourneyStoresOnePerLeg(t *testing.T) {
 	contains(t, "stdout", squash(again.stdout), "first failing leg pay")
 }
 
-func TestConfirmJourneyUsage(t *testing.T) {
+func TestReviewJourneyUsage(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	for name, tc := range map[string]struct {
 		args []string
 		want string
 	}{
-		"unknown":         {[]string{"confirm", "--journey", "nope", "--yes"}, "journey nope was not found"},
-		"with --all":      {[]string{"confirm", "--journey", "checkout", "--all"}, "and not several of them"},
-		"with a fixture":  {[]string{"confirm", "--journey", "checkout", "--fixture", "x"}, "and not both"},
-		"with a scenario": {[]string{"confirm", "--journey", "checkout", "SHOP-482-01"}, "and not several of them"},
+		"unknown": {[]string{"review", "nope", "--yes"}, "nope is not a scenario, a ticket, a fixture, a journey, or the app of a screens file"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			res := r.must(t, cli.ExitError, tc.args...)
@@ -425,20 +422,20 @@ func TestConfirmJourneyUsage(t *testing.T) {
 		})
 	}
 	// The example has no expected result that needs a person.
-	res := r.must(t, cli.ExitOK, "confirm", "--journey", "checkout", "--yes")
+	res := r.must(t, cli.ExitOK, "review", "checkout", "--yes")
 	contains(t, "stdout", res.stdout, "no expected result of journey checkout needs a confirmation")
 }
 
-func TestConfirmJourneyNeedsAnEnvironmentWhenThereAreSeveral(t *testing.T) {
+func TestReviewJourneyNeedsAnEnvironmentWhenThereAreSeveral(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	r.requireConfirmation(t)
 	r.rewriteConfig(t, func(s string) string {
 		const uat = "  uat:\n    kind: test\n    hosts: [\"127.0.0.1:9\"]\n    methods: [GET]\n    effects: {mode: read_only}\n    services:\n      - name: orders\n        baseUrl: http://127.0.0.1:9\n"
 		return strings.Replace(s, "authProfiles:\n", uat+"authProfiles:\n", 1)
 	})
-	res := r.must(t, cli.ExitError, "confirm", "--journey", "checkout", "--yes")
+	res := r.must(t, cli.ExitError, "review", "checkout", "--yes")
 	contains(t, "stderr", res.stderr, "choose an environment: local, uat")
-	r.must(t, cli.ExitOK, "confirm", "--journey", "checkout", "--yes", "--env", "local")
+	r.must(t, cli.ExitOK, "review", "checkout", "--yes", "--env", "local")
 }
 
 func TestLedgerReadsJourneyOutcome(t *testing.T) {
@@ -486,7 +483,7 @@ func TestLedgerCountsAStaleJourney(t *testing.T) {
 func TestJourneyRunOfAnInvalidFileShowsItSafely(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	r.writeRel(t, ".semar/journeys/evil.yaml", "apiVersion: semar/v1\nkind: Journey\nid: evil\n\"x\\e[31mred\\u202eblue\": 1\n")
-	for _, args := range [][]string{{"journey", "run", "evil"}, {"journey", "run", "--all"}, {"confirm", "--journey", "evil", "--yes"}} {
+	for _, args := range [][]string{{"journey", "run", "evil"}, {"journey", "run", "--all"}, {"review", "evil", "--yes"}} {
 		res := r.semar(t, t.Context(), args...)
 		if strings.ContainsAny(res.stdout+res.stderr, "\x1b\u202e") {
 			t.Errorf("semar %s printed a control character:\n%q", strings.Join(args, " "), res.stderr)

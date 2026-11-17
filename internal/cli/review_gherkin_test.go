@@ -1,14 +1,17 @@
 package cli_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jancuk/semar/internal/cli"
 )
 
-func TestConfirmShowsTheScenarioAsGherkinWithItsCites(t *testing.T) {
+func TestReviewDetailsShowTheScenarioAsGherkinWithItsCites(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
-	res := r.must(t, cli.ExitOK, "confirm", scenarioID, "--yes")
+	r.opts.Terminal = func() bool { return true }
+	r.opts.Stdin = strings.NewReader("d\ny\n")
+	res := r.must(t, cli.ExitOK, "review", scenarioID)
 	contains(t, "stdout", res.stdout,
 		".semar/scenarios/SHOP-482/"+scenarioID+".feature as Gherkin, with the source and cite of each expected result under it:",
 		"    Feature: SHOP-482\n",

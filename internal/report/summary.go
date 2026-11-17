@@ -90,6 +90,23 @@ func countLine(results []domain.ScenarioResult) string {
 // line when there is one, and one line for each build that was declared rather than read from
 // the service.
 func Summary(w io.Writer, run domain.Run, coverage string) error {
+	if err := Lines(w, run); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, countLine(run.Results)); err != nil {
+		return err
+	}
+	if coverage != "" {
+		if _, err := fmt.Fprintln(w, plain(coverage)); err != nil {
+			return err
+		}
+	}
+	return DeclaredBuilds(w, run)
+}
+
+// Lines writes one line for each scenario of the run, or for each journey and its legs: the ID, the
+// word for the result, why, and the command that comes next.
+func Lines(w io.Writer, run domain.Run) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	if len(run.Journeys) > 0 {
 		// A journey run prints each leg under its journey, in place of the loose legs.
@@ -118,17 +135,11 @@ func Summary(w io.Writer, run domain.Run, coverage string) error {
 			}
 		}
 	}
-	if err := tw.Flush(); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintln(w, countLine(run.Results)); err != nil {
-		return err
-	}
-	if coverage != "" {
-		if _, err := fmt.Fprintln(w, plain(coverage)); err != nil {
-			return err
-		}
-	}
+	return tw.Flush()
+}
+
+// DeclaredBuilds names each build that a person declared, because nothing read it from the service.
+func DeclaredBuilds(w io.Writer, run domain.Run) error {
 	for _, b := range run.BuildsStart {
 		if b.Declared {
 			if _, err := fmt.Fprintf(w, "build: %s\n", plain(declaredBuild(b))); err != nil {

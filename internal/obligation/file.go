@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -67,6 +68,18 @@ type Obligation struct {
 	Journeys []string            `yaml:"journeys,omitempty"`
 	Gap      string              `yaml:"gap,omitempty"`
 	Manual   *Manual             `yaml:"manual,omitempty"`
+	// Retired are the scenarios that a person took away from this use case with semar rm. The use
+	// case stays, and it shows who retired each test and why, so that removing a test never makes a
+	// use case look done.
+	Retired []Retired `yaml:"retired,omitempty"`
+}
+
+// Retired is one scenario that semar rm took out of the covers of a use case.
+type Retired struct {
+	Scenario domain.ScenarioID `yaml:"scenario"`
+	Reason   string            `yaml:"reason"`
+	User     string            `yaml:"user"`
+	Day      string            `yaml:"day"` // YYYY-MM-DD
 }
 
 type Manual struct {
@@ -181,11 +194,13 @@ const (
 	shapeFile       = "file"
 	shapeObligation = "obligation"
 	shapeManual     = "manual"
+	shapeRetired    = "retired"
 )
 
 var knownKeys = map[string][]string{
 	shapeFile:       {"apiVersion", "kind", "ticket", "obligations"},
-	shapeObligation: {"id", "title", "source", "cite", "ticket", "covers", "journeys", "gap", "manual"},
+	shapeObligation: {"id", "title", "source", "cite", "ticket", "covers", "journeys", "gap", "manual", "retired"},
+	shapeRetired:    {"scenario", "reason", "user", "day"},
 	shapeManual:     {"kind", "text", "steps", "expected", "writtenBy"},
 }
 
@@ -251,6 +266,8 @@ func childShape(shape, key string) string {
 		return shapeObligation + "[]"
 	case shape == shapeObligation && key == "manual":
 		return shapeManual
+	case shape == shapeObligation && key == "retired":
+		return shapeRetired + "[]"
 	}
 	return ""
 }
@@ -365,6 +382,32 @@ func validateObligation(o Obligation, fileTicket, p string, add func(path, forma
 
 	if o.Manual != nil {
 		validateManual(*o.Manual, p+".manual", add)
+	}
+	for i, r := range o.Retired {
+		validateRetired(r, fmt.Sprintf("%s.retired[%d]", p, i), add)
+	}
+}
+
+func validateRetired(r Retired, p string, add func(path, format string, args ...any)) {
+	if err := idcheck.Scenario(string(r.Scenario)); err != nil {
+		add(p+".scenario", "%s", err)
+	}
+	switch {
+	case strings.TrimSpace(r.Reason) == "":
+		add(p+".reason", "reason is required")
+	case multiline(r.Reason):
+		add(p+".reason", "reason must be one line")
+	case utf8.RuneCountInString(r.Reason) > maxGap:
+		add(p+".reason", "reason is longer than %d characters", maxGap)
+	}
+	switch {
+	case strings.TrimSpace(r.User) == "":
+		add(p+".user", "user is required")
+	case multiline(r.User):
+		add(p+".user", "user must be one line")
+	}
+	if _, err := time.Parse("2006-01-02", r.Day); err != nil {
+		add(p+".day", "day must be YYYY-MM-DD")
 	}
 }
 

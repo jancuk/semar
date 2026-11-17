@@ -73,8 +73,8 @@ func TestScenariosConvertKeepsEveryConfirmationAndScript(t *testing.T) {
 		t.Error("the converted scenario lost its confirmation")
 	}
 	// A person who confirms it again confirms the same expectation hash.
-	res = r.must(t, cli.ExitOK, "confirm", scenarioID, "--yes")
-	contains(t, "stdout", res.stdout, "confirmed scenario "+scenarioID+" for expectation hash "+hash)
+	res = r.must(t, cli.ExitOK, "review", scenarioID, "--yes")
+	contains(t, "stdout", res.stdout, "scenario "+scenarioID+" is already confirmed")
 }
 
 func TestScenariosConvertWritesTheFileInPlaceAndRepeatsNothing(t *testing.T) {

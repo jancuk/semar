@@ -20,13 +20,13 @@ func TestFixtureRunEndToEnd(t *testing.T) {
 
 	// A fixture that nobody approved gives no state, and nothing reaches the services.
 	blocked := r.must(t, cli.ExitUndecided, "run", "--scenario", fixtureScenario)
-	contains(t, "the summary", blocked.stdout, fixtureScenario, "blocked", "fixture order.paid is not approved: run semar review order.paid")
+	contains(t, "the summary", blocked.stdout, fixtureScenario, "needs review", "fixture order.paid is not approved: run semar review order.paid")
 	if n := r.reached("/v1"); n != 0 {
 		t.Errorf("%d requests reached the services before the fixture was approved", n)
 	}
 
-	confirmed := r.must(t, cli.ExitOK, "confirm", "--fixture", "order.paid", "--yes")
-	contains(t, "the approval", confirmed.stdout, "approved fixture order.paid 1.0.0", "local, unverified identity")
+	confirmed := r.must(t, cli.ExitOK, "review", "order.paid", "--yes")
+	contains(t, "the approval", confirmed.stdout, "approved fixture order.paid", "local, unverified identity")
 	hash, err := cli.FixtureHashOf(r.dir, "order.paid")
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestFixtureRunEndToEnd(t *testing.T) {
 		t.Errorf("a clean run lists what still exists:\n%s", md)
 	}
 
-	acts := r.must(t, cli.ExitOK, "activity", "latest")
+	acts := r.must(t, cli.ExitOK, "show", "--activity")
 	contains(t, "the activity", acts.stdout,
 		"fixture order.paid (as order): find step 1",
 		"fixture order.paid (as order): create step 1",
@@ -83,7 +83,7 @@ func TestFixtureRunEndToEnd(t *testing.T) {
 	if n := strings.Count(acts.stdout, "create step 3"); n != 2 {
 		t.Errorf("the wait for the payment made %d reads, want 2:\n%s", n, acts.stdout)
 	}
-	cleanup := r.must(t, cli.ExitOK, "activity", "latest", "--pass", "cleanup")
+	cleanup := r.must(t, cli.ExitOK, "show", "latest", "--activity", "--pass", "cleanup")
 	contains(t, "the cleanup pass", cleanup.stdout, "POST /v1/orders/o-1/cancel")
 
 	r.assertNoSecret(t, []string{token, "tok-pay"})
@@ -114,7 +114,7 @@ func TestFixtureRunReusesARecordThatFindGives(t *testing.T) {
 	}
 	md := r.lastReport(t)
 	contains(t, "report.md", md, givenLine(hash, "found by find; cleanup not needed"))
-	acts := r.must(t, cli.ExitOK, "activity", "latest", "--pass", "cleanup")
+	acts := r.must(t, cli.ExitOK, "show", "latest", "--activity", "--pass", "cleanup")
 	if strings.Contains(acts.stdout, "cancel") {
 		t.Errorf("a cleanup action ran for a record that find gave:\n%s", acts.stdout)
 	}
@@ -124,7 +124,7 @@ func TestFixtureRunNotApprovedIsBlockedBeforeAnyRequest(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 
 	res := r.must(t, cli.ExitUndecided, "run", "--scenario", fixtureScenario)
-	contains(t, "the summary", res.stdout, "blocked")
+	contains(t, "the summary", res.stdout, "needs review")
 	if strings.Contains(res.stdout, "failed 1") {
 		t.Errorf("a fixture that is not approved must never give failed:\n%s", res.stdout)
 	}

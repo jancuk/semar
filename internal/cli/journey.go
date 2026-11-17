@@ -384,11 +384,39 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 		return exitError{ExitUndecided}
 	}
 
+	fin, err := executeJourneys(ctx, stderr, o, f.dir, cfg, envName, env, declared, chosen, f.headed, func() {})
+	if err != nil {
+		return err
+	}
+	record, coverage, interrupted := fin.record, fin.coverage, fin.interrupted
+	if err := report.Summary(stdout, record, coverage); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
+	if interrupted {
+		fmt.Fprintf(stderr, "semar: the run was interrupted: run %s is incomplete\n", record.ID)
+		return exitError{ExitUndecided}
+	}
+	code := report.JourneyExitCode(record.Journeys)
+	if skipped > 0 {
+		fmt.Fprintf(stderr, "semar: %s was skipped, so this run does not cover every journey\n", plural(skipped, "journey file"))
+		if code == ExitOK {
+			code = ExitUndecided
+		}
+	}
+	if code != ExitOK {
+		return exitError{code}
+	}
+	return nil
+}
+
+// executeJourneys runs the journeys against one environment, writes the report, and closes the run.
+func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir string, cfg config.Config, envName string, env config.Environment, declared map[string]string, chosen []domain.Journey, headed bool, announce func()) (finishedRun, error) {
 	var cat *fixture.Catalogue
 	if slices.ContainsFunc(chosen, func(j domain.Journey) bool { return len(j.Given) > 0 }) {
-		c, err := fixture.Load(f.dir, allServices(cfg))
+		c, err := fixture.Load(dir, allServices(cfg))
 		if err != nil {
-			return err
+			return finishedRun{}, err
 		}
 		for _, p := range c.Problems {
 			fmt.Fprintf(stderr, "semar: fixture file %s: %s; this run does not use it\n", terminalSafe(p.File), terminalSafe(oneLine(problemText(p))))
@@ -397,18 +425,19 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 	}
 
 	fmt.Fprintf(stderr, "semar: running against %s (%s, %s)\n", envName, env.Kind, effectsWords(env.Effects.Mode))
-	rg, err := newEnvRig(ctx, o, f.dir, cfg, env, declared, journeyNeeds(cfg, env, chosen, cat))
+	rg, err := newEnvRig(ctx, o, dir, cfg, env, declared, journeyNeeds(cfg, env, chosen, cat))
 	if err != nil {
-		return err
+		return finishedRun{}, err
 	}
 	confirmations := confirm.NewLocal(rg.store.Root())
 	deps := replay.Deps{
 		Engine: rg.engine, Builds: rg.builds, Confirm: confirmations, Trust: cfg.Policy.Trust.Confirm, Run: rg.id,
 		Accounts: slices.Sorted(maps.Keys(cfg.AuthProfiles)),
 	}
-	eng := rg.webEngine(o, envName, env, f.headed)
+	eng := rg.webEngine(o, envName, env, headed)
 	defer eng.Close()
-	deps.Web, deps.Screens = eng, screenSource{repo: f.dir, approvals: confirmations}
+	announce()
+	deps.Web, deps.Screens = eng, screenSource{repo: dir, approvals: confirmations}
 	jdeps := journey.Deps{Builds: rg.builds, Services: map[string]string{}, Clock: o.Clock, Sleep: o.Sleep, Accounts: deps.Accounts}
 	for _, s := range env.Services {
 		jdeps.Services[s.Name] = s.AuthProfile
@@ -416,7 +445,7 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 	if cat != nil {
 		fx, err := rg.resolver(o, envName, env, *cat)
 		if err != nil {
-			return err
+			return finishedRun{}, err
 		}
 		deps.Fixtures, jdeps.Fixtures, jdeps.Catalogue = fx, fx, cat
 	}
@@ -448,7 +477,7 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 	}
 	interrupted := ctx.Err() != nil
 	if runErr != nil && !interrupted {
-		return fmt.Errorf("run %s stopped: %w; its evidence may be incomplete, so it reports no outcome", rg.id, runErr)
+		return finishedRun{}, fmt.Errorf("run %s stopped: %w; its evidence may be incomplete, so it reports no outcome", rg.id, runErr)
 	}
 	record.BuildsStart, record.BuildsEnd = manifestBuilds(record.Journeys)
 	if record.Results == nil {
@@ -460,9 +489,9 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 
 	acts, err := rg.store.Activity(rg.id)
 	if err != nil {
-		return err
+		return finishedRun{}, err
 	}
-	coverage, tickets := runCoverage(stderr, o, f.dir, nil, record)
+	coverage, tickets := runCoverage(stderr, o, dir, nil, record)
 	writeReport := func(rec domain.Run) error {
 		var md bytes.Buffer
 		data := report.Data{Run: rec, Scenarios: scenarios, Activity: acts, Coverage: coverage, CoverageTickets: tickets, Journeys: rec.Journeys, JourneyTitles: titles}
@@ -472,7 +501,7 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 		return rg.run.WriteFile(reportFile, md.Bytes())
 	}
 	if err := writeReport(record); err != nil {
-		return err
+		return finishedRun{}, err
 	}
 	// An interrupted run keeps no run.json, so that it loads as interrupted.
 	if !interrupted {
@@ -480,31 +509,12 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 			unfinished := record
 			unfinished.EndedAt = time.Time{}
 			if werr := writeReport(unfinished); werr != nil {
-				return errors.Join(err, fmt.Errorf("rewrite %s as unfinished: %w", reportFile, werr))
+				return finishedRun{}, errors.Join(err, fmt.Errorf("rewrite %s as unfinished: %w", reportFile, werr))
 			}
-			return err
+			return finishedRun{}, err
 		}
 	}
-
-	if err := report.Summary(stdout, record, coverage); err != nil {
-		return err
-	}
-	fmt.Fprintf(stdout, "report: %s\n", filepath.Join(rg.store.Root(), "runs", string(rg.id), reportFile))
-	if interrupted {
-		fmt.Fprintf(stderr, "semar: the run was interrupted: run %s is incomplete\n", rg.id)
-		return exitError{ExitUndecided}
-	}
-	code := report.JourneyExitCode(record.Journeys)
-	if skipped > 0 {
-		fmt.Fprintf(stderr, "semar: %s was skipped, so this run does not cover every journey\n", plural(skipped, "journey file"))
-		if code == ExitOK {
-			code = ExitUndecided
-		}
-	}
-	if code != ExitOK {
-		return exitError{code}
-	}
-	return nil
+	return finishedRun{record: record, reportPath: filepath.Join(rg.store.Root(), "runs", string(rg.id), reportFile), interrupted: interrupted, coverage: coverage}, nil
 }
 
 // legStepAccounts is the as of each step of a leg that has one.
@@ -642,47 +652,4 @@ func unconfirmedWhy(store confirm.Store, trust []domain.Source, sc domain.Scenar
 		return "an expected result is not confirmed: run semar review " + string(id)
 	}
 	return ""
-}
-
-// ---- semar confirm --journey
-
-// confirmJourneys shows the expected results of every leg of the named journeys that need a person,
-// and stores one confirmation per leg under the scenario of the leg.
-func confirmJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f confirmFlags) error {
-	cfg, err := config.Load(f.dir)
-	if err != nil {
-		return err
-	}
-	_, env, err := cfg.Environment(f.env)
-	env = withServiceAuth(cfg, env)
-	if err != nil {
-		return err
-	}
-	chosen, _, err := selectJourneys(stderr, f.dir, f.journeys, false)
-	if err != nil {
-		return err
-	}
-	var todo []unconfirmed
-	for _, j := range chosen {
-		before := len(todo)
-		for _, l := range j.Legs {
-			sc, _ := journey.LegScenario(j, l.ID, legAuth(env, j, l.Service))
-			u := needsConfirmation(f.dir, sc, cfg.Policy.Trust.Confirm)
-			if len(u.lines) == 0 {
-				continue
-			}
-			u.label = fmt.Sprintf("Leg %s of journey %s (scenario %s)", l.ID, j.ID, sc.ID)
-			if as := journey.ActedAs(sc); len(as) > 0 {
-				u.label += ", acts as " + terminalSafe(strings.Join(as, ", "))
-			}
-			todo = append(todo, u)
-		}
-		if len(todo) == before {
-			fmt.Fprintf(stdout, "no expected result of journey %s needs a confirmation\n", j.ID)
-		}
-	}
-	if len(todo) == 0 {
-		return nil
-	}
-	return storeConfirmations(ctx, stdout, stderr, o, f, todo)
 }

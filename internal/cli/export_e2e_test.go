@@ -371,7 +371,7 @@ func (r *repo) exportScenario(t *testing.T, id, title, steps, scriptSteps string
 	r.writeRel(t, "scripts/"+id+".yaml", fmt.Sprintf("apiVersion: semar/v1\nkind: Script\nscenario: %s\nexpectHash: %q\n"+
 		"authoredBy: { instance: hand, model: none, harness: none }\nsteps:%s", id, domain.ExpectHash(sc), scriptSteps))
 	r.must(t, cli.ExitOK, "script", "add", script)
-	r.must(t, cli.ExitOK, "confirm", id, "--yes")
+	r.must(t, cli.ExitOK, "review", id, "--yes")
 }
 
 func TestExportEndToEnd(t *testing.T) {
