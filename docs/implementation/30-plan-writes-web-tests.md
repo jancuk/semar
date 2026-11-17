@@ -28,7 +28,7 @@ Each row says what was built. Where it differs from the plan as first written, t
 | --- | --- | --- |
 | D1 | The answer `manualCheck` of a criterion job gains `surface`, one of `web`, `mobile`, and `other`. The prompt version rises (criterion 3 to 4). The obligation keeps it as `manual.surface`, and `plan.md` shows it | Code must know which manual checks a browser can do. The job has read the criterion already, so the question costs no job. Changed: the plan did not say where the surface is kept. A person who reads the checklist sees which checks are for a phone |
 | D2 | A web criterion is explored when the environment is a test environment that allows test data, Chrome is found, and the service has a web page. A service has a web page when `GET <base URL><start>` answers `text/html`, where `start` is `services[].web.start`, else `/`. The probe is one GET for each service of a plan, up to the first that answers. `--no-web` turns the exploring off. A criterion that is not explored stays a manual check, and the plan says why once | No setting is needed for the common case, and a service that is an API only costs one request. A recording clicks and types, so the rules of where `record` runs hold here too. Changed: `services[].web.start` did not exist, so it is added to the configuration as `web: {start: /path}`, checked to be a path that starts with one `/`. Only the first service with a web page is explored. The reason is on standard error once, in `plan.md`, and not in the exit code |
-| D3 | The page list has the address, the title, and at most 150 lines, one for each visible element that a person can act on or read: `e<n> <role> "<name>"`, with the text, the value of a field, and `disabled` when they apply. Texts are cut at 80 characters. An element out of the view is listed, and Semar scrolls to it before it acts | A small model reads a short list well. The reference is the only way to name an element, so the model cannot invent a locator. Changed: one page function reads the page, and not the accessibility tree, because it must also know what is visible and what a person can drag or click, and it keeps the elements in `window.__semarRefs` so that a reference maps to an element. A list over 150 lines keeps what a person can act on first and says how many it left out. The address has no query and no fragment. A role that a page wrote can add no line. A text inside a button or a link is not listed again, and a text inside a card that can be dragged is, so that a badge can be checked on its own |
+| D3 | The page list has the address, the title, and at most 150 lines, one for each visible element that a person can act on or read: `e<n> <role> "<name>"`, with the text, the value of a field, the `form` of the value of a date or time field, and `disabled` when they apply. Texts are cut at 80 characters. An element out of the view is listed, and Semar scrolls to it before it acts | A small model reads a short list well. The reference is the only way to name an element, so the model cannot invent a locator. Changed: one page function reads the page, and not the accessibility tree, because it must also know what is visible and what a person can drag or click, and it keeps the elements in `window.__semarRefs` so that a reference maps to an element. A list over 150 lines keeps what a person can act on first and says how many it left out. The address has no query and no fragment. A role that a page wrote can add no line. A text inside a button or a link is not listed again, and a text inside a card that can be dragged is, so that a badge can be checked on its own |
 | D4 | The answer of a turn follows a closed schema and is one of three kinds. `act` has 1 to 5 actions, each `click`, `fill` (with `text`), `press` (`Enter` or `Escape`), `drag` (with `to`), or `check` (with `expect`), on a reference of the list. `done` has the title and the intent of the test, and `unproved`. `manual` has the reason. Semar stops the actions of a turn at the first that cannot be done, and the next turn says which and why | Several actions in a turn make a form one turn and not five. A closed schema is what makes a small model usable (Plan 25). Changed: the references of the list are an enum of the schema, so a reference that is not on the page cannot be named. `press` takes an empty reference for a key that goes to the page. `done` names in `unproved` the part of the criterion that its checks did not prove, or nothing: the test is written for the rest, and the plan keeps a manual check of the same criterion for that part. A turn is a closed sum in code, `act`, `done`, `manual`, or `given`. An answer with a problem goes back once to the same model with the problems in plain words, as a criterion does, and then the flow ends as a manual check |
 | D5 | A `fill` text may hold `{{run.id}}`. Semar types the ID of the run, and the written step keeps the variable, through the values of Plan 28 (D6). The prompt asks for it in every name that the flow creates | A test that creates "Board" at every run meets its own leftovers. Changed: another `{{...}}` in a text is refused with a sentence, because the engine would read it as a variable of a step. `{{run.id}}` in the `expect` of a check is the ID of the run too. The run ID is a value of every flow, with or without fixtures, so that the text that a flow typed, the locators that follow it, and the text of a check all keep the variable. The prompt tells the model to make its own data, because a first live run used a board that an earlier run left, and its test did not run again |
 | D6 | The first answer may be `given`, with fixtures of the catalogue and an alias for each, in place of the three kinds. Semar makes them as `record --given` does, gives the model their outputs, and loads the page again. The catalogue in the prompt has the ID, the description, and the outputs of each fixture, drafts of this plan included | A flow needs data, and a fixture gives it with a cleanup. The model chooses before it acts, because a fixture that is made after a click would not be in the recording's start. Changed: "the page" that is loaded again is the first page of the service, `services[].web.start`, because the model has no action that opens an address. The recording starts over at that page. `given` is offered only when the catalogue has a fixture, and a `given` after the first answer is refused with a note and does nothing |
@@ -39,7 +39,8 @@ Each row says what was built. Where it differs from the plan as first written, t
 | D11 | One criterion is explored at a time | An account has one browser profile, and two flows in one application disturb each other |
 | D12 | Each turn is a job of the plan: it counts in the model use line, in `--max-cost`, and in the usage file with the pipeline `web`. The plan prints, for the web part, the criteria explored, the tests written, the ones left for a person with the reason, the turns, and the cost | The person sees what the web part cost, apart from the API part. Changed: the turns are in the total and in the cost limit, and the use line adds `N web turns`. `plan.md` lists the web tests, the models of the web part, and the reason for each criterion left for a person |
 | D13 | The text of the page is data. The prompt marks it as such, the model has no tool, its answer can only name an action on a reference, and the browser stays inside the hosts and the methods of the environment (Plan 22) | A page can hold text that reads as an instruction. Changed: the recorder of a flow has the effects policy of the environment, and judges every request of the page as the engine of a replay does. That policy lists hosts and a deny list for a browser, and not methods, because a page sends requests that no step wrote. The environment of a flow is a test environment that allows test data, so a write is allowed |
-| D14 | Not built: a mobile screen, a flow across two tabs, a file upload, a hover, and a select list, which the recorder does not hear (Plan 28), and a date, time, color, or slider field, which a flow cannot type into. The estimate of `semar run` before a plan does not count the web part | Each is its own work. The count of web criteria is not known before the first jobs. Changed: the list names such a field by its kind, such as `datetime-local`, and a fill of it is refused with a sentence, so that a model says so early and leaves that part to a person |
+| D14 | Not built: a mobile screen, a flow across two tabs, a file upload, a hover, and a select list, which the recorder does not hear (Plan 28), and a color, slider, or file field, which a flow cannot type into. The estimate of `semar run` before a plan does not count the web part | Each is its own work. The count of web criteria is not known before the first jobs. Changed: the list names such a field by its kind, such as `color`, and a fill of it is refused with a sentence, so that a model says so early and leaves that part to a person. The first live run showed the same for a `datetime-local` field, and a later change builds it, as D15 says |
+| D15 | A `fill` of an `input` of type `date`, `datetime-local`, `time`, `month`, or `week` sets its value, in the form that the value of the field takes: `2026-03-09`, `2026-03-09T14:30`, `14:30`, `2026-03`, and `2026-W11`. The page list gives such a field its kind as the role and `form=YYYY-MM-DDTHH:MM` and the like on its line. The prompt (web 4) gives the forms and says that a typed date is the same at every run, so a criterion that depends on the present time needs a date far in the past or far in the future. A `color`, a slider, and a file are still refused | Key events do not reach the segments of these fields in a way that holds from one browser to the next, so the engine sets the value through the native setter of the element, focuses the field, and sends `input` and `change` events that bubble. The setter is the one of the prototype, so a framework that wraps the setter of the instance still sees the change. A field that does not keep the text, such as an empty value or another one afterwards, ends the step with an error that names the form. The events of a script are not trusted, so the recorder does not hear them: the explorer asks the recorder to send the fill, and the same step replays by the same code. A person who sets such a field is recorded by Plan 28 as one `fill` |
 
 ## Contract
 
@@ -47,7 +48,7 @@ Each row says what was built. Where it differs from the plan as first written, t
 $ semar plan --provider claude --base base-main
 ...
 web: 2 criteria explored, 1 test written, 1 left for a person, 22 turns, $0.12
-web: left for a person: docs/tickets/SHOP-482.md:13: the due date field is a datetime-local input that cannot be typed into, so the due date and the Overdue badge cannot be shown on this page.
+web: left for a person: docs/tickets/SHOP-482.md:13: the card colour is a color input that cannot be typed into, so the colour of the card cannot be shown on this page.
 ```
 
 A check that the page does not meet is listed with what the page shows, for example:
@@ -88,25 +89,74 @@ The scenario of a flow is the one in the Measured section. Every expected result
 
 ## Measured
 
-One plan of a real small model on a sample board application: an API, a web page with a sign-in form that keeps its session in `sessionStorage`, and two tickets with 16 acceptance criteria in all, among them web criteria (drag a card between lists, and the due date and the Overdue badge of a card) and Android criteria. The provider is Claude Code with the default ladder, `haiku`, then `sonnet`. The environment was a test environment on this machine, with a new backend and an empty `.semar` before the run. The ticket keys below are renamed. The numbers are from `plan.md` and the usage file of that run, and they are one run, not a mean.
+**The first run (history).** The first measurement, before the date fields were built, wrote 1 web test (a drag, by `haiku` in 11 turns) and left the due date criterion for a person after 11 turns of two models, because its `datetime-local` field could not be typed into. The plan cost $0.19.
+
+**The run with date fields.** The same sample board application and the same tickets: an API, a web page with a sign-in form that keeps its session in `sessionStorage`, and 16 acceptance criteria in all. The provider is Claude Code with the default ladder, `haiku`, then `sonnet`, a new backend, and an empty `.semar` before the run. The numbers are from the output of `semar plan`, `plan.md`, and the usage file, and they are one run, not a mean. Two plans before this one, on the same application, found the first two defects below.
 
 | What | Measured |
 | --- | --- |
 | Acceptance criteria | 16: 11 answered as API scenarios, 5 as manual checks |
-| Surface of the 5 manual checks | `web` 2, `mobile` 2, `other` 1 |
-| Web criteria explored | 2. The three others were never given to a browser |
-| Web tests written | 1, by `haiku`, in 11 turns |
-| Left for a person | 1, after `haiku` (6 turns) and `sonnet` (5 turns): the due date field is a `datetime-local` input that a flow cannot type into, so no card had a due date to show. The model said so in its reason |
-| Turns of the web part | 22: 17 by `haiku` and 5 by `sonnet`, 22 calls, no correction |
-| Time | 3 minutes 9 seconds for the plan, of which the web part took 2 minutes 6 seconds |
-| Cost | $0.19 for the plan: $0.12 for the web turns and $0.07 for the 16 first jobs, as the provider reported it. The live runs of this plan, which had five runs before it that found the defects that the rows of the decisions table describe, cost $1.34 in all, as the usage file counts them |
-| After `semar review` | `semar run` passed 12 of 12 scenarios, the web test among them: `SHOP-482-01  passed` |
-| The page made wrong | In a copy of the sample, one comparison of the drop code was turned round, so that a card dropped on another card went to the wrong place. `semar run --scenario SHOP-482-01` ended `failed` with exit code 1: `step drag-card-3-run-id-card-1-run-id-2: expected element button-2 equals Card 3 r-20261117T164822Z-d13f (written as element button-2 equals Card 3 {{run.id}}), observed Card 1 r-20261117T164822Z-d13f` |
-| A mobile screen | The two `mobile` criteria and the one `other` stayed manual checks, and no browser was opened for them |
+| Web criteria explored | 2, both with `haiku` |
+| Web tests written | 2: the due date criterion, and the drag criterion |
+| Left for a person | 0 criteria. The due date test names in `unproved` what its checks do not prove, and a manual check stays for it |
+| Turns of the web part | 22, no correction, no turn by `sonnet` |
+| Time | 3 minutes 25 seconds for the plan |
+| Cost | $0.10 for the plan, of which $0.03 for the web turns. The three plans of this measurement cost $0.54 in all, as the usage file counts them |
+| After `semar review` | `semar run` passed 12 scenarios of 13, the due date test among them: `SHOP-482-02  passed`. The one that failed is the drag test: its model wrote `Card A SHOP-482 {{run.id}}` as the expected text of a card, and the page shows `Card A {{run.id}}`. The plan had listed it under "fails now" |
+| The page made wrong | In a copy of the sample, the label of the badge was changed from `Overdue` to `Late`. `semar run --scenario SHOP-482-02` ended `failed` with exit code 1: `step click-save-2: expected element span-3 equals Overdue, observed Late (source ticket)` |
 
-What the person is left with, from `semar status`: 11 use cases verified, and 5 for a person. One of the five is the rest of the drag criterion, which the test does not prove: the model named in `unproved` that the order after a reload and the refusal by the server were not checked, and the plan kept a manual check for them.
+What the live runs of this work found, and the structure that now prevents each:
 
-The test that the model wrote, as it stands in the repository:
+* **A check of something that is gone.** In the first plan the model checked, after a clear of the due date, that the title of the card was still there, twice. That is true whatever the product does. The prompt now says that a check cannot show that something is gone, and to name it in `unproved`. The next plan did so: its `unproved` says that the test did not prove the absence of the badge for a future date or the clearing of the date.
+* **Half of a text.** A model wrote `Jan 1, 2099, 9:00 AM` for an element that shows `Due Jan 1, 2099, 9:00 AM`, and the plan listed both checks under "fails now". The prompt now says that the check compares the whole text of the element, so `expect` holds the words around the value, read from the list after the cause.
+* **A browser that keeps the page.** The browser profile of an account keeps the scripts of the application. A copy of the sample that was changed for a moment was served and still ran the old script for a few minutes, so a run on the wrong page passed. The browser cache of the profile was cleared in the measurement. A run that must see a changed page needs a profile with no cache, or a server that sends `Cache-Control`.
+
+The due date test that the model wrote, as it stands in the repository, with the names renamed:
+
+```gherkin
+Feature: Due dates and overdue cards
+
+  @id:SHOP-482-02 @ticket:SHOP-482 @surface:web
+  Scenario: Card shows its due date and a red Overdue badge for a past due date
+    Before this run, a card had no verified due date or Overdue badge on the board. Now a card created in this run shows its due date as set in the editor (Jan 1, 2000, 9:00 AM) and shows the Overdue badge, as the criterion requires for a past due date.
+
+    Given Open /
+    # step: open
+    When Type "Board {{run.id}}" in new-board
+    # step: fill-new-board
+    And Click new-board-2
+    # step: click-new-board-2
+    And Type "Todo {{run.id}}" in add-list
+    # step: fill-add-list
+    And Click add-list-2
+    # step: click-add-list-2
+    And Type "Due check {{run.id}}" in add-card
+    # step: fill-add-card
+    And Click add-card-2
+    # step: click-add-card-2
+    And Click due-check-run-id
+    # step: click-due-check-run-id
+    And Type "2099-01-01T09:00" in due-date
+    # step: fill-due-date
+    And Click save
+    # step: click-save
+    Then the element span equals "Due Jan 1, 2099, 9:00 AM"
+    # ticket docs/tickets/SHOP-482.md:13 Web: the card shows its due date, and a red "Overdue" badge when `overdue` is true, by model
+    When Click due-check-run-id
+    # step: click-due-check-run-id-2
+    And Type "2000-01-01T09:00" in due-date
+    # step: fill-due-date-2
+    And Click save
+    # step: click-save-2
+    Then the element span-2 equals "Due Jan 1, 2000, 9:00 AM"
+    # ticket docs/tickets/SHOP-482.md:13 Web: the card shows its due date, and a red "Overdue" badge when `overdue` is true, by model
+    And the element span-3 equals "Overdue"
+    # ticket docs/tickets/SHOP-482.md:13 Web: the card shows its due date, and a red "Overdue" badge when `overdue` is true, by model
+```
+
+Read as a QA would. The test makes its own board, list, and card with the ID of the run, so it runs again. It uses a date far in the future and then a date far in the past, as the prompt says, so that the result does not depend on the day of the run. The first check proves that the date that was typed is shown, and the third that a past date has the badge, which the product could get wrong. Its weak parts are the locators `span`, `span-2`, and `span-3`, which are short CSS paths in the page, and a check that the first date has no badge, which a check cannot show. A person fixes the first in the file and keeps the manual check for the second. The ID of the scenario here is the number of its ticket in the sample, renamed.
+
+The first run's drag test, which a person also reads:
 
 ```gherkin
 Feature: Move a card to another list
@@ -156,7 +206,7 @@ Read as a QA would. The test makes its own board, lists, and cards with the ID o
 What the five live runs before this one found, and the structure that now prevents each:
 
 * **Stale references.** A page that has just been clicked had not started its request when Semar read it, so the model chose an element that the page then replaced. A page now gets 300 milliseconds after an action before it is asked whether it is still.
-* **A field that cannot be typed into.** A `datetime-local` field kept none of the text of two models, and each said so after four turns. The list now gives such a field its kind, a fill of it is refused at once with a sentence, and the prompt says to prove what can be proved without it.
+* **A field that cannot be typed into.** A `datetime-local` field kept none of the text of two models, and each said so after four turns. The list then gave such a field its kind and a fill of it was refused at once with a sentence. A later change builds the fill (D15), and the refusal stays for a `color`, a slider, and a file.
 * **A whole criterion left to a person.** A criterion with a part that the page cannot show, such as the refusal of a server, ended as `manual` on both models. `done` now carries `unproved`, and the plan keeps a manual check for that part.
 * **A test that did not run again.** A model used a board that an earlier run had left, and its check named a run ID that the replay did not have. The prompt now tells the model to make its own data, and the run ID is a value of every flow, so the typed text, the locators, and the text of a check keep the variable. Before this, a flow with no fixture wrote the literal ID.
 * **A check that proves nothing.** A model checked the label "Due date" and a "Clear due date" button, and the test listed a mismatch that only a wrong element caused. A check on an element with no text is refused, and the prompt says that a label or a control is not a result.
@@ -165,6 +215,8 @@ What the five live runs before this one found, and the structure that now preven
 ## Not built
 
 * A mobile screen, a flow across two tabs, a file upload, a hover, and a choice in a select list, which the recorder does not hear.
+* A `color` field and a slider, which a flow cannot type into. The clearing of a date or time field is not written as a step, as for a text field, and a flow clears it with the button of the page.
+* A date that is relative to the day of the run. A typed date is the same at every run, so a criterion that depends on the present time is proved with a date far in the past or far in the future.
 * An action that opens an address. A flow starts at the first page of the service and moves by clicks.
 * More than one service with a web page in one plan: the first is explored.
 * The count of web criteria in the estimate before a plan.

@@ -793,7 +793,7 @@ Semar writes the scenario with one line for each action and a `Then` line for ea
 * **Nothing is approved.** A recording made in a minute can hold a mistake, so a person reviews the screens file and the scenario. The command ends with `semar review <id>`, and `--covers <use case id>` also prints `semar check <use case id> --by <id>`. [Plan 26](docs/implementation/26-daily-loop.md) builds those two commands. `record` only prints them.
 * **Safety.** `semar record` refuses a production environment and a read-only one, because it clicks and types. It refuses an ID that has a scenario unless `--replace` is set. It uses `--service` when the environment has several, `--ticket` for a ticket other than the group of the ID, and `--open <path>` for the first page.
 
-It does not record on Android, a wait of time, a check of anything but the text of an element, a choice in a select list, hover, a file upload, or a second tab. Add them to the files by hand.
+A date or time field (`date`, `datetime-local`, `time`, `month`, `week`) is recorded as one step with its value, whether the person keys it or picks it. It does not record on Android, a wait of time, a check of anything but the text of an element, the clearing of such a field, a color field, a slider, a choice in a select list, hover, a file upload, or a second tab. Add them to the files by hand.
 
 ### Plan writes web tests
 
@@ -812,7 +812,7 @@ For each such criterion, Semar opens Chrome with no window on its own profile, s
 $ semar plan --base main
 ...
 web: 2 criteria explored, 1 test written, 1 left for a person, 22 turns, $0.12
-web: left for a person: docs/tickets/SHOP-482.md:13: the due date field is a datetime-local input that cannot be typed into, so the due date and the Overdue badge cannot be shown on this page.
+web: left for a person: docs/tickets/SHOP-482.md:13: the card colour is a color input that cannot be typed into, so the colour of the card cannot be shown on this page.
 ```
 
 
@@ -825,7 +825,7 @@ web: left for a person: docs/tickets/SHOP-482.md:13: the due date field is a dat
 * **The cost.** Each turn is a job of the plan. It counts in the `model use` line, in `--max-cost`, and in the usage file with the pipeline `web`, apart from the criteria. The estimate that `semar run` shows before a plan does not count the web part, because the number of web criteria is not known before the first jobs.
 * **One criterion at a time.** An account has one browser profile, and two flows in one application disturb each other.
 
-It does not explore a mobile screen, a flow across two tabs, a file upload, a hover, a choice in a select list, or a date, time, color, or slider field, because the recorder does not hear them or a flow cannot type into them. The plan does not sign in through another site or with a second factor.
+It does not explore a mobile screen, a flow across two tabs, a file upload, a hover, a choice in a select list, or a color, slider, or file field, because the recorder does not hear them or a flow cannot type into them. A date or time field is filled with its value in the form that the field takes, such as `2026-03-09T14:30`, and the page list shows the form. The same text is typed at every run, so a criterion that depends on the present time needs a date far in the past or far in the future. The plan does not sign in through another site or with a second factor.
 
 ### Test a business flow with a journey
 
