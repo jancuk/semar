@@ -161,7 +161,7 @@ func TestConvertSaysInPlainWordsWhatIsWrong(t *testing.T) {
 		}, "the status must be a whole number from 100 to 599"},
 		"null for equals": {func(st map[string]any) {
 			st["expect"] = []any{map[string]any{"subject": "jsonpath", "name": "$.error.code", "operator": "equals", "value": nil}}
-		}, "use notExists"},
+		}, "cannot compare with null"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, ps := p.Convert(withStep(t, tc.change), in)
@@ -302,11 +302,12 @@ func TestAnswerSchemaIsClosed(t *testing.T) {
 	walkSchema(root, func(n map[string]any) {
 		props, _ := n["properties"].(map[string]any)
 		ops = append(ops, enumValues(props["operation"])...)
-		accounts = append(accounts, enumValues(props["as"])...)
 		fixtures = append(fixtures, enumValues(props["fixture"])...)
 		bodyFields = append(bodyFields, enumValues(props["field"])...)
 		kinds = append(kinds, enumValues(props["kind"])...)
 	})
+	defs, _ := root["$defs"].(map[string]any)
+	accounts = enumValues(defs["account"])
 	if want := []string{"post_v1_orders_orderId_refunds", "createOrder", "getOrder", "health"}; !slices.Equal(ops, want) {
 		t.Errorf("operations = %v, want %v", ops, want)
 	}

@@ -494,7 +494,7 @@ func (p Packet) convertCheck(op PacketOperation, c AnswerCheck, path string, ps 
 	switch c.Operator {
 	case "equals", "notEquals", "contains":
 		if c.Value == nil {
-			return bad("the operator %s needs a value; to test that a field is missing or null, use notExists", c.Operator)
+			return bad("the operator %s cannot compare with null, which a check cannot hold; check the status, or another field that has a value, instead", c.Operator)
 		}
 		switch c.Operator {
 		case "equals":

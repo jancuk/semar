@@ -135,6 +135,8 @@ func (p Packet) AnswerSchema() json.RawMessage {
 		"needs": text("What is missing, such as fixture <proposed id>, or an account."),
 	})
 	root := object(map[string]any{"answer": map[string]any{"anyOf": []any{scenario, manual, notDrafted}}})
+	// The parts that every operation shares are written once.
+	root["$defs"] = map[string]any{"check": p.checkSchema(), "account": p.accountSchema()}
 	data, err := json.Marshal(root)
 	if err != nil {
 		panic(fmt.Sprintf("encode the answer schema: %v", err)) // the schema holds strings and maps
@@ -227,12 +229,18 @@ func namedValue(names []string) map[string]any {
 	return object(map[string]any{"name": name, "value": map[string]any{"type": "string"}})
 }
 
-func (p Packet) stepSchema() any {
+// accountSchema is the account of a step.
+func (p Packet) accountSchema() map[string]any {
 	accounts := text("The account of the step.")
 	if names := p.accountNames(); len(names) > 0 {
 		accounts = enum("string", names...)
 		accounts["description"] = "The account that sends the request. " + p.Account + " is the default."
 	}
+	return accounts
+}
+
+func (p Packet) stepSchema() any {
+	accounts := map[string]any{"$ref": "#/$defs/account"}
 	var branches []any
 	for _, op := range p.Operations {
 		branches = append(branches, object(map[string]any{
@@ -245,7 +253,7 @@ func (p Packet) stepSchema() any {
 			"query":     array(queryItems(op), "The query parameters."),
 			"body":      array(bodyItems(op), "The fields of the JSON body."),
 			"captures":  array(captureItem(op), "Values of this response that a later step uses as {{name}}."),
-			"expect":    array(p.checkSchema(), "What the response must be. The criterion decides it."),
+			"expect":    array(map[string]any{"$ref": "#/$defs/check"}, "What the response must be. The criterion decides it."),
 		}))
 	}
 	if len(branches) == 0 {
@@ -347,6 +355,6 @@ func (p Packet) checkSchema() any {
 		"subject":  enum("string", checkSubjects...),
 		"name":     text("For jsonpath, the JSONPath such as $.error.code. For header, the header name. For status, an empty string."),
 		"operator": enum("string", checkOperators...),
-		"value":    jsonValue("The value to compare. For status, the status code as a number. For exists and notExists, null. For count, a whole number. For equalsPath, the other JSONPath as a string."),
+		"value":    jsonValue("The value to compare. For status, the status code as a number. For exists and notExists, write null. For every other operator, never null. For count, a whole number. For equalsPath, the other JSONPath as a string."),
 	})
 }

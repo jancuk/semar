@@ -433,6 +433,33 @@ func writePipeline(b *strings.Builder, out Output) {
 		}
 		fmt.Fprintf(b, "| %s | %s | %s | %d |\n", shown(o.Packet.Cite, maxValueShown), kind, shown(model, maxValueShown), o.Corrections)
 	}
+	writeReturned(b, out.Outcomes)
+}
+
+const maxReturnedShown = 40
+
+// writeReturned lists the problems that went back to a model, and the problems of the last answer to
+// a criterion that no model answered, so that a person can judge an answer whose first version is not
+// in the plan.
+func writeReturned(b *strings.Builder, outcomes []CriterionOutcome) {
+	shownSoFar := 0
+	for _, o := range outcomes {
+		for _, p := range append(slices.Clone(o.Returned), o.Problems...) {
+			if shownSoFar == 0 {
+				b.WriteString("\nProblems that went back to a model:\n\n")
+			}
+			if shownSoFar == maxReturnedShown {
+				b.WriteString("- and more that are not listed\n")
+				return
+			}
+			shownSoFar++
+			msg := shown(p.Message, maxValueShown*2)
+			if p.Path != "" {
+				msg = shown(p.Path, maxValueShown) + ": " + msg
+			}
+			fmt.Fprintf(b, "- %s: %s\n", shown(o.Packet.Cite, maxValueShown), msg)
+		}
+	}
 }
 
 const maxRefusedShown = 30

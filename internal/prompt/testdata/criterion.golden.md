@@ -55,11 +55,12 @@ Do not repeat these. Give your scenario a title of its own.
 Choose exactly one `kind`:
 
 1. `scenario` when a caller of the API can observe what the criterion says. Write the requests and what each response must be.
-2. `manualCheck` when only a person can check it, on a screen, on a device, or by a gesture. Write 1 to 20 steps of the person and the result that they must see.
+2. `manualCheck` when only a person can check it: the criterion is about a screen, a page, a button, a drag, a tap, a badge, or a message that a person reads, or it starts with `Web:` or `Android:`. Choose it even when an API serves the screen. Write 1 to 20 steps of the person and the result that they must see.
 3. `notDrafted` when the criterion needs data or a call that you do not have. Say what is missing.
 
 Rules for a scenario:
 
+- The scenario is about this criterion only. Do not add requests or expected results for another requirement, even one that the same request would show.
 - The steps run in order and share nothing with another scenario. A step with `setup: true` prepares data and has no `expect`. Every other step has at least one.
 - Send the request that the criterion is about, and check what the criterion states: the status, the error code, a field that the criterion names. Do not check a value that you cannot know.
 - Read the record again after a refused or changed request only when the criterion says something about its state afterwards, such as "nothing changes".

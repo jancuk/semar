@@ -91,11 +91,12 @@ type CriterionOutcome struct {
 	Packet      Packet
 	Result      CriterionResult
 	Answered    bool
-	Rung        int  // the rung that answered, or the last that tried
-	Corrections int  // calls that repaired an answer of this criterion
-	Reused      bool // the answer is a stored answer of an earlier plan
-	Problems    []Problem
-	Output      []byte // the accepted output; the last output when there is none
+	Rung        int       // the rung that answered, or the last that tried
+	Corrections int       // calls that repaired an answer of this criterion
+	Reused      bool      // the answer is a stored answer of an earlier plan
+	Problems    []Problem // the problems of the last answer, when no model answered
+	Returned    []Problem // the problems that went back to a model, over every correction
+	Output      []byte    // the accepted output; the last output when there is none
 }
 
 type runState struct {
@@ -340,6 +341,7 @@ func (rs *runState) answer(ctx context.Context, p Packet) (CriterionOutcome, err
 			}
 		}
 		o.Corrections++
+		o.Returned = append(o.Returned, ps...)
 		var err error
 		if raw, err = rs.call(ctx, rung, p, raw, ps); err != nil {
 			return o, err
@@ -495,6 +497,7 @@ func (rs *runState) trial(ctx context.Context, b built) (built, *Trial, int, []R
 			mu.Lock()
 			defer mu.Unlock()
 			o.Result, o.Output, o.Corrections = res, raw, o.Corrections+1
+			o.Returned = append(slices.Clone(o.Returned), ps...)
 			repaired[idx] = o
 			return nil
 		})

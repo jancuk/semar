@@ -18,7 +18,7 @@ import (
 const (
 	// MaxPacketDiffBytes is the most diff text that one packet carries. It is the diff of the files
 	// that the ticket changed, whole files first as far as the budget lasts.
-	MaxPacketDiffBytes = 24 << 10
+	MaxPacketDiffBytes = 16 << 10
 	// maxPacketOperations bounds the operations of a packet, which the answer schema lists in full.
 	maxPacketOperations = 24
 	// maxRegistrationBytes bounds the part of a changed file that is read for route registrations.
