@@ -63,6 +63,9 @@ func secretEnvNames(cfg config.Config) []string {
 				names = append(names, name)
 			}
 		}
+		if p.Web != nil && p.Web.PasswordEnv() != "" {
+			names = append(names, p.Web.PasswordEnv())
+		}
 	}
 	return names
 }

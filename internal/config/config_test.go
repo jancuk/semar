@@ -542,3 +542,36 @@ func TestChangeBase(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthProfileWebSignIn(t *testing.T) {
+	head := envHead + envBody + "    services:\n      - {name: orders, baseUrl: \"https://api.uat.example.com\"}\nauthProfiles:\n"
+	cfg, err := loadText(t, head+"  ana:\n    description: A customer\n    web: {user: ana@example.com, password: \"env:ORDERS_WEB_PASSWORD\"}\n  bob:\n    description: No web\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := cfg.AuthProfiles["ana"].Web
+	if w == nil || w.User != "ana@example.com" || w.Password != "env:ORDERS_WEB_PASSWORD" || w.PasswordEnv() != "ORDERS_WEB_PASSWORD" {
+		t.Fatalf("web of ana = %+v", w)
+	}
+	if cfg.AuthProfiles["bob"].Web != nil {
+		t.Errorf("a profile with no web has %+v", cfg.AuthProfiles["bob"].Web)
+	}
+	for name, c := range map[string]struct{ text, want string }{
+		"a user alone":        {"web: {user: ana@example.com}", "authProfiles.ana.web needs both user and password"},
+		"a password alone":    {"web: {password: \"env:P\"}", "authProfiles.ana.web needs both user and password"},
+		"an empty block":      {"web: {}", "authProfiles.ana.web needs both user and password"},
+		"a literal password":  {"web: {user: ana, password: hunter2}", "authProfiles.ana.web.password"},
+		"another scheme":      {"web: {user: ana, password: \"keychain:P\"}", "authProfiles.ana.web.password"},
+		"an empty name":       {"web: {user: ana, password: \"env:\"}", "authProfiles.ana.web.password"},
+		"a name with a space": {"web: {user: ana, password: \"env:A B\"}", "authProfiles.ana.web.password"},
+		"a user with newline": {"web: {user: \"a\\nb\", password: \"env:P\"}", "authProfiles.ana.web.user"},
+		"a user with a bidi":  {"web: {user: \"a\\u202eb\", password: \"env:P\"}", "authProfiles.ana.web.user"},
+		"a user too long":     {"web: {user: " + strings.Repeat("x", 201) + ", password: \"env:P\"}", "authProfiles.ana.web.user"},
+		"an unknown key":      {"web: {user: ana, password: \"env:P\", mfa: x}", "mfa"},
+	} {
+		_, err := loadText(t, head+"  ana:\n    "+c.text+"\n")
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: want an error with %q, got %v", name, c.want, err)
+		}
+	}
+}

@@ -119,8 +119,28 @@ func validate(c Config, name string) error {
 		if problem := descriptionProblem(c.AuthProfiles[n].Description); problem != "" {
 			add("authProfiles.%s.description %s", n, problem)
 		}
+		validateWebSignIn(n, c.AuthProfiles[n].Web, add)
 	}
 	return joinErrors(errs)
+}
+
+var webPasswordPattern = regexp.MustCompile(`^env:[A-Za-z_][A-Za-z0-9_]*$`)
+
+func validateWebSignIn(account string, w *WebSignIn, add func(string, ...any)) {
+	if w == nil {
+		return
+	}
+	p := "authProfiles." + account + ".web"
+	if w.User == "" || w.Password == "" {
+		add("%s needs both user and password", p)
+		return
+	}
+	if problem := descriptionProblem(w.User); problem != "" {
+		add("%s.user %s", p, problem)
+	}
+	if !webPasswordPattern.MatchString(w.Password) {
+		add("%s.password must be a reference to an environment variable, env:NAME, and never the password itself", p)
+	}
 }
 
 func validateEnvironment(name string, e Environment, profiles map[string]AuthProfile, add func(string, ...any)) {

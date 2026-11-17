@@ -80,7 +80,20 @@ type AuthProfile struct {
 	Description string            `yaml:"description"`
 	Session     *SessionSpec      `yaml:"session"`
 	Secrets     map[string]string `yaml:"secrets"`
+	// Web is how the account signs in to the web application. Nil means Semar never signs in as
+	// this account.
+	Web *WebSignIn `yaml:"web"`
 }
+
+// WebSignIn is the user and the password of an account on a sign-in form. Password is a secret
+// reference, env:NAME, and never the password.
+type WebSignIn struct {
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+}
+
+// PasswordEnv is the name of the variable that holds the password.
+func (w WebSignIn) PasswordEnv() string { return strings.TrimPrefix(w.Password, "env:") }
 
 // SessionSpec's Value may hold {{secret.NAME}}.
 type SessionSpec struct{ Header, Value string }

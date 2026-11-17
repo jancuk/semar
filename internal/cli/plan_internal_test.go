@@ -108,3 +108,14 @@ func TestCostLimitNoteNamesTheProvidersItCannotBind(t *testing.T) {
 		}
 	}
 }
+
+func TestSecretEnvNamesListsThePasswordOfAWebSignIn(t *testing.T) {
+	cfg := config.Config{AuthProfiles: map[string]config.AuthProfile{
+		"default": {Secrets: map[string]string{"TOKEN": "env:ORDERS_TOKEN"}, Web: &config.WebSignIn{User: "ana@example.com", Password: "env:ORDERS_WEB_PASSWORD"}},
+	}}
+	got := secretEnvNames(cfg)
+	slices.Sort(got)
+	if want := []string{"ORDERS_TOKEN", "ORDERS_WEB_PASSWORD"}; !slices.Equal(got, want) {
+		t.Fatalf("secretEnvNames = %v, want %v", got, want)
+	}
+}
