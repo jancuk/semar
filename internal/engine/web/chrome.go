@@ -20,13 +20,36 @@ import (
 // ErrChromeNotFound is the error of a run on a machine where no Chrome can be started.
 var ErrChromeNotFound = errors.New("Chrome was not found: install Chrome or set web.chrome in semar.yaml")
 
+// chromeError is a Chrome that was not found, with the text for the person who set web.chrome.
+type chromeError struct{ msg string }
+
+func (e chromeError) Error() string        { return e.msg }
+func (e chromeError) Is(target error) bool { return target == ErrChromeNotFound }
+
+// ChromeNotFoundText is the message to show for an error that says that Chrome was not found, and
+// false for any other error. The error may be wrapped.
+func ChromeNotFoundText(err error) (string, bool) {
+	if !errors.Is(err, ErrChromeNotFound) {
+		return "", false
+	}
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if ce, ok := e.(chromeError); ok {
+			return ce.msg, true
+		}
+		if e == ErrChromeNotFound {
+			return e.Error(), true
+		}
+	}
+	return ErrChromeNotFound.Error(), true
+}
+
 // FindChrome gives the program to start. A configured path is used as it is and never replaced by
 // another Chrome, so a person who names one gets that one or an error.
 func FindChrome(configured string) (string, error) {
 	if configured != "" {
 		info, err := os.Stat(configured)
 		if err != nil || info.IsDir() {
-			return "", fmt.Errorf("Chrome was not found at the path of web.chrome, %s: install Chrome or correct web.chrome in semar.yaml: %w", configured, ErrChromeNotFound)
+			return "", chromeError{fmt.Sprintf("Chrome was not found at the path of web.chrome, %s: install Chrome or correct web.chrome in semar.yaml", configured)}
 		}
 		return configured, nil
 	}

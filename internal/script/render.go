@@ -283,3 +283,53 @@ func variables(req domain.APIRequest) []string {
 	}
 	return names
 }
+
+// RenderWeb returns a copy of w with every {{name}} replaced in the path and the value. A variable's
+// value is inserted into the path as one segment, as in a request.
+func RenderWeb(w domain.WebAction, vars map[string]string) (domain.WebAction, error) {
+	out := w
+	var err error
+	if w.Path != "" {
+		if out.Path, err = substitute(w.Path, vars, checkPathValue); err != nil {
+			return domain.WebAction{}, fmt.Errorf("path: %w", err)
+		}
+		if err = checkRenderedPath(w.Path, out.Path); err != nil {
+			return domain.WebAction{}, fmt.Errorf("path: %w", err)
+		}
+	}
+	if out.Value, err = substitute(w.Value, vars, nil); err != nil {
+		return domain.WebAction{}, fmt.Errorf("value: %w", err)
+	}
+	return out, nil
+}
+
+// RenderLocator returns a copy of l with every {{name}} replaced in its fields. A name without a
+// value is an error that names the variable and the field.
+func RenderLocator(l domain.Locator, vars map[string]string) (domain.Locator, error) {
+	out := l
+	for _, f := range []struct {
+		name string
+		to   *string
+		from string
+	}{{"testId", &out.TestID, l.TestID}, {"role", &out.Role, l.Role}, {"name", &out.Name, l.Name}, {"text", &out.Text, l.Text}, {"css", &out.CSS, l.CSS}} {
+		v, err := substitute(f.from, vars, nil)
+		if err != nil {
+			return domain.Locator{}, fmt.Errorf("%s: %w", f.name, err)
+		}
+		*f.to = v
+	}
+	return out, nil
+}
+
+// LocatorVariables lists the variable names in the fields of a locator, in order and without repeats.
+func LocatorVariables(l domain.Locator) []string {
+	var names []string
+	for _, text := range []string{l.TestID, l.Role, l.Name, l.Text, l.CSS} {
+		for _, m := range variablePattern.FindAllStringSubmatch(text, -1) {
+			if !slices.Contains(names, m[1]) {
+				names = append(names, m[1])
+			}
+		}
+	}
+	return names
+}

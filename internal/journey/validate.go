@@ -1,6 +1,7 @@
 package journey
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/scenario"
+	"github.com/jancuk/semar/internal/screens"
 	"github.com/jancuk/semar/internal/script"
 )
 
@@ -55,7 +57,7 @@ const (
 	minEvery      = 100 * time.Millisecond
 	// No hyphen: a leg ID is the head of {{<leg>.<output>}}, and a variable name has none.
 	legIDRule = `^[a-z][a-z0-9_]*$`
-	apiOnly   = "legs are not supported yet: this version runs api legs only; web legs come in M2 and android legs in M3"
+	notYet    = "legs are not supported yet: this version runs api legs and web legs; android legs come in M3"
 )
 
 var (
@@ -75,8 +77,22 @@ func Validate(j domain.Journey, outputs func(domain.FixtureID) ([]string, bool))
 	return validate(j, "", outputs)
 }
 
+// ScreensFunc gives the screens file of an app. The error is screens.ErrNotFound for a file that is not there.
+type ScreensFunc func(app string) (domain.Screens, error)
+
+// ValidateWithScreens is Validate for a journey that has web legs, with a lookup of the screens files,
+// so that a screen or an element that a step names and the file lacks is a problem. With a nil lookup,
+// the screens are not looked up.
+func ValidateWithScreens(j domain.Journey, outputs func(domain.FixtureID) ([]string, bool), screensOf ScreensFunc) []Problem {
+	return validateFull(j, "", outputs, screensOf)
+}
+
 func validate(j domain.Journey, file string, outputs func(domain.FixtureID) ([]string, bool)) []Problem {
-	v := &validator{file: file, j: j, outputs: outputs, aliases: map[string]alias{}, legIndex: map[domain.LegID]int{}}
+	return validateFull(j, file, outputs, nil)
+}
+
+func validateFull(j domain.Journey, file string, outputs func(domain.FixtureID) ([]string, bool), screensOf ScreensFunc) []Problem {
+	v := &validator{file: file, j: j, outputs: outputs, screens: screensOf, aliases: map[string]alias{}, legIndex: map[domain.LegID]int{}}
 	for i, l := range j.Legs {
 		if _, dup := v.legIndex[l.ID]; !dup {
 			v.legIndex[l.ID] = i
@@ -99,6 +115,7 @@ type alias struct {
 type validator struct {
 	file     string
 	j        domain.Journey
+	screens  ScreensFunc
 	outputs  func(domain.FixtureID) ([]string, bool)
 	aliases  map[string]alias
 	legIndex map[domain.LegID]int // the first leg with each ID
@@ -201,9 +218,10 @@ func (v *validator) legs() {
 		seen[l.ID] = true
 		v.needs(where, l)
 		v.surface(where, l)
-		if l.Surface != domain.SurfaceAPI {
+		if l.Surface != domain.SurfaceAPI && l.Surface != domain.SurfaceWeb {
 			continue
 		}
+		v.app(where, l)
 		switch {
 		case l.Service == "":
 			v.add(where+".service", "service is required")
@@ -214,6 +232,9 @@ func (v *validator) legs() {
 		}
 		reach := v.reach(l)
 		v.steps(i, l, reach)
+		if l.Surface == domain.SurfaceWeb {
+			v.screensOf(i, l)
+		}
 		v.wait(i, l)
 		v.legOutputs(i, l)
 	}
@@ -259,12 +280,30 @@ func (v *validator) needs(where string, l domain.Leg) {
 func (v *validator) surface(where string, l domain.Leg) {
 	switch l.Surface {
 	case domain.SurfaceAPI:
-	case domain.SurfaceWeb, domain.SurfaceAndroid:
-		v.add(where+".surface", "%s "+apiOnly, l.Surface)
+	case domain.SurfaceWeb:
+	case domain.SurfaceAndroid:
+		v.add(where+".surface", "%s "+notYet, l.Surface)
 	case "":
-		v.add(where+".surface", "surface is required: this version runs api legs only")
+		v.add(where+".surface", "surface is required: it is api or web")
 	default:
-		v.add(where+".surface", "surface %q is not known: this version runs api legs only; web legs come in M2 and android legs in M3", l.Surface)
+		v.add(where+".surface", "surface %q is not known: this version runs api legs and web legs; android legs come in M3", l.Surface)
+	}
+}
+
+// app checks the screens file that a web leg uses, and that an api leg uses none.
+func (v *validator) app(where string, l domain.Leg) {
+	switch {
+	case l.Surface == domain.SurfaceWeb && l.App == "":
+		v.add(where+".app", "app is required for a web leg: it names the screens file .semar/screens/<app>.yaml")
+	case l.Surface == domain.SurfaceWeb:
+		if err := idcheck.Check("app name", l.App); err != nil {
+			v.add(where+".app", "%v", err)
+		}
+	case l.App != "":
+		v.add(where+".app", "app is for a web leg: an api leg has no screens file")
+	}
+	if l.Surface == domain.SurfaceWeb && l.Wait != nil {
+		v.add(where+".wait", "a web leg cannot wait: a wait repeats the last request, and a web step has none. Use a step with do: wait for an element")
 	}
 }
 
@@ -308,11 +347,18 @@ func (v *validator) steps(li int, l domain.Leg, reach map[domain.LegID]bool) {
 	dup := false
 	for k, st := range l.Steps {
 		sp := fmt.Sprintf("%s.steps[%d]", base, k)
-		if st.Hint == nil {
-			v.add(sp+".hint", "a step needs a hint: a method and a path template")
-		}
-		if rs := st.Request.Service; rs != "" && rs != l.Service {
-			v.add(sp+".request.service", "%s differs from the leg's service %s", rs, l.Service)
+		if l.Surface == domain.SurfaceWeb {
+			v.webStep(sp, l, st)
+		} else {
+			if st.Web != nil {
+				v.add(sp+".web", "a step of an api leg has a request, and not a web action: web is for a leg with surface web")
+			}
+			if st.Hint == nil {
+				v.add(sp+".hint", "a step needs a hint: a method and a path template")
+			}
+			if rs := st.Request.Service; rs != "" && rs != l.Service {
+				v.add(sp+".request.service", "%s differs from the leg's service %s", rs, l.Service)
+			}
 		}
 		if _, ok := stepAt[st.ID]; ok {
 			dup = true
@@ -344,7 +390,11 @@ func (v *validator) steps(li int, l domain.Leg, reach map[domain.LegID]bool) {
 				continue
 			}
 			if k, ok := stepAt[p.Step]; ok {
-				v.add(fmt.Sprintf("%s.steps[%d].request", base, k), "%s", p.Message)
+				place, msg := "request", p.Message
+				if l.Steps[k].Web != nil {
+					place, msg = "web", strings.TrimPrefix(p.Message, "web: ")
+				}
+				v.add(fmt.Sprintf("%s.steps[%d].%s", base, k, place), "%s", msg)
 			} else {
 				v.add(base+".steps", "%s", p.Message)
 			}
@@ -359,6 +409,16 @@ func (v *validator) steps(li int, l domain.Leg, reach map[domain.LegID]bool) {
 		return v.refProblem(l, reach, name) == ""
 	}
 	for k, st := range l.Steps {
+		if st.Web != nil {
+			for _, name := range st.Web.Variables() {
+				if head, _, dotted := strings.Cut(name, "."); dotted && name != "run.id" && head != "secret" && head != "data" {
+					if msg := v.refProblem(l, reach, name); msg != "" {
+						v.add(fmt.Sprintf("%s.steps[%d].web", base, k), "%s", msg)
+					}
+				}
+			}
+			continue
+		}
 		req := st.Request
 		req.Service = vl.Service
 		for _, m := range script.RequestProblems(req, known) {
@@ -442,7 +502,7 @@ func (v *validator) wait(li int, l domain.Leg) {
 	case w.Timeout > 0 && w.Every > w.Timeout:
 		v.add(wp+".every", "wait every %s is above the timeout %s", w.Every, w.Timeout)
 	}
-	if n := len(l.Steps); n > 0 {
+	if n := len(l.Steps); n > 0 && l.Surface != domain.SurfaceWeb {
 		if m := l.Steps[n-1].Request.Method; m != "" && m != "GET" && m != "HEAD" {
 			v.add(wp, "the last step of leg %s is %s; a wait repeats the last step, which must read", l.ID, m)
 		}
@@ -523,4 +583,65 @@ func (v *validator) invariantRef(head, rest string) string {
 		return notAnOutput(name, head, outs)
 	}
 	return ""
+}
+
+// webStep checks the one action of a step of a web leg, and that the step has no request and no hint.
+func (v *validator) webStep(sp string, l domain.Leg, st domain.LegStep) {
+	switch {
+	case st.Web == nil:
+		v.add(sp+".web", "a step of a web leg needs web: its one browser action")
+		return
+	case st.Hint != nil:
+		v.add(sp+".hint", "a step of a web leg has no hint: a hint is the method and the path of a request")
+	}
+	if !requestEmpty(st.Request) {
+		v.add(sp+".request", "a step of a web leg has a web action, and not a request")
+	}
+	if w := st.Web; w.Service != "" && w.Service != l.Service {
+		v.add(sp+".web.service", "%s differs from the leg's service %s: write the service on the leg", w.Service, l.Service)
+	}
+	if w := st.Web; w.App != "" && w.App != l.App {
+		v.add(sp+".web.app", "%s differs from the leg's app %s: write the app on the leg", w.App, l.App)
+	}
+}
+
+func requestEmpty(r domain.APIRequest) bool {
+	return r.Service == "" && r.Method == "" && r.Path == "" && len(r.Query) == 0 && len(r.Headers) == 0 && r.JSON == nil
+}
+
+// screensOf checks that the screens file of a web leg is there and has every screen and element that
+// the steps of the leg name.
+func (v *validator) screensOf(li int, l domain.Leg) {
+	if v.screens == nil || l.App == "" || idcheck.Check("app name", l.App) != nil {
+		return
+	}
+	where := fmt.Sprintf("legs[%d]", li)
+	scr, err := v.screens(l.App)
+	switch {
+	case errors.Is(err, screens.ErrNotFound):
+		v.add(where+".app", "the screens of %s were not found: %s", l.App, screens.Path(l.App))
+		return
+	case err != nil:
+		v.add(where+".app", "the screens of %s cannot be used: %v", l.App, err)
+		return
+	}
+	for k, st := range l.Steps {
+		if st.Web == nil {
+			continue
+		}
+		var elements []string
+		for _, e := range st.Expect {
+			if e.Check.Element != "" {
+				elements = append(elements, e.Check.Element)
+			}
+		}
+		for _, c := range st.Captures {
+			if c.Element != "" {
+				elements = append(elements, c.Element)
+			}
+		}
+		for _, msg := range screens.Check(scr, []screens.Use{{Action: *st.Web, Elements: elements}}) {
+			v.add(fmt.Sprintf("%s.steps[%d].web", where, k), "%s", msg)
+		}
+	}
 }

@@ -120,9 +120,9 @@ func TestValidateRules(t *testing.T) {
 		{rule: "J6", name: "twelve legs", edit: manyLegs(12)},
 		{rule: "J6", name: "thirteen legs", edit: manyLegs(13), path: "legs", want: "13 legs; at most 12"},
 
-		{rule: "J7", name: "web", edit: func(j *domain.Journey) { j.Legs[0].Surface = "web" }, path: "legs[0].surface", want: "web legs are not supported yet: this version runs api legs only; web legs come in M2 and android legs in M3"},
-		{rule: "J7", name: "android", edit: func(j *domain.Journey) { j.Legs[0].Surface = "android" }, path: "legs[0].surface", want: "android legs are not supported yet: this version runs api legs only; web legs come in M2 and android legs in M3"},
-		{rule: "J7", name: "unknown surface", edit: func(j *domain.Journey) { j.Legs[0].Surface = "ios" }, path: "legs[0].surface", want: `surface "ios" is not known: this version runs api legs only`},
+		{rule: "J7", name: "web without an app", edit: func(j *domain.Journey) { j.Legs[0].Surface = "web" }, path: "legs[0].app", want: "app is required for a web leg"},
+		{rule: "J7", name: "android", edit: func(j *domain.Journey) { j.Legs[0].Surface = "android" }, path: "legs[0].surface", want: "android legs are not supported yet: this version runs api legs and web legs; android legs come in M3"},
+		{rule: "J7", name: "unknown surface", edit: func(j *domain.Journey) { j.Legs[0].Surface = "ios" }, path: "legs[0].surface", want: `surface "ios" is not known: this version runs api legs and web legs`},
 		{rule: "J7", name: "no surface", edit: func(j *domain.Journey) { j.Legs[0].Surface = "" }, path: "legs[0].surface", want: "surface is required"},
 
 		{rule: "J8", name: "no service", edit: func(j *domain.Journey) { j.Legs[0].Service = "" }, path: "legs[0].service", want: "service is required"},
@@ -315,28 +315,11 @@ func TestTheExampleHasNoProblems(t *testing.T) {
 	}
 }
 
-func TestWebSurfaceRefused(t *testing.T) {
-	j := example(t)
-	j.Legs[1].Surface = domain.SurfaceWeb
-	// A web leg has no request, so its steps are not read as api steps and add no problem.
-	j.Legs[1].Steps, j.Legs[1].Service = nil, ""
-	ps := Validate(j, nil)
-	want := "web legs are not supported yet: this version runs api legs only; web legs come in M2 and android legs in M3"
-	if len(ps) == 0 || !hasProblem(ps, "legs[1].surface", want) {
-		t.Fatalf("problems = %v", ps)
-	}
-	for _, p := range ps {
-		if strings.Contains(p.Path, "steps") || strings.Contains(p.Path, "service") {
-			t.Errorf("the refused leg is also read as an api leg: %v", p)
-		}
-	}
-}
-
 func TestAndroidSurfaceRefused(t *testing.T) {
 	j := example(t)
 	j.Legs[1].Surface = domain.SurfaceAndroid
 	j.Legs[1].Steps, j.Legs[1].Service = nil, ""
-	want := "android legs are not supported yet: this version runs api legs only; web legs come in M2 and android legs in M3"
+	want := "android legs are not supported yet: this version runs api legs and web legs; android legs come in M3"
 	if ps := Validate(j, nil); !hasProblem(ps, "legs[1].surface", want) {
 		t.Fatalf("problems = %v", ps)
 	}

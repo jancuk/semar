@@ -28,7 +28,7 @@ func legScenario(j domain.Journey, leg domain.Leg, authProfile string) (domain.S
 		Title:       j.Title + ": " + string(leg.ID),
 		Ticket:      string(j.ID),
 		Intent:      "Leg " + string(leg.ID) + " of journey " + string(j.ID) + ": " + j.Title,
-		Surface:     domain.SurfaceAPI,
+		Surface:     cmp.Or(leg.Surface, domain.SurfaceAPI),
 		AuthProfile: authProfile,
 		Steps:       make([]domain.Step, len(leg.Steps)),
 	}
@@ -42,6 +42,12 @@ func legScenario(j domain.Journey, leg domain.Leg, authProfile string) (domain.S
 	for i, st := range leg.Steps {
 		as := cmp.Or(st.As, leg.As)
 		sc.Steps[i] = domain.Step{ID: st.ID, Setup: st.Setup, Action: st.Action, Hint: st.Hint, Expect: st.Expect, As: as}
+		if st.Web != nil {
+			w := *st.Web
+			w.Service, w.App = leg.Service, leg.App
+			sr.Steps[i] = domain.ScriptStep{Step: st.ID, Web: &w, Captures: st.Captures}
+			continue
+		}
 		req := st.Request
 		req.Service = leg.Service
 		req.Query = maps.Clone(req.Query)

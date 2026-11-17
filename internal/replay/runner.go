@@ -11,6 +11,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -64,9 +65,17 @@ type Deps struct {
 	// Accounts are the auth profiles of the configuration that a step may act as (steps[].as).
 	// The profile of a scenario itself is always known.
 	Accounts []string
+	// Web is the browser engine and Screens the screens files that its steps use. Without them, a
+	// scenario with a web step ends blocked.
+	Web     WebDoer
+	Screens ScreenSource
 }
 
-type Runner struct{ d Deps }
+type Runner struct {
+	d Deps
+	// webMu holds one scenario with web steps at a time, so that two of them never act on one page.
+	webMu sync.Mutex
+}
 
 func New(d Deps) *Runner {
 	if d.Workers <= 0 {
@@ -318,6 +327,15 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 	note := func(step domain.StepID, text string) {
 		run.notes = append(run.notes, domain.Reason{Rule: domain.OutcomeInconclusive, Text: text, Step: step})
 	}
+	var wr *webRun
+	if slices.ContainsFunc(s.Steps, func(ss domain.ScriptStep) bool { return ss.Web != nil }) {
+		r.webMu.Lock()
+		defer r.webMu.Unlock()
+		var proceed bool
+		if wr, proceed = r.prepareWeb(sc, s, run); !proceed {
+			return nil
+		}
+	}
 	var doErr error
 	interrupted := false
 	// shown holds the variables as a report may show them: a capture is the redacted value of
@@ -325,17 +343,18 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 	shown := maps.Clone(vars)
 	for i, step := range sc.Steps {
 		ss, ok := bound[step.ID]
-		if !ok || ss.Request == nil {
-			note(step.ID, fmt.Sprintf("step %s has no request in the script, so the later steps were not sent", step.ID))
+		if !ok || (ss.Request == nil && ss.Web == nil) {
+			what := "request"
+			if sc.Surface == domain.SurfaceWeb {
+				what = "web action"
+			}
+			note(step.ID, fmt.Sprintf("step %s has no %s in the script, so the later steps were not sent", step.ID, what))
 			break
 		}
-		call, err := buildCall(sc, step, ss, vars, pass)
-		if err != nil {
-			note(step.ID, fmt.Sprintf("step %s could not be sent: the request could not be built", step.ID))
+		res, err := r.send(ctx, wr, run, sc, step, ss, vars, pass, note)
+		if !res.built {
 			break
 		}
-		res, err := r.d.Engine.Do(ctx, call)
-		run.last = &call
 		if res.Action.ID != "" {
 			have, showing := maps.Clone(vars), maps.Clone(shown)
 			maps.Copy(have, res.Captured)
@@ -343,7 +362,9 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 			run.steps[step.ID] = evaluate(step, res.Action, have, showing)
 		}
 		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			if reason, blocked := blockedByBrowser(err); blocked {
+				run.blocked = append(run.blocked, reason)
+			} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				interrupted = true
 			} else {
 				note(step.ID, fmt.Sprintf("step %s could not be sent or recorded", step.ID))
@@ -351,7 +372,7 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 			}
 			break
 		}
-		if a := res.Action; a.Response == nil || a.Refused != "" || a.Err != "" {
+		if a := res.Action; (a.Web == nil && a.Response == nil) || a.Refused != "" || a.Err != "" {
 			break
 		}
 		maps.Copy(run.captured, res.Captured)
@@ -371,6 +392,38 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 		note("", reasonInterrupted)
 	}
 	return doErr
+}
+
+// sent is the answer of an engine to one step, whichever engine it was. built is false when the step
+// could not be built, and the note says why.
+type sent struct {
+	Action   domain.Action
+	Captured map[string]string
+	Missing  []string
+	built    bool
+}
+
+// send hands one step to the engine of its surface: the browser for a web step, the API engine for a
+// request. It is the one place where the two meet, so that a step is recorded, judged, and stopped on
+// in one way.
+func (r *Runner) send(ctx context.Context, wr *webRun, run *replayed, sc domain.Scenario, step domain.Step, ss domain.ScriptStep, vars map[string]string, pass domain.Pass, note func(domain.StepID, string)) (sent, error) {
+	if ss.Web != nil {
+		call, err := wr.webCall(sc, step, ss, vars, pass)
+		if err != nil {
+			note(step.ID, fmt.Sprintf("step %s could not be run: %v", step.ID, err))
+			return sent{}, nil
+		}
+		res, err := r.d.Web.Do(ctx, call)
+		return sent{res.Action, res.Captured, res.Missing, true}, err
+	}
+	call, err := buildCall(sc, step, ss, vars, pass)
+	if err != nil {
+		note(step.ID, fmt.Sprintf("step %s could not be sent: the request could not be built", step.ID))
+		return sent{}, nil
+	}
+	res, err := r.d.Engine.Do(ctx, call)
+	run.last = &call
+	return sent{res.Action, res.Captured, res.Missing, true}, err
 }
 
 func buildCall(sc domain.Scenario, step domain.Step, ss domain.ScriptStep, vars map[string]string, pass domain.Pass) (api.Call, error) {
@@ -414,7 +467,11 @@ func buildCall(sc domain.Scenario, step domain.Step, ss domain.ScriptStep, vars 
 // evaluate reads only the redacted, stored action. A variable in a string operand is filled in
 // from vars before the check; shown holds the same variables as a report may print them.
 func evaluate(step domain.Step, a domain.Action, vars, shown map[string]string) verdict.StepEvidence {
-	ev := verdict.StepEvidence{Action: &a, Invariants: check.Invariants(step, a)}
+	ev := verdict.StepEvidence{Action: &a}
+	if a.Web == nil {
+		// A browser action has no response to hold an invariant.
+		ev.Invariants = check.Invariants(step, a)
+	}
 	for _, e := range step.Expect {
 		ev.Checks = append(ev.Checks, evalExpectation(e.Check, a, vars, shown))
 	}

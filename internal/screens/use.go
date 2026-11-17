@@ -23,14 +23,14 @@ func Check(s domain.Screens, uses []Use) []string {
 		named := append(u.Action.Elements(), u.Elements...)
 		if u.Action.Screen == "" {
 			if len(u.Elements) > 0 {
-				out = append(out, fmt.Sprintf("%s names element %s but has no screen", u.Where, u.Elements[0]))
+				out = append(out, say(u.Where, " ", "names element %s but has no screen", u.Elements[0]))
 			}
 			continue
 		}
 		elements, ok := s.Screens[u.Action.Screen]
 		if !ok {
-			out = append(out, fmt.Sprintf("%s: screen %s is not in the screens of %s; its screens are %s",
-				u.Where, u.Action.Screen, s.App, list(s.ScreenNames())))
+			out = append(out, say(u.Where, ": ", "screen %s is not in the screens of %s; its screens are %s",
+				u.Action.Screen, s.App, list(s.ScreenNames())))
 			continue
 		}
 		seen := map[string]bool{}
@@ -40,12 +40,22 @@ func Check(s domain.Screens, uses []Use) []string {
 			}
 			seen[name] = true
 			if _, ok := elements[name]; !ok {
-				out = append(out, fmt.Sprintf("%s: element %s is not on screen %s of %s; its elements are %s",
-					u.Where, name, u.Action.Screen, s.App, list(s.ElementNames(u.Action.Screen))))
+				out = append(out, say(u.Where, ": ", "element %s is not on screen %s of %s; its elements are %s",
+					name, u.Action.Screen, s.App, list(s.ElementNames(u.Action.Screen))))
 			}
 		}
 	}
 	return out
+}
+
+// say puts where in front of the message, with the joint between them, and leaves both out when the
+// caller has no place to name.
+func say(where, joint, format string, args ...any) string {
+	msg := fmt.Sprintf(format, args...)
+	if where == "" {
+		return msg
+	}
+	return where + joint + msg
 }
 
 func list(names []string) string {

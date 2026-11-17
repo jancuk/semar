@@ -416,10 +416,10 @@ func (e *Engine) read(rd *reader, c Call) (map[string]domain.ElementState, []dom
 			repair = append(repair, Candidates(name, *res.state.Locator, tree)...)
 		}
 	}
-	// The elements of the action that are not watched are read too, but they stay out of the record
-	// when only the action named them: the target is in the record already.
+	// An element that only the action named stays out of the record when it was found: the target is
+	// in the record already. One that was not found stays in, with the locator that missed.
 	for _, name := range w.Elements() {
-		if !slices.ContainsFunc(c.Watch, func(wt Watched) bool { return wt.Element == name }) {
+		if !slices.ContainsFunc(c.Watch, func(wt Watched) bool { return wt.Element == name }) && states[name].Found {
 			delete(states, name)
 		}
 	}

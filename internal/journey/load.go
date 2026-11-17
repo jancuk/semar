@@ -17,6 +17,7 @@ import (
 
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/fixture"
+	"github.com/jancuk/semar/internal/screens"
 )
 
 const (
@@ -91,7 +92,7 @@ func Load(repo string) ([]domain.Journey, []Problem, error) {
 			problems = append(problems, Problem{File: rel, Message: tooLarge})
 			continue
 		}
-		j, ps := decode(data, rel, outputs)
+		j, ps := decode(data, rel, outputs, func(app string) (domain.Screens, error) { return screens.Load(repo, app) })
 		if len(ps) > 0 {
 			problems = append(problems, ps...)
 			continue
@@ -104,12 +105,12 @@ func Load(repo string) ([]domain.Journey, []Problem, error) {
 }
 
 // decode parses and validates one file. rel is how a problem names it.
-func decode(data []byte, rel string, outputs func(domain.FixtureID) ([]string, bool)) (domain.Journey, []Problem) {
+func decode(data []byte, rel string, outputs func(domain.FixtureID) ([]string, bool), screensOf ScreensFunc) (domain.Journey, []Problem) {
 	j, err := Parse(data, rel)
 	if err != nil {
 		return domain.Journey{}, parseProblems(err, rel)
 	}
-	ps := validate(j, rel, outputs)
+	ps := validateFull(j, rel, outputs, screensOf)
 	if len(ps) == 0 {
 		return j, nil
 	}

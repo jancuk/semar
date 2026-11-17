@@ -117,7 +117,7 @@ func TestLoadReportsInvalidFilesAndKeepsValidOnes(t *testing.T) {
 		".semar/journeys/empty.yaml: the file is empty",
 		".semar/journeys/twice.yaml: journey twice has two files: twice.yaml and twice.yml",
 		".semar/journeys/twice.yml: journey twice has two files: twice.yaml and twice.yml",
-		".semar/journeys/web.yaml:9: legs[0].surface: web legs are not supported yet",
+		".semar/journeys/web.yaml:8: legs[0].app: app is required for a web leg",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("problems do not hold %q:\n%s", want, got)
