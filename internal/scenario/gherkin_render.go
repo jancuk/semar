@@ -91,10 +91,9 @@ func Render(s domain.Scenario, subject string) ([]byte, error) {
 
 	for i, g := range s.Given {
 		path := fmt.Sprintf("given[%d]", i)
-		var w domain.Given
-		w, b2 := r.given(path, g, i == 0)
+		w, text := r.given(path, g, i == 0)
 		want.Given = append(want.Given, w)
-		b.WriteString(b2)
+		b.WriteString(text)
 	}
 
 	prev := kindNone
