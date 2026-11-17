@@ -335,6 +335,9 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 		if wr, proceed = r.prepareWeb(sc, s, run); !proceed {
 			return nil
 		}
+		if wr != nil {
+			r.d.Web.NewScenario()
+		}
 	}
 	var doErr error
 	interrupted := false

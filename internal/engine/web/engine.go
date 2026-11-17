@@ -135,6 +135,15 @@ func randomHex(n int) string {
 func (e *Engine) Close() {
 	e.mu.Lock()
 	e.closed = true
+	e.mu.Unlock()
+	e.NewScenario()
+}
+
+// NewScenario ends every browser that the engine started, so that the scenario that comes next
+// starts with no page, no state of a tab, and no session cookie of the one before. The profile on
+// the disk stays, and with it what a person signed in to with semar login.
+func (e *Engine) NewScenario() {
+	e.mu.Lock()
 	sessions := slices.Collect(maps.Values(e.sessions))
 	e.sessions = map[string]*session{}
 	e.mu.Unlock()

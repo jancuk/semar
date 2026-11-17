@@ -15,6 +15,8 @@ import (
 // WebDoer is the browser engine.
 type WebDoer interface {
 	Do(ctx context.Context, c web.Call) (web.Result, error)
+	// NewScenario makes the next action start in a browser that holds nothing of the scenario before.
+	NewScenario()
 }
 
 // ScreenSource gives the screens file of an app, and says whether a person approved it as it is now.

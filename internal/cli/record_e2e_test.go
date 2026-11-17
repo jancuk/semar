@@ -60,6 +60,21 @@ document.getElementById('go').addEventListener('click', () => {
 });
 </script></body></html>`
 
+// tabSessionShop keeps who signed in for as long as the tab lives, and shows no form to a person
+// who is signed in, as an application with a session in sessionStorage does.
+const tabSessionShop = `<!doctype html><html><head><title>Desk</title></head><body>
+<form id="form"><label>Email <input id="email" type="text"></label><button id="go" type="button">Sign in</button></form>
+<p id="welcome"></p>
+<script>
+const show = () => {
+  const who = sessionStorage.getItem('who');
+  if (who && document.getElementById('form')) document.getElementById('form').remove();
+  document.getElementById('welcome').textContent = who ? 'Welcome ' + who : 'signed out';
+};
+document.getElementById('go').addEventListener('click', () => { sessionStorage.setItem('who', document.getElementById('email').value); show(); });
+show();
+</script></body></html>`
+
 // orderShop is the page of one order: its number is in the address, the title, and the text.
 func orderShop(id string) string {
 	return `<!doctype html><html><head><title>Order ` + id + `</title></head><body>
@@ -82,6 +97,7 @@ func recordRepoWith(t *testing.T, o repoOptions) (*repo, *shopPages) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/refund", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, refundShop(pages.refund.Load())) })
 		mux.HandleFunc("/signin", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, signInShop) })
+		mux.HandleFunc("/desk", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, tabSessionShop) })
 		mux.HandleFunc("/braces", func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprint(w, `<!doctype html><title>Braces</title><p id="t">hello {{x}} world</p>`)
 		})
@@ -205,6 +221,24 @@ func TestRecordWritesATestThatReplaysAndFailsWhenACheckIsWrong(t *testing.T) {
 	failed := r.run(t, trusted, cli.ExitFailed, "--scenario", "SHOP-482-07")
 	contains(t, "the run", failed.stdout, "SHOP-482-07  failed")
 	contains(t, "the report", r.lastReport(t), "6.00")
+}
+
+// Each scenario signs in by itself, so the second must not start in the tab that the first left signed in.
+func TestTwoWebScenariosOfOneRunDoNotShareTheStateOfATab(t *testing.T) {
+	r, _ := recordRepo(t)
+	ctx := t.Context()
+	signIn := func(email string) person {
+		return func(d webtest.Driver) {
+			must(t, d.Type("#email", email))
+			must(t, d.Click("#go"))
+			must(t, d.OptionClick("#welcome"))
+		}
+	}
+	r.record(t, ctx, cli.ExitOK, signIn("ana@example.com"), "SHOP-482-21", "--open", "/desk", "--service", "orders")
+	r.record(t, ctx, cli.ExitOK, signIn("ben@example.com"), "SHOP-482-22", "--open", "/desk", "--service", "orders")
+
+	both := r.semar(t, cli.WithTrustedScreens(ctx, "orders"), "run", "--scenario", "SHOP-482-21", "--scenario", "SHOP-482-22")
+	contains(t, "the run", both.stdout, "SHOP-482-21  passed", "SHOP-482-22  passed")
 }
 
 func TestRecordWithNoCheckWritesNothingAndSaysHow(t *testing.T) {

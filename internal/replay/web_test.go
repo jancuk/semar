@@ -30,6 +30,8 @@ type fakeWeb struct {
 	reply func(c web.Call, n int) (web.Result, error)
 }
 
+func (f *fakeWeb) NewScenario() {}
+
 func (f *fakeWeb) Do(_ context.Context, c web.Call) (web.Result, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, c)
