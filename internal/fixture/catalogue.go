@@ -44,8 +44,8 @@ func (c Catalogue) Get(id domain.FixtureID) (domain.Fixture, bool) {
 // reuse its ID. A file that cannot be used is a Problem, and the valid files stay.
 //
 // services is the list of services of every environment of the configuration, for rule F16. With
-// nil, F16 is not checked.
-func Load(repo string, services []string) (Catalogue, error) {
+// nil, F16 is not checked. The option Accounts adds rule F17.
+func Load(repo string, services []string, opts ...Option) (Catalogue, error) {
 	root, err := openDir(repo)
 	if err != nil || root == nil {
 		return Catalogue{}, err
@@ -91,7 +91,7 @@ func Load(repo string, services []string) (Catalogue, error) {
 			c.Problems = append(c.Problems, Problem{File: rel, Message: tooLarge})
 			continue
 		}
-		f, ps := decode(data, rel, services)
+		f, ps := decode(data, rel, services, opts...)
 		if len(ps) > 0 {
 			c.Problems = append(c.Problems, ps...)
 			continue
@@ -106,7 +106,7 @@ func Load(repo string, services []string) (Catalogue, error) {
 // LoadOne reads the one fixture file with this ID, for a person who is about to approve it. The ID
 // comes from the command line, so it must match the ID pattern before it names a file. An unusable
 // file is an error that lists every problem, one per line.
-func LoadOne(repo string, id domain.FixtureID, services []string) (domain.Fixture, error) {
+func LoadOne(repo string, id domain.FixtureID, services []string, opts ...Option) (domain.Fixture, error) {
 	if !idPattern.MatchString(string(id)) || len(id) > maxIDBytes {
 		return domain.Fixture{}, fmt.Errorf("invalid fixture ID %q: use lower-case letters, digits, hyphen, and underscore in parts that a dot separates, starting with a letter, at most %d bytes", id, maxIDBytes)
 	}
@@ -145,7 +145,7 @@ func LoadOne(repo string, id domain.FixtureID, services []string) (domain.Fixtur
 	if big {
 		return domain.Fixture{}, fmt.Errorf("%s", Problem{File: rel, Message: tooLarge})
 	}
-	f, ps := decode(data, rel, services)
+	f, ps := decode(data, rel, services, opts...)
 	if len(ps) > 0 {
 		lines := make([]string, len(ps))
 		for i, p := range ps {
@@ -242,12 +242,12 @@ func readFile(root *os.Root, name string) (data []byte, big bool, err error) {
 }
 
 // decode parses and validates one file. rel is how a problem names it.
-func decode(data []byte, rel string, services []string) (domain.Fixture, []Problem) {
+func decode(data []byte, rel string, services []string, opts ...Option) (domain.Fixture, []Problem) {
 	f, err := Parse(data, rel)
 	if err != nil {
 		return domain.Fixture{}, parseProblems(err, rel)
 	}
-	if ps := validate(f, rel, services); len(ps) > 0 {
+	if ps := validate(f, rel, services, opts...); len(ps) > 0 {
 		return domain.Fixture{}, ps
 	}
 	return f, nil

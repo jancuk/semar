@@ -46,7 +46,11 @@ func fixtureLines(fx domain.Fixture, h domain.Hash) []string {
 func fixtureStepLine(phase string, n int, st domain.FixtureStep) string {
 	r := st.Request
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s %d: %s %s %s", phase, n, r.Method, r.Service, r.Path)
+	fmt.Fprintf(&b, "%s %d", phase, n)
+	if st.As != "" {
+		b.WriteString(" as " + st.As)
+	}
+	fmt.Fprintf(&b, ": %s %s %s", r.Method, r.Service, r.Path)
 	pairs := func(label string, m map[string]string) {
 		if len(m) == 0 {
 			return

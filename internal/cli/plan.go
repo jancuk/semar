@@ -378,7 +378,7 @@ func findTickets(stderr io.Writer, sourceDir string, sources []knowledge.Source,
 // marked approved when a person approved it as it is now. A file that cannot be used stays out,
 // and one line for each of its problems says so.
 func planFixtures(stderr io.Writer, repo string, cfg config.Config) ([]fixture.Entry, fixture.Catalogue, error) {
-	cat, err := fixture.Load(repo, allServices(cfg))
+	cat, err := fixture.Load(repo, allServices(cfg), fixtureAccounts(cfg))
 	if err != nil {
 		return nil, fixture.Catalogue{}, err
 	}

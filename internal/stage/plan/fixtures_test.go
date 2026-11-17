@@ -473,3 +473,25 @@ func TestPlanMarkdownWithNoFixturesNeeded(t *testing.T) {
 		t.Error("plan.md has a given line for a scenario with none")
 	}
 }
+
+func TestPlanMdSaysWhichAccountsAFixtureActsAs(t *testing.T) {
+	fx := domain.Fixture{
+		ID: "board.private", Description: "A board of carol that the default account is not a member of",
+		Create: []domain.FixtureStep{
+			{As: "carol", Request: domain.APIRequest{Service: "shop", Method: "POST", Path: "/v1/orders"}},
+			{As: "carol", Request: domain.APIRequest{Service: "shop", Method: "POST", Path: "/v1/orders/{{id}}/lines"}},
+		},
+		Cleanup: []domain.FixtureStep{{As: "bob", Request: domain.APIRequest{Service: "shop", Method: "POST", Path: "/v1/orders/{{id}}/cancel"}}},
+	}
+	var b strings.Builder
+	writeFixturesDrafted(&b, Output{FixtureDrafts: []FixtureDraft{{Need: FixtureNeed{ID: "board.private"}, Drafted: true, Fixture: fx}}})
+	if want := "3 requests as bob, carol, cleans up."; !strings.Contains(b.String(), want) {
+		t.Errorf("plan.md lacks %q:\n%s", want, b.String())
+	}
+	fx.Create[0].As, fx.Create[1].As, fx.Cleanup[0].As = "", "", ""
+	b.Reset()
+	writeFixturesDrafted(&b, Output{FixtureDrafts: []FixtureDraft{{Need: FixtureNeed{ID: "board.private"}, Drafted: true, Fixture: fx}}})
+	if strings.Contains(b.String(), " as ") || !strings.Contains(b.String(), "3 requests, cleans up.") {
+		t.Errorf("a fixture with no account says none:\n%s", b.String())
+	}
+}

@@ -1,4 +1,4 @@
-version: 2
+version: 3
 
 You write one fixture for automated API tests. A fixture prepares data that scenarios need before their first request, and removes it afterwards. Your answer is one JSON object in the schema that came with this prompt. It names things that this prompt lists, and it never writes a method, an address, a host, a header, or a credential: a program supplies those. A program runs the fixture once, and a person reviews it before it counts.
 
@@ -16,7 +16,11 @@ Use only these operations, and under each one only the parameters and the body f
 
 ## The account
 
-Every request of the fixture is sent as `[[.Account]]`, the account that the scenarios act as. A fixture cannot send a request as another account. If the state needs data that only another account can make, make what `[[.Account]]` can make and leave the rest.
+Every request of the fixture is sent as `[[.Account]]`, the account that the scenarios act as.[[if .Accounts]] A step may name another account in `as`. A step that makes something that belongs to another account acts as that account.
+
+These accounts are in the configuration:
+
+[[.Accounts]][[end]]
 
 ## How to answer
 

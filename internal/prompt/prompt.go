@@ -63,7 +63,8 @@ type CriterionData struct {
 type FixtureData struct {
 	Fixture    string // the ID, the state, and the outputs, as a fenced block
 	Operations string // a Markdown list of the operations that the job can call
-	Account    string // the account that every request of the fixture is sent as
+	Account    string // the account that a request of the fixture is sent as when its step names none
+	Accounts   string // a Markdown list of the accounts a step may act as; empty with fewer than two
 	Correction bool   // the job repairs a previous answer
 	Previous   string // the previous answer as a fenced block
 	Problems   string // a Markdown list of what the previous answer got wrong

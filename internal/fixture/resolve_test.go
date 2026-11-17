@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -552,6 +553,46 @@ func TestPerServiceAuthProfile(t *testing.T) {
 	}
 	if h := r.sink.all()[0].Request.Headers["Authorization"]; h != nil {
 		t.Errorf("a step without a profile carries %v", h)
+	}
+}
+
+func TestAStepSendsAsTheAccountItNames(t *testing.T) {
+	f := example(t)
+	f.Create[0].As = "bob"
+	f.Create[1].As = "alice" // a payments step: as wins over the auth profile of the service
+	f.Create[2].As = "bob"   // the order of bob is read by bob
+	f.Cleanup[0].As = "bob"
+	var mu sync.Mutex
+	var seen []string
+	record := func(rewrite string) func(http.Handler) http.Handler {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				mu.Lock()
+				seen = append(seen, req.Method+" "+req.URL.Path+" "+req.Header.Get("Authorization"))
+				mu.Unlock()
+				if rewrite != "" {
+					req.Header.Set("Authorization", rewrite) // the payments sample knows one token only
+				}
+				next.ServeHTTP(w, req)
+			})
+		}
+	}
+	r := newRig(t, rigOptions{fixtures: []domain.Fixture{f}, wrapOrders: record(""), wrapPayments: record("Bearer tok-pay")})
+	res := r.resolve(request(orderGiven))
+	if len(res.Blocked) > 0 {
+		t.Fatalf("Blocked = %q", res.Blocked)
+	}
+	r.resolver().Release(t.Context(), res)
+	want := []string{
+		"GET /v1/orders Bearer tok-alice",
+		"POST /v1/orders Bearer tok-bob",
+		"POST /v1/payments Bearer tok-alice",
+		"GET /v1/orders/o-1 Bearer tok-bob",
+		"GET /v1/orders/o-1 Bearer tok-bob",
+		"POST /v1/orders/o-1/cancel Bearer tok-bob",
+	}
+	if diff := diff(want, seen); diff != "" {
+		t.Errorf("requests as the services saw them (-want +got):\n%s", diff)
 	}
 }
 

@@ -42,7 +42,6 @@ func TestParseRefusals(t *testing.T) {
 		name, text, want string
 	}{
 		{"unknown key", edited(t, "version: 1.0.0", "version: 1.0.0\nretries: 3"), "retries"},
-		{"as in a fixture step", edited(t, "captures: [{ name: id, jsonpath: \"$.data[0].id\" }]", "captures: [{ name: id, jsonpath: \"$.data[0].id\" }]\n    as: carol"), "as"},
 		{"unknown key in a step", edited(t, "captures: [{ name: id, jsonpath: \"$.data[0].id\" }]", "captures: [{ name: id, jsonpath: \"$.data[0].id\" }]\n    retry: 2"), "retry"},
 		{"empty", "", "the file is empty"},
 		{"second document", exampleText(t) + "---\n" + exampleText(t), "more than one YAML document"},
@@ -110,5 +109,15 @@ func TestParseKeepsATimeoutOfABody(t *testing.T) {
 	}
 	if f.Create[0].Request.JSON.(map[string]any)["timeout"] != 30 {
 		t.Errorf("body = %v", f.Create[0].Request.JSON)
+	}
+}
+
+func TestParseReadsTheAccountOfAStep(t *testing.T) {
+	f, err := Parse([]byte(edited(t, "captures: [{ name: id, jsonpath: \"$.data[0].id\" }]", "captures: [{ name: id, jsonpath: \"$.data[0].id\" }]\n    as: carol")), "x.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Find[0].As != "carol" || f.Create[0].As != "" {
+		t.Errorf("as = %q, %q", f.Find[0].As, f.Create[0].As)
 	}
 }

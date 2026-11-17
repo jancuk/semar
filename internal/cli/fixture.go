@@ -62,7 +62,7 @@ func listFixtures(ctx context.Context, stdout, stderr io.Writer, f fixtureListFl
 	if err != nil && !(errors.Is(err, fs.ErrNotExist) && f.env == "") {
 		return err
 	}
-	cat, err := fixture.Load(f.dir, allServices(cfg))
+	cat, err := fixture.Load(f.dir, allServices(cfg), fixtureAccounts(cfg))
 	if err != nil {
 		return err
 	}
@@ -107,6 +107,9 @@ func listFixtures(ctx context.Context, stdout, stderr io.Writer, f fixtureListFl
 		cells := []string{string(fx.ID), fx.Version, fx.Owner, approval}
 		if health != nil {
 			cells = append(cells, healthWords(health, f.env, fx))
+		}
+		if as := fx.Accounts(); len(as) > 0 {
+			cells = append(cells, "acts as "+strings.Join(as, ", "))
 		}
 		used := "used by no scenario"
 		if ids := users[fx.ID]; len(ids) > 0 {
@@ -219,7 +222,7 @@ func checkFixtures(ctx context.Context, stdout, stderr io.Writer, o options, f f
 	if err != nil {
 		return err
 	}
-	cat, err := fixture.Load(f.dir, allServices(cfg))
+	cat, err := fixture.Load(f.dir, allServices(cfg), fixtureAccounts(cfg))
 	if err != nil {
 		return err
 	}

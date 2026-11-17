@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"time"
 )
 
@@ -41,6 +42,9 @@ type Param struct {
 }
 
 type FixtureStep struct {
+	// As names an auth profile: the step is sent with that profile's session, as the as of a scenario
+	// step is. Empty is the account of the run.
+	As       string     `yaml:"as,omitempty"`
 	Request  APIRequest `yaml:"request"`
 	Captures []Capture  `yaml:"captures,omitempty"`
 	Until    *Until     `yaml:"until,omitempty"`
@@ -120,6 +124,7 @@ type hashedUntil struct {
 }
 
 type hashedFixtureStep struct {
+	As       string          `json:"as,omitempty"`
 	Request  hashedRequest   `json:"request"`
 	Captures []hashedCapture `json:"captures,omitempty"`
 	Until    *hashedUntil    `json:"until,omitempty"`
@@ -144,7 +149,7 @@ func hashedSteps(in []FixtureStep) []hashedFixtureStep {
 	}
 	out := make([]hashedFixtureStep, len(in))
 	for i, st := range in {
-		hs := hashedFixtureStep{Request: hashedRequest(st.Request)}
+		hs := hashedFixtureStep{As: st.As, Request: hashedRequest(st.Request)}
 		for _, c := range st.Captures {
 			hs.Captures = append(hs.Captures, hashedCapture{Name: c.Name, JSONPath: c.JSONPath, Element: c.Element})
 		}
@@ -181,4 +186,18 @@ func FixtureHash(f Fixture) Hash {
 	}
 	sum := sha256.Sum256(b)
 	return Hash(hex.EncodeToString(sum[:]))
+}
+
+// Accounts are the auth profiles that the steps of the fixture act as, sorted, each once.
+func (f Fixture) Accounts() []string {
+	var out []string
+	for _, steps := range [][]FixtureStep{f.Find, f.Create, f.Cleanup} {
+		for _, st := range steps {
+			if st.As != "" && !slices.Contains(out, st.As) {
+				out = append(out, st.As)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
 }

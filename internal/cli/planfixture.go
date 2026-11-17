@@ -76,6 +76,11 @@ func (t *fixtureRig) open(ctx context.Context) (*envRig, string) {
 			needs[s.AuthProfile] = "service " + s.Name + " of a drafted fixture"
 		}
 	}
+	for name := range t.cfg.AuthProfiles {
+		if _, ok := needs[name]; !ok {
+			needs[name] = "an account that a drafted fixture may act as"
+		}
+	}
 	rg, err := newEnvRig(ctx, t.o, t.dir, t.cfg, t.env, nil, needs)
 	if err != nil {
 		t.failed = "the run could not start: " + oneLine(terminalSafe(err.Error()))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -99,10 +100,89 @@ func TestTheFixtureSchemaOffersOnlyTheOperationsOfItsPacket(t *testing.T) {
 			t.Errorf("the schema lacks %s", want)
 		}
 	}
-	for _, not := range []string{`"find"`, `"until"`, `"as"`, `"expect"`} {
+	for _, not := range []string{`"find"`, `"until"`, `"expect"`} {
 		if strings.Contains(s, not) {
 			t.Errorf("the schema offers %s, which a drafted fixture does not have", not)
 		}
+	}
+}
+
+func stepAccounts(t *testing.T, fp FixturePacket) []any {
+	t.Helper()
+	var schema map[string]any
+	if err := json.Unmarshal(fp.Schema(), &schema); err != nil {
+		t.Fatal(err)
+	}
+	fx := schema["properties"].(map[string]any)["fixture"].(map[string]any)["properties"].(map[string]any)
+	var out []any
+	for _, phase := range []string{"create", "cleanup"} {
+		step := fx[phase].(map[string]any)["items"].(map[string]any)
+		if branches, ok := step["anyOf"].([]any); ok {
+			step = branches[0].(map[string]any)
+		}
+		as, ok := step["properties"].(map[string]any)["as"].(map[string]any)
+		if !ok {
+			return nil
+		}
+		out = append(out, as["enum"])
+	}
+	return out
+}
+
+func TestEachStepOfTheFixtureSchemaChoosesAnAccount(t *testing.T) {
+	_, fp := fixturePacket(t)
+	got := stepAccounts(t, fp)
+	if len(got) != 2 || !reflect.DeepEqual(got[0], []any{"default", "bob"}) || !reflect.DeepEqual(got[1], []any{"default", "bob"}) {
+		t.Errorf("the accounts of a create step and of a cleanup step = %v", got)
+	}
+	fp.Accounts = fp.Accounts[:1]
+	if got := stepAccounts(t, fp); got != nil {
+		t.Errorf("one account is no choice, and the schema offers %v", got)
+	}
+}
+
+func TestTheFixturePromptListsTheAccountsAndSaysWhenToActAsOne(t *testing.T) {
+	_, fp := fixturePacket(t)
+	text, err := fp.Prompt(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"- `bob`: A customer with no refund rights.", "- `default`: A support agent.", "acts as that account"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the prompt lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "cannot send a request as another account") {
+		t.Errorf("the prompt still says that a fixture cannot act as another account:\n%s", text)
+	}
+	fp.Accounts = fp.Accounts[:1]
+	text, _ = fp.Prompt(nil, nil)
+	if strings.Contains(text, "acts as that account") || strings.Contains(text, "- `default`:") {
+		t.Errorf("one account is no choice, and the prompt offers it:\n%s", text)
+	}
+}
+
+func TestAStepThatActsAsAnotherAccountKeepsItAndTheDefaultIsLeftOut(t *testing.T) {
+	in, fp := fixturePacket(t)
+	answer := strings.Replace(refundedFixtureAnswer, `{"operation":"createOrder",`, `{"as":"bob","operation":"createOrder",`, 1)
+	answer = strings.Replace(answer, `{"operation":"post_v1_orders_orderId_refunds",`, `{"as":"default","operation":"post_v1_orders_orderId_refunds",`, 1)
+	fx, ps := fp.Convert(decodeFixture(t, answer), in)
+	if len(ps) > 0 {
+		t.Fatalf("problems:\n%s", messages(ps))
+	}
+	if fx.Create[0].As != "bob" || fx.Create[1].As != "" {
+		t.Errorf("as = %q, %q; want bob, and none for the default account", fx.Create[0].As, fx.Create[1].As)
+	}
+	data, err := fixture.Marshal(fx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), "as:") != 1 || !strings.Contains(string(data), "as: bob") {
+		t.Errorf("the file:\n%s", data)
+	}
+	bad := strings.Replace(refundedFixtureAnswer, `{"operation":"createOrder",`, `{"as":"carol","operation":"createOrder",`, 1)
+	if _, ps := fp.Convert(decodeFixture(t, bad), in); !strings.Contains(messages(ps), "carol is not an auth profile of the configuration: use one of bob, default") {
+		t.Errorf("problems = %q", messages(ps))
 	}
 }
 
@@ -129,6 +209,7 @@ func TestTheFixturePromptHoldsTheStateTheOperationsAndTheAccount(t *testing.T) {
 type fixtureScript struct {
 	mu       sync.Mutex
 	fixtures []string // the answers to fixture jobs, in turn
+	state    string   // what a criterion says is true of the fixture it needs, when it is not the default
 	prompts  []string
 	jobs     []provider.Job
 }
@@ -155,7 +236,11 @@ func (s *fixtureScript) fake(id string) *fake.Fake {
 		case strings.Contains(j.Prompt, ticket482+":9\n") && strings.Contains(j.Prompt, "- `order.refunded`"):
 			out = scenarioWithRefundedFixture
 		case strings.Contains(j.Prompt, ticket482+":9\n"):
-			out = needAnswer("order.refunded", "An order that has been refunded in part", "id")
+			state := "An order that has been refunded in part"
+			if s.state != "" {
+				state = s.state
+			}
+			out = needAnswer("order.refunded", state, "id")
 		case strings.Contains(j.Prompt, ticket482+":10\n"):
 			out = refundAnswer("A partial refund is accepted", 40000, 201, "amount")
 		default:
@@ -365,5 +450,106 @@ func TestACaptureOfAWholeObjectIsAProblemInAFixtureAndInAScenario(t *testing.T) 
 	_, ps = p.Convert(a, in2)
 	if !strings.Contains(messages(ps), "capture order reads $.data, which is an object") {
 		t.Errorf("a scenario step may capture an object: %q", messages(ps))
+	}
+}
+
+func TestTheFixturePromptHasNoDoubleBlankLine(t *testing.T) {
+	_, fp := fixturePacket(t)
+	for _, accounts := range [][]Account{fp.Accounts, fp.Accounts[:1]} {
+		fp.Accounts = accounts
+		text, err := fp.Prompt(nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(text, "\n\n\n") {
+			t.Errorf("the prompt holds two blank lines in a row:\n%s", text)
+		}
+	}
+}
+
+func fixtureNamed(state string) FixturePacket {
+	fp := FixturePacket{Need: FixtureNeed{ID: "order.refunded", State: state, Outputs: []string{"id"}}, Account: "default",
+		Accounts: []Account{{Name: "default"}, {Name: "bob"}, {Name: "support-agent"}}}
+	return fp
+}
+
+func TestADescriptionThatNamesAnAccountNeedsAStepThatActsAsIt(t *testing.T) {
+	in, fp := fixturePacket(t)
+	for name, tc := range map[string]struct {
+		state, answer string
+		problem       string
+	}{
+		"the account is named and no step acts as it": {
+			state: "An order that the bob account made, refunded in part", answer: refundedFixtureAnswer,
+			problem: "the description names the account bob, and no step acts as bob: set as on each step that bob sends",
+		},
+		"the name is capitalised": {
+			state: "An order of Bob, refunded in part", answer: refundedFixtureAnswer,
+			problem: "no step acts as bob",
+		},
+		"another account acts, not the one named": {
+			state: "An order of bob, refunded in part", answer: strings.Replace(refundedFixtureAnswer, `{"operation":"createOrder",`, `{"as":"default","operation":"createOrder",`, 1),
+			problem: "no step acts as bob",
+		},
+		"a step acts as the account": {
+			state:  "An order that the bob account made, refunded in part",
+			answer: strings.Replace(refundedFixtureAnswer, `{"operation":"createOrder",`, `{"as":"bob","operation":"createOrder",`, 1),
+		},
+		"the default account needs no step": {state: "An order of the default account, refunded in part", answer: refundedFixtureAnswer},
+		"a word that holds the name":        {state: "An order of bobby and of a bobsled, refunded in part", answer: refundedFixtureAnswer},
+		"no account is named":               {state: "An order that has been refunded in part", answer: refundedFixtureAnswer},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fp := fp
+			fp.Need.State = tc.state
+			_, ps := fp.Convert(decodeFixture(t, tc.answer), in)
+			if tc.problem == "" {
+				if len(ps) > 0 {
+					t.Fatalf("problems:\n%s", messages(ps))
+				}
+				return
+			}
+			if !strings.Contains(messages(ps), tc.problem) {
+				t.Errorf("problems = %q, want one that holds %q", messages(ps), tc.problem)
+			}
+		})
+	}
+}
+
+func TestAnAccountNameIsAWordOfTheDescription(t *testing.T) {
+	for _, tc := range []struct {
+		state string
+		named []string
+	}{
+		{"A board owned by the bob account", []string{"bob"}},
+		{"bob's board, with one list.", []string{"bob"}},
+		{"A board of bob.", []string{"bob"}},
+		{"A board of support-agent, not of bob", []string{"bob", "support-agent"}},
+		{"A board of support", nil},
+		{"A board of the default account", nil},
+		{"A board of bobby", nil},
+		{"A board of sub-bob", nil},
+	} {
+		if got := fixtureNamed(tc.state).accountsNamed(); !reflect.DeepEqual(got, tc.named) {
+			t.Errorf("%q names %v, want %v", tc.state, got, tc.named)
+		}
+	}
+}
+
+func TestADraftThatLeavesOutTheAccountIsCorrectedAndThenPasses(t *testing.T) {
+	in := shopInput(t)
+	withBob := strings.Replace(refundedFixtureAnswer, `{"operation":"createOrder",`, `{"as":"bob","operation":"createOrder",`, 1)
+	s := &fixtureScript{state: "An order that the bob account made, refunded in part", fixtures: []string{refundedFixtureAnswer, withBob}}
+	in.Ladder = ladder(Rung{Planner: s.fake("p"), Model: "haiku"})
+	out, err := RunCriteria(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := out.FixtureDrafts[0]
+	if !d.Drafted || d.Corrections != 1 || d.Fixture.Create[0].As != "bob" {
+		t.Fatalf("draft = %+v", d)
+	}
+	if !strings.Contains(messages(d.Returned), "no step acts as bob: set as on each step that bob sends") {
+		t.Errorf("the problem that went back = %q", messages(d.Returned))
 	}
 }

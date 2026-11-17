@@ -162,7 +162,7 @@ func runCatalogue(stderr io.Writer, repo string, cfg config.Config, scenarios []
 	if !slices.ContainsFunc(scenarios, func(sc domain.Scenario) bool { return len(sc.Given) > 0 }) {
 		return nil, nil
 	}
-	cat, err := fixture.Load(repo, allServices(cfg))
+	cat, err := fixture.Load(repo, allServices(cfg), fixtureAccounts(cfg))
 	if err != nil {
 		return nil, err
 	}
@@ -191,6 +191,11 @@ func allServices(cfg config.Config) []string {
 	}
 	slices.Sort(names)
 	return slices.Compact(names)
+}
+
+// fixtureAccounts is rule F17: the as of a fixture step is an auth profile of the configuration.
+func fixtureAccounts(cfg config.Config) fixture.Option {
+	return fixture.Accounts(slices.Sorted(maps.Keys(cfg.AuthProfiles))...)
 }
 
 // envRig is what a run against one environment needs before it sends anything: the evidence run,
@@ -385,6 +390,9 @@ func sessionNeeds(cfg config.Config, env config.Environment, scenarios []domain.
 func addServiceProfiles(needs map[string]string, env config.Environment, f domain.Fixture, why string) {
 	for _, steps := range [][]domain.FixtureStep{f.Find, f.Create, f.Cleanup} {
 		for _, st := range steps {
+			if _, ok := needs[st.As]; st.As != "" && !ok {
+				needs[st.As] = "a step of fixture " + string(f.ID) + " that acts as it"
+			}
 			for _, s := range env.Services {
 				if s.Name != st.Request.Service || s.AuthProfile == "" {
 					continue
