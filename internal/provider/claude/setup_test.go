@@ -246,3 +246,18 @@ func TestStreamFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestNoToolsJobPassesNoTool(t *testing.T) {
+	b := newBinary(t, "stream_success.jsonl", 0, "")
+	d := newSetupDriver(t, config.Provider{ID: "c", Kind: "claude"}, b.path)
+	j := job(t)
+	j.NoTools = true
+	if _, err := d.Run(context.Background(), j); err != nil {
+		t.Fatal(err)
+	}
+	args := argsOf(t, b)
+	i := slices.Index(args, "--tools")
+	if i < 0 || i+1 >= len(args) || args[i+1] != "" {
+		t.Fatalf("--tools must take one empty argument, args = %q", args)
+	}
+}

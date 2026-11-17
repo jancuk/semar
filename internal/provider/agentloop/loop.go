@@ -100,6 +100,8 @@ const (
 	systemText = "You work in a read-only copy of a source tree. Use read_file, search, and list_files to study it; " +
 		"every path is relative to the working directory. When you have the answer, call submit once, " +
 		"with the complete result object as its arguments. A reply without a tool call is not read."
+	noToolsSystemText = "You have no tool except submit. Answer from the prompt alone: call submit once, " +
+		"with the complete result object as its arguments. A reply without a tool call is not read."
 	reminderText = "Your reply had no tool call. Call submit now with the complete result object as its arguments, " +
 		"or call another tool if you still need to read something."
 )
@@ -136,6 +138,10 @@ func Run(ctx context.Context, client Client, job provider.Job) (provider.Result,
 		System:   systemText,
 		Messages: []Message{{Role: RoleUser, Text: job.Prompt}},
 		Tools:    toolDefs(job.Schema),
+	}
+	if job.NoTools {
+		// submit is the last definition. A job that cannot read has nothing else to call.
+		req.System, req.Tools = noToolsSystemText, req.Tools[len(req.Tools)-1:]
 	}
 	var res provider.Result
 	var progress provider.Progress
@@ -195,7 +201,11 @@ func Run(ctx context.Context, client Client, job provider.Job) (provider.Result,
 				return res, &provider.Error{Class: provider.ValidationError, Detail: "the model twice replied without calling submit"}
 			}
 			reminded = true
-			req.Messages = append(req.Messages, Message{Role: RoleUser, Text: reminderText})
+			reminder := reminderText
+			if job.NoTools {
+				reminder = "Your reply had no tool call. Call submit now with the complete result object as its arguments."
+			}
+			req.Messages = append(req.Messages, Message{Role: RoleUser, Text: reminder})
 			continue
 		}
 		results := make([]ToolResult, 0, len(msg.Calls))

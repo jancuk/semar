@@ -20,6 +20,7 @@ type Fake struct {
 	id      string
 	root    string
 	outputs []string
+	answer  func(provider.Job) (provider.Result, error)
 
 	mu   sync.Mutex
 	next int
@@ -33,6 +34,12 @@ func New(cfg config.Provider, repoRoot string) (*Fake, error) {
 		}
 	}
 	return &Fake{id: cfg.ID, root: repoRoot, outputs: cfg.Outputs}, nil
+}
+
+// NewFunc is a fake whose answer is computed from the job, for a stage that runs many jobs at once
+// and so cannot depend on the order of prepared files. answer may be called from several goroutines.
+func NewFunc(id string, answer func(provider.Job) (provider.Result, error)) *Fake {
+	return &Fake{id: id, answer: answer}
 }
 
 func Factory(repoRoot string) provider.Factory {
@@ -49,6 +56,12 @@ func (f *Fake) Health(context.Context) provider.Health {
 func (f *Fake) Run(ctx context.Context, job provider.Job) (provider.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return provider.Result{}, fmt.Errorf("run fake provider: %w", err)
+	}
+	if f.answer != nil {
+		f.mu.Lock()
+		f.jobs = append(f.jobs, job)
+		f.mu.Unlock()
+		return f.answer(job)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()

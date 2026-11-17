@@ -48,6 +48,9 @@ type Job struct {
 	MaxTurns  int
 	Timeout   time.Duration
 	Progress  func(Progress) // nil for no reports
+	// NoTools gives the job no tool at all: it cannot read a file, search, or run a command, and
+	// answers from its prompt. Workdir still names a directory, which the job never reads.
+	NoTools bool
 }
 
 // Progress is what a running job has done so far. A provider reports it when it can, with

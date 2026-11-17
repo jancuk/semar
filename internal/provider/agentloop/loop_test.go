@@ -439,3 +439,27 @@ func TestRunReportsProgress(t *testing.T) {
 		})
 	}
 }
+
+func TestRunNoToolsOffersOnlySubmit(t *testing.T) {
+	job := newJob(t)
+	job.NoTools = true
+	s := &script{t: t}
+	s.steps = append(s.steps,
+		func(req Request) (Response, error) {
+			if len(req.Tools) != 1 || req.Tools[0].Name != "submit" {
+				t.Fatalf("tools = %+v", req.Tools)
+			}
+			if strings.Contains(req.System, "read_file") {
+				t.Errorf("the system text names a tool that the job lacks: %q", req.System)
+			}
+			return calls(call("c1", "submit", `{"summary":"s"}`)), nil
+		},
+	)
+	res, err := Run(context.Background(), s, job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Turns != 1 || string(res.Output) != `{"summary":"s"}` {
+		t.Fatalf("got %+v", res)
+	}
+}

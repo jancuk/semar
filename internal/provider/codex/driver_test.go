@@ -860,3 +860,27 @@ func TestRunReasoning(t *testing.T) {
 		}
 	})
 }
+
+func TestNoToolsJobTurnsTheCommandToolsOff(t *testing.T) {
+	for _, noTools := range []bool{false, true} {
+		b := newBinary(t, "success.jsonl", 0, "")
+		d := newDriver(t, config.Provider{ID: "c", Kind: "codex"}, b.path)
+		j := job(t)
+		j.NoTools = noTools
+		if _, err := d.Run(context.Background(), j); err != nil {
+			t.Fatal(err)
+		}
+		args := argsOf(t, b)
+		var off []string
+		for i, a := range args {
+			if a == "--disable" {
+				off = append(off, args[i+1])
+			}
+		}
+		for _, f := range []string{"shell_tool", "unified_exec"} {
+			if slices.Contains(off, f) != noTools {
+				t.Errorf("noTools=%v: --disable %s present = %v", noTools, f, !noTools)
+			}
+		}
+	}
+}

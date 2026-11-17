@@ -2,6 +2,7 @@ package fake_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -124,5 +125,18 @@ func TestFakeReportsNoProgress(t *testing.T) {
 	reports := 0
 	if _, err := f.Run(context.Background(), provider.Job{Prompt: "p", Progress: func(provider.Progress) { reports++ }}); err != nil || reports != 0 {
 		t.Fatalf("%d reports, %v", reports, err)
+	}
+}
+
+func TestFuncAnswersFromTheJob(t *testing.T) {
+	f := fake.NewFunc("f", func(j provider.Job) (provider.Result, error) {
+		return provider.Result{Output: json.RawMessage(`{"model":"` + j.Model + `"}`), Turns: 1}, nil
+	})
+	res, err := f.Run(context.Background(), provider.Job{Model: "m1"})
+	if err != nil || string(res.Output) != `{"model":"m1"}` {
+		t.Fatalf("got %+v, %v", res, err)
+	}
+	if jobs := f.Jobs(); len(jobs) != 1 || jobs[0].Model != "m1" {
+		t.Fatalf("jobs = %+v", jobs)
 	}
 }

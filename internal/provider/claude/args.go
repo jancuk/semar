@@ -44,6 +44,9 @@ func buildArgs(job provider.Job, cfg config.Provider) []string {
 	if s.Skills {
 		tools += ",Skill"
 	}
+	if job.NoTools {
+		tools = ""
+	}
 	args = append(args, "--json-schema", string(job.Schema), "--tools", tools)
 	if !s.MCP {
 		args = append(args, "--strict-mcp-config")

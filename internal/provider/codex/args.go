@@ -23,6 +23,10 @@ var alwaysOff = []string{
 	"image_generation", "multi_agent", "tool_suggest", "skill_mcp_dependency_install",
 }
 
+// noToolFeatures are the features that let a job run a command, which the model would use to read
+// files. A job with no tools turns them off, and codex 0.169 answers from the prompt.
+var noToolFeatures = []string{"shell_tool", "unified_exec"}
+
 type argSpec struct {
 	workdir    string // resolved, absolute
 	schemaFile string // "" when the schema goes in the prompt
@@ -31,6 +35,7 @@ type argSpec struct {
 	setup      config.Setup
 	skillRoots []string
 	repoSkills []string
+	noTools    bool // the job answers from its prompt: the command tools are off
 }
 
 // buildArgs never passes --sandbox read-only, which lets commands read the whole disk, and never
@@ -45,6 +50,9 @@ func buildArgs(s argSpec) ([]string, error) {
 		args = append(args, "--model="+s.model)
 	}
 	off := slices.Clone(alwaysOff)
+	if s.noTools {
+		off = append(off, noToolFeatures...)
+	}
 	switch {
 	case !s.setup.MCP && !s.setup.Skills:
 		args = append(args, "--ignore-user-config")

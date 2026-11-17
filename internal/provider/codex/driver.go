@@ -203,6 +203,7 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 		setup:      d.cfg.Setup,
 		skillRoots: d.skillRoots(),
 		repoSkills: repoSkills(workdir),
+		noTools:    job.NoTools,
 	})
 	if err != nil {
 		return provider.Result{}, err
