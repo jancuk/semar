@@ -7,7 +7,6 @@ import (
 	"maps"
 	"math"
 	"reflect"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,12 +16,6 @@ import (
 	yaml "go.yaml.in/yaml/v4"
 
 	"github.com/jancuk/semar/internal/domain"
-)
-
-const (
-	apiVersion = "semar/v1"
-	kind       = "Scenario"
-	maxDepth   = 200
 )
 
 // Marshal writes s as block YAML that Parse reads back to the same value, with the same expectation
@@ -290,8 +283,6 @@ func (e *enc) value(path string, v any, depth int) (*yaml.Node, any) {
 	return plain("null"), nil
 }
 
-var jsonNumber = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
-
 // number writes a JSON number as its own text. The expectation hash covers the number as
 // encoding/json writes the value that Parse reads, so a text that differs from it is refused.
 func (e *enc) number(path string, n json.Number) (*yaml.Node, any) {
@@ -327,54 +318,6 @@ func (e *enc) number(path string, n json.Number) (*yaml.Node, any) {
 		return plain("null"), nil
 	}
 	return plain(text), value
-}
-
-var decimalParts = regexp.MustCompile(`^(-?)([0-9]+)(?:\.([0-9]*))?(?:[eE]([-+]?[0-9]+))?$`)
-
-// decimalKey names the value of a decimal text so that two texts of one value have one key.
-func decimalKey(text string) string {
-	m := decimalParts.FindStringSubmatch(text)
-	if m == nil {
-		return "?" + text
-	}
-	exp := 0
-	if m[4] != "" {
-		n, err := strconv.Atoi(m[4])
-		if err != nil {
-			return "?" + text
-		}
-		exp = n
-	}
-	digits := strings.TrimLeft(m[2]+m[3], "0")
-	exp -= len(m[3])
-	trimmed := strings.TrimRight(digits, "0")
-	exp += len(digits) - len(trimmed)
-	if trimmed == "" {
-		return "0"
-	}
-	return m[1] + trimmed + "e" + strconv.Itoa(exp)
-}
-
-// floatText is the shortest decimal that reads back as f. When whole is set, a text that has no
-// point or exponent gets ".0" so that YAML reads a float and not an integer.
-func floatText(f float64, whole bool) string {
-	var s string
-	if a := math.Abs(f); a == 0 || (a >= 1e-6 && a < 1e21) {
-		s = strconv.FormatFloat(f, 'f', -1, 64)
-	} else {
-		s = strconv.FormatFloat(f, 'e', -1, 64)
-		if i := strings.IndexByte(s, 'e'); i >= 0 {
-			exp := strings.TrimLeft(s[i+2:], "0")
-			if exp == "" {
-				exp = "0"
-			}
-			s = s[:i+2] + exp
-		}
-	}
-	if whole && !strings.ContainsAny(s, ".eE") {
-		s += ".0"
-	}
-	return s
 }
 
 var reserved = []string{"true", "false", "null", "yes", "no", "on", "off", "y", "n", "inf", "infinity", "nan"}
