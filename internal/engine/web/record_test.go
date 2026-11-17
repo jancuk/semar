@@ -444,3 +444,50 @@ func TestOptionClickRecordsACheckAndTheCheckedPageNeverSeesIt(t *testing.T) {
 		t.Errorf("a click: %s", describeEvents([]record.Event{ev}))
 	}
 }
+
+const signInPage = `<!doctype html><html><head><title>Sign in</title></head><body>
+<label>Email <input type="text" id="email"></label>
+<label>Password <input type="password" id="pw"></label>
+<label>Code <input type="text" id="code" autocomplete="one-time-code"></label>
+<label>New <input type="text" id="np" autocomplete="new-password"></label>
+<button id="go">Sign in</button>
+</body></html>`
+
+func TestAPasswordIsNeverReadOrSent(t *testing.T) {
+	const password = "hunter2-correct-horse"
+	r := newRecRig(t, map[string]string{"/signin": signInPage})
+	r.open("/signin?next=1#top")
+	r.events(1)
+
+	r.typeInto("#email", "ana@example.com")
+	r.typeInto("#pw", password)
+	r.key(kb.Enter)
+	r.typeInto("#np", password+"-2")
+	r.click("#go")
+	got := r.events(5)
+	// The email, the password and its Enter, the field that asks for a new password, and the button.
+	if got[0].Kind != record.KindFill || got[0].Value != "ana@example.com" || got[0].Secret {
+		t.Errorf("the email: %s", describeEvents(got[:1]))
+	}
+	for _, i := range []int{1, 3} {
+		if got[i].Kind != record.KindFill || !got[i].Secret || got[i].Value != "" {
+			t.Errorf("event %d should say that a secret was typed and nothing of it: %s", i, describeEvents(got[i:i+1]))
+		}
+	}
+	if got[2].Kind != record.KindPress || got[2].Value != "Enter" {
+		t.Errorf("Enter in the password field: %s", describeEvents(got[2:3]))
+	}
+
+	// The page that an event names is its path: a form that sends a password in the address would
+	// otherwise put it in every event after it.
+	if u := got[0].Page.URL; strings.ContainsAny(u, "?#") {
+		t.Errorf("the page of a typed text has a query or a fragment: %s", u)
+	}
+
+	// Nothing that the recorder holds has the password, in any form that it was typed.
+	all := describeEvents(r.rec.Events())
+	if strings.Contains(all, password) || strings.Contains(all, "hunter2") {
+		t.Errorf("a password is in the events: %s", all)
+	}
+	r.rec.Finish()
+}

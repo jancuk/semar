@@ -6,7 +6,7 @@
   const isTrusted = e => e.isTrusted === true;
 
   function send(ev) {
-    ev.page = { url: location.href, title: document.title };
+    ev.page = { url: location.origin + location.pathname, title: document.title };
     const bind = window.__semarEvent;
     if (typeof bind === 'function') bind(JSON.stringify(ev));
   }
