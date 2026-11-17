@@ -435,14 +435,14 @@ func TestPromptCarriesTheEvidenceOfTheChange(t *testing.T) {
 	}
 	for _, want := range []string{
 		"CHANGE-TABLE\n\n### Files left out of the copy\n\nThese files of the head commit are not in your copy of the source, so you cannot read them.\n\n- `big.bin`: larger than 5 MiB\n\n## The difference\n\n",
-		"This is the whole difference between the two versions. Do not read `.semar-plan/change.diff`: it holds the same text.\n\n```diff\ndiff --git a/a.go b/a.go\n```\n\n## The API operations that the difference names\n\n",
+		"This is the whole difference between the two versions, apart from Semar's own files under `.semar`, which are not part of the source. You need not read `.semar-plan/change.diff`.\n\n```diff\ndiff --git a/a.go b/a.go\n```\n\n## The API operations that the difference names\n\n",
 		"Read the document at the line given when you need a request body, a field, or a status text.\n\n- `POST /v1/orders` (`createOrder`): Create an order. Declares 201, 400\n\n## What you may use",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the prompt lacks %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "The difference is large") || strings.Count(got, "\n\n\n") != 0 {
+	if strings.Contains(got, "This is a part of the difference") || strings.Count(got, "\n\n\n") != 0 {
 		t.Errorf("the prompt has the wrong sentence or two blank lines in a row:\n%s", got)
 	}
 
@@ -454,8 +454,8 @@ func TestPromptCarriesTheEvidenceOfTheChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"The difference is large, so this is the part of it that matters most",
-		"`.semar-plan/change.diff` holds all of it. To see a file that is not shown, search that file for the file's path.\n\n```diff\ndiff --git a/a.go b/a.go\n```\n\nNot shown here:\n\n- `b.go` (+900 -2, source)\n- `c.go` (+800 -0, test)\n\n## What you may use",
+		"This is a part of the difference: whole files",
+		"To see another file that is not shown here, search `.semar-plan/change.diff` for the file's path.\n\n```diff\ndiff --git a/a.go b/a.go\n```\n\nNot shown here:\n\n- `b.go` (+900 -2, source)\n- `c.go` (+800 -0, test)\n\n## What you may use",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the prompt lacks %q:\n%s", want, got)
@@ -468,7 +468,7 @@ func TestPromptCarriesTheEvidenceOfTheChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "holds all of it.") || !strings.Contains(got, "Not shown here:\n\n- `b.go`") || strings.Count(got, "\n\n\n") != 0 {
+	if !strings.Contains(got, "as far as the prompt has room") || !strings.Contains(got, "Not shown here:\n\n- `b.go`") || strings.Count(got, "\n\n\n") != 0 {
 		t.Errorf("a diff of which no file fits the budget is not described:\n%s", got)
 	}
 }

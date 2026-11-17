@@ -28,7 +28,7 @@ const maxAPISummary = 200
 // diffChoice is the part of the diff that goes into the prompt.
 type diffChoice struct {
 	Text    string   // the diff, in git's unified format, as chosen; "" when none of it is shown
-	Whole   bool     // Text is the whole diff
+	Whole   bool     // Text is every file of the diff except those of .semar
 	Omitted []string // one Markdown line for each file whose hunks are not in Text
 }
 
@@ -38,32 +38,60 @@ type diffSection struct {
 	text   string
 }
 
-// chooseDiff keeps the whole diff when it fits the budget. Otherwise it ranks the files and keeps
+// chooseDiff never shows the files of .semar, which hold Semar's own configuration and name hosts
+// (R19). It keeps the rest whole when that fits the budget. Otherwise it ranks the files and keeps
 // whole files, in the order of the diff, while the budget lasts: a file named by a ticket before a
 // file that no ticket names, then source before migrations, configuration, tests, documents, and
-// generated files, then the smaller file first so that more files fit. The files of .semar come
-// last, because the copy of the source has none of them.
+// generated files, then the smaller file first so that more files fit.
 func chooseDiff(diff []byte, files []domain.FileChange, budget int) diffChoice {
-	if len(diff) <= budget {
-		return diffChoice{Text: string(diff), Whole: true}
-	}
+	var shown []int
 	sections := splitDiff(string(diff), files)
-	order := make([]int, len(sections))
-	for i := range order {
-		order[i] = i
+	size := 0
+	for i, s := range sections {
+		if isSemarFile(s) {
+			continue
+		}
+		shown = append(shown, i)
+		size += len(s.text)
 	}
-	rank := func(s diffSection) [3]int {
+	kept := make([]bool, len(sections))
+	if size <= budget {
+		for _, i := range shown {
+			kept[i] = true
+		}
+	} else {
+		keepByRank(sections, shown, kept, budget)
+	}
+	out := diffChoice{Whole: size <= budget}
+	var text strings.Builder
+	for i, s := range sections {
+		switch {
+		case kept[i]:
+			text.WriteString(s.text)
+		case !isSemarFile(s):
+			out.Omitted = append(out.Omitted, omittedLine(s))
+		}
+	}
+	out.Text = text.String()
+	return out
+}
+
+func isSemarFile(s diffSection) bool {
+	return s.file != nil && (s.file.Path == ".semar" || strings.HasPrefix(s.file.Path, ".semar/"))
+}
+
+// keepByRank marks the sections among order that fit the budget, most important first.
+func keepByRank(sections []diffSection, order []int, kept []bool, budget int) {
+	order = slices.Clone(order)
+	rank := func(s diffSection) [2]int {
 		if s.file == nil {
-			return [3]int{3, 0, 0}
+			return [2]int{2, 0}
 		}
 		named := 1
 		if len(s.file.Tickets) > 0 {
 			named = 0
 		}
-		if s.file.Path == ".semar" || strings.HasPrefix(s.file.Path, ".semar/") {
-			named = 2
-		}
-		return [3]int{named, kindRank(s.file.Kind), 0}
+		return [2]int{named, kindRank(s.file.Kind)}
 	}
 	slices.SortStableFunc(order, func(a, b int) int {
 		ra, rb := rank(sections[a]), rank(sections[b])
@@ -74,7 +102,6 @@ func chooseDiff(diff []byte, files []domain.FileChange, budget int) diffChoice {
 		}
 		return len(sections[a].text) - len(sections[b].text)
 	})
-	kept := make([]bool, len(sections))
 	left := budget
 	for _, i := range order {
 		if n := len(sections[i].text); n <= left {
@@ -82,17 +109,6 @@ func chooseDiff(diff []byte, files []domain.FileChange, budget int) diffChoice {
 			left -= n
 		}
 	}
-	var out diffChoice
-	var text strings.Builder
-	for i, s := range sections {
-		if kept[i] {
-			text.WriteString(s.text)
-			continue
-		}
-		out.Omitted = append(out.Omitted, omittedLine(s))
-	}
-	out.Text = text.String()
-	return out
 }
 
 func kindRank(kind string) int {

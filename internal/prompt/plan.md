@@ -71,7 +71,7 @@ These files of the head commit are not in your copy of the source, so you cannot
 [[end]][[if or .Diff .DiffOmitted]]
 ## The difference
 
-[[if .DiffWhole]]This is the whole difference between the two versions. Do not read `.semar-plan/change.diff`: it holds the same text.[[else]]The difference is large, so this is the part of it that matters most: whole files, the ones that the tickets name and the source files first. `.semar-plan/change.diff` holds all of it. To see a file that is not shown, search that file for the file's path.[[end]]
+[[if .DiffWhole]]This is the whole difference between the two versions, apart from Semar's own files under `.semar`, which are not part of the source. You need not read `.semar-plan/change.diff`.[[else]]This is a part of the difference: whole files, the ones that the tickets name and the source files first, as far as the prompt has room, and never Semar's own files under `.semar`. To see another file that is not shown here, search `.semar-plan/change.diff` for the file's path.[[end]]
 [[if .Diff]]
 [[.Diff]]
 [[end]][[if .DiffOmitted]]

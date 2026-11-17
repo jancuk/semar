@@ -121,10 +121,15 @@ func TestPlanReadsTheListedDocuments(t *testing.T) {
 			"- `docs`: the documents under `docs` (2 files)\n"+
 			"- `legacy`: the API document `docs/refunds.md` (code could not read its routes)\n\n",
 		"`uncovered`, and `differences`.")
-	for _, absent := range []string{"docs/old", "`rules`", "orders.example.com"} {
+	for _, absent := range []string{"docs/old", "`rules`", p.host, planTokenEnv} {
 		if strings.Contains(prompt, absent) {
 			t.Errorf("the prompt holds %q", absent)
 		}
+	}
+	// The host of the API document is text of the repository: it is in the difference that adds
+	// the document, and nowhere else in the prompt.
+	if before, _, found := strings.Cut(prompt, "## The difference"); !found || strings.Contains(before, "orders.example.com") {
+		t.Errorf("the host of the API document is outside the difference (found the section: %v)", found)
 	}
 
 	md, err := os.ReadFile(p.path(".semar", "plans", p.head(t)[:12], "plan.md"))

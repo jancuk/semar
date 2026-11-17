@@ -74,7 +74,7 @@ func TestChooseDiffSpendsTheBudgetOnTheFilesThatMatterMost(t *testing.T) {
 	for _, line := range got.Omitted {
 		omitted = append(omitted, strings.SplitN(line, "`", 3)[1])
 	}
-	if strings.Join(omitted, " ") != "internal/huge.go internal/other.go .semar/plans/p.md gen/api.pb.go" {
+	if strings.Join(omitted, " ") != "internal/huge.go internal/other.go gen/api.pb.go" {
 		t.Errorf("omitted = %q", got.Omitted)
 	}
 	if got.Omitted[0] != "- `internal/huge.go` (+1 -1, source)" {
@@ -225,7 +225,7 @@ func TestRunPutsTheEvidenceInThePrompt(t *testing.T) {
 
 	got := runPrompt(t, in)
 	for _, want := range []string{
-		"## The difference\n\nThis is the whole difference between the two versions.",
+		"## The difference\n\nThis is the whole difference between the two versions, apart from",
 		"```diff\ndiff --git a/internal/refund.go b/internal/refund.go",
 		"## The API operations that the difference names",
 		"- `POST /orders/{orderId}/refunds`. Declares 201, 4XX. See `docs/openapi.yaml`:",
@@ -250,7 +250,7 @@ func TestRunShowsPartOfALargeDiffAndNamesTheRest(t *testing.T) {
 
 	got := runPrompt(t, in)
 	for _, want := range []string{
-		"The difference is large, so this is the part of it that matters most",
+		"This is a part of the difference: whole files",
 		"+\treturn refund(w, r)",
 		"Not shown here:\n\n- `internal/vendor_dump.go` (+1 -1, source)",
 	} {
@@ -285,5 +285,22 @@ func TestRunKeepsTheEvidenceOnTheSecondAttempt(t *testing.T) {
 		if !strings.Contains(j.Prompt, "+\treturn refund(w, r)") {
 			t.Errorf("job %d lacks the difference", i+1)
 		}
+	}
+}
+
+// The files of .semar name hosts, so the prompt never shows them, whatever the budget, and does not
+// point the planner at them either.
+func TestChooseDiffNeverShowsTheFilesOfSemar(t *testing.T) {
+	code := section("internal/refund.go", "+x")
+	own := section(".semar/semar.yaml", "+baseUrl: http://internal.example.com")
+	files := []domain.FileChange{fileOf("internal/refund.go", "source", "SHOP-1"), fileOf(".semar/semar.yaml", "config", "SHOP-1")}
+	for _, budget := range []int{len(code + own), len(code) + 1, len(code)} {
+		got := chooseDiff([]byte(code+own), files, budget)
+		if got.Text != code || len(got.Omitted) != 0 {
+			t.Errorf("budget %d: choice = %+v", budget, got)
+		}
+	}
+	if got := chooseDiff([]byte(code+own), files, len(code)-1); got.Text != "" || got.Whole || len(got.Omitted) != 1 || strings.Contains(got.Omitted[0], ".semar") {
+		t.Errorf("a file over the budget: %+v", got)
 	}
 }
