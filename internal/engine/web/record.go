@@ -143,6 +143,9 @@ func (r *Recorder) guardTab() error {
 	if _, err := chromedp.Call(r.tab, network.Enable, network.EnableParams{}); err != nil {
 		return err
 	}
+	if err := freshFiles(r.tab); err != nil {
+		return err
+	}
 	_, err := chromedp.Call(r.tab, fetch.Enable, fetch.EnableParams{Patterns: []*fetch.RequestPattern{{URLPattern: "*"}}})
 	return err
 }

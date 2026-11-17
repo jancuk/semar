@@ -86,6 +86,7 @@ func (s *session) start() error {
 	steps := []func() error{
 		func() error { _, err := chromedp.Call(s.ctx, page.Enable, page.EnableParams{}); return err },
 		func() error { _, err := chromedp.Call(s.ctx, network.Enable, network.EnableParams{}); return err },
+		func() error { return freshFiles(s.ctx) },
 		func() error {
 			_, err := chromedp.Call(s.ctx, fetch.Enable, fetch.EnableParams{Patterns: []*fetch.RequestPattern{{URLPattern: "*"}}})
 			return err
@@ -106,6 +107,13 @@ func (s *session) start() error {
 		}
 	}
 	return nil
+}
+
+// freshFiles makes the tab ask the server for every file. The profile lasts between runs, and a
+// script from Chrome's cache would be the build of an earlier run.
+func freshFiles(tab context.Context) error {
+	_, err := chromedp.Call(tab, network.SetCacheDisabled, network.SetCacheDisabledParams{CacheDisabled: true})
+	return err
 }
 
 // close ends Chrome and waits for it, so that the profile is on the disk when it returns.

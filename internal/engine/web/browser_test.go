@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -832,5 +833,49 @@ func TestAPresenceCheckOfAnAbsentElementIsNoMiss(t *testing.T) {
 	st := res.Action.Web.Elements["ghost"]
 	if st.Count != 0 || !st.Presence || len(res.Action.Web.Repair) != 0 {
 		t.Errorf("state = %+v, repair = %+v", st, res.Action.Web.Repair)
+	}
+}
+
+// A profile lasts between runs, and with it Chrome's cache. A script that the server lets a browser
+// keep would make a run judge the build of an earlier run.
+func TestARunNeverReadsAScriptThatAnEarlierRunCached(t *testing.T) {
+	needChrome(t)
+	var build atomic.Int64
+	build.Store(1)
+	r := newRig(t, rigOptions{handler: func(mux *http.ServeMux) {
+		mux.HandleFunc("/app.js", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/javascript")
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+			fmt.Fprintf(w, `document.getElementById('build').textContent = 'build %d';`, build.Load())
+		})
+		mux.HandleFunc("/shop", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, `<!doctype html><p id="build"></p><script src="/app.js"></script>`)
+		})
+	}})
+	shown := func(eng *web.Engine) string {
+		t.Helper()
+		res, err := eng.Do(context.Background(), web.Call{
+			Use: domain.UseCase{Pass: domain.PassScenario, Scenario: "board", Step: "build"}, By: domain.ActorReplay,
+			Action:   domain.WebAction{Service: "app", Do: domain.WebOpen, Path: "/shop"},
+			Locators: map[string]domain.Locator{"build": {CSS: "#build"}}, Watch: []web.Watched{text("build")},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Action.Web.Elements["build"].Text
+	}
+	if got := shown(r.eng); got != "build 1" {
+		t.Fatalf("the first run shows %q", got)
+	}
+	r.eng.Close()
+
+	build.Store(2)
+	second := web.New(web.Options{
+		Policy: r.policy, Recorder: recorderOf(t, r), Files: r.run, Services: map[string]string{"app": r.srv.URL},
+		Home: r.home, Environment: "test", Run: "r-2",
+	})
+	defer second.Close()
+	if got := shown(second); got != "build 2" {
+		t.Errorf("the second run shows %q, want the script of the build that runs now", got)
 	}
 }
