@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,8 +19,10 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
 
+	"github.com/jancuk/semar/internal/datevar"
 	"github.com/jancuk/semar/internal/engine/web/webinput"
 	"github.com/jancuk/semar/internal/pagelist"
+	"github.com/jancuk/semar/internal/script"
 )
 
 // pageListJS lists the elements of the page that a person can act on or read, and keeps them in
@@ -39,6 +43,8 @@ type Explorer struct {
 	rec  *Recorder
 	mu   sync.Mutex
 	list pagelist.List
+	// used holds the date variables that a text has had filled in, with the text each gave.
+	used map[string]string
 }
 
 // NewExplorer starts to explore the tab of a recorder.
@@ -66,8 +72,6 @@ func (x *Explorer) List(ctx context.Context) (pagelist.List, error) {
 }
 
 const (
-	// RunIDVariable is the one variable that a text of the model may hold.
-	RunIDVariable = "{{run.id}}"
 	// checkHeard is how long a check waits for the recorder to hear the Option-click.
 	checkHeard = 3 * time.Second
 )
@@ -139,20 +143,67 @@ func (x *Explorer) Click(ctx context.Context, ref string) error {
 	return t.rd.click(t.id)
 }
 
-// Fill replaces what a field holds by typing the text at it. {{run.id}} in the text is the ID of the
-// run, and no other variable is allowed.
+var textVariable = regexp.MustCompile(`\{\{([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*)\}\}`)
+
+// Expand fills in the variables of a text: {{run.id}} is the ID of the run, and a date variable is the
+// day or the time that the time of the run gives. No other variable has a value. The date variables
+// that it fills in are kept, for Variables.
+func (x *Explorer) Expand(text string) (string, error) {
+	if strings.Contains(textVariable.ReplaceAllString(text, ""), "{{") {
+		return "", errors.New("the text holds {{ that is not a variable, and {{run.id}} and the date variables are the only variables that a text may hold")
+	}
+	var err error
+	out := textVariable.ReplaceAllStringFunc(text, func(m string) string {
+		name := textVariable.FindStringSubmatch(m)[1]
+		if err != nil {
+			return m
+		}
+		if name != "run.id" && !datevar.Is(name) {
+			err = fmt.Errorf("the text holds %s, and {{run.id}} and the date variables are the only variables that a text may hold", m)
+			return m
+		}
+		if x.RunID == "" {
+			err = fmt.Errorf("the text holds %s, and this run has no ID", m)
+			return m
+		}
+		val, _, rerr := script.Resolve(map[string]string{"run.id": x.RunID}, name)
+		if rerr != nil {
+			err = rerr
+			return m
+		}
+		if name != "run.id" {
+			x.mu.Lock()
+			if x.used == nil {
+				x.used = map[string]string{}
+			}
+			x.used[name] = val
+			x.mu.Unlock()
+		}
+		return val
+	})
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// Variables are the date variables that texts have had filled in so far, with the text of each. A
+// recording keeps such a text as its variable, so that the test it writes follows the run.
+func (x *Explorer) Variables() map[string]string {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return maps.Clone(x.used)
+}
+
+// Fill replaces what a field holds by typing the text at it. The variables of the text are filled in
+// as Expand does.
 func (x *Explorer) Fill(ctx context.Context, ref, text string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if strings.Contains(text, RunIDVariable) {
-		if x.RunID == "" {
-			return errors.New("the text holds {{run.id}}, and this run has no ID")
-		}
-		text = strings.ReplaceAll(text, RunIDVariable, x.RunID)
-	}
-	if strings.Contains(text, "{{") {
-		return errors.New("the text holds {{, and {{run.id}} is the only variable that a text may hold")
+	text, err := x.Expand(text)
+	if err != nil {
+		return err
 	}
 	t, err := x.find(ref)
 	if err != nil {

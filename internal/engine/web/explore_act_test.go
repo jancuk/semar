@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chromedp/chromedp/kb"
 
@@ -233,5 +234,51 @@ func TestAFillOfADateFieldIsHeardAsAFillWithItsValue(t *testing.T) {
 	}
 	if err := x.Fill(ctx, refOf(t, l, "datetime-local", "Due date"), "tomorrow"); err == nil || !strings.Contains(err.Error(), "2026-03-09T14:30") {
 		t.Errorf("a text that the field does not keep: %v", err)
+	}
+}
+
+func TestAFillTypesTheComputedTextOfADateVariable(t *testing.T) {
+	old := time.Local
+	time.Local = time.FixedZone("UTC+7", 7*3600)
+	t.Cleanup(func() { time.Local = old })
+
+	r := newRecRig(t, map[string]string{"/due": dueExplorePage})
+	x, l := r.explore("/due")
+	x.RunID = "r-20261118T071502Z-0001"
+	ctx := t.Context()
+	r.must(x.Fill(ctx, refOf(t, l, "datetime-local", "Due date"), "{{local.plus7d}}"))
+	r.must(x.Fill(ctx, refOf(t, l, "month", "Month"), "2026-03"))
+	got := r.events(2)
+	if got[0].Kind != record.KindFill || got[0].Value != "2026-11-25T14:15" {
+		t.Errorf("the date field was typed %s", describeEvents(got[:1]))
+	}
+	if want := map[string]string{"local.plus7d": "2026-11-25T14:15"}; !reflect.DeepEqual(x.Variables(), want) {
+		t.Errorf("Variables = %v, want %v", x.Variables(), want)
+	}
+	if text, err := x.Expand("Due {{date.plus7d}} for {{run.id}}"); err != nil || text != "Due 2026-11-25 for r-20261118T071502Z-0001" {
+		t.Errorf("Expand = %q, %v", text, err)
+	}
+	if _, ok := x.Variables()["date.plus7d"]; !ok {
+		t.Errorf("a date variable of a text to expect is a variable that the test keeps: %v", x.Variables())
+	}
+}
+
+func TestAFillRefusesAVariableThatHasNoValue(t *testing.T) {
+	r := newRecRig(t, map[string]string{"/refund": refundPage})
+	x, l := r.explore("/refund")
+	amount := refOf(t, l, "textbox", "Amount")
+	for text, want := range map[string]string{
+		"{{date.today}}":    "this run has no ID",
+		"{{date.tomorrow}}": "only variables that a text may hold",
+		"a {{b.board}}":     "only variables that a text may hold",
+		"{{run.id":          "only variables that a text may hold",
+	} {
+		if err := x.Fill(t.Context(), amount, text); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v, want an error with %q", text, err, want)
+		}
+	}
+	x.RunID = "r1"
+	if err := x.Fill(t.Context(), amount, "{{date.today}}"); err == nil || !strings.Contains(err.Error(), `the run ID "r1" holds no time`) {
+		t.Errorf("a run ID with no time: %v", err)
 	}
 }

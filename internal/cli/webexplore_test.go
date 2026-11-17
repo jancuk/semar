@@ -5,14 +5,18 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jancuk/semar/internal/cli"
+	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/pagelist"
 	"github.com/jancuk/semar/internal/sampleapp"
+	"github.com/jancuk/semar/internal/script"
 	"github.com/jancuk/semar/internal/stage/plan"
 )
 
@@ -269,6 +273,68 @@ func TestAFlowKeepsTheIDOfTheRunAsAVariable(t *testing.T) {
 	for name, data := range map[string]string{"the scenario": string(feature), "the screens": string(screensFile)} {
 		if strings.Contains(data, "r-test-") {
 			t.Errorf("%s holds the ID of the run that the flow made:\n%s", name, data)
+		}
+	}
+}
+
+func TestAFlowThatTypesADateKeepsTheVariableAndTheTestFollowsTheRun(t *testing.T) {
+	old := time.Local
+	time.Local = time.FixedZone("UTC+7", 7*3600)
+	t.Cleanup(func() { time.Local = old })
+
+	r, _ := recordRepoWith(t, repoOptions{app: sampleapp.Options{}})
+	r.opts.RunID = func() domain.RunID { return "r-20261118T071502Z-0001" }
+	r.rewriteConfig(t, func(s string) string {
+		return strings.Replace(s, "baseUrl: "+r.ordersURL, "baseUrl: "+r.ordersURL+"\n        web: {start: /due}", 1)
+	})
+	flow := scriptedFlow(t, func(in plan.TurnInput) plan.Turn {
+		return plan.TurnAct{Actions: []plan.Action{
+			{Kind: plan.ActionFill, Ref: ref(t, in.Page, "date", "Due date"), Text: "{{date.plus7d}}"},
+			{Kind: plan.ActionClick, Ref: ref(t, in.Page, "button", "Save")},
+		}}
+	}, func(in plan.TurnInput) plan.Turn {
+		return plan.TurnAct{Actions: []plan.Action{
+			{Kind: plan.ActionCheck, Ref: ref(t, in.Page, "text", "Due 2026-11-25"), Expect: "Due {{date.plus7d}}"},
+		}}
+	}, func(plan.TurnInput) plan.Turn {
+		return plan.TurnDone{Title: "A due date is shown", Intent: "Before: no date. Now: the date is shown."}
+	})
+	out, err := explorerOf(t, r, "").Explore(t.Context(), plan.WebRequest{ID: "SHOP-482-05", Ticket: "SHOP-482", Cite: flowCite}, flow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Test == nil || out.Test.Replay != "passed" {
+		t.Fatalf("outcome = %+v", out)
+	}
+
+	feature, err := os.ReadFile(r.path(".semar", "scenarios", "SHOP-482", "SHOP-482-05.feature"))
+	must(t, err)
+	contains(t, "the scenario", string(feature), `equals "Due {{date.plus7d}}"`)
+	if strings.Contains(string(feature), "2026-11-25") {
+		t.Errorf("the scenario holds the typed date:\n%s", feature)
+	}
+
+	files, err := filepath.Glob(r.path(".semar", "store", "scripts", "SHOP-482-05", "*.yaml"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("scripts %v, %v", files, err)
+	}
+	data, err := os.ReadFile(files[0])
+	must(t, err)
+	if !strings.Contains(string(data), "{{date.plus7d}}") || strings.Contains(string(data), "2026-11-25") {
+		t.Errorf("the script must hold the variable and not the date:\n%s", data)
+	}
+	s, err := script.Parse(data, files[0])
+	must(t, err)
+	var fill domain.WebAction
+	for _, st := range s.Steps {
+		if st.Web != nil && st.Web.Do == domain.WebFill {
+			fill = *st.Web
+		}
+	}
+	for runID, want := range map[domain.RunID]string{"r-20261118T071502Z-0001": "2026-11-25", "r-20261125T071502Z-0001": "2026-12-02"} {
+		got, err := script.RenderWeb(fill, map[string]string{"run.id": string(runID)})
+		if err != nil || got.Value != want {
+			t.Errorf("run %s typed %q, %v, want %s", runID, got.Value, err, want)
 		}
 	}
 }

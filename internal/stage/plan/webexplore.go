@@ -156,7 +156,7 @@ func (rs *runState) exploreOne(ctx context.Context, o CriterionOutcome) (*WebRes
 		res.Rung = rung
 		catalogue := slices.Clone(rs.in.Fixtures)
 		drive := func(ctx context.Context, b FlowBrowser) (FlowEnd, error) {
-			return playFlow(ctx, DefaultFlowLimits, TurnInput{Criterion: p.Cite + "\n" + p.Criterion, Reading: reading}, rs.turnModel(rung, catalogue, DefaultFlowLimits.Turns), b)
+			return playFlow(ctx, DefaultFlowLimits, TurnInput{Criterion: p.Cite + "\n" + p.Criterion, Ticket: p.Ticket, Reading: reading}, rs.turnModel(rung, catalogue, DefaultFlowLimits.Turns), b)
 		}
 		out, err := rs.in.Web.Explore(ctx, req, drive)
 		if err != nil {

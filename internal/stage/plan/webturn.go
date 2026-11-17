@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jancuk/semar/internal/datevar"
 	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/pagelist"
 	"github.com/jancuk/semar/internal/prompt"
@@ -119,8 +120,8 @@ func actTurn(w turnWire, page pagelist.List, ps *problems) Turn {
 			switch {
 			case a.Text == "":
 				ps.add(path+".text", "a fill needs the text to type")
-			case strings.Contains(strings.ReplaceAll(a.Text, runIDVariable, ""), "{{"):
-				ps.add(path+".text", "the text holds {{, and %s is the only variable that a text may hold", runIDVariable)
+			default:
+				checkTextVariables(path+".text", "the text", a.Text, ps)
 			}
 		case ActionPress:
 			ref("ref", a.Ref, true)
@@ -137,6 +138,8 @@ func actTurn(w turnWire, page pagelist.List, ps *problems) Turn {
 			ref("ref", a.Ref, false)
 			if blank(a.Expect) {
 				ps.add(path+".expect", "a check needs expect, the text that the element must show")
+			} else {
+				checkTextVariables(path+".expect", "expect", a.Expect, ps)
 			}
 		default:
 			ps.add(path+".kind", "the action kind %q must be one of click, fill, press, drag, check", a.Kind)
@@ -144,6 +147,44 @@ func actTurn(w turnWire, page pagelist.List, ps *problems) Turn {
 		out = append(out, act)
 	}
 	return TurnAct{Actions: out}
+}
+
+var textVariable = regexp.MustCompile(`\{\{([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*)\}\}`)
+
+// checkTextVariables refuses a "{{" in a text of a page that is not {{run.id}} or a date variable.
+// The program fills in the text that the page shows or takes, so no other variable has a value there.
+func checkTextVariables(path, what string, text string, ps *problems) {
+	for _, m := range textVariable.FindAllStringSubmatch(text, -1) {
+		if m[1] != "run.id" && !datevar.Is(m[1]) {
+			ps.add(path, "%s holds %s, and %s and the date variables are the only variables that a text may hold", what, m[0], runIDVariable)
+			return
+		}
+	}
+	if strings.Contains(textVariable.ReplaceAllString(text, ""), "{{") {
+		ps.add(path, "%s holds {{ that is not a variable, and %s and the date variables are the only variables that a text may hold", what, runIDVariable)
+	}
+}
+
+// turnDates refuses a date near today that an action types or expects, as the rule of D7 does for a
+// request. A text of a page shows words around a date, so a date at the start of a word counts.
+func turnDates(t Turn, rule dateRule, ticket string, ps *problems) {
+	act, ok := t.(TurnAct)
+	if !ok || !rule.on {
+		return
+	}
+	for i, a := range act.Actions {
+		path := fmt.Sprintf("turn.actions[%d]", i)
+		switch a.Kind {
+		case ActionFill:
+			if msg := rule.problemInWords(a.Text, ticket); msg != "" {
+				ps.add(path+".text", "the text %s", msg)
+			}
+		case ActionCheck:
+			if msg := rule.problemInWords(a.Expect, ticket); msg != "" {
+				ps.add(path+".expect", "expect %s", msg)
+			}
+		}
+	}
 }
 
 // checkGiven applies the rules of a given list of a scenario to the fixtures of a flow: each fixture is
@@ -196,10 +237,10 @@ func TurnSchema(page pagelist.List, first bool, catalogue []fixture.Entry) json.
 	pressRef := map[string]any{"description": "The field to press the key in, or an empty text to press it on the page.", "type": "string", "enum": append([]any{""}, anyStrings(refs)...)}
 	actions := []any{
 		object(map[string]any{"kind": enum("string", "click"), "ref": ref}),
-		object(map[string]any{"kind": enum("string", "fill"), "ref": ref, "text": text("The text to type. It replaces what the field holds. {{run.id}} is the ID of the run.")}),
+		object(map[string]any{"kind": enum("string", "fill"), "ref": ref, "text": text("The text to type. It replaces what the field holds. {{run.id}} is the ID of the run. For a date field write {{date.today}}, {{date.plus7d}}, or {{date.minus3d}}, and for a datetime-local field {{local.now}}, {{local.plus2h}}, or {{local.minus1d}}, and never type a date that is near today.")}),
 		object(map[string]any{"kind": enum("string", "press"), "ref": pressRef, "key": enum("string", "Enter", "Escape")}),
 		object(map[string]any{"kind": enum("string", "drag"), "ref": ref, "to": ref}),
-		object(map[string]any{"kind": enum("string", "check"), "ref": ref, "expect": text("The text that the element must show, written from the criterion.")}),
+		object(map[string]any{"kind": enum("string", "check"), "ref": ref, "expect": text("The text that the element must show, written from the criterion. {{run.id}} and the date variables are filled in as in a text.")}),
 	}
 	branches := []any{
 		object(map[string]any{"kind": enum("string", turnAct), "actions": array(map[string]any{"anyOf": actions}, "1 to 5 actions, done in order.")}),
@@ -287,6 +328,11 @@ func (rs *runState) turnModel(rung int, catalogue []fixture.Entry, maxTurns int)
 				continue
 			}
 			turn, found, err := DecodeTurn(raw, in.Page, in.First, catalogue)
+			if err == nil && len(found) == 0 {
+				var dated problems
+				turnDates(turn, newDateRule(rs.in.Now), ticketText(rs.in.Tickets, in.Ticket), &dated)
+				found = dated.list
+			}
 			switch {
 			case err != nil:
 				ps = []Problem{{Message: "the output is not an answer in the schema: " + err.Error()}}

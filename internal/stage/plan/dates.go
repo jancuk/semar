@@ -35,38 +35,62 @@ func newDateRule(now time.Time) dateRule {
 	return dateRule{today: time.Date(y, m, d, 0, 0, 0, 0, time.UTC), on: true}
 }
 
+// near gives the distance in days of a real day from the day of the plan, and says whether that is
+// near and the ticket does not name it (D8).
+func (r dateRule) near(day, ticket string) (int, bool) {
+	at, err := time.Parse("2006-01-02", day)
+	if err != nil {
+		return 0, false
+	}
+	diff := int(at.Sub(r.today).Hours() / 24)
+	return diff, diff > -nearDays && diff < nearDays && !namesWord(ticket, day)
+}
+
+func refusal(shown string, form string, days int) string {
+	return fmt.Sprintf("holds the date %s, which is near today and will be wrong on a later day: write {{%s}}, or a date at least 10 years away when the value must not move",
+		shown, datevar.Suggest(form, days))
+}
+
 // problem says why text may not be typed, or "" when it may. A text is a date when it starts with a
 // real day and the day ends the text or is followed by T or a space. ticket is the text of the file
 // of the ticket, which may name the day on purpose.
 func (r dateRule) problem(text, ticket string) string {
-	if !r.on {
-		return ""
-	}
 	m := dateAtStart.FindStringSubmatch(text)
-	if m == nil {
+	if !r.on || m == nil {
 		return ""
 	}
-	return r.check(text, m[1], ticket)
-}
-
-func (r dateRule) check(shown, day, ticket string) string {
-	at, err := time.Parse("2006-01-02", day)
-	if err != nil {
-		return ""
-	}
-	diff := int(at.Sub(r.today).Hours() / 24)
-	if diff <= -nearDays || diff >= nearDays || namesWord(ticket, day) {
+	days, near := r.near(m[1], ticket)
+	if !near {
 		return ""
 	}
 	form := "date"
-	if rest := strings.TrimPrefix(shown, day); rest != "" {
+	if rest := text[len(m[1]):]; rest != "" {
 		form = "local"
 		if t, ok := strings.CutPrefix(rest, "T"); ok && zoneAtEnd.MatchString(t) {
 			form = "datetime"
 		}
 	}
-	return fmt.Sprintf("holds the date %s, which is near today and will be wrong on a later day: write {{%s}}, or a date at least 10 years away when the value must not move",
-		strings.TrimSpace(shown), datevar.Suggest(form, diff))
+	return refusal(strings.TrimSpace(text), form, days)
+}
+
+// problemInWords is problem for a text of a page, which shows words around a date, such as
+// "Due 2026-12-01": a date at the start of any word counts. A browser field holds no zone, so a
+// time is a local one.
+func (r dateRule) problemInWords(text, ticket string) string {
+	m := dateInText.FindStringSubmatchIndex(text)
+	if !r.on || m == nil {
+		return ""
+	}
+	day := text[m[2]:m[3]]
+	days, near := r.near(day, ticket)
+	if !near {
+		return ""
+	}
+	form := "date"
+	if strings.HasPrefix(text[m[3]:], "T") {
+		form = "local"
+	}
+	return refusal(day, form, days)
 }
 
 // dates refuses a typed date that is near today in the query values, the JSON body, the expected

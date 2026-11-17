@@ -60,6 +60,27 @@ func mustTurn(t *testing.T, raw string, first bool) Turn {
 	return turn
 }
 
+func TestDecodeTurnAcceptsADateVariableInATextAndInACheck(t *testing.T) {
+	turn, ps := decodeTurn(t, `{"turn":{"kind":"act","actions":[
+	  {"kind":"fill","ref":"e1","text":"{{date.plus7d}}"},{"kind":"fill","ref":"e1","text":"Plan {{run.id}} for {{local.plus1d}}"},
+	  {"kind":"check","ref":"e2","expect":"Due {{date.plus7d}}"}]}}`, false)
+	a, ok := turn.(TurnAct)
+	if !ok || len(ps) > 0 || a.Actions[0].Text != "{{date.plus7d}}" || a.Actions[2].Expect != "Due {{date.plus7d}}" {
+		t.Fatalf("turn = %#v, problems %v", turn, ps)
+	}
+	for name, raw := range map[string]string{
+		"a date name that is not a variable in a text":  `{"turn":{"kind":"act","actions":[{"kind":"fill","ref":"e1","text":"{{date.tomorrow}}"}]}}`,
+		"a date name that is not a variable in a check": `{"turn":{"kind":"act","actions":[{"kind":"check","ref":"e2","expect":"{{date.plus0d}}"}]}}`,
+		"another variable in a check":                   `{"turn":{"kind":"act","actions":[{"kind":"check","ref":"e2","expect":"{{b.board}}"}]}}`,
+		"a half variable in a check":                    `{"turn":{"kind":"act","actions":[{"kind":"check","ref":"e2","expect":"Due {{date.today"}]}}`,
+	} {
+		_, ps := decodeTurn(t, raw, false)
+		if got := messages(ps); !strings.Contains(got, "{{run.id}} and the date variables are the only variables") {
+			t.Errorf("%s: problems:\n%s", name, got)
+		}
+	}
+}
+
 func TestDecodeTurnFindsEveryProblemInPlainWords(t *testing.T) {
 	for name, tc := range map[string]struct {
 		raw   string

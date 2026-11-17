@@ -196,7 +196,7 @@ func TestThePlanListsTheWebTestsAndWhatTheWebPartDid(t *testing.T) {
 		"- Web model haiku (haiku, provider p)",
 		"- Web criterion " + ticket482 + ":11: test SHOP-482-02 written by haiku in 4 turns",
 		"web test: SHOP-482-02",
-		"web 4\n",
+		"web 5\n",
 		"| " + ticket482 + ":11 | web test | haiku | 0 |",
 		"web test: SHOP-482-01",
 	} {

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jancuk/semar/internal/knowledge"
 	"github.com/jancuk/semar/internal/provider"
 	"github.com/jancuk/semar/internal/provider/fake"
 )
@@ -100,5 +101,48 @@ func TestATurnDoesNotStartOnceTheCostLimitIsReached(t *testing.T) {
 	}
 	if _, err := model(t.Context(), TurnInput{Page: twoElementPage()}); !errors.Is(err, ErrCostLimit) || len(p.jobs) != 1 || !rs.limited {
 		t.Errorf("err %v after %d jobs, limited %v", err, len(p.jobs), rs.limited)
+	}
+}
+
+func TestATurnThatTypesADateNearTodayGoesBackWithTheVariableToWrite(t *testing.T) {
+	const (
+		typed    = `{"turn":{"kind":"act","actions":[{"kind":"fill","ref":"e1","text":"2026-11-25"}]}}`
+		inWords  = `{"turn":{"kind":"act","actions":[{"kind":"check","ref":"e2","expect":"Due 2026-11-25"}]}}`
+		variable = `{"turn":{"kind":"act","actions":[{"kind":"fill","ref":"e1","text":"{{date.plus7d}}"}]}}`
+	)
+	for name, bad := range map[string]string{"a fill": typed, "a check": inWords} {
+		t.Run(name, func(t *testing.T) {
+			rs, p := turnRun(t, bad, variable)
+			rs.in.Now = planDay(t)
+			turn, err := rs.turnModel(0, nil, 12)(t.Context(), TurnInput{Criterion: "c", Number: 1, Page: twoElementPage()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if a, ok := turn.(TurnAct); !ok || a.Actions[0].Text != "{{date.plus7d}}" || len(p.jobs) != 2 {
+				t.Fatalf("turn %#v after %d jobs", turn, len(p.jobs))
+			}
+			for _, want := range []string{"holds the date 2026-11-25", "near today", "{{date.plus7d}}"} {
+				if !strings.Contains(p.jobs[1].Prompt, want) {
+					t.Errorf("the correction lacks %q:\n%s", want, p.jobs[1].Prompt)
+				}
+			}
+		})
+	}
+}
+
+func TestATurnMayTypeADateFarAwayOrOneThatTheTicketNames(t *testing.T) {
+	far := `{"turn":{"kind":"act","actions":[{"kind":"fill","ref":"e1","text":"2099-01-01T09:00"},{"kind":"check","ref":"e2","expect":"Due 2000-01-01"}]}}`
+	rs, p := turnRun(t, far)
+	rs.in.Now = planDay(t)
+	if _, err := rs.turnModel(0, nil, 12)(t.Context(), TurnInput{Criterion: "c", Number: 1, Page: twoElementPage()}); err != nil || len(p.jobs) != 1 {
+		t.Fatalf("err %v after %d jobs", err, len(p.jobs))
+	}
+
+	named := `{"turn":{"kind":"act","actions":[{"kind":"fill","ref":"e1","text":"2026-11-25"}]}}`
+	rs, p = turnRun(t, named)
+	rs.in.Now = planDay(t)
+	rs.in.Tickets = []knowledge.Ticket{{Key: "SHOP-482", Text: "Due on 2026-11-25 the card is late."}}
+	if _, err := rs.turnModel(0, nil, 12)(t.Context(), TurnInput{Criterion: "c", Number: 1, Ticket: "SHOP-482", Page: twoElementPage()}); err != nil || len(p.jobs) != 1 {
+		t.Fatalf("a date of the ticket: err %v after %d jobs", err, len(p.jobs))
 	}
 }

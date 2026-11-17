@@ -85,6 +85,8 @@ type GivenOutput struct{ Alias, Name, Value string }
 // TurnInput is what the model is told in one turn.
 type TurnInput struct {
 	Criterion string
+	// Ticket is the key of the ticket of the criterion: its file may name a date on purpose.
+	Ticket string
 	// Reading is what a first job wrote for a person to do, as a help.
 	Reading string
 	Number  int  // of this turn, from 1

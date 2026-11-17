@@ -100,7 +100,7 @@ func (w *webExplorer) Explore(ctx context.Context, req plan.WebRequest, drive pl
 	x := web.NewExplorer(rec)
 	x.RunID = string(w.o.RunID())
 	br := &flowBrowser{w: w, rec: rec, x: x, fx: fx}
-	fx.runID = &x.RunID
+	fx.x = x
 	end, err := drive(ctx, br)
 	if err != nil {
 		return plan.WebOutcome{}, err
@@ -119,11 +119,15 @@ func (w *webExplorer) Explore(ctx context.Context, req plan.WebRequest, drive pl
 // replay must end as the recording predicts: passed when every check met its claim, failed when one did
 // not. A test that ends otherwise is removed, because a wrong test costs more than a manual check.
 func (w *webExplorer) write(ctx context.Context, req plan.WebRequest, end plan.FlowEnd, events []record.Event, fx *flowFixtures) (plan.WebOutcome, error) {
-	vars := fx.vars()
 	claims := make([]record.Claim, len(end.Checks))
 	for i, c := range end.Checks {
-		claims[i] = record.Claim{Expect: strings.ReplaceAll(c.Expect, web.RunIDVariable, vars["run.id"]), Cite: req.Cite}
+		expect, err := fx.x.Expand(c.Expect)
+		if err != nil {
+			return manual("the check of %s cannot be filled in: %s", c.Ref, terminalSafe(oneLine(err.Error()))), nil
+		}
+		claims[i] = record.Claim{Expect: expect, Cite: req.Cite}
 	}
+	vars := fx.vars()
 	opts := record.Options{
 		ID: req.ID, Ticket: req.Ticket, App: w.app, Service: w.svc.Name, BaseURL: w.svc.BaseURL,
 		AuthProfile: w.authProfile, Given: fx.given, Values: record.NewValues(vars), Date: w.o.Clock(), Claims: claims,
@@ -202,8 +206,9 @@ type flowFixtures struct {
 	given []domain.Given
 	got   fixtureValues
 	undo  func()
-	// runID is the ID that the browser types for {{run.id}}.
-	runID *string
+	// x is the browser of the flow, which types the ID of the run for {{run.id}} and the day or the time
+	// for a date variable.
+	x *web.Explorer
 }
 
 // release cleans the fixtures up. It may be called more than once.
@@ -214,12 +219,16 @@ func (f *flowFixtures) release() {
 	}
 }
 
-// vars are the values that the fixtures gave, and the ID of the run, which the test keeps as variables.
+// vars are the values that the fixtures gave, the ID of the run, and the date variables that the flow
+// typed or expected, which the test keeps as variables.
 func (f *flowFixtures) vars() map[string]string {
 	vars := map[string]string{}
 	maps.Copy(vars, f.got.vars)
-	if f.runID != nil && *f.runID != "" {
-		vars["run.id"] = *f.runID
+	if f.x != nil {
+		maps.Copy(vars, f.x.Variables())
+		if f.x.RunID != "" {
+			vars["run.id"] = f.x.RunID
+		}
 	}
 	return vars
 }
@@ -288,7 +297,11 @@ func (b *flowBrowser) Compare(ctx context.Context, ref, expect string) (string, 
 	if err != nil {
 		return "", false, err
 	}
-	return shown, shown == strings.ReplaceAll(expect, web.RunIDVariable, b.x.RunID), nil
+	want, err := b.x.Expand(expect)
+	if err != nil {
+		return "", false, err
+	}
+	return shown, shown == want, nil
 }
 
 // Given makes the fixtures and loads the first page again, so that the page shows their data and the
