@@ -2114,6 +2114,25 @@ Trust: the page under test can send an event to the binding as the recorder does
 
 **Not built.** Recording on Android, a recorded wait of time, a check of anything but the text of an element, a choice in a select list, hover, a file upload, a second tab, and a frame inside the page.
 
+### Signing in to a web application
+
+Built in [Plan 29](implementation/29-web-sign-in.md). An auth profile may hold `web: {user, password: "env:<NAME>"}`. The web engine and `semar record` use it the same way, through one `signer` and one reading of the page.
+
+```text
+open ─► settle ─► signInForm ─► fill user ─► fill password ─► send ─► wait ─► same address?
+                  (no model)    (as a fill step does)         submit   form gone    no: open again
+                      │ none: do nothing                      or Enter
+```
+
+* **The form.** One page function finds it. The password field is the only visible `input[type=password]`, and the user field is the last visible, enabled text, email, or tel input before it, in the same form. Two password fields, none, or no user field is no form. The result is the two fields and the submit control: the submit button of the form, else the first visible button after the password field, else Enter in the password field.
+* **The wait.** After the send the engine waits until the page shows no sign-in form, for a third of the time of an action. A form that the server draws again is a form, so a wrong password is told from a right one by the page and not by the click. The engine then opens the address of the step again when the tab is at another address, the fragment aside.
+* **The result.** The stored `open` carries `web.signIn: {account, user}`. A sign-in that does not finish is an error of the action with the account, the variable, and the first visible alert, so the checks of the step are not evaluated and the scenario is never `failed`.
+* **The password.** It is resolved through the resolver that feeds the redactor, typed with the same input code as a `fill`, and read back only as a yes or no. The variable is in the list of those that a harness never gets.
+* **The recorder.** With a sign-in the window starts with no recorder script. After the sign-in the recorder is added to every page and to the open one, what came before is dropped, and the recording starts at an `open` of the first address.
+* **The file.** `semar login --user` changes the one line of the account through `config.SetWebSignIn`, which edits lines, so a comment and every other byte stay.
+
+**Not built.** A form in two pages, a sign-in through another site, a second factor, a captcha, a form in a frame, and a form that appears after the page has settled.
+
 ### Android engine
 
 The engine drives an emulator or a device through `adb`. It installs the build under test, launches the app, reads the screen as a list of elements with refs, sends input, and captures screenshots and `logcat`. [Signing in](#signing-in) describes sign-in on the device.

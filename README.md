@@ -69,7 +69,7 @@ These parts are implemented in Go.
 * **API journeys:** a business flow across services, such as an order that is placed, paid, and shown as paid, runs leg by leg against one set of builds. See [Test a business flow with a journey](#test-a-business-flow-with-a-journey).
 * **The use case ledger:** each use case that needs testing ends in one stated state, so that nothing is skipped without a word. See [See that nothing is skipped: the use case ledger](#see-that-nothing-is-skipped-the-use-case-ledger).
 * **Exports:** `semar export` writes a stored run as CTRF, JUnit XML, or SARIF. See [Send results to your tools](#send-results-to-your-tools).
-* **The web:** a journey leg or a scenario with the tag `@surface:web` drives Chrome on a profile of Semar's own, finds elements through screen objects that a person approves, and repairs a broken locator with no model. `semar login`, `semar review --screens`, and `semar screens repair`. Plan 22 describes it.
+* **The web:** a journey leg or a scenario with the tag `@surface:web` drives Chrome on a profile of Semar's own, finds elements through screen objects that a person approves, and repairs a broken locator with no model. `semar login`, `semar review --screens`, and `semar screens repair`. Plan 22 describes it. An account may name its web user and password variable, and Semar then signs in by itself: see [Sign in to a web application](#sign-in-to-a-web-application).
 * **Record a web test:** `semar record` opens Chrome on Semar's own profile, records the flow that a person does, takes what the person points at with the Option key as the expected result, and writes the screens, the scenario, and the script. Nobody writes a locator. See [Record a web test](#record-a-web-test) and Plan 28.
 * **Gherkin scenarios:** a scenario is a `.feature` file that product and QA read and confirm as it is, with the requests in a YAML script apart from it. `semar scenarios convert` moves older YAML scenario files over and keeps their confirmations. See [Hand-written scenarios](#hand-written-scenarios) and Plan 24.
 * **Planning with small models:** `semar plan` plans one acceptance criterion at a time when a ticket of the change has acceptance criteria. Code finds the operations, fields, diff, fixtures, and accounts that a criterion needs, a job with no tools answers in a fixed shape, code checks the answer, and a failing answer goes to the next model of the ladder. With Claude Code the ladder is `haiku`, then `sonnet`. A criterion that needs data no fixture gives gets a fixture that a job drafts and the plan runs once. `--max-cost` bounds what a plan spends. See [Plan with a small model](#plan-with-a-small-model).
@@ -479,7 +479,7 @@ And the order stays as it was
 
 [Plan 25](docs/implementation/25-small-models.md) has the measurements of the pipeline, and [Plan 27](docs/implementation/27-first-run.md) the decisions about the default, the fixtures, and the cost limit.
 
-**A first run.** `semar init` on a terminal asks for what it cannot find and no flag gave: the address of the service, the environment variable of the token, and further accounts, each with one line on who the account is. It prints the API document, the documents, and the ticket files that it found, and looks for the build probe: one `GET` to `/version` on the address of the service, which counts when the answer is JSON with the commit at `$.commit`. Every question has a flag (`--base-url`, `--token-env`, `--account`, `--describe <account>=<text>`), and `init` with no terminal asks nothing. In a repository that has `.semar/semar.yaml`, `semar init` writes nothing: it checks this machine and prints one line for each item, `ok`, `missing` with the way to fix it, or `review` for what a person has not approved. The exit code is 0 when nothing is missing and 2 otherwise.
+**A first run.** `semar init` on a terminal asks for what it cannot find and no flag gave: the address of the service, the environment variable of the token, and further accounts, each with one line on who the account is. It prints the API document, the documents, and the ticket files that it found, and looks for the build probe: one `GET` to `/version` on the address of the service, which counts when the answer is JSON with the commit at `$.commit`. For each account it also asks for the user that the account signs in with on the web, and the variable of its password (Enter for none). Every question has a flag (`--base-url`, `--token-env`, `--account`, `--describe <account>=<text>`, `--web-user <account>=<user>`, `--web-password-env <account>=<NAME>`), and `init` with no terminal asks nothing. In a repository that has `.semar/semar.yaml`, `semar init` writes nothing: it checks this machine and prints one line for each item, `ok`, `missing` with the way to fix it, or `review` for what a person has not approved. The exit code is 0 when nothing is missing and 2 otherwise.
 
 ### Hand-written scenarios
 
@@ -706,12 +706,43 @@ order.paid  1.0.0  team-orders  approved  not checked on uat  used by SHOP-482-0
 
 Cleanup never changes an outcome. A record that cleanup could not remove is listed in the report under "Still exists". Each scenario of the report shows what it was given, for example `Given order: order.paid 1.0.0 (hash 8b38156352ff), made by create; cleanup done`.
 
+### Sign in to a web application
+
+An application that keeps its session in the tab shows the sign-in form at every start, so a recorded test would start with the typing of the sign-in, and so would each recording. Name the user and the password variable of an account once, and Semar signs in by itself wherever it meets the form. A test holds no sign-in step.
+
+```bash
+semar login shop --user ana@example.com --password-env SHOP_WEB_PASSWORD
+```
+
+```text
+Wrote the web sign-in of default to .semar/semar.yaml.
+Signed in as default (ana@example.com) at https://shop.uat.example.com. The profile of default in uat is saved.
+```
+
+The command adds one line to the account in `.semar/semar.yaml` and keeps every other line and comment. It then signs in once with no window, so you learn at once that the two values are right. `semar init` writes the same line: it asks, after each account, for the user that the account signs in with on the web and for the variable of its password, and it has the flags `--web-user <account>=<user>` and `--web-password-env <account>=<NAME>` (`default` names the first account). `--as <account>` on `login` names another account.
+
+```yaml
+authProfiles:
+  default:
+    session: {header: Authorization, value: "Bearer {{secret.TOKEN}}"}
+    secrets: {TOKEN: "env:SEMAR_TOKEN"}
+    web: {user: ana@example.com, password: "env:SHOP_WEB_PASSWORD"}
+```
+
+* **When it signs in.** After every `open` of a web step, once the page has settled, and when `semar record` opens its first page. If the page shows a sign-in form, Semar fills it and sends it. If there is no form, it does nothing. If the sign-in sent the tab to another page, Semar opens the address of the step again.
+* **What a form is.** One visible password field, and the last visible text, email, or tel field before it, in the same form. A page with two password fields sets a password, and Semar leaves it alone. Semar sends the form with its submit button, else the first button after the password field, else Enter.
+* **The password is never written.** It stays in the environment variable. It reaches no file, log, report, or screenshot text, and a stored `open` says only that Semar signed in and as which account. The machine check of `semar init` lists a password variable that is not set.
+* **A sign-in that does not finish** ends the step with a line that names the account, says that the form is still there, quotes the alert that the page shows, and names `web.user` and the variable. The scenario is `blocked` or `inconclusive`, never `failed`, because the product was not judged. `semar login --user` exits with 2.
+* **A test of the sign-in page itself** uses an account with no `web` block.
+
+It does not sign in through another site, with a second factor, with a captcha, or with a form in two pages. For those, `semar login <service>` with no flag opens a window, and the session lasts in the profile.
+
 ### Record a web test
 
 A web test took three hand-written files: the screens, a script, and a scenario. `semar record` writes all three while you do the flow once in Chrome. You write no locator.
 
 ```bash
-semar login shop --env uat        # once: sign in on Semar's own profile
+semar login shop --env uat --user ana@example.com --password-env SHOP_WEB_PASSWORD   # once: Semar signs in by itself from then on
 semar record SHOP-482-07 uat --given order.paid as o --open '/orders/{{o.id}}'
 ```
 
@@ -1018,6 +1049,8 @@ Semar does not read the acceptance criteria of a ticket, the feature map, or pas
 | `--build-commit` | `$.commit` | Where that answer holds the commit, as a JSONPath |
 | `--describe <account>=<text>` | none | One line on who an account is, such as `default=a customer with paid orders`. The planner chooses the account of a step from it. `default` names the default account. Repeat the flag for more |
 | `--account <name>=<ENV>` | none | Another account: an auth profile `<name>` with the same session header and value as `default`, and the token in the environment variable `<ENV>`. Repeat the flag for more accounts. A name that is not a valid profile name, is `default`, or is given twice stops the command with exit 3 |
+| `--web-user <account>=<user>` | none | The user that an account signs in with on the web. Needs `--web-password-env` for the same account. `default` names the default account. Repeat the flag for more accounts |
+| `--web-password-env <account>=<NAME>` | none | The environment variable that holds the web password of an account. Needs `--web-user` |
 
 The file that they write:
 
@@ -1116,9 +1149,10 @@ Every command takes `--dir <path>`, the root of the repository that holds `.sema
 | `semar plan [--diff <link or range>]` | Drafts scenarios and scripts for a change. With no `--diff` it plans the change of the checked-out branch against its base, from the clone, with no fetch. `--base <branch>` names another base. It writes `plan.md` and the obligations. Tells the planner to read the documents that `knowledge` lists, and sends the read-only steps of the draft once to the environment. Also takes `--provider <id>`, `--model <name>`, `--reasoning <level>`, `--pipeline single\|criteria`, `--ladder <steps>`, `--max-cost <dollars>`, `--with-setup`, `--no-trial`, `--max-scenarios <n>`, and `--no-fetch` |
 | `semar dashboard` | Opens a page on your machine to manage the model providers and see usage. `--no-open` prints the address only, `--port <n>` sets the port |
 | `semar providers` | Prints your providers and marks the one that would plan here. No model |
-| `semar init` | On a terminal, asks for the address of the service, the token variable, and who each account is, then writes `.semar/semar.yaml`, with a `knowledge` entry for each conventional path that it finds and the build probe at `/version` when the service has one, and `.semar/.gitignore` when there is none. `--base-url <url>` and the other flags answer the questions. `--account <name>=<ENV>` adds an auth profile, `--describe <account>=<text>` says who an account is, and both can repeat. In a repository that is set up, it checks this machine and writes nothing |
+| `semar init` | On a terminal, asks for the address of the service, the token variable, and who each account is, then writes `.semar/semar.yaml`, with a `knowledge` entry for each conventional path that it finds and the build probe at `/version` when the service has one, and `.semar/.gitignore` when there is none. `--base-url <url>` and the other flags answer the questions. `--account <name>=<ENV>` adds an auth profile, `--describe <account>=<text>` says who an account is, `--web-user <account>=<user>` with `--web-password-env <account>=<NAME>` gives an account its web sign-in, and each can repeat. In a repository that is set up, it checks this machine and writes nothing |
 | `semar script add <file>` | Checks a script against its scenario and stores it |
 | `semar record <scenario id> [environment]` | Opens Chrome on Semar's own profile, records what a person does, and writes the screens, the scenario, and the script. Takes `--open <path>`, `--given <fixture>[ as <alias>]`, `--as <account>`, `--service <name>`, `--app <name>`, `--ticket <key>`, `--covers <use case id>`, `--secret-env <NAME>`, `--replace`, and `--no-replay` |
+| `semar login <service> [--as <account>]` | Opens Chrome on Semar's own profile of the account, at the base URL of the service, and waits until the window is closed. With `--user <user>` and `--password-env <NAME>`, it writes the `web` block of the account into `semar.yaml`, signs in once with no window, and exits with 2 when the sign-in does not finish. Takes `--env <environment>` |
 | `semar run [environment]` | Runs the scenarios of the change and its critical journeys, and ends with the status of the change. The change is the commits from the base branch to `HEAD`. Before it sends anything it prints the change, the target with its build, what it selected, and the gaps. `--all` runs every scenario and every critical journey, `--scenario <id>` runs the scenarios named and no journey, `--no-journeys` leaves the journeys out, `--no-plan` never offers to plan, and `--base <branch>` names another base |
 | `semar review [id...]` | Shows what needs a person, one item at a time: the fixtures and screens files that are not approved, the scenarios that need a confirmation grouped by use case, and the journeys. It answers `y` to approve, `n` to skip, `d` for the details (the whole file, as Gherkin for a scenario), and `q` to stop. An ID narrows it: a scenario, a ticket, a fixture, a journey, or the app of a screens file. `--yes` approves everything with no question. With no terminal and no `--yes` it lists the items and exits 2 |
 | `semar scenarios convert` | Converts every `.yaml` or `.yml` scenario file under `.semar/scenarios` to a Gherkin `.feature` file in place, and deletes the YAML file. The expectation hashes stay the same. It never overwrites a file |
