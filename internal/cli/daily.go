@@ -323,12 +323,8 @@ func chooseChange(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 	for _, t := range notPlanned {
 		sel.gaps = append(sel.gaps, t+" is not planned → semar plan")
 	}
-	if n := len(sel.input.NoTicket); n > 0 {
-		noun := "commit has"
-		if n > 1 {
-			noun = "commits have"
-		}
-		sel.gaps = append(sel.gaps, fmt.Sprintf("%d %s no ticket: %s", n, noun, strings.Join(sel.input.NoTicket, ", ")))
+	if len(sel.input.NoTicket) > 0 {
+		sel.gaps = append(sel.gaps, status.NoTicketLine(sel.input.NoTicket))
 	}
 	sel.gaps = append(sel.gaps, surfaceGaps(sel.scenarios)...)
 	code := ExitOK

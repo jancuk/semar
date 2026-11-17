@@ -67,6 +67,9 @@ func TestRunNamesTheGapsBeforeItSendsAnything(t *testing.T) {
 	r := dailyRepo(t)
 	r.git(t, "commit", "--quiet", "--allow-empty", "-m", "SHOP-490 show the limit in the receipt")
 	r.git(t, "commit", "--quiet", "--allow-empty", "-m", "tidy the logger")
+	r.writeRel(t, ".semar/notes.md", "setup\n")
+	r.git(t, "add", ".semar/notes.md")
+	r.git(t, "commit", "--quiet", "-m", "Set up Semar")
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
 	r.must(t, cli.ExitOK, "review", "--yes")
 

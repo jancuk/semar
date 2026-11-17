@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/idcheck"
@@ -95,7 +97,7 @@ func Build(ctx context.Context, repo Repo, o Options) (domain.ChangeSet, error) 
 		}
 		if !merge {
 			cc.Files = c.Files
-			if len(keys) == 0 {
+			if len(keys) == 0 && !onlySemar(c.Files) {
 				cs.NoTicket = append(cs.NoTicket, c.ID)
 			}
 		}
@@ -185,4 +187,10 @@ func findKeys(re *regexp.Regexp, text string) []string {
 
 func isAlnum(b byte) bool {
 	return b >= '0' && b <= '9' || b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z'
+}
+
+// onlySemar is true for a commit that changes files under .semar/ and nothing else. It is Semar's
+// own setup, and no test would be chosen for it.
+func onlySemar(files []string) bool {
+	return len(files) > 0 && !slices.ContainsFunc(files, func(p string) bool { return !strings.HasPrefix(p, ".semar/") })
 }

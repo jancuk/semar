@@ -225,6 +225,29 @@ func TestATitleIsCutAtAReadableWidth(t *testing.T) {
 	t.Errorf("no line for the use case:\n%s", got)
 }
 
+func TestCommitsWithNoTicketAreOneLine(t *testing.T) {
+	commits := []string{`4405647 "start without the tool"`, `435164a "QA: setup"`, `2e14da4 "tidy"`, `1cdf78f "Set up"`}
+	cases := []struct {
+		in   []string
+		want string
+	}{
+		{nil, ""},
+		{commits[:1], `1 commit has no ticket: 4405647 "start without the tool"`},
+		{commits[:2], `2 commits have no ticket: 4405647 "start without the tool", 435164a "QA: setup"`},
+		{commits[:3], `3 commits have no ticket: 4405647 "start without the tool", 435164a "QA: setup", 2e14da4 "tidy"`},
+		{commits, `4 commits have no ticket: 4405647 "start without the tool", 435164a "QA: setup", and 2 more`},
+	}
+	for _, c := range cases {
+		if got := status.NoTicketLine(c.in); got != c.want {
+			t.Errorf("line %q, want %q", got, c.want)
+		}
+	}
+	got := render(t, status.Input{Entries: []obligation.Entry{entry("a/1", obligation.Verified, nil)}, NoTicket: commits})
+	if !strings.Contains(got, "\n"+cases[4].want+"\n") || strings.Count(got, "no ticket") != 1 {
+		t.Errorf("text:\n%s", got)
+	}
+}
+
 func TestShipIsYesOnlyWhenTheCodeIsZero(t *testing.T) {
 	in := status.Input{Branch: "b", Base: "main", Environment: "uat", BuildsRead: true, Tickets: []string{"SHOP-482"},
 		Entries: []obligation.Entry{entry("SHOP-482/1", obligation.Verified, nil), entry("SHOP-482/2", obligation.Deferred, nil)}}

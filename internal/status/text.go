@@ -50,11 +50,8 @@ func Text(w io.Writer, r Report) error {
 		groupLine(&b, "not planned", len(r.NotPlanned), countWidth, "semar plan")
 		fmt.Fprintf(&b, "    %s\n", line(strings.Join(r.NotPlanned, ", ")))
 	}
-	for _, c := range r.NoTicket {
-		fmt.Fprintf(&b, "\nA commit has no ticket: %s", line(c))
-	}
 	if len(r.NoTicket) > 0 {
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "\n%s\n", line(NoTicketLine(r.NoTicket)))
 	}
 	fmt.Fprintf(&b, "\n%s\n", line(r.Verdict()))
 	_, err := io.WriteString(w, b.String())
@@ -133,4 +130,22 @@ func withoutSentence(e obligation.Entry) []string {
 		return e.Reasons
 	}
 	return slices.DeleteFunc(slices.Clone(e.Reasons), func(r string) bool { return r == e.Obligation.Manual.Text })
+}
+
+// NoTicketLine is one line for the commits of a change that name no ticket, each as its short ID and
+// its subject. With more than three, two are named and the rest are counted.
+func NoTicketLine(commits []string) string {
+	n := len(commits)
+	if n == 0 {
+		return ""
+	}
+	verb, noun := "have", "commits"
+	if n == 1 {
+		verb, noun = "has", "commit"
+	}
+	shown, more := commits, ""
+	if n > 3 {
+		shown, more = commits[:2], fmt.Sprintf(", and %d more", n-2)
+	}
+	return fmt.Sprintf("%d %s %s no ticket: %s%s", n, noun, verb, strings.Join(shown, ", "), more)
 }
