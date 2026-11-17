@@ -94,7 +94,7 @@ type Scenario struct {
 	Result     domain.ScenarioResult
 	Title      string // "" when the scenario file is gone
 	File       string // the scenario file from the repository root, "" when gone
-	StepLines  map[domain.StepID]int // the line of each step's id key in the file
+	StepLines  map[domain.StepID]int // the line of each step's Given or When in the file. Before Plan 24 it was the line of the id key
 	DurationMS int64
 	Unknown    bool   // an action was too large to read
 }
@@ -207,7 +207,7 @@ The three writers are pure: the same `Run` gives the same bytes. Maps are writte
           "level": "error",
           "message": { "text": "SHOP-482-01 step refund-too-much: expected status 422, observed status 200 (source ticket)" },
           "locations": [
-            { "physicalLocation": { "artifactLocation": { "uri": ".semar/scenarios/SHOP-482/SHOP-482-01.yaml" }, "region": { "startLine": 14 } } }
+            { "physicalLocation": { "artifactLocation": { "uri": ".semar/scenarios/SHOP-482/SHOP-482-01.feature" }, "region": { "startLine": 14 } } }
           ],
           "partialFingerprints": { "semar/v1": "<hex SHA-256 of scenario, step, check index, and rule>" },
           "properties": { "semarRun": "r-20261117T090000Z-1a2b", "semarScenario": "SHOP-482-01", "semarStep": "refund-too-much" }

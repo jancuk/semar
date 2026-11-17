@@ -102,7 +102,16 @@ The planner can raise the level and cannot lower it. A person can set it by hand
 The planner reads the ticket, the code as deployed, the feature map, and earlier testing. It produces one plan:
 
 * **The impact map.** Each affected URL, path, and screen, with the code path that leads to it.
-* **Functional scenarios** for each entry point: the changed behaviour, the boundary, the refusal, and the neighbour.
+* **Functional scenarios** for each entry point: the changed behaviour, the boundary, the refusal, and the neighbour. Each is a Gherkin `.feature` file that product and QA can read, with the source of every expected result in the comment under its `Then` line:
+
+  ```gherkin
+  When Request a refund of 150000 for that order
+  # step: refund-too-much; POST /v1/orders/{id}/refunds
+  Then the status is 422
+  # ticket SHOP-482: a refund above the order total must be rejected
+  ```
+
+  The request itself is in a script, apart from the file that people confirm.
 * **Access checks** and the **security plan**: which probe kinds apply to which entry points, and which "must never" rules are in play.
 * **Two coverage tables.** The ticket's criteria against scenarios, and the changed code against scenarios.
 * **A double-check list** and recommendations, including what cannot be tested.
@@ -111,7 +120,7 @@ Code validates every claim it can: cited lines, listed paths, quoted ticket sent
 
 ### 4. Confirm intent
 
-People answer only what is new: an expected result that came from the code alone, a proposed "must never" rule, or a baseline. They answer in the merge request or the ticket. No later phase waits for them. A scenario with an open question is tested anyway and stays `inconclusive` until the answer arrives.
+People answer only what is new: an expected result that came from the code alone, a proposed "must never" rule, or a baseline. They read the scenario as Gherkin, `semar confirm` shows it in that form with the cite of each result, and they answer in the merge request or the ticket. No later phase waits for them. A scenario with an open question is tested anyway and stays `inconclusive` until the answer arrives.
 
 ### 5. Entry check
 

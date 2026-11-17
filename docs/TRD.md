@@ -153,7 +153,7 @@ A developer or a QA engineer changes what Semar tests by editing files under `.s
 | --- | --- |
 | `.semar/semar.yaml` | Hosts, accounts, limits, policy, providers, agents, assignments, and adapters |
 | `.semar/map.yaml` | Features, entry points, and "must never" rules |
-| `.semar/scenarios/` | One file per scenario. A scenario can carry a table of cases |
+| `.semar/scenarios/` | One Gherkin `.feature` file per scenario |
 | `.semar/fragments/` | Steps that several scenarios share |
 | `.semar/data/<env>.yaml` | Named test data per environment |
 | `.semar/checks.yaml` | Named checks |
@@ -186,7 +186,7 @@ Three things stay in code, because they are what makes a result mean the same ev
 | T5 | Codex is driven with `codex exec --json` | `codex app-server` | `codex --help` marks `app-server` as experimental. Semar's jobs are one-shot and need no interactive approvals |
 | T6 | The agent returns structured results by calling an MCP tool (`qa_submit_plan`, `qa_submit_script`) | Each harness's own structured-output flag | One mechanism works on every harness. Semar validates the payload and returns errors to the agent in the same turn |
 | T7 | Only actions that go through Semar's tools count as evidence. In an unattended job the agent's shell, network, and write tools are also switched off | Trust the agent to report what it did | Product rules 1 and 6. The recorder and the credentials stay in the daemon |
-| T8 | Three separate objects: Scenario (confirmed by people), Script (written by the agent), Run (executed by the runner) | One file that holds both expectations and requests | The agent can then repair a request without being able to change an expected result |
+| T8 | Three separate objects: Scenario (a Gherkin file that people confirm), Script (a YAML file that the agent writes), Run (executed by the runner) | One file that holds both expectations and requests | The agent can then repair a request without being able to change an expected result. The file that people confirm reads as the Gherkin that QA engineers know, and holds no request ([Plan 24](implementation/24-gherkin-scenarios.md)) |
 | T9 | The API engine is a native Go HTTP client | An existing HTTP test tool as a child process | The recorder, trace-ID injection, credential injection, and redaction all sit in the HTTP client. Owning the client is less code than wrapping another tool |
 | T10 | The web engine is an in-process Chrome DevTools Protocol client built on chromedp, in `internal/engine/web` (Plan 22, D1). The Android engine is chosen by spike S7 | Another tool's engine by import, by its daemon, or by a copy. Test files of an existing runner, run as child processes | One maintained library gives real input events, the accessibility tree, request interception, and screenshots, with no second process. A snapshot-and-locator engine lets Semar act step by step like a person, and lets it record each action. A test-file runner only reports at the end |
 | T11 | The shared record is an orphan git branch in the service repository | A server with a database, or object storage | Works on any code host, needs nothing to operate, and is browsable in the code host's web interface |
@@ -328,42 +328,77 @@ These rules follow from the split:
 
 ### Scenario file
 
-Scenario files are YAML under `.semar/scenarios/<ticket>/` in the service repository. The example uses an invented order service.
+A scenario is one Gherkin file, `.semar/scenarios/<ticket>/<id>.feature`, in the service repository. Gherkin is the format that QA engineers know from Cucumber and BDD, so product and QA read the file and confirm it as it is. The file holds what a person confirms: the scenario, its steps in words, and its expected results. It holds no request, no selector, and no capture. Those are in the script, as decision T8 says, and a script stays YAML. A file holds one `Scenario`. The official Gherkin parser, `github.com/cucumber/gherkin/go`, reads it, and `domain.Scenario` stays the model inside Semar. The example uses an invented order service.
 
-```yaml
-apiVersion: semar/v1
-kind: Scenario
-id: SHOP-482-01
-title: Refund above the order total is rejected
-ticket: SHOP-482
-intent: >
-  Before: a refund larger than the order total was accepted.
-  Now: the API rejects it with 422 and leaves the order unchanged.
-surface: api
-authProfile: support-agent
-steps:
-  - id: create-order
-    setup: true
-    action: Create a paid order for 100000
-    hint: { method: POST, path: /v1/orders }
-  - id: refund-too-much
-    action: Request a refund of 150000 for that order
-    hint: { method: POST, path: "/v1/orders/{id}/refunds" }
-    expect:
-      - check: { status: 422 }
-        source: ticket
-        cite: "SHOP-482: a refund above the order total must be rejected"
-      - { check: { jsonpath: "$.error.code", equals: REFUND_EXCEEDS_TOTAL }, source: diff }
-  - id: order-unchanged
-    action: Read the order again
-    hint: { method: GET, path: "/v1/orders/{id}" }
-    expect:
-      - check: { jsonpath: "$.data.refunded_total", equals: 0 }
-        source: ticket
-        cite: "SHOP-482: the order must stay unchanged"
+```gherkin
+Feature: Refunds of an order
+
+  @id:SHOP-482-01 @ticket:SHOP-482 @surface:api @auth:support-agent
+  Scenario: Refund above the order total is rejected
+    Before: a refund larger than the order total was accepted.
+    Now: the API rejects it with 422 and leaves the order unchanged.
+
+    Given Create a paid order for 100000
+    # step: create-order; POST /v1/orders
+    When Request a refund of 150000 for that order
+    # step: refund-too-much; POST /v1/orders/{id}/refunds
+    Then the status is 422
+    # ticket SHOP-482: a refund above the order total must be rejected
+    And $.error.code equals "REFUND_EXCEEDS_TOTAL"
+    # diff
+    When Read the order again
+    # step: order-unchanged; GET /v1/orders/{id}
+    Then $.data.refunded_total equals 0
+    # ticket SHOP-482: the order must stay unchanged
 ```
 
-Who confirmed the scenario is not written in the file. Semar reads the confirmation from the code host or the evidence store at run time, so the agent and the author cannot write it.
+**How a part of the scenario is written.** Gherkin has no place for some of it, and a comment line directly under the line that it describes carries that.
+
+| Part of `domain.Scenario` | Where it is in the file |
+| --- | --- |
+| `title` | The name after `Scenario:` |
+| `intent` | The description lines under `Scenario:`, before the first step |
+| `id`, `ticket`, `surface` | The tags `@id:<id>`, `@ticket:<key>`, and `@surface:api` (or `web`, `android`). All three are required |
+| `authProfile` | `@auth:<profile>`. Nothing when the profile is `default`. `@noauth` when the scenario has no profile |
+| `given` | A `Given the fixture <id> as <name>` line for each entry, before the steps. `with` is a table of two columns (`\| name \| value \|`) under the line, and `lease: exclusive` ends the line with `with an exclusive lease` |
+| A setup step (`setup: true`) | A `Given` line. A step that follows another `Given` or `When` line is written `And` |
+| An action step | A `When` line |
+| `as` of a step | The line starts `as <account>, `, as in `When as bob, Bob moves card A to Doing` |
+| The `id` and the `hint` of a step | The comment under the step: `# step: <id>` for a step with no request, and `# step: <id>; <METHOD> <path template>` for one with. The ID is the name that reports, scripts, and the ledger use for the step, so it is written and never counted |
+| An expected result (`expect`) | A `Then` line directly under the `When` step that it belongs to, and an `And` line for the next one |
+| The `source` and the `cite` of an expected result | The comment under its `Then` line: `# <source> <cite>`, and `, by model` at the end when a model wrote it (`by: model`) |
+| The Feature line | The ticket's subject, for the person who reads the file. It is not part of the scenario and not in the hash |
+
+**The sentence of a `Then` line.** There is one form for each subject and operator. A value is a JSON literal, so a string is in double quotes.
+
+| Check | Sentence |
+| --- | --- |
+| The status | `the status is 422` |
+| Equals | `$.error.code equals "REFUND_EXCEEDS_TOTAL"` |
+| Not equals | `$.error.code does not equal "X"` |
+| Contains | `$.error.message contains "total"` |
+| Exists | `$.data.id exists`, and `$.data.id does not exist` |
+| Greater, less | `$.data.total is greater than 0`, and `is less than 100` |
+| Count | `$.data.items has 3 items`, and `has 1 item` |
+| Equals a value at another path | `$.a equals the value at $.b` |
+| A header | `the header Location contains "/v1/"`. A header takes the operators of a path |
+| An element of a web page | `the element todo-first equals "{{b_title}}"`. An element takes equals, does not equal, contains, exists, and has N items |
+
+The subject of a path check starts with `$`, so a path with spaces is allowed: Semar takes the first split that leaves a sentence that reads. A line that is none of these forms is an error that names the line and lists the forms.
+
+**What the reader does.** It is strict, as the YAML reader was, and every error starts with the file and the line. It refuses a tag that is not listed, a second Scenario, a Background, a Rule, Examples, a doc string, a table anywhere but under a fixture line, a step with no `# step:` comment, an expected result with no source comment, a `Then` that has no `When` above it, a language other than English, and a number that a 64-bit float cannot hold exactly. A comment that is not in one of these places is ignored, so a person can add notes.
+
+**What the file keeps exactly.** The writer and the reader are one pair: what `Render` writes, `Parse` reads back as the same scenario, with the same expectation hash. So a YAML scenario file that `semar scenarios convert` turns into a `.feature` file keeps every confirmation and every stored script. A few texts need care, and the writer says in a plain sentence which field it cannot carry:
+
+* A line of the intent that starts like part of the scenario, such as `Given a paid order`, a `#`, an `@`, a `|`, or `Scenario:`, is written with a backslash in front, and the reader takes the backslash off. A line that starts with a backslash is written with two.
+* An intent that ends with one line break, as a YAML `>` block does, is written with the tag `@intent-newline`, because Gherkin drops the blank lines at the end of a description. The tag keeps the hash. Remove it when you next edit the intent.
+* The title, the action, the cite, and the names are one line each and have no space at either end, because Gherkin trims them.
+
+The hash of the expected results covers what it always covered: the intent, the auth profile, each step's ID, setup flag, hint, `as`, and expected results, and `given`. The Feature line, the title, and the wording of a step are left out, so rewording them lapses no confirmation.
+
+Who confirmed the scenario is not written in the file. Semar reads the confirmation from the code host or the evidence store at run time, so the agent and the author cannot write it. `semar confirm` prints the file as it is, with the source and the cite of each expected result in the comment under it, and then the results that need a person.
+
+**Converting older files.** Scenario files were YAML until [Plan 24](implementation/24-gherkin-scenarios.md). Semar reads `.feature` files only, and a `.yaml` or `.yml` file under `.semar/scenarios` is an error that says "scenario files are Gherkin now: run semar scenarios convert". The command converts every such file in place, deletes the YAML file, and refuses to overwrite a `.feature` file.
 
 ### Planned types for obligations, fixtures, journeys, and engines
 
@@ -386,15 +421,13 @@ type Given struct {
 }
 ```
 
-```yaml
-given:
-  - fixture: order.paid
-    as: order
-steps:
-  - id: read-order
-    action: Read the paid order
-    hint: { method: GET, path: "/v1/orders/{id}" }   # the script sends {{order.id}}
+```gherkin
+Given the fixture order.paid as order
+When Read the paid order
+# step: read-order; GET /v1/orders/{id}
 ```
+
+The script sends `{{order.id}}`.
 
 **Obligations and the ledger.** An obligation state is its own type. It never replaces a scenario outcome.
 
@@ -1632,7 +1665,7 @@ For each affected feature the agent calls `kb_prior_tests` and must give a decis
 
 The plan also lists gaps: test cases for the feature that no scenario covers. QA wrote those cases, so a gap is a strong hint about what the plan missed.
 
-Code checks each citation. The item must exist in the source under the cited ID. An expected result with `source: testcase` must quote text that exists in the case.
+Code checks each citation. The item must exist in the source under the cited ID. An expected result with the source `testcase` must quote text that exists in the case.
 
 ### Memory notes
 
@@ -2124,7 +2157,7 @@ Three rules apply:
 
 Exploring never produces `passed`. It produces findings through `qa_finding`. Each finding carries its recorded actions, so a person can replay it. A person triages each finding as a defect, a new scenario, or noise.
 
-`semar verify` runs an explore pass by default, within the limits under `explore` in configuration. A finding can become a scenario: the agent adds a proposed check to the finding, and a person who accepts it gets a scenario file with `source: person`.
+`semar verify` runs an explore pass by default, within the limits under `explore` in configuration. A finding can become a scenario: the agent adds a proposed check to the finding, and a person who accepts it gets a scenario file whose expected results have the source `person`.
 
 ## Screens and UI legs
 
@@ -2166,19 +2199,21 @@ interruptions:
     dismiss: { text: "Don't allow" }
 ```
 
-A UI step may carry `screen:`, a capture `from: { screen, element }`, and an expectation `check: { element, text }`:
+A UI step names its screen, and the captures that read elements of it, in the script. Its expected result is a `Then` line in the scenario file, about an element:
+
+```gherkin
+When Read the order number and total on the confirmation screen
+# step: read-confirmation
+Then the element order-status equals "Order placed"
+# ticket SHOP-482: the customer sees that the order was placed
+```
 
 ```yaml
-- id: read-confirmation
-  action: Read the order number and total on the confirmation screen
+- step: read-confirmation
   screen: Confirmation
   captures:
     - { name: order_id, from: { screen: Confirmation, element: order-number } }
     - { name: total,    from: { screen: Confirmation, element: order-total } }
-  expect:
-    - check: { element: order-status, text: "Order placed" }
-      source: ticket
-      cite: "SHOP-482: the customer sees that the order was placed"
 ```
 
 ### The web, as built
@@ -2452,7 +2487,7 @@ On a page or a screen, `otp: true` fills the code field. When the code is split 
 | A gate that fails on "zero scanned cases", with a third exit code for "could not judge" | `semar verify` and `semar regression run` exit with 0 when every scenario passed, 1 when one failed, and 2 when nothing failed but a scenario is blocked, inconclusive, or stale, or no scenario ran | M1 |
 | Known failures that work both ways: a waived scenario that passes also fails the gate | `.semar/known-failures.yaml` lists a scenario with a ticket and an expiry date. A listed scenario that passes is reported as "passes now, remove the waiver" | M1.1 |
 | JUnit XML output | `semar export junit <run>`, so that a pipeline shows Semar's results in its own test view | M1.1 |
-| Gherkin feature files as a test format | `semar import gherkin <file>` turns each scenario into a Semar scenario with `source: person`. The plan also prints each scenario as Given, When, Then | M1.1 |
+| Import of a team's own Gherkin feature files | Semar's own scenario files are Gherkin ([Plan 24](implementation/24-gherkin-scenarios.md)). Not built: `semar import gherkin <file>`, which would turn the scenarios of a feature file that a team wrote with its own step sentences into Semar scenarios with the source `person` | M1.1 |
 | A local dashboard with run history, scenario detail, and a live view | `semar ui` serves a read-only page on 127.0.0.1 from the evidence store: runs, the evidence of a scenario, and the live activity log | M1.1 |
 | A monitor that posts to a webhook when a scenario that passed now fails | The regression report has "newly failing". Semar posts that list to a configured webhook | M1.1 |
 | An OTP read from a mailbox | An `mcp` OTP source, through the [MCP gateway](#mcp-gateway) | M1.1 |
@@ -2612,6 +2647,8 @@ Three rules keep database checks rare:
 * **The report counts them.** Each run shows how many checks used the database. A rising count is a sign that the service lacks read endpoints.
 
 ### A database check
+
+This sketch is not built, and it shows the step in the YAML form that scenario files had before [Plan 24](implementation/24-gherkin-scenarios.md). When it is built, the `Then` line of the scenario file will name the check, and the query will be in the script.
 
 ```yaml
 - id: settlement-row-written

@@ -1,6 +1,8 @@
 # Core and Replay Implementation Plan
 
-> **Status:** Implemented. This text describes the system as built.
+> **Status:** Implemented. This text describes the system as built, except that scenario files are Gherkin now.
+
+> **Changed by [Plan 24](24-gherkin-scenarios.md):** the scenario files of this plan are YAML, and they are Gherkin `.feature` files now. `scenario.Parse` reads Gherkin, `scenario.Render` writes it, and the YAML reader stays for `semar scenarios convert` only. Read each scenario file below as the older format. The domain types and the expectation hash did not change.
 
 > **For agentic workers:** Implement this plan task by task. The steps use checkbox (`- [ ]`) syntax for tracking.
 

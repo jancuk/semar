@@ -529,12 +529,12 @@ Semar plans from the ticket text and the feature map. Every expected result must
 
 ## Scenario 8: change a test, a rule, or a model
 
-**You are** a developer or a QA engineer. You want Semar to test something differently. You edit a YAML file. You never read or change Semar's code, and you do not rebuild or restart anything.
+**You are** a developer or a QA engineer. You want Semar to test something differently. You edit a text file: Gherkin for a scenario, YAML for the rest. You never read or change Semar's code, and you do not rebuild or restart anything.
 
 | You want to | Edit |
 | --- | --- |
-| Add or change a test | A file in `.semar/scenarios/` |
-| Run one test with many inputs | `cases:` in the scenario |
+| Add or change a test | A `.feature` file in `.semar/scenarios/`. It is Gherkin: Feature, Scenario, Given, When, Then, and tags |
+| Run one test with many inputs | Not built. Write each input as its own `.feature` file. A table of cases is planned |
 | Share steps between tests | A file in `.semar/fragments/` |
 | Use other test data on another environment | `.semar/data/<env>.yaml` |
 | Add a rule that every response must meet | `policy.invariants` in `.semar/semar.yaml` |
@@ -543,14 +543,16 @@ Semar plans from the ticket text and the feature map. Every expected result must
 | Change which model does which job | `providers`, `agents`, and `assign` in `.semar/semar.yaml` |
 | Change who must confirm, or when a ticket is ready | `policy:` in `.semar/semar.yaml` |
 
-**Run one test with three inputs.** Add a table of cases to the scenario:
+**Change what a test expects.** Open the scenario file, and change the `Then` line. A person who reads Gherkin reads this file as it is, and product and QA confirm it in this form:
 
-```yaml
-cases:
-  - { name: one-below, amount: 99999,  status: 201 }
-  - { name: equal,     amount: 100000, status: 201 }
-  - { name: one-above, amount: 100001, status: 422 }
+```gherkin
+When Request a refund of 150000 for that order
+# step: refund-too-much; POST /v1/orders/{id}/refunds
+Then the status is 422
+# ticket SHOP-482: a refund above the order total must be rejected
 ```
+
+The comment under the `When` line holds the step's ID and request, and the comment under the `Then` line holds where the expected result comes from. The request itself, with its body, is in the script, and the agent can repair it without touching what you confirmed.
 
 **Give low-risk tickets to a cheaper model, and run three testers at once.**
 
@@ -572,7 +574,7 @@ assign:
 ```text
 $ semar validate
 
-.semar/scenarios/SHOP-482/SHOP-482-02.yaml:14  unknown key "expects". Did you mean "expect"?
+.semar/scenarios/SHOP-482/SHOP-482-02.feature:14  Semar cannot read the Then line "the answer is nice". Accepted forms: the status is 422, $.path equals "text", ...
 .semar/semar.yaml:61                           agent "tester-lite" is not defined. Defined: tester, tester-light, fast
 2 problems. Nothing was run.
 
@@ -583,7 +585,7 @@ $ semar validate --changed
 Their confirmations and scripts no longer apply.
 ```
 
-`semar agents` shows which model does each job. `semar explain <setting>` says what a setting does and what it is set to. `semar new scenario` writes a starting file with a comment on every field.
+`semar agents` shows which model does each job. `semar explain <setting>` says what a setting does and what it is set to. `semar new scenario` writes a starting `.feature` file.
 
 Three things cannot be changed in YAML, on purpose: what `passed` means, Semar's fixed rules such as "no server error", and who may confirm an expected result. Those are the same in every company, so that a result can be trusted.
 

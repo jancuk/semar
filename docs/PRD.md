@@ -178,8 +178,9 @@ You did not answer these directly, so this draft picks the option it judges best
 | D66 | The open-source core stays Apache-2.0. Enterprise features belong to a later managed edition: single sign-on, role-based access, an audit log, run history across teams, secret-manager integration, masking of personal data in evidence, and data residency. The format and the engine are never made commercial | This is consistent with D4, which stages a managed cloud, and with D36, which names Apache-2.0 as the license choice. Open question 9 stays open until the owner confirms the license, and open question 40 asks where the boundary lies | Adopters cannot rely on the core staying open, or the managed edition has nothing to offer that funds it |
 | D67 | Semar publishes its scenario, fixture, journey, screens, evidence, and verdict formats as versioned JSON Schemas, with a conformance suite that another tool can run. It does not claim to be a standard | Adoption is earned. Published schemas and a conformance suite let others implement the formats. A neutral foundation and an RFC process are a later option. This extends FR-255 | The formats stay private and nobody can check an implementation, or Semar claims a status that nobody has given it |
 | D68 | Semar exports reports in CTRF and JUnit XML and findings in SARIF. It imports Postman collections, OpenAPI documents, HAR files, and existing manual test cases as drafts that a person reviews. To verify: the exact version of each format is not verified | Results should reach the tools a team already runs, and an existing collection is the fastest start. An import is a draft because Semar cannot judge its fidelity. This extends FR-71 and FR-188 | Each team writes its own converter, or an import counts without review |
+| D69 | A scenario file is a Gherkin `.feature` file, the format that QA engineers know from Cucumber and BDD. It holds what a person confirms: the scenario, its steps in words, and its expected results. A request, a selector, and a capture stay in the YAML script. Added on 2026-11-17, built in [Plan 24](implementation/24-gherkin-scenarios.md) | Product and QA read and confirm the scenario as it is, in a format that they already know, and the split of decision T8 keeps an agent from changing an expected result when it repairs a request | A Semar-only format that every new QA engineer must learn, or a file that mixes what people confirm with how it runs |
 
-D53 to D68 were added on 2026-11-17. They extend D8, D25, and D44 and reverse no earlier decision.
+D53 to D69 were added on 2026-11-17. They extend D8, D25, and D44 and reverse no earlier decision.
 
 ## Goals
 
@@ -208,7 +209,7 @@ The first two goals are the reason Semar exists. The numbered goals after them s
 18. Let a developer or a QA engineer see every action the agent took on UAT, in order, and every record it created, changed, or deleted.
 19. Have the agent test the security of what changed, the way a QA engineer would, and report what it tried.
 20. Fit a company with other tools: another tracker, another code host, another observability stack, with configuration and no change to Semar's code.
-21. Let developers and QA change tests, rules, and models by editing YAML, with no knowledge of Semar's code.
+21. Let developers and QA change tests, rules, and models by editing YAML, and scenarios by editing Gherkin, with no knowledge of Semar's code.
 22. Let a team choose which model does which job, run agents in parallel, and use a cheap, fast model wherever a job is a simple choice.
 23. Keep a history of testing and show metrics from it: which tickets, teams, and scenarios were tested, on which build, and with which outcome.
 24. Give the agent the context it needs to choose scenarios and explain results: the team's tools through MCP servers, a knowledge base and memory, and the source code.
@@ -321,7 +322,7 @@ Delivery sequence: **M1** is an API pilot, **M1.1** adds shared team operation, 
 | FR-3 | Semar drafts scenarios. Each scenario has steps, and each step has expected results | M1 |
 | FR-4 | Each expected result carries a source: `ticket`, `testcase`, `person`, `diff`, or `baseline`. The agent can submit every source except `person`, which code assigns when a signed-in person writes the result. Invariants are a fixed list in Semar's code | M1 |
 | FR-5 | Semar lists changed areas that no scenario covers, and scenarios that cannot run with the reason | M1 |
-| FR-6 | Scenarios are stored as files in the service repository so that a merge request can carry them | M1 |
+| FR-6 | Scenarios are stored as Gherkin `.feature` files in the service repository, one scenario in each file, so that a merge request can carry them and a QA engineer can read them. See [Plan 24](implementation/24-gherkin-scenarios.md) | M1 |
 | FR-7 | Semar can plan from a local branch before a merge request exists | M1 |
 | FR-53 | Semar keeps a feature map in the repository: each feature, its API routes, web pages, Android screens, and background jobs, and its source files. The agent drafts it and people correct it | M1 |
 | FR-54 | For a change, Semar lists each affected entry point with the code path from the changed line to it, and marks the reach as direct, indirect, or unknown | M1 |
@@ -599,7 +600,7 @@ Delivery sequence: **M1** is an API pilot, **M1.1** adds shared team operation, 
 | FR-186 | Semar exits with 0 when every scenario passed, 1 when one failed, and 2 when nothing failed but a scenario could not be judged or no scenario ran | M1 |
 | FR-187 | A team can list known failures, each with a ticket and an expiry date. A listed scenario that passes is reported | M1.1 |
 | FR-188 | Semar exports results as JUnit XML | M1.1 |
-| FR-189 | Semar imports Gherkin feature files as scenarios | M1.1 |
+| FR-189 | Semar imports the Gherkin feature files that a team wrote with its own step sentences as scenarios. Semar's own scenario files are Gherkin already ([Plan 24](implementation/24-gherkin-scenarios.md)) | M1.1 |
 | FR-190 | `semar ui` shows runs, evidence, and the live activity log on a local page | M1.1 |
 | FR-191 | Semar posts newly failing regression scenarios to a webhook | M1.1 |
 | FR-192 | On the web, an uncaught script error and a 5xx from a background request each break an invariant. Console and network logs are stored per scenario | M2 |

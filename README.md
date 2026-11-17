@@ -69,7 +69,8 @@ These parts are implemented in Go.
 * **API journeys:** a business flow across services, such as an order that is placed, paid, and shown as paid, runs leg by leg against one set of builds. See [Test a business flow with a journey](#test-a-business-flow-with-a-journey).
 * **The use case ledger:** each use case that needs testing ends in one stated state, so that nothing is skipped without a word. See [See that nothing is skipped: the use case ledger](#see-that-nothing-is-skipped-the-use-case-ledger).
 * **Exports:** `semar export` writes a stored run as CTRF, JUnit XML, or SARIF. See [Send results to your tools](#send-results-to-your-tools).
-* **The web:** a journey leg or a scenario with `surface: web` drives Chrome on a profile of Semar's own, finds elements through screen objects that a person approves, and repairs a broken locator with no model. `semar login`, `semar confirm --screens`, and `semar screens repair`. Plan 22 describes it.
+* **The web:** a journey leg or a scenario with the tag `@surface:web` drives Chrome on a profile of Semar's own, finds elements through screen objects that a person approves, and repairs a broken locator with no model. `semar login`, `semar confirm --screens`, and `semar screens repair`. Plan 22 describes it.
+* **Gherkin scenarios:** a scenario is a `.feature` file that product and QA read and confirm as it is, with the requests in a YAML script apart from it. `semar scenarios convert` moves older YAML scenario files over and keeps their confirmations. See [Hand-written scenarios](#hand-written-scenarios) and Plan 24.
 
 An environment is declared as `test` or `production`, and Semar acts in it only as its rules allow.
 
@@ -172,7 +173,7 @@ While the planner works, a status line on standard error shows the elapsed time,
 
 | File | Content |
 | --- | --- |
-| `.semar/scenarios/<ticket>/<ticket>-NN.yaml` | One scenario: its steps and expected results |
+| `.semar/scenarios/<ticket>/<ticket>-NN.feature` | One scenario as a Gherkin file: its steps and expected results, with the source of each result |
 | `.semar/store/scripts/...` | The exact request of each step |
 | `.semar/obligations/<ticket>.plan.yaml` | The use cases of the ticket, for the [ledger](#see-that-nothing-is-skipped-the-use-case-ledger) |
 | `.semar/plans/<head commit>/plan.md` | What changed, the scenarios per ticket, the acceptance criteria and what cites each one, what was not drafted and what it needs, the fixtures needed, the journeys to rerun, the manual checks for a person, the files that no scenario covers, the trial run, the documents that the planner was told to read, and the problems of every draft that went back to the planner |
@@ -429,21 +430,21 @@ knowledge:
 
 **What the planner is told.** The prompt (version 7) shows each file as data, numbered by line, inside a fence that its own text cannot end. It cannot change the schema, the rules, or a result: a person still confirms every expected result. The planner is told to:
 
-* give each criterion that a caller of the API can observe at least one expected result with `source: ticket` and a `cite` of the form `<ticket file>:<line> <one sentence>`. Code checks that the file is the ticket file of the scenario's ticket and that the line exists. A scenario whose ticket has no file cannot use `source: ticket`, and the problem goes back to the planner;
+* give each criterion that a caller of the API can observe at least one expected result with the source `ticket` and a cite of the form `<ticket file>:<line> <one sentence>`, which is written in the comment under the `Then` line as `# ticket <ticket file>:<line> <one sentence>`. Code checks that the file is the ticket file of the scenario's ticket and that the line exists. A scenario whose ticket has no file cannot use the source `ticket`, and the problem goes back to the planner;
 * expect what the criterion says where the code does not meet it, add a `differences` entry, and name the scenario after the requirement. `plan.md` marks that scenario with `This scenario is expected to fail on this build: the code does not meet docs/tickets/SHOP-482.md:14.` The mark is a prediction that a person can check in the run;
 * put a criterion that only a person can check, on a screen, on a device, or by a gesture, under `manualChecks`: the ticket, a title, 1 to 20 steps, the expected result, and the cite of the criterion;
-* account for every numbered criterion under a heading that contains "Acceptance criteria". Code reads those lines and checks that each one is cited by a scenario with `source: ticket`, by a manual check, or by a `notDrafted` entry with a `cite`. A criterion that nothing cites goes back to the planner. If it is still missing after the last draft, the plan is written and the criterion becomes an obligation `<ticket>/criterion-<n>` with the gap "criterion not accounted for by the planner", so the ledger keeps it. `plan.md` shows a table "Acceptance criteria" in each ticket's section, with what cites each one;
+* account for every numbered criterion under a heading that contains "Acceptance criteria". Code reads those lines and checks that each one is cited by a scenario with the source `ticket`, by a manual check, or by a `notDrafted` entry with a `cite`. A criterion that nothing cites goes back to the planner. If it is still missing after the last draft, the plan is written and the criterion becomes an obligation `<ticket>/criterion-<n>` with the gap "criterion not accounted for by the planner", so the ledger keeps it. `plan.md` shows a table "Acceptance criteria" in each ticket's section, with what cites each one;
 * test a record that is not found with an ID that cannot exist, `missing-{{run.id}}`, in the path. It may not use any other made-up ID.
 
 **Manual checks.** Each manual check is listed in `plan.md` under its ticket, and becomes an obligation `<ticket>/manual-<n>` in `.semar/obligations/<ticket>.plan.yaml`, with `source: criterion` and a `manual` reason of the kind `judgement` that is written by `ai`. It derives `needs_a_person`, and `semar ledger --checklist` prints its steps and its expected result. A person records the result with `semar ledger record`.
 
 **Accounts.** When `semar.yaml` has two auth profiles or more, the prompt lists their names and their one-line `description`, and tells the planner to add a scenario for the most likely access mistake, with `as`. The planner may use only these names. An unknown name is a problem that goes back to the planner. A [trial run](#the-trial-run) does not send a step that acts as another account, because it has the session of the plan's account only.
 
-**Expected results from the planner.** Every expected result that the planner drafts is written with `by: model` and the `source` that the planner gave, `diff` unless it cites a ticket. It always needs a person's confirmation.
+**Expected results from the planner.** Every expected result that the planner drafts is marked `, by model` in the comment under its `Then` line, with the source that the planner gave, `diff` unless it cites a ticket. It always needs a person's confirmation.
 
 **What `plan.md` adds.** "How this plan was made" lists the problems of every draft that went back to the planner, at most 30 for each draft, escaped. When a trial sent nothing, the summary line of `semar plan` says why, for example `tried: 0 of 27 steps (every step needs a write or a fixture create, which a trial never sends)`.
 
-Code cannot check that a cited line says what the planner claims. `semar confirm` prints that line next to the result, so a person compares them.
+Code cannot check that a cited line says what the planner claims. `semar confirm` prints that line next to the result, and prints the scenario as the Gherkin file that it is, so a person compares them.
 
 ### Hand-written scenarios
 
@@ -453,34 +454,52 @@ Code cannot check that a cited line says what the planner claims. `semar confirm
 semar init --base-url https://orders.uat.example.com --token-env ORDERS_UAT_TOKEN
 ```
 
-**2. Write a scenario** in `.semar/scenarios/SHOP-482/SHOP-482-01.yaml`. It says what must be true, and where each expected result comes from:
+**2. Write a scenario** in `.semar/scenarios/SHOP-482/SHOP-482-01.feature`. It is a Gherkin file, the format that QA engineers know from Cucumber. It says what must be true, and where each expected result comes from:
 
-```yaml
-apiVersion: semar/v1
-kind: Scenario
-id: SHOP-482-01
-title: Refund above the order total is rejected
-ticket: SHOP-482
-intent: >
-  Before: a refund larger than the order total was accepted.
-  Now: the API rejects it with 422 and leaves the order unchanged.
-surface: api
-authProfile: default
-steps:
-  - id: create-order
-    setup: true
-    action: Create a paid order for 100000
-    hint: { method: POST, path: /v1/orders }
-  - id: refund-too-much
-    action: Request a refund of 150000 for that order
-    hint: { method: POST, path: "/v1/orders/{id}/refunds" }
-    expect:
-      - check: { status: 422 }
-        source: ticket
-        cite: "SHOP-482: a refund above the order total must be rejected"
-      - check: { jsonpath: "$.error.code", equals: REFUND_EXCEEDS_TOTAL }
-        source: diff
+```gherkin
+Feature: Refunds of an order
+
+  @id:SHOP-482-01 @ticket:SHOP-482 @surface:api
+  Scenario: Refund above the order total is rejected
+    Before: a refund larger than the order total was accepted.
+    Now: the API rejects it with 422 and leaves the order unchanged.
+
+    Given Create a paid order for 100000
+    # step: create-order; POST /v1/orders
+    When Request a refund of 150000 for that order
+    # step: refund-too-much; POST /v1/orders/{id}/refunds
+    Then the status is 422
+    # ticket SHOP-482: a refund above the order total must be rejected
+    And $.error.code equals "REFUND_EXCEEDS_TOTAL"
+    # diff
 ```
+
+How to read it:
+
+| In the file | Means |
+| --- | --- |
+| `@id:`, `@ticket:`, `@surface:` | The scenario's ID, its ticket, and `api` or `web`. All three are required. `@auth:<profile>` names the auth profile, and nothing means `default`. `@noauth` means no profile |
+| The lines under `Scenario:` | The intent: what was true before, and what is now |
+| `Given` | A setup step: it prepares data and makes no claim. It has no expected result |
+| `When` | A step with a request, and expected results |
+| `# step: <id>; <METHOD> <path>` | The comment under a step. It holds the step's ID, which reports and scripts use, and its request path as a hint. A web step has no hint: `# step: <id>` |
+| `Then`, `And` | An expected result of the `When` step above. Write one sentence from the table below |
+| `# <source> <cite>` | The comment under a `Then` line. The source is `ticket`, `testcase`, `person`, `diff`, or `baseline`. A model's result ends `, by model` |
+
+A `Then` line is one of these. A value is JSON, so a string is in double quotes:
+
+| Sentence | Checks |
+| --- | --- |
+| `the status is 422` | The HTTP status |
+| `$.error.code equals "X"`, `does not equal`, `contains` | The value at a JSON path |
+| `$.data.id exists`, `$.data.id does not exist` | That the path selects a value, or does not |
+| `$.data.total is greater than 0`, `is less than 100` | A number |
+| `$.data.items has 3 items` | How many values the path selects |
+| `$.a equals the value at $.b` | Two values of the response |
+| `the header Location contains "/v1/"` | A response header, with the same operators as a path |
+| `the element todo-first equals "{{b_title}}"` | The text of an element of a web page, with equals, does not equal, contains, exists, and has N items |
+
+A line that is none of these is an error that names the file and the line, and lists the forms. A tag, a comment, or a step in another place is an error too, so that a typo cannot change a test silently. A comment elsewhere is a note and is ignored.
 
 **3. Write its script** in any file, for example `scripts/SHOP-482-01.yaml`. It holds the exact request of each step:
 
@@ -509,40 +528,45 @@ semar confirm SHOP-482-01                      # needed because one result has t
 semar run --scenario SHOP-482-01 --build 9f3c2ab41d07; echo "exit $?"
 ```
 
-`testdata/e2e/` holds these files as a working example. Its configuration points at an address where nothing listens, so a run there ends as `blocked`. The tests in `internal/cli` run the same files against a sample service.
+`testdata/e2e/` holds these files as a working example. The scenario there was converted from the older YAML format, so its file also has the tag `@intent-newline`: it keeps the intent exactly as it was, so that the confirmation of the YAML file still holds. Its configuration points at an address where nothing listens, so a run there ends as `blocked`. The tests in `internal/cli` run the same files against a sample service.
+
+### Convert scenarios from the older YAML format
+
+Scenario files were YAML before they were Gherkin. Semar reads `.feature` files only, and a `.yaml` or `.yml` file under `.semar/scenarios` stops every command with "scenario files are Gherkin now: run semar scenarios convert". Run it once:
+
+```bash
+semar scenarios convert        # --dir <repository root>
+```
+
+It writes a `.feature` file beside each YAML scenario file, deletes the YAML file, and prints each file with its expectation hash. The scenario is the same, so every confirmation and every stored script stays valid, and `semar run` gives the results that it gave before. It never overwrites a `.feature` file, and it writes nothing when any file cannot be converted. A file that cannot be converted says which field Gherkin cannot carry exactly, for example an intent that ends with two line breaks. Change that text in the YAML file, run `convert` again, and expect the scenario to need a new confirmation, because its hash changes with the text.
 
 ### Act as another account
 
-A step uses the auth profile of the scenario. `as` makes one step, a setup step too, act as another auth profile of `semar.yaml`. Every request of that step then carries that profile's session, and no other:
+A step uses the auth profile of the scenario. Starting a step with `as <account>, ` makes it, a setup step too, act as another auth profile of `semar.yaml`. Every request of that step then carries that profile's session, and no other:
 
-```yaml
-  - id: move-to-other-board
-    action: A member of another board moves the card
-    as: carol
-    hint: { method: POST, path: "/v1/cards/{id}/move" }
-    expect:
-      - check: { status: 403 }
-        source: ticket
-        cite: "docs/tickets/SHOP-482.md:14 only a member of the board may move a card"
+```gherkin
+    When as carol, A member of another board moves the card
+    # step: move-to-other-board; POST /v1/cards/{id}/move
+    Then the status is 403
+    # ticket docs/tickets/SHOP-482.md:14 only a member of the board may move a card
 ```
 
 A name that `semar.yaml` does not define blocks the scenario before any request, with `account carol is not in the configuration`. A fixture step has no `as`: it uses the profile of its service, and a file that sets `as` there is refused. A journey leg and a journey step have `as` too, as [a journey](#test-a-business-flow-with-a-journey) explains.
 
 ### Expected results from a model, and variables in them
 
-`by: model` on an expected result says that a model wrote it. It always needs a person's confirmation, whatever its `source` and whatever `policy.trust.confirm` lists. `semar confirm` prints the cited line for a `ticket` result whose `cite` starts with `<file of the repository>:<line>`, read from your working tree as one escaped line of at most 300 characters, and `as` for each step that has it. A cite to a file or a line that is not there prints `line not found`, so you can see that it does not hold up.
+`, by model` at the end of the comment under a `Then` line says that a model wrote the expected result. It always needs a person's confirmation, whatever its source and whatever `policy.trust.confirm` lists. `semar confirm` prints the scenario file as it is, and then each result that needs a person. For a `ticket` result whose cite starts with `<file of the repository>:<line>` it prints the cited line, read from your working tree as one escaped line of at most 300 characters, and `as` for each step that has it. A cite to a file or a line that is not there prints `line not found`, so you can see that it does not hold up.
 
-A string operand of `equals`, `notEquals`, or `contains` may hold `{{name}}`: a capture of this or an earlier step, an output of a `given` entry such as `{{card.board}}`, or `{{run.id}}`. Semar fills it in before it checks. A `secret.` or `data.` name, a malformed `{{`, or a name that nothing provides is refused when the files are loaded, and a value that is missing at run time makes the check `not_evaluated`. The report shows the filled-in value next to what was written, and a value that the redaction hides stays hidden.
+A string value after `equals`, `does not equal`, or `contains` may hold `{{name}}`: a capture of this or an earlier step, an output of a `given` entry such as `{{card.board}}`, or `{{run.id}}`. Semar fills it in before it checks. A `secret.` or `data.` name, a malformed `{{`, or a name that nothing provides is refused when the files are loaded, and a value that is missing at run time makes the check `not_evaluated`. The report shows the filled-in value next to what was written, and a value that the redaction hides stays hidden.
 
-`count` compares a number of values. On a path made only of names and indexes, such as `$.data.lists[0].cards`, that selects one array, it is the length of the array, so `count: 0` means the array is empty. On any other path, such as `$.data.cards[*]`, it is the number of values the path selects.
+`has N items` compares a number of values. On a path made only of names and indexes, such as `$.data.lists[0].cards`, that selects one array, it is the length of the array, so `has 0 items` means the array is empty. On any other path, such as `$.data.cards[*]`, it is the number of values the path selects.
 
-```yaml
-      - check: { jsonpath: "$.data.board", equals: "{{card.board}}" }
-        source: ticket
-        cite: "docs/tickets/SHOP-482.md:9 the card stays on its board"
+```gherkin
+    Then $.data.board equals "{{card.board}}"
+    # ticket docs/tickets/SHOP-482.md:9 the card stays on its board
 ```
 
-`as` and `by` are part of what a confirmation covers, but only when set, so a scenario that does not use them keeps its hash and its stored confirmations and scripts.
+`as` and `by model` are part of what a confirmation covers, but only when set, so a scenario that does not use them keeps its hash and its stored confirmations and scripts.
 
 ### Prepare data with fixtures
 
@@ -584,35 +608,25 @@ What each part does:
 * Every step goes through the same rules as a scenario step: the host list, the methods, `effects.deny`, `effects.once`, and `effects.mode`. A step on the deny list or the once list is refused. A `find` step that writes is refused. On a `read_only` environment no `create` is sent.
 * A fixture cannot use another fixture.
 
-**2. Name it in a scenario** with `given`, and read its outputs in the script:
+**2. Name it in a scenario** with a `Given the fixture` line, and read its outputs in the script:
 
-```yaml
-apiVersion: semar/v1
-kind: Scenario
-id: SHOP-482-05
-title: A paid order is read back as paid
-ticket: SHOP-482
-intent: >
-  Given a paid order, its owner reads it and sees the status paid.
-surface: api
-authProfile: default
-given:
-  - fixture: order.paid
-    as: order
-steps:
-  - id: read-paid-order
-    action: Read the paid order
-    hint: { method: GET, path: "/v1/orders/{id}" }
-    expect:
-      - check: { status: 200 }
-        source: ticket
-        cite: "SHOP-482: a paid order can be read by its owner"
-      - check: { jsonpath: "$.data.status", equals: paid }
-        source: ticket
-        cite: "SHOP-482: the order stays paid"
+```gherkin
+Feature: Reading an order
+
+  @id:SHOP-482-05 @ticket:SHOP-482 @surface:api
+  Scenario: A paid order is read back as paid
+    The owner of a paid order reads it and sees the status paid.
+
+    Given the fixture order.paid as order
+    When Read the paid order
+    # step: read-paid-order; GET /v1/orders/{id}
+    Then the status is 200
+    # ticket SHOP-482: a paid order can be read by its owner
+    And $.data.status equals "paid"
+    # ticket SHOP-482: the order stays paid
 ```
 
-The script step is `request: { service: orders, method: GET, path: "/v1/orders/{{order.id}}" }`. A `given` entry can also set `with: { customer: c-2 }` to give a parameter, and `lease: exclusive`. `testdata/e2e-fixtures/` holds these files as a working example. `given` is part of what a person confirms, so adding or changing it lapses the confirmation of the scenario.
+The script step is `request: { service: orders, method: GET, path: "/v1/orders/{{order.id}}" }`. A fixture line can also give a parameter with a table of two columns under it, such as `| customer | c-2 |`, and end with `with an exclusive lease`. `testdata/e2e-fixtures/` holds a working example of these files. The fixture lines are part of what a person confirms, so adding or changing one lapses the confirmation of the scenario.
 
 **3. Approve it.** A fixture counts only after a person approves it, as an expected result counts only after it is confirmed.
 
@@ -988,7 +1002,8 @@ Every command takes `--dir <path>`, the root of the repository that holds `.sema
 | `semar script add <file>` | Checks a script against its scenario and stores it |
 | `semar run --all` | Replays every scenario in `.semar/scenarios` |
 | `semar run --scenario <id>` | Replays one scenario. Repeat the flag for more |
-| `semar confirm <scenario id>` | Lists the expected results that need a person, with the cited ticket line and the account of a step, and stores the confirmation. `--all` for every scenario, `--yes` to skip the question |
+| `semar confirm <scenario id>` | Prints the scenario as its Gherkin file, with the source and cite of each result under it, then lists the expected results that need a person, with the cited ticket line and the account of a step, and stores the confirmation. `--all` for every scenario, `--yes` to skip the question |
+| `semar scenarios convert` | Converts every `.yaml` or `.yml` scenario file under `.semar/scenarios` to a Gherkin `.feature` file in place, and deletes the YAML file. The expectation hashes stay the same. It never overwrites a file |
 | `semar confirm --fixture <id>` | Shows a fixture and approves it as it is now. Repeat the flag for more. It cannot be combined with a scenario ID or `--all` |
 | `semar confirm --journey <id>` | Confirms the expected results of every leg of a journey. Repeat the flag for more. `--env <name>` names the environment whose auth profiles the legs use |
 | `semar fixture list` | Lists the fixtures with their approval, their health, and the scenarios that use them. `--env <name>` shows the health on that environment and checks each fixture against its effects policy |
@@ -1037,7 +1052,7 @@ The layout of `.semar/`:
 ```text
 .semar/
   semar.yaml            environments, services, auth profiles, redaction, policy
-  scenarios/            one YAML file per scenario, for example SHOP-482/SHOP-482-01.yaml
+  scenarios/            one Gherkin .feature file per scenario, for example SHOP-482/SHOP-482-01.feature
   fixtures/             one YAML file per fixture, for example order.paid.yaml
   journeys/             one YAML file per journey, for example checkout.yaml
   obligations/          the use cases: <ticket>.plan.yaml from semar plan, and the files that you write

@@ -29,9 +29,9 @@ semar run --all --build <head commit>     # the result
 ```text
 link or range --> codehost.ParseCompare --> vcs.Git (fetch, log, diff, archive) --> changeset.Build
                                                                                          |
-     .semar/scenarios/<ticket>/*.yaml  <--+                                              v
-     stored scripts                    <--+-- stage/plan.Validate <-- provider.Instance.Run (read-only, one JSON object)
-     .semar/plans/<head>/plan.md       <--+
+     .semar/scenarios/<ticket>/*.feature  <-+                                             v
+     stored scripts                     <--+-- stage/plan.Validate <-- provider.Instance.Run (read-only, one JSON object)
+     .semar/plans/<head>/plan.md        <--+
 ```
 
 * Everything left of the provider is code with no model, and so is `Validate` on its right. The planner is the only model call.
@@ -326,7 +326,7 @@ A link to one pull request or merge request is refused with a message that says 
 | Path | Content |
 | --- | --- |
 | `.semar/semar.yaml` | Only when it is missing, from the flags of `init` |
-| `.semar/scenarios/<ticket>/<ticket>-NN.yaml` | One scenario. `NN` continues after the highest number that exists for the ticket |
+| `.semar/scenarios/<ticket>/<ticket>-NN.feature` | One scenario, as a Gherkin file (Plan 24). `NN` continues after the highest number that exists for the ticket |
 | The script store | One script per scenario, `authoredBy: {instance: <provider id>, model: <model>, harness: <provider kind>}` |
 | `.semar/plans/<first 12 characters of the head commit>/plan.md` | The summary, the change table, one section per ticket with its scenarios, what was not drafted and what it needs, the files that no scenario covers, the provider, the model, the attempts, and the tokens |
 | `.semar/plans/<the same>/draft.json` | The accepted draft |

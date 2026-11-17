@@ -1,6 +1,6 @@
 # Semar implementation guide
 
-* **Status:** Draft 1. Plans 01, 12 to 22 are implemented. The other plans are specifications.
+* **Status:** Draft 1. Plans 01, 12 to 22, and 24 are implemented. The other plans are specifications.
 * **Date:** 2026-11-14
 * **Spec:** [product requirements](../PRD.md), [technical requirements](../TRD.md), [test workflow](../WORKFLOW.md), [user scenarios](../USER_SCENARIOS.md)
 
@@ -218,7 +218,7 @@ internal/yamlfile/         strict YAML decoding with the file and line in each e
 internal/hostrule/         the one rule for a listed host, used by effects and config
 internal/idcheck/          whether an ID is safe as one path segment
 internal/atomicfile/       writes a whole file or none, and encodes JSON for storage
-internal/scenario/         scenario files: load and validate
+internal/scenario/         scenario files: write and read Gherkin, load, and validate. legacy.go reads the older YAML for convert
 internal/script/           script files: load, and validate the binding to a scenario
 internal/effects/          what a test may change: admit or refuse one request
 internal/redact/           removes secrets before storage and before the agent sees a result
@@ -269,7 +269,8 @@ Checked on the Go module proxy on 2026-11-14. Pin the exact version in `go.mod`.
 | Module | Version | Used for | First plan |
 | --- | --- | --- | --- |
 | `github.com/spf13/cobra` | v1.10.2 | Commands and flags | 01 |
-| `go.yaml.in/yaml/v4` | v4.0.0 | Scenario, script, and configuration files, decoded strictly | 01 |
+| `go.yaml.in/yaml/v4` | v4.0.0 | Script and configuration files, decoded strictly. Scenario files too until Plan 24, and the older scenario format afterwards, for `semar scenarios convert` | 01 |
+| `github.com/cucumber/gherkin/go/v43` | v43.0.0 | Reads a scenario file, which is Gherkin. The standard library has no Gherkin parser, and the official one reads every edge of the language as other tools do. Its messages module and `github.com/google/uuid` come with it | 24 |
 | `github.com/theory/jsonpath` | v0.12.3 | JSONPath as in RFC 9535, for checks and captures | 01 |
 | `github.com/bmatcuk/doublestar/v4` | v4.10.4 | `**` patterns for paths in the deny list and the risk rules | 01 |
 | `github.com/google/go-cmp` | v0.7.0 | Comparisons in tests | 01 |
@@ -307,6 +308,7 @@ Checked on the Go module proxy on 2026-11-14. Pin the exact version in `go.mod`.
 | 21 | [Findings from a real delivery](21-field-findings.md) (implemented) | Ticket files are requirements: the planner expects what an acceptance criterion says, and every numbered criterion is accounted for by a check, a manual check, or a stated gap. Accounts with `as` on steps and journey legs, variables in expected values, `count` on arrays, plain unknown-key errors, `.semar/.gitignore`, and the problems of refused drafts in `plan.md` | Plans 12 to 20 | FR-123, FR-261 to FR-270 |
 | 22 | [The web engine and web legs](22-web-engine.md) (implemented) | `surface: web` journey legs and web scenarios drive Chrome on a profile of Semar's own through one in-process engine. Steps name elements through screen objects in `.semar/screens/` that a person approves with `semar confirm --screens`. A broken locator ends the leg `inconclusive`, and `semar screens repair` proposes a fix with no model. `semar login` signs in once. Supersedes Plan 09 | Plans 17, 18, 19, and 21 | FR-20 in part, FR-192 to FR-202 in part, FR-288 to 298 (web legs) |
 | 23 | [Tokens of a plan](23-plan-tokens.md) (implemented) | A plan costs far fewer tokens at the same quality. It runs without the person's MCP servers and skills unless `--with-setup` or `plan.withSetup` asks for them, the prompt holds the change evidence the planner always needs, a rejected draft is repaired in a short job, and `semar plan` ends with one line of turns, tokens, and cost | Plans 12, 13, and 21 | None |
+| 24 | [Scenario files are Gherkin](24-gherkin-scenarios.md) (implemented) | A scenario is a `.feature` file that product and QA read and confirm as Gherkin, with the requests in the YAML script apart from it. `semar scenarios convert` moves older YAML files over and keeps every confirmation and script. `semar confirm` shows the file with the cites | Plans 01, 12, 17, 19, 20, and 22 | FR-6 and PRD decision D69 |
 | 11 | [Configuration over code](11-configuration.md) | Cases, fragments, data sets, named checks, company rules, declared probes, passes, schemas, and `semar validate`. Every use case is a YAML edit | Plan 04. Parts need Plans 05 and 06 | FR-246 to 260 |
 
 Plans 01 to 04 are the first usable version: one API ticket from a plan to a report. Plans 05, 06, 07, and 11 do not depend on each other, apart from the tasks that Plan 11 names. They can be built in parallel after Plan 04, and Plan 06 can start after Plan 02. Tasks 1 to 5 and 11 to 13 of Plan 11 are worth doing early, because they are what a first user touches.

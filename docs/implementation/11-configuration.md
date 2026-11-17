@@ -117,7 +117,7 @@ func Validate(root string) []Finding   // every file under .semar/, with file, l
 
 ## Formats
 
-**A scenario with cases, a fragment, data, and a named check.**
+**A scenario with cases, a fragment, data, and a named check.** This sketch shows the YAML that scenario files had before [Plan 24](24-gherkin-scenarios.md). Scenario files are Gherkin now, and `Examples` tables, fragments, and named checks are not built. The reader refuses `Examples`, and a built form of cases would be a table of cases in the Gherkin file.
 
 ```yaml
 apiVersion: semar/v1
