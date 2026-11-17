@@ -7,10 +7,13 @@ import (
 )
 
 // Line is one line of a scenario as the Gherkin file has it: its keyword and its sentence. A Then or
-// an And that states an expected result carries the expectation.
+// an And that states an expected result carries the expectation. A line of a step, and a line of one
+// of its expected results, name the step, and an expected result its position in Expect.
 type Line struct {
 	Keyword, Text string
 	Expect        *domain.Expectation
+	Step          domain.StepID
+	Index         int
 }
 
 // Lines are the Given, When, and Then lines of s in the words of Render, with no comments and no
@@ -37,7 +40,7 @@ func Lines(s domain.Scenario) []Line {
 		if prev == k {
 			word = "And"
 		}
-		out = append(out, Line{Keyword: word, Text: stepText(st)})
+		out = append(out, Line{Keyword: word, Text: stepText(st), Step: st.ID})
 		prev = k
 		for i := range st.Expect {
 			word := "Then"
@@ -46,7 +49,7 @@ func Lines(s domain.Scenario) []Line {
 			}
 			prev = kindOutcome
 			sentence, _ := r.check("expect", st.Expect[i].Check)
-			out = append(out, Line{Keyword: word, Text: sentence, Expect: &st.Expect[i]})
+			out = append(out, Line{Keyword: word, Text: sentence, Expect: &st.Expect[i], Step: st.ID, Index: i})
 		}
 	}
 	return out

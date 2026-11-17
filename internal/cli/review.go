@@ -298,7 +298,7 @@ func collectReview(stderr io.Writer, f reviewFlags, args []string) ([]reviewItem
 		u.file, u.gherkin = scenarioText(f.dir, sc)
 		todo = append(todo, u)
 	}
-	items = append(items, scenarioItems(f.dir, uses, todo, approvedFixture)...)
+	items = append(items, scenarioItems(f.dir, uses, todo, approvedFixture, scenarioViewer(f.dir))...)
 
 	js, problems, err := loadJourneys(f.dir)
 	if err != nil {
@@ -461,7 +461,7 @@ func screensItem(scr domain.Screens, h domain.Hash, before *confirm.ScreensAppro
 
 // scenarioItems groups the scenarios that need a confirmation by the use case that covers them. A
 // scenario that no use case covers is an item of its own.
-func scenarioItems(dir string, uses []obligation.Located, todo []unconfirmed, fixtureState func(domain.FixtureID) string) []reviewItem {
+func scenarioItems(dir string, uses []obligation.Located, todo []unconfirmed, fixtureState func(domain.FixtureID) string, view func(domain.Scenario) scenarioView) []reviewItem {
 	groups := map[string][]unconfirmed{}
 	var order []string
 	for _, u := range todo {
@@ -505,7 +505,7 @@ func scenarioItems(dir string, uses []obligation.Located, todo []unconfirmed, fi
 			kind: "scenario", id: strings.Join(ids, ", "),
 			summary: "scenario " + strings.Join(ids, ", "),
 			show: func(w io.Writer, n, total int) {
-				showScenarioItem(w, dir, n, total, use, us, fixtureState)
+				showScenarioItem(w, dir, n, total, use, us, fixtureState, view)
 			},
 			details: func(w io.Writer) {
 				for _, u := range us {
@@ -520,6 +520,7 @@ func scenarioItems(dir string, uses []obligation.Located, todo []unconfirmed, fi
 					for _, line := range u.lines {
 						fmt.Fprintf(w, "  - %s\n", line)
 					}
+					view(u.sc).printExchanges(w, u.sc)
 				}
 			},
 			approve: func(store *confirm.Local, a approver) error {

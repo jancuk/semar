@@ -27,7 +27,7 @@ func refundScenario(cite1, cite2 string) domain.Scenario {
 func showItem(t *testing.T, dir string, use *obligation.Located, sc domain.Scenario) string {
 	t.Helper()
 	var b strings.Builder
-	showScenarioItem(&b, dir, 2, 12, use, []unconfirmed{needsConfirmation(dir, sc, []domain.Source{domain.SourceTicket, domain.SourceDiff})}, func(domain.FixtureID) string { return "approved" })
+	showScenarioItem(&b, dir, 2, 12, use, []unconfirmed{needsConfirmation(dir, sc, []domain.Source{domain.SourceTicket, domain.SourceDiff})}, func(domain.FixtureID) string { return "approved" }, func(domain.Scenario) scenarioView { return scenarioView{} })
 	return b.String()
 }
 
@@ -50,6 +50,8 @@ func TestAScenarioItemOpensWithTheRequirementAndThenTheTest(t *testing.T) {
     Then  the status is 422 (by model)
     And   $.data.position equals 0
     And   $.error.code equals "REFUND_TOO_LARGE" (source diff)
+    no script is stored for this scenario
+    not run yet: semar run --scenario SHOP-482-01 sends it and stores what the service answers
     Uses the fixture order.paid (approved)
 `
 	if got != want {

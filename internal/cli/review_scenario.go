@@ -53,7 +53,7 @@ var numbering = regexp.MustCompile(`^[0-9]+\.\s+`)
 
 // showScenarioItem prints a use case that has scenarios to confirm. It opens with the requirement,
 // which is the cited lines of the ticket, and then shows each test as its Gherkin file has it.
-func showScenarioItem(w io.Writer, dir string, n, total int, use *obligation.Located, us []unconfirmed, fixtureState func(domain.FixtureID) string) {
+func showScenarioItem(w io.Writer, dir string, n, total int, use *obligation.Located, us []unconfirmed, fixtureState func(domain.FixtureID) string, view func(domain.Scenario) scenarioView) {
 	ticket := us[0].sc.Ticket
 	if use != nil {
 		ticket = ticketKey(*use)
@@ -83,13 +83,22 @@ func showScenarioItem(w io.Writer, dir string, n, total int, use *obligation.Loc
 		if title := terminalSafe(oneLine(sc.Title)); title != opening {
 			fmt.Fprintf(w, "    %s\n", title)
 		}
+		v := view(sc)
+		const detail = "          "
 		for _, l := range scenario.Lines(sc) {
 			text := l.Text
 			if e := l.Expect; e != nil {
 				text += expectationNote(*e)
 			}
 			fmt.Fprintf(w, "    %-5s %s\n", l.Keyword, terminalSafe(oneLine(text)))
+			switch {
+			case l.Expect != nil:
+				v.printObserved(w, detail, l.Step, l.Index)
+			case l.Step != "":
+				v.printSends(w, detail, l.Step)
+			}
 		}
+		v.printNotes(w, "    ", sc.ID)
 		for _, id := range fixturesOf(sc) {
 			fmt.Fprintf(w, "    Uses the fixture %s (%s)\n", id, fixtureState(id))
 		}
