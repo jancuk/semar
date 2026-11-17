@@ -119,11 +119,13 @@
   function describe(el, purpose) {
     const reading = purpose === 'check';
     const role = roleOf(el);
-    const named = NAMED_ROLES.has(role) ? accName(el, role) : { name: '', fromContent: false };
+    const acc = accName(el, role);
+    const named = NAMED_ROLES.has(role) ? acc : { name: '', fromContent: false };
     const text = reading ? '' : norm(el.innerText);
     const attrs = TEST_ID_ATTRS.map(a => [a, el.getAttribute(a)]).filter(([a, v]) => v && byTestId(a, v).length === 1);
-    const hint = (attrs[0] && attrs[0][1]) || (reading ? '' : named.name || (text.length <= 40 ? text : '')) ||
-      (reading && !named.fromContent ? named.name : '') || el.id || el.getAttribute('name') || norm(el.getAttribute('aria-label')) || el.tagName.toLowerCase();
+    // What the element is called by: a check never calls its element by the text that it reads.
+    const label = reading ? (acc.fromContent ? '' : acc.name) : acc.name || (text.length <= 40 ? text : '');
+    const hint = (attrs[0] && attrs[0][1]) || label || el.id || el.getAttribute('name') || el.tagName.toLowerCase();
 
     if (attrs.length) {
       const [attr, value] = attrs[0];

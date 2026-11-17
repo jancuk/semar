@@ -187,6 +187,7 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 	root.AddCommand(newLedgerCommand(o))
 	root.AddCommand(newJourneyCommand(o))
 	root.AddCommand(newLoginCommand(o), newScreensCommand(o), newScenariosCommand())
+	root.AddCommand(newRecordCommand(o))
 	return root
 }
 

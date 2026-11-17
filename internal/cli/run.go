@@ -40,6 +40,9 @@ type runFlags struct {
 	builds    []string
 	dir       string
 	headed    bool
+	// done is told how the run ended, and where its report is. semar record uses it to say how the
+	// replay of a new recording went.
+	done func(run domain.Run, report string)
 }
 
 func newRunCommand(o options) *cobra.Command {
@@ -142,10 +145,14 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 		}
 	}
 
+	reportPath := filepath.Join(r.store.Root(), "runs", string(r.id), reportFile)
+	if f.done != nil {
+		f.done(record, reportPath)
+	}
 	if err := report.Summary(stdout, record, coverage); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "report: %s\n", filepath.Join(r.store.Root(), "runs", string(r.id), reportFile))
+	fmt.Fprintf(stdout, "report: %s\n", reportPath)
 	if interrupted {
 		fmt.Fprintf(stderr, "semar: the run was interrupted: run %s is incomplete\n", r.id)
 		return exitError{ExitUndecided}
@@ -271,7 +278,7 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 		deps.Fixtures = fx
 	}
 	eng := rg.webEngine(o, envName, env, headed)
-	deps.Web, deps.Screens = eng, screenSource{repo: repo, approvals: confirm.NewLocal(rg.store.Root())}
+	deps.Web, deps.Screens = eng, screenSource{repo: repo, approvals: confirm.NewLocal(rg.store.Root()), trusted: trustedScreens(ctx)}
 	return &replayRig{envRig: rg, runner: replay.New(deps), web: eng}, nil
 }
 

@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
 
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/engine/web"
+	"github.com/jancuk/semar/internal/engine/web/webtest"
 	"github.com/jancuk/semar/internal/record"
 )
 
@@ -84,8 +84,7 @@ func (r *recRig) waitSettled() {
 	r.t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		ready, err := chromedp.Run(r.rec.Context(), chromedp.Evaluate[bool](`document.readyState === 'complete' && !!window.__semarRec`))
-		if err == nil && ready {
+		if r.driver().Ready() {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -93,63 +92,20 @@ func (r *recRig) waitSettled() {
 	r.t.Fatal("the page did not load with the recorder in it")
 }
 
-func (r *recRig) center(sel string) (float64, float64) {
+func (r *recRig) driver() webtest.Driver { return webtest.Driver{Tab: r.rec.Context()} }
+
+func (r *recRig) must(err error) {
 	r.t.Helper()
-	pt, err := chromedp.Run(r.rec.Context(), chromedp.Evaluate[[2]float64](fmt.Sprintf(
-		`(() => { const e = document.querySelector(%q); e.scrollIntoView({block: 'center'}); const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()`, sel)))
 	if err != nil {
-		r.t.Fatalf("find %s: %v", sel, err)
-	}
-	return pt[0], pt[1]
-}
-
-func (r *recRig) click(sel string) {
-	r.t.Helper()
-	x, y := r.center(sel)
-	if err := chromedp.Do(r.rec.Context(), chromedp.MouseClickXY(x, y)); err != nil {
 		r.t.Fatal(err)
 	}
 }
 
-// altClick presses, and lets go of, the left button with the Option key held down.
-func (r *recRig) altClick(sel string) {
-	r.t.Helper()
-	x, y := r.center(sel)
-	for _, typ := range []input.DispatchMouseEventType{chromedp.MousePressed, chromedp.MouseReleased} {
-		err := chromedp.Do(r.rec.Context(), chromedp.MouseEvent(typ, x, y, func(p *input.DispatchMouseEventParams) {
-			p.Button, p.ClickCount, p.Modifiers = input.MouseButtonLeft, 1, int64(chromedp.ModifierAlt)
-		}))
-		if err != nil {
-			r.t.Fatal(err)
-		}
-	}
-}
-
-// typeInto focuses a field with a click and sends one key event for each character.
-func (r *recRig) typeInto(sel, text string) {
-	r.t.Helper()
-	r.click(sel)
-	if err := chromedp.Do(r.rec.Context(), chromedp.KeyEvent(text)); err != nil {
-		r.t.Fatal(err)
-	}
-}
-
-func (r *recRig) key(k string) {
-	r.t.Helper()
-	if err := chromedp.Do(r.rec.Context(), chromedp.KeyEvent(k)); err != nil {
-		r.t.Fatal(err)
-	}
-}
-
-// drag presses on one element, moves in steps to another, and lets go.
-func (r *recRig) drag(from, to string) {
-	r.t.Helper()
-	fx, fy := r.center(from)
-	tx, ty := r.center(to)
-	if err := chromedp.Do(r.rec.Context(), chromedp.DragAndDropXY(fx, fy, tx, ty)); err != nil {
-		r.t.Fatal(err)
-	}
-}
+func (r *recRig) click(sel string)          { r.t.Helper(); r.must(r.driver().Click(sel)) }
+func (r *recRig) altClick(sel string)       { r.t.Helper(); r.must(r.driver().OptionClick(sel)) }
+func (r *recRig) typeInto(sel, text string) { r.t.Helper(); r.must(r.driver().Type(sel, text)) }
+func (r *recRig) key(k string)              { r.t.Helper(); r.must(r.driver().Keys(k)) }
+func (r *recRig) drag(from, to string)      { r.t.Helper(); r.must(r.driver().Drag(from, to)) }
 
 // events waits for n more events than the test has taken, and gives them.
 func (r *recRig) events(n int) []record.Event {
@@ -243,11 +199,11 @@ func TestRecorderSendsClicksFieldsKeysAndAddresses(t *testing.T) {
 	r.quiet()
 
 	// An address that is typed is a step.
-	if err := r.rec.Open(r.srv.URL + "/refund?from=done"); err != nil {
+	if err := r.rec.Open(r.srv.URL + "/refund?from=done#top"); err != nil {
 		t.Fatal(err)
 	}
 	got = r.events(1)
-	if got[0].Kind != record.KindOpen || !strings.HasSuffix(got[0].Page.URL, "/refund?from=done") {
+	if got[0].Kind != record.KindOpen || !strings.HasSuffix(got[0].Page.URL, "/refund?from=done#top") {
 		t.Errorf("the second address: %s", describeEvents(got))
 	}
 }

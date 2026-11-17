@@ -23,6 +23,14 @@ var ErrSecretName = errors.New("a password was typed, so the test needs the name
 
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// CheckSecretEnv refuses a name that is not an environment variable.
+func CheckSecretEnv(name string) error {
+	if !envName.MatchString(name) {
+		return fmt.Errorf("%q is not the name of an environment variable", name)
+	}
+	return nil
+}
+
 // Options say what the files of the recording are called and where the recording was made.
 type Options struct {
 	ID          domain.ScenarioID
@@ -65,8 +73,10 @@ type item struct {
 // Build turns what a person did into a scenario, a script, and the elements that they need. It
 // writes nothing.
 func Build(events []Event, o Options) (Draft, error) {
-	if o.SecretEnv != "" && !envName.MatchString(o.SecretEnv) {
-		return Draft{}, fmt.Errorf("%q is not the name of an environment variable", o.SecretEnv)
+	if o.SecretEnv != "" {
+		if err := CheckSecretEnv(o.SecretEnv); err != nil {
+			return Draft{}, err
+		}
 	}
 	b := &builder{o: o, namers: map[string]*Namer{}, added: map[string]int{}, ids: map[string]int{}}
 	items := b.items(events)

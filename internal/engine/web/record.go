@@ -11,6 +11,7 @@ import (
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 
 	"github.com/jancuk/semar/internal/record"
@@ -52,6 +53,7 @@ type Recorder struct {
 	events    []record.Event
 	requested time.Time // when a page last asked for a navigation: a click or a form did
 	closeOnce sync.Once
+	gone      bool // Wait has returned: the window is closed, or the browser is gone
 }
 
 // StartRecorder starts Chrome on the profile of the account and puts the recorder in every page of
@@ -107,6 +109,20 @@ func (r *Recorder) Open(rawURL string) error {
 	return nil
 }
 
+// CloseWindow closes every page of the window, as a person does with its close button. A test that
+// stands where the person stands calls it when its input is done.
+func (r *Recorder) CloseWindow() {
+	res, err := chromedp.CallBrowser(r.tab, target.GetTargets, target.GetTargetsParams{})
+	if err != nil {
+		return
+	}
+	for _, info := range res.TargetInfos {
+		if info.Type == "page" {
+			_, _ = chromedp.CallBrowser(r.tab, target.CloseTarget, target.CloseTargetParams{TargetID: info.TargetID})
+		}
+	}
+}
+
 // Events gives what has been sent so far, in the order that it happened.
 func (r *Recorder) Events() []record.Event {
 	r.mu.Lock()
@@ -116,7 +132,11 @@ func (r *Recorder) Events() []record.Event {
 
 // Wait returns when the person has closed the window.
 func (r *Recorder) Wait(ctx context.Context) error {
-	return waitWindowClosed(ctx, r.tab, r.o.Poll)
+	err := waitWindowClosed(ctx, r.tab, r.o.Poll, true)
+	r.mu.Lock()
+	r.gone = true
+	r.mu.Unlock()
+	return err
 }
 
 // Finish sends the text of a field that was typed and not yet sent, ends Chrome, and gives every
@@ -133,7 +153,12 @@ func (r *Recorder) Finish() []record.Event {
 }
 
 func (r *Recorder) shutdown() {
-	closeBrowser(r.tab)
+	r.mu.Lock()
+	gone := r.gone
+	r.mu.Unlock()
+	if !gone {
+		closeBrowser(r.tab)
+	}
 	r.stop()
 	r.alloc()
 }
@@ -167,7 +192,7 @@ func (r *Recorder) onEvent(ev any) {
 		if byPage || !openable(e.Frame.URL) {
 			return
 		}
-		r.add(record.Event{Kind: record.KindOpen, Page: record.Page{URL: e.Frame.URL}})
+		r.add(record.Event{Kind: record.KindOpen, Page: record.Page{URL: e.Frame.URL + e.Frame.URLFragment}})
 	}
 }
 
