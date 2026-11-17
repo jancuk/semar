@@ -185,11 +185,14 @@ SHOP-490 (config): 1 scenario
 not drafted: 1
 plan: .semar/plans/9f3c2ab41d07/plan.md
 tried: 3 of 5 steps, 0 problems returned, 1 for a second look
+model use: 1 attempt, 12 turns, 310k input (270k cached), 9.5k output, $0.84
 next:
   semar run --all --build 9f3c2ab41d07
   semar confirm --all
   semar run --all --build 9f3c2ab41d07
 ```
+
+`model use` is what the plan cost, summed over its attempts. The cost shows when the provider reports it. The planner is given the change table, the diff, and the API operations that the diff names in its prompt, and a draft that is sent back is repaired in a job of at most 12 turns, so a plan stays short.
 
 Read `plan.md` and the scenario files before you run them. The model read them from the code. The only requests sent so far are the read-only ones of the [trial run](#the-trial-run).
 

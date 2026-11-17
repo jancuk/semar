@@ -246,6 +246,9 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	}
 	if err != nil {
 		o.recordUsage(stderr, inst, model, pc.Reasoning, out, usageOutcome(ctx, err), "", time.Since(started))
+		if line := modelUseLine(out.Result, out.Attempts, in.SetupOn); line != "" {
+			fmt.Fprintf(stderr, "semar: %s\n", line)
+		}
 		return planFailed(ctx, stderr, err)
 	}
 	planFile, err := writePlan(f.dir, in, out, known)
@@ -254,7 +257,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		return err
 	}
 	o.recordUsage(stderr, inst, model, pc.Reasoning, out, "ok", filepath.Base(filepath.Dir(planFile)), time.Since(started))
-	printPlanDone(stdout, out, len(cfg.Knowledge) > 0, trialSummary(in, out), planFile, nextRun(env, envName, f.env, cs.HeadCommit))
+	printPlanDone(stdout, out, len(cfg.Knowledge) > 0, trialSummary(in, out), modelUseLine(out.Result, out.Attempts, in.SetupOn), planFile, nextRun(env, envName, f.env, cs.HeadCommit))
 	if len(out.Scenarios) == 0 {
 		return exitError{ExitUndecided}
 	}
@@ -543,7 +546,7 @@ func shortCommit(id string) string {
 	return id
 }
 
-func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, planFile, run string) {
+func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, planFile, run string) {
 	count := map[string]int{}
 	for _, sc := range out.Scenarios {
 		count[sc.Ticket]++
@@ -558,6 +561,9 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, planFile, r
 	fmt.Fprintf(w, "plan: %s\n", planFile)
 	if trial != "" {
 		fmt.Fprintln(w, trial)
+	}
+	if modelUse != "" {
+		fmt.Fprintln(w, modelUse)
 	}
 	if len(out.Scenarios) > 0 {
 		fmt.Fprintf(w, "next:\n  %s\n  semar confirm --all\n  %s\n", run, run)

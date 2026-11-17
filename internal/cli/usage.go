@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jancuk/semar/internal/provider"
@@ -54,4 +56,40 @@ func (o options) recordUsage(stderr io.Writer, inst provider.Instance, model, re
 	if err != nil {
 		fmt.Fprintf(stderr, "semar: the usage of this job was not recorded: %v\n", err)
 	}
+}
+
+// modelUseLine is the one line that says what a plan used, summed over its attempts, for example
+// "model use: 2 attempts, 21 turns, 640k input (590k cached), 18k output, $1.10". The cached part
+// and the cost appear only when the provider reported them. A job that never ran gives "". With
+// the setup on, a second line says that it adds tokens to every turn.
+func modelUseLine(r provider.Result, attempts int, setupOn bool) string {
+	if attempts == 0 && r.Turns == 0 && r.InputTokens == 0 && r.OutputTokens == 0 {
+		return ""
+	}
+	parts := []string{plural(attempts, "attempt"), plural(r.Turns, "turn"), tokenCount(r.InputTokens) + " input"}
+	if r.CacheReadTokens > 0 {
+		parts[2] += " (" + tokenCount(r.CacheReadTokens) + " cached)"
+	}
+	parts = append(parts, tokenCount(r.OutputTokens)+" output")
+	if r.CostUSD > 0 {
+		parts = append(parts, fmt.Sprintf("$%.2f", r.CostUSD))
+	}
+	line := "model use: " + strings.Join(parts, ", ")
+	if setupOn {
+		line += "\nyour MCP servers and skills were loaded, and they add tokens to every turn; plan without --with-setup to leave them out"
+	}
+	return line
+}
+
+// tokenCount writes a number of tokens as 850, 6.1k, 640k, or 2.7M.
+func tokenCount(n int) string {
+	switch {
+	case n < 1000:
+		return strconv.Itoa(n)
+	case n < 9_950:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	case n < 999_500:
+		return fmt.Sprintf("%dk", (n+500)/1000)
+	}
+	return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
 }
