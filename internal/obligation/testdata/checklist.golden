@@ -7,7 +7,7 @@ Manual checks for SHOP-482 (2)
      3. Decide which one is right, and change the other, or the scenario.
    Expected: The document and the code agree
    Cite: docs/refunds.md:14 (checked when the plan was made)
-   Record:   semar ledger record SHOP-482/difference-1 passed|failed --notes "<what you saw>"
+   Check:    semar check SHOP-482/difference-1 pass|fail --note "<what you saw>"
 2. SHOP-482/mailbox  The customer gets an email about the rejection
    Why a person: A person decides whether the document or the code is right
    Steps (written by a person):
@@ -16,7 +16,7 @@ Manual checks for SHOP-482 (2)
    Expected: The document and the code agree
    Cite: TC-1042: the customer is told by email (not checked by code)
    Recorded: failed, checked by a person (tester, 2026-11-17)
-   Record:   semar ledger record SHOP-482/mailbox passed|failed --notes "<what you saw>"
+   Check:    semar check SHOP-482/mailbox pass|fail --note "<what you saw>"
 
 Manual checks for refunds (1)
 1. refunds/ai-case  Case proposed by a model
@@ -24,4 +24,4 @@ Manual checks for refunds (1)
    Steps (written by AI):
      1. Look at the screen.
    Expected: The document and the code agree
-   Record:   semar ledger record refunds/ai-case passed|failed --notes "<what you saw>"
+   Check:    semar check refunds/ai-case pass|fail --note "<what you saw>"

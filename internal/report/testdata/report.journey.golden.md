@@ -1,7 +1,7 @@
 # Semar report r-journey
 
 3 use cases: 2 verified, 1 failed
-Details: `semar ledger --ticket SHOP-482`
+Details: `semar status --ticket SHOP-482`
 
 ## Journeys
 

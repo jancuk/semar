@@ -110,7 +110,7 @@ func TestPlanDraftsTheTicketCriterionAndMarksItExpectedToFail(t *testing.T) {
 	contains(t, "the obligations", string(ob), "id: SHOP-482/manual-1", "source: criterion", "kind: judgement", "writtenBy: ai", "A red banner shows.")
 
 	// The new obligation needs a person, and the ledger prints its checklist.
-	led := p.semar(t, t.Context(), "ledger", "--checklist")
+	led := p.semar(t, t.Context(), "status", "--checklist")
 	contains(t, "the checklist", led.stdout, "Manual checks for SHOP-482", "SHOP-482/manual-1  The refusal shows a red banner", "Steps (written by AI):")
 	p.assertNoTempCopy(t)
 }

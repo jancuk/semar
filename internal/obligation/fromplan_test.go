@@ -387,7 +387,7 @@ func TestAManualCheckDerivesNeedsAPersonWithAChecklist(t *testing.T) {
 		"1. Open the order in the app.",
 		"Expected: A red banner says the refund is above the total.",
 		"Cite: docs/tickets/SHOP-482.md:5 the app shows an error banner",
-		"semar ledger record SHOP-482/manual-1 passed|failed",
+		"semar check SHOP-482/manual-1 pass|fail",
 	} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("the checklist lacks %q:\n%s", want, b.String())

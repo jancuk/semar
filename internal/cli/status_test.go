@@ -110,152 +110,149 @@ func (r *repo) ledgerFile(t *testing.T, text string) {
 	r.writeRel(t, ".semar/obligations/SHOP-482.plan.yaml", text)
 }
 
-// unread is the summary line of a ledger that was not given --env.
-func unread(line string) string {
-	return strings.TrimSuffix(line, ".") + ". Builds were not read, so no result is matched to the current build."
-}
+// unreadShip is the end of the last line when the builds were not read.
+const unreadShip = "The builds were not read."
 
-func TestLedgerGroupsAndExitCodes(t *testing.T) {
+func TestStatusGroupsAndExitCodes(t *testing.T) {
 	cases := []struct {
 		name  string
 		setup func(t *testing.T, r *repo)
 		code  int
-		line  string // the first line of stdout
+		want  []string // each is in the output with the runs of spaces squashed
 	}{
-		{"every use case verified or deferred is 0", func(t *testing.T, r *repo) {
+		{"every use case verified or deferred is 0 only with the builds read", func(t *testing.T, r *repo) {
 			r.putRun(t, "r-old-1", "", nil, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
 			r.ledgerFile(t, obligations("SHOP-482",
 				entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]"),
 				entry("SHOP-482/b", "Left for later", `gap: "not drafted: needs a fixture"`)))
-			r.must(t, cli.ExitOK, "ledger", "defer", "SHOP-482/b", "--reason", "waiting for a fixture", "--until", inDays(7))
-		}, cli.ExitUndecided, "2 use cases: 1 verified, 1 deferred"}, // 0 only with --env
+			r.must(t, cli.ExitOK, "defer", "SHOP-482/b", "--reason", "waiting for a fixture", "--until", inDays(7))
+		}, cli.ExitUndecided, []string{"2 use cases", "verified 1", "deferred 1 SHOP-482/b", "Ship: no. " + unreadShip}},
 		{"a failed scenario is 1", func(t *testing.T, r *repo) {
 			r.putRun(t, "r-old-1", "", nil, true, scenarioResult(scenarioID, domain.OutcomeFailed, "refund-too-much: expected 422, got 201"))
 			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
-		}, cli.ExitFailed, "1 use case: 0 verified, 1 failed"},
+		}, cli.ExitFailed, []string{"1 use case", "failing 1 SHOP-482/a SHOP-482-01 failed in r-old-1: refund-too-much: expected 422, got 201", "Ship: no. 1 failing."}},
 		{"a failed manual result is 1", func(t *testing.T, r *repo) {
 			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "By hand", manualEntryFields)))
-			r.must(t, cli.ExitOK, "ledger", "record", "SHOP-482/a", "failed", "--notes", "no")
-		}, cli.ExitFailed, "1 use case: 0 verified, 1 needs a person. Checked by a person: 1 failed."},
-		{"a blocked use case is 2", func(t *testing.T, r *repo) {
+			r.must(t, cli.ExitOK, "check", "SHOP-482/a", "fail", "--note", "no")
+		}, cli.ExitFailed, []string{"failing 1 SHOP-482/a A person decides"}},
+		{"a use case that never ran is blocked, and is 2", func(t *testing.T, r *repo) {
 			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Never run", "covers: ["+scenarioID+"]")))
-		}, cli.ExitUndecided, "1 use case: 0 verified, 1 blocked"},
-		{"a use case that needs a person is 2, even when the person passed it", func(t *testing.T, r *repo) {
+		}, cli.ExitUndecided, []string{"blocked 1 SHOP-482/a SHOP-482-01 has no result: run it → semar run", "Ship: no. 1 open."}},
+		{"a use case for a person is 2 when the pass names no build", func(t *testing.T, r *repo) {
 			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "By hand", manualEntryFields)))
-			r.must(t, cli.ExitOK, "ledger", "record", "SHOP-482/a", "passed", "--notes", "ok")
-		}, cli.ExitUndecided, "1 use case: 0 verified, 1 needs a person. Checked by a person: 1 passed."},
+			r.must(t, cli.ExitOK, "check", "SHOP-482/a", "pass", "--note", "ok")
+		}, cli.ExitUndecided, []string{"for a person 1 SHOP-482/a A person decides", "passed, checked by a person", "→ semar check SHOP-482/a pass"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			r := ledgerRepo(t)
 			c.setup(t, r)
-			res := r.must(t, c.code, "ledger")
-			if first, _, _ := strings.Cut(res.stdout, "\n"); first != unread(c.line) {
-				t.Errorf("the first line is %q, want %q", first, unread(c.line))
-			}
+			res := r.must(t, c.code, "status")
+			contains(t, "the status", squash(res.stdout), c.want...)
 		})
 	}
 }
 
-func TestLedgerGroupsInOrder(t *testing.T) {
+func TestStatusGroupsInOrderAndAddUp(t *testing.T) {
 	r := ledgerRepo(t)
 	for _, id := range []string{"SHOP-482-02", "SHOP-482-03", "SHOP-482-04"} {
 		r.copyScenario(t, id)
 	}
+	review := scenarioResult("SHOP-482-03", domain.OutcomeInconclusive, "an expected result is not confirmed")
 	r.putRun(t, "r-old-1", "", nil, true,
 		scenarioResult(scenarioID, domain.OutcomePassed, ""),
 		scenarioResult("SHOP-482-02", domain.OutcomeFailed, "refund-too-much: expected 422, got 201"),
-		scenarioResult("SHOP-482-03", domain.OutcomeInconclusive, "an expected result is not confirmed"))
+		review)
 	r.ledgerFile(t, obligations("SHOP-482",
 		entry("SHOP-482/verified", "V", "covers: ["+scenarioID+"]"),
 		entry("SHOP-482/deferred", "D", `gap: "not drafted"`),
 		entry("SHOP-482/person", "P", manualEntryFields),
-		entry("SHOP-482/blocked", "B", "covers: [SHOP-482-03]"),
+		entry("SHOP-482/review", "B", "covers: [SHOP-482-03]"),
 		entry("SHOP-482/failed", "F", "covers: [SHOP-482-02]"),
 		entry("SHOP-482/nothing", "N")))
-	r.must(t, cli.ExitOK, "ledger", "defer", "SHOP-482/deferred", "--reason", "later", "--until", inDays(3))
+	r.must(t, cli.ExitOK, "defer", "SHOP-482/deferred", "--reason", "later", "--until", inDays(3))
 
-	res := r.must(t, cli.ExitFailed, "ledger")
+	res := r.must(t, cli.ExitFailed, "status")
+	out := squash(res.stdout)
 	last := -1
-	for _, h := range []string{"No test and no reason (1)", "Failed (1)", "Blocked (1)", "Needs a person (1)", "Deferred (1)", "Verified (1)"} {
-		i := strings.Index(res.stdout, h)
+	for _, h := range []string{"verified 1", "failing 1", "needs review 1", "for a person 1", "no test 1", "deferred 1"} {
+		i := strings.Index(out, h)
 		if i < 0 || i < last {
 			t.Fatalf("the group %q is missing or out of order:\n%s", h, res.stdout)
 		}
 		last = i
 	}
-	contains(t, "the table", res.stdout,
-		"6 use cases: 1 verified, 1 failed, 2 blocked, 1 needs a person, 1 deferred",
-		"SHOP-482/nothing", "use case with no test and no reason",
+	contains(t, "the status", out,
+		"6 use cases",
+		"SHOP-482/nothing use case with no test and no reason → semar plan",
 		"SHOP-482-02 failed in r-old-1: refund-too-much: expected 422, got 201",
-		"SHOP-482-03 is inconclusive in r-old-1: an expected result is not confirmed",
+		"SHOP-482-03 needs review in r-old-1: an expected result is not confirmed → semar review SHOP-482-03",
 		"A person decides",
-		"deferred by tester until "+inDays(3)+": later")
+		"deferred by tester until "+inDays(3)+": later",
+		"Ship: no. 1 failing, 3 open.")
 }
 
-func TestLedgerWithoutEnvSaysSo(t *testing.T) {
+func TestStatusWithoutABuildSaysSo(t *testing.T) {
 	r := ledgerRepo(t)
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Gap", `gap: "not drafted"`)))
-	const note = "semar: the builds that the environment runs now were not read; pass --env to count only results on the current builds\n"
-	res := r.must(t, cli.ExitUndecided, "ledger")
-	if res.stderr != note {
-		t.Errorf("stderr = %q, want %q", res.stderr, note)
-	}
-	if strings.Contains(res.stdout, "builds") {
+	res := r.must(t, cli.ExitUndecided, "status")
+	contains(t, "stderr", res.stderr, "the build of orders could not be read", "the results are not matched to the current build")
+	if strings.Contains(res.stdout, "could not be read") {
 		t.Errorf("the note is on standard output:\n%s", res.stdout)
 	}
+	contains(t, "the first line", strings.SplitN(res.stdout, "\n", 2)[0], "Not in a git repository", "local")
 }
 
 // Without --env, a pass on any build counts, so nothing is confirmed current: the exit code is 2 at
 // best, and the first line says so. A failure still makes it 1.
-func TestLedgerWithoutEnvIsNeverGreen(t *testing.T) {
+func TestStatusWithTheBuildsNotReadIsNeverGreen(t *testing.T) {
 	r := ledgerRepo(t)
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
 	r.putRun(t, "r-old-1", "", []domain.BuildRef{{Service: "orders", Commit: "9f3c2ab"}}, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
-	res := r.must(t, cli.ExitUndecided, "ledger")
-	if first, _, _ := strings.Cut(res.stdout, "\n"); first != unread("1 use case: 1 verified") {
-		t.Errorf("the first line is %q", first)
-	}
+	res := r.must(t, cli.ExitUndecided, "status")
+	contains(t, "the status", squash(res.stdout), "1 use case", "verified 1", "Ship: no. "+unreadShip)
 	r.putRun(t, "r-z-new", "", nil, true, scenarioResult(scenarioID, domain.OutcomeFailed, "boom"))
-	r.must(t, cli.ExitFailed, "ledger")
+	r.must(t, cli.ExitFailed, "status")
 }
 
-func TestLedgerEnvMarksStale(t *testing.T) {
+func TestStatusEnvMarksStale(t *testing.T) {
 	r := newRepo(t, repoOptions{app: sampleapp.Options{Commit: "c0ffee1"}})
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
 	r.putRun(t, "r-old-1", "", []domain.BuildRef{{Service: "orders", Commit: "9f3c2ab"}}, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
 
-	// With no environment, the old build counts, and the use case is verified, but not green.
-	r.must(t, cli.ExitUndecided, "ledger")
-
-	res := r.must(t, cli.ExitUndecided, "ledger", "--env", "local")
-	contains(t, "the table", res.stdout,
-		"1 use case: 0 verified, 1 blocked",
-		"SHOP-482-01 ran on orders 9f3c2ab, and the environment runs c0ffee1: rerun on the current build")
-	if strings.Contains(res.stderr, "were not read") {
-		t.Errorf("the note about unread builds is printed although --env was given:\n%s", res.stderr)
+	// The only environment is read with no argument, and an old build is stale.
+	res := r.must(t, cli.ExitUndecided, "status")
+	contains(t, "the status", squash(res.stdout), "local · orders at c0ffee1",
+		"stale 1 SHOP-482/a SHOP-482-01 ran on orders 9f3c2ab, and the environment runs c0ffee1: rerun on the current build → semar run")
+	if strings.Contains(res.stderr, "not read") {
+		t.Errorf("the note about unread builds is printed although the environment was read:\n%s", res.stderr)
 	}
+	// Named as an argument, or with --env, it gives the same.
+	r.must(t, cli.ExitUndecided, "status", "local")
+	r.must(t, cli.ExitUndecided, "status", "--env", "local")
+	res = r.must(t, cli.ExitError, "status", "local", "--env", "local")
+	contains(t, "stderr", res.stderr, "name the environment once")
 
 	// A run on the build that the environment runs now counts again.
 	r.putRun(t, "r-z-new", "", []domain.BuildRef{{Service: "orders", Commit: "c0ffee1"}}, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
-	res = r.must(t, cli.ExitOK, "ledger", "--env", "local")
-	contains(t, "the table", res.stdout, "1 use case: 1 verified")
+	res = r.must(t, cli.ExitOK, "status")
+	contains(t, "the status", squash(res.stdout), "1 use case", "verified 1", "Ship: yes.")
 }
 
-func TestLedgerEnvThatCannotBeReadIsAnError(t *testing.T) {
+func TestStatusNamedEnvThatCannotBeReadIsAnError(t *testing.T) {
 	r := ledgerRepo(t)
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
-	res := r.must(t, cli.ExitError, "ledger", "--env", "local")
+	res := r.must(t, cli.ExitError, "status", "local")
 	contains(t, "stderr", res.stderr, "the build of orders could not be read", "cannot be matched to the current build")
 	if res.stdout != "" {
-		t.Errorf("a ledger was printed without the builds:\n%s", res.stdout)
+		t.Errorf("a status was printed without the builds:\n%s", res.stdout)
 	}
 }
 
-func TestLedgerBuildNeedsEnv(t *testing.T) {
+func TestStatusBuildNeedsAnEnvironment(t *testing.T) {
 	r := ledgerRepo(t)
-	res := r.must(t, cli.ExitError, "ledger", "--build", "abcdef1")
-	contains(t, "stderr", res.stderr, "--build needs --env")
+	res := r.must(t, cli.ExitError, "status", "--build", "abcdef1")
+	contains(t, "stderr", res.stderr, "--build needs an environment")
 }
 
 func TestDeferValidation(t *testing.T) {
@@ -281,7 +278,7 @@ func TestDeferValidation(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			res := r.must(t, cli.ExitError, append([]string{"ledger", "defer"}, c.args...)...)
+			res := r.must(t, cli.ExitError, append([]string{"defer"}, c.args...)...)
 			contains(t, "stderr", res.stderr, c.want)
 			if exists(t, r.path(".semar", "store", "obligations")) {
 				t.Error("a refused deferral left a record")
@@ -290,7 +287,7 @@ func TestDeferValidation(t *testing.T) {
 	}
 
 	// 180 days is the longest.
-	res := r.must(t, cli.ExitOK, "ledger", "defer", "SHOP-482/a", "--reason", "waiting", "--until", inDays(180))
+	res := r.must(t, cli.ExitOK, "defer", "SHOP-482/a", "--reason", "waiting", "--until", inDays(180))
 	contains(t, "stdout", res.stdout, "deferred SHOP-482/a until "+inDays(180)+" as tester", "local, unverified identity")
 }
 
@@ -298,10 +295,10 @@ func TestDeferNeedsAName(t *testing.T) {
 	r := ledgerRepo(t)
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Gap", `gap: "not drafted"`)))
 	r.opts.User = func() (string, error) { return "  ", nil }
-	res := r.must(t, cli.ExitError, "ledger", "defer", "SHOP-482/a", "--reason", "r", "--until", inDays(5))
+	res := r.must(t, cli.ExitError, "defer", "SHOP-482/a", "--reason", "r", "--until", inDays(5))
 	contains(t, "stderr", res.stderr, "no name")
 	r.opts.User = func() (string, error) { return "", fmt.Errorf("no user") }
-	r.must(t, cli.ExitError, "ledger", "defer", "SHOP-482/a", "--reason", "r", "--until", inDays(5))
+	r.must(t, cli.ExitError, "defer", "SHOP-482/a", "--reason", "r", "--until", inDays(5))
 	if exists(t, r.path(".semar", "store", "obligations")) {
 		t.Error("a deferral without a name left a record")
 	}
@@ -311,7 +308,7 @@ func TestRecordNeedsAName(t *testing.T) {
 	r := ledgerRepo(t)
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "By hand", manualEntryFields)))
 	r.opts.User = func() (string, error) { return "", nil }
-	res := r.must(t, cli.ExitError, "ledger", "record", "SHOP-482/a", "passed", "--notes", "x")
+	res := r.must(t, cli.ExitError, "check", "SHOP-482/a", "pass", "--note", "x")
 	contains(t, "stderr", res.stderr, "no name")
 	if exists(t, r.path(".semar", "store", "obligations")) {
 		t.Error("a result without a name left a record")
@@ -327,18 +324,18 @@ func TestRecordOnlyForNeedsAPerson(t *testing.T) {
 		entry("SHOP-482/person", "P", manualEntryFields)))
 
 	for _, id := range []string{"SHOP-482/verified", "SHOP-482/blocked"} {
-		res := r.must(t, cli.ExitError, "ledger", "record", id, "passed", "--notes", "x")
-		contains(t, "stderr", res.stderr, id, "needs_a_person")
+		res := r.must(t, cli.ExitError, "check", id, "pass", "--note", "x")
+		contains(t, "stderr", res.stderr, id, "only a use case with a manual check")
 	}
-	res := r.must(t, cli.ExitError, "ledger", "record", "SHOP-482/none", "passed", "--notes", "x")
+	res := r.must(t, cli.ExitError, "check", "SHOP-482/none", "pass", "--note", "x")
 	contains(t, "stderr", res.stderr, "SHOP-482/none was not found")
-	res = r.must(t, cli.ExitError, "ledger", "record", "SHOP-482/person", "maybe", "--notes", "x")
-	contains(t, "stderr", res.stderr, "passed or failed")
+	res = r.must(t, cli.ExitError, "check", "SHOP-482/person", "maybe", "--note", "x")
+	contains(t, "stderr", res.stderr, "say pass or fail")
 	if exists(t, r.path(".semar", "store", "obligations")) {
 		t.Error("a refused result left a record")
 	}
 
-	res = r.must(t, cli.ExitOK, "ledger", "record", "SHOP-482/person", "passed", "--notes", "the document is right")
+	res = r.must(t, cli.ExitOK, "check", "SHOP-482/person", "pass", "--note", "the document is right")
 	contains(t, "stdout", res.stdout, "recorded passed for SHOP-482/person as tester", "checked by a person")
 }
 
@@ -346,16 +343,16 @@ func TestRecordIsANewRecordAndKeepsTheState(t *testing.T) {
 	r := ledgerRepo(t)
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/person", "P", manualEntryFields)))
 
-	r.must(t, cli.ExitOK, "ledger", "record", "SHOP-482/person", "failed", "--notes", "no")
-	res := r.must(t, cli.ExitFailed, "ledger")
-	contains(t, "the table", res.stdout, "Needs a person (1)", "A person decides", "failed, checked by a person", "Checked by a person: 1 failed.")
+	r.must(t, cli.ExitOK, "check", "SHOP-482/person", "fail", "--note", "no")
+	res := r.must(t, cli.ExitFailed, "status")
+	contains(t, "the table", squash(res.stdout), "failing 1 SHOP-482/person", "A person decides", "failed, checked by a person")
 
 	r.opts.Clock = func() time.Time { return time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC) }
-	r.must(t, cli.ExitOK, "ledger", "record", "SHOP-482/person", "passed", "--notes", "yes, after a fix")
-	res = r.must(t, cli.ExitUndecided, "ledger")
-	contains(t, "the table", res.stdout, "passed, checked by a person", "Checked by a person: 1 passed.")
-	if strings.Contains(res.stdout, "1 verified") && !strings.Contains(res.stdout, "0 verified") {
-		t.Errorf("a manual result counted as a pass:\n%s", res.stdout)
+	r.must(t, cli.ExitOK, "check", "SHOP-482/person", "pass", "--note", "yes, after a fix")
+	res = r.must(t, cli.ExitUndecided, "status")
+	contains(t, "the table", res.stdout, "passed, checked by a person")
+	if strings.Contains(res.stdout, "verified") {
+		t.Errorf("a manual result with no build counted as a pass:\n%s", res.stdout)
 	}
 	files, err := filepath.Glob(r.path(".semar", "store", "obligations", "SHOP-482", "person", "manual", "*.json"))
 	if err != nil || len(files) != 2 {
@@ -371,8 +368,8 @@ func TestLedgerSkipsTrialAndCheckRuns(t *testing.T) {
 	r.putRun(t, "r-c-check", domain.PurposeFixtureCheck, nil, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
 	r.putRun(t, "r-d-unfinished", "", nil, false)
 
-	res := r.must(t, cli.ExitFailed, "ledger")
-	contains(t, "the table", res.stdout, "Failed (1)", "SHOP-482-01 failed in r-a-scenarios")
+	res := r.must(t, cli.ExitFailed, "status")
+	contains(t, "the table", squash(res.stdout), "failing 1", "SHOP-482-01 failed in r-a-scenarios")
 }
 
 // withHash is a passed result that carries the hash of the expected results of the scenario file now.
@@ -387,10 +384,10 @@ func (r *repo) withHash(t *testing.T) domain.ScenarioResult {
 	return res
 }
 
-// ledgerTable is what semar ledger prints, whatever the exit code.
+// ledgerTable is what semar status prints, whatever the exit code.
 func (r *repo) ledgerTable(t *testing.T) string {
 	t.Helper()
-	return r.semar(t, t.Context(), "ledger").stdout
+	return r.semar(t, t.Context(), "status").stdout
 }
 
 // editScenario changes the scenario file of SHOP-482-01, and fails when the change does not apply.
@@ -411,11 +408,11 @@ func TestLedgerDoesNotCountAPassOfAScenarioThatChanged(t *testing.T) {
 	r := ledgerRepo(t)
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
 	r.putRun(t, "r-1", "", nil, true, r.withHash(t))
-	contains(t, "the table", r.ledgerTable(t), "Verified (1)")
+	contains(t, "the table", squash(r.ledgerTable(t)), "verified 1")
 
 	// The expected result is edited after the pass.
 	r.editScenario(t, "the status is 422", "the status is 400")
-	contains(t, "the table", r.ledgerTable(t), "Blocked (1)", scenarioID+": rerun: the scenario changed since r-1")
+	contains(t, "the table", squash(r.ledgerTable(t)), "stale 1", scenarioID+": rerun: the scenario changed since r-1 → semar run")
 }
 
 func TestLedgerCountsAPassOfAnOldRunWithNoHash(t *testing.T) {
@@ -423,7 +420,7 @@ func TestLedgerCountsAPassOfAnOldRunWithNoHash(t *testing.T) {
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
 	r.putRun(t, "r-1", "", nil, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
 	r.editScenario(t, "the status is 422", "the status is 400")
-	contains(t, "the table", r.ledgerTable(t), "Verified (1)")
+	contains(t, "the table", squash(r.ledgerTable(t)), "verified 1")
 }
 
 func TestLedgerReadsTheNewestCompleteRun(t *testing.T) {
@@ -431,12 +428,12 @@ func TestLedgerReadsTheNewestCompleteRun(t *testing.T) {
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
 	r.putRun(t, "r-1", "", nil, true, scenarioResult(scenarioID, domain.OutcomeFailed, "old failure"))
 	r.putRun(t, "r-2", "", nil, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
-	res := r.must(t, cli.ExitUndecided, "ledger")
-	contains(t, "the table", res.stdout, "Verified (1)")
+	res := r.must(t, cli.ExitUndecided, "status")
+	contains(t, "the table", squash(res.stdout), "verified 1")
 
 	// A run that did not touch the scenario leaves the result of the run before it.
 	r.putRun(t, "r-3", "", nil, true)
-	r.must(t, cli.ExitUndecided, "ledger")
+	r.must(t, cli.ExitUndecided, "status")
 }
 
 func TestLedgerRunReadsOneRunAndPrintsTheChecklist(t *testing.T) {
@@ -447,22 +444,22 @@ func TestLedgerRunReadsOneRunAndPrintsTheChecklist(t *testing.T) {
 	r.putRun(t, "r-1", "", nil, true, scenarioResult(scenarioID, domain.OutcomeFailed, "old failure"))
 	r.putRun(t, "r-2", "", nil, true, scenarioResult(scenarioID, domain.OutcomePassed, ""))
 
-	res := r.must(t, cli.ExitFailed, "ledger", "--run", "r-1")
-	contains(t, "the table", res.stdout, "Failed (1)", "SHOP-482-01 failed in r-1: old failure", "Needs a person (1)",
-		"Manual checks for SHOP-482 (1)", "1. SHOP-482/person  P", "semar ledger record SHOP-482/person passed|failed")
-	if strings.Index(res.stdout, "Manual checks for") < strings.Index(res.stdout, "Needs a person (1)") {
+	res := r.must(t, cli.ExitFailed, "status", "--run", "r-1")
+	contains(t, "the table", squash(res.stdout), "failing 1", "SHOP-482-01 failed in r-1: old failure", "for a person 1")
+	contains(t, "the checklist", res.stdout, "Manual checks for SHOP-482 (1)", "1. SHOP-482/person  P", "semar check SHOP-482/person pass|fail")
+	if strings.Index(res.stdout, "Manual checks for") < strings.Index(squash(res.stdout), "for a person 1") {
 		t.Errorf("the checklist comes before the table:\n%s", res.stdout)
 	}
 
 	// A run with nothing of the scenario gives "no result".
 	r.putRun(t, "r-3", "", nil, true)
-	res = r.must(t, cli.ExitUndecided, "ledger", "--run", "r-3")
+	res = r.must(t, cli.ExitUndecided, "status", "--run", "r-3")
 	contains(t, "the table", res.stdout, "SHOP-482-01 has no result: run it")
 
 	r.putRun(t, "r-4-trial", domain.PurposeTrial, nil, true)
 	r.putRun(t, "r-5-open", "", nil, false)
 	for _, id := range []string{"r-4-trial", "r-5-open", "r-none", "../x"} {
-		res := r.must(t, cli.ExitError, "ledger", "--run", id)
+		res := r.must(t, cli.ExitError, "status", "--run", id)
 		contains(t, "stderr", res.stderr, "run")
 		if res.stdout != "" {
 			t.Errorf("--run %s printed a table:\n%s", id, res.stdout)
@@ -476,27 +473,27 @@ func TestLedgerTicketFilter(t *testing.T) {
 	r.writeRel(t, ".semar/obligations/other.yaml", obligations("SHOP-480", entry("SHOP-480/b", "B", `gap: "not drafted"`)))
 	r.writeRel(t, ".semar/obligations/refunds.yaml", obligations("", entry("refunds/c", "C", `gap: "not drafted"`)))
 
-	res := r.must(t, cli.ExitUndecided, "ledger", "--ticket", "SHOP-482")
-	contains(t, "the table", res.stdout, "1 use case:", "SHOP-482/a")
+	res := r.must(t, cli.ExitUndecided, "status", "--ticket", "SHOP-482")
+	contains(t, "the table", squash(res.stdout), "1 use case of SHOP-482", "SHOP-482/a")
 	if strings.Contains(res.stdout, "SHOP-480/b") || strings.Contains(res.stdout, "refunds/c") {
 		t.Errorf("another ticket is listed:\n%s", res.stdout)
 	}
-	res = r.must(t, cli.ExitUndecided, "ledger", "--ticket", "SHOP-482", "--ticket", "refunds")
-	contains(t, "the table", res.stdout, "2 use cases:", "SHOP-482/a", "refunds/c")
-	res = r.must(t, cli.ExitError, "ledger", "--ticket", "a/b")
+	res = r.must(t, cli.ExitUndecided, "status", "--ticket", "SHOP-482", "--ticket", "refunds")
+	contains(t, "the table", squash(res.stdout), "2 use cases of SHOP-482, refunds", "SHOP-482/a", "refunds/c")
+	res = r.must(t, cli.ExitError, "status", "--ticket", "a/b")
 	contains(t, "stderr", res.stderr, "invalid ticket")
 }
 
 func TestLedgerWithoutObligationsSaysSo(t *testing.T) {
 	r := ledgerRepo(t)
-	res := r.must(t, cli.ExitUndecided, "ledger")
+	res := r.must(t, cli.ExitUndecided, "status")
 	contains(t, "stdout", res.stdout, "no use case: there is no obligation in .semar/obligations")
 }
 
 func TestLedgerNamesTheProblemsOfAFile(t *testing.T) {
 	r := ledgerRepo(t)
 	r.ledgerFile(t, "apiVersion: semar/v1\nkind: Obligations\nobligations:\n  - id: SHOP-482/a\n    source: diff\n")
-	res := r.must(t, cli.ExitError, "ledger")
+	res := r.must(t, cli.ExitError, "status")
 	contains(t, "stderr", res.stderr, ".semar/obligations/SHOP-482.plan.yaml:", "title is required", "nothing was derived")
 	if res.stdout != "" {
 		t.Errorf("a table was printed from a file with a problem:\n%s", res.stdout)
@@ -508,8 +505,8 @@ func TestLedgerTextFromAFileIsData(t *testing.T) {
 	r.ledgerFile(t, obligations("SHOP-482",
 		"  - id: SHOP-482/a\n    title: \"Title \\x1b[2J \\u202e reversed\"\n    source: diff\n    gap: \"gap \\x1b]0;owned\\x07 text\"\n",
 		"  - id: SHOP-482/p\n    title: \"By hand \\x1b[31m\"\n    source: diff\n    cite: \"cite \\x1b[41m\"\n    manual:\n      kind: other\n      text: \"why \\x1b[1m\"\n      steps: [\"step \\x1b[2J\"]\n      expected: \"expected \\x9b31m\"\n      writtenBy: code\n"))
-	r.must(t, cli.ExitOK, "ledger", "defer", "SHOP-482/a", "--reason", "reason \x1b[2J", "--until", inDays(2))
-	for _, args := range [][]string{{"ledger"}, {"ledger", "--checklist"}} {
+	r.must(t, cli.ExitOK, "defer", "SHOP-482/a", "--reason", "reason \x1b[2J", "--until", inDays(2))
+	for _, args := range [][]string{{"status"}, {"status", "--checklist"}} {
 		res := r.must(t, cli.ExitUndecided, args...)
 		for _, out := range []string{res.stdout, res.stderr} {
 			if strings.ContainsAny(out, "\x1b\x07\u202e\u009b") {
@@ -527,7 +524,7 @@ func TestLedgerChecklist(t *testing.T) {
 	r.ledgerFile(t, obligations("SHOP-482",
 		entry("SHOP-482/a", "Covered", `gap: "not drafted"`),
 		entry("SHOP-482/p", "By hand", manualEntryFields)))
-	res := r.must(t, cli.ExitUndecided, "ledger", "--checklist")
+	res := r.must(t, cli.ExitUndecided, "status", "--checklist")
 	want := `Manual checks for SHOP-482 (1)
 1. SHOP-482/p  By hand
    Why a person: A person decides
@@ -535,7 +532,7 @@ func TestLedgerChecklist(t *testing.T) {
      1. Read the document.
      2. Read the code.
    Expected: They agree
-   Record:   semar ledger record SHOP-482/p passed|failed --notes "<what you saw>"
+   Check:    semar check SHOP-482/p pass|fail --note "<what you saw>"
 `
 	if res.stdout != want {
 		t.Errorf("checklist:\n%s\nwant:\n%s", res.stdout, want)
@@ -546,17 +543,17 @@ func TestLedgerChecklist(t *testing.T) {
 
 	// With nothing for a person, it says so.
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", `gap: "not drafted"`)))
-	res = r.must(t, cli.ExitUndecided, "ledger", "--checklist")
+	res = r.must(t, cli.ExitUndecided, "status", "--checklist")
 	contains(t, "stdout", res.stdout, "no use case needs a person")
 }
 
 func TestLedgerExpiredDeferralIsIgnoredAndSaid(t *testing.T) {
 	r := ledgerRepo(t)
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Gap", `gap: "not drafted"`)))
-	r.must(t, cli.ExitOK, "ledger", "defer", "SHOP-482/a", "--reason", "later", "--until", inDays(2))
+	r.must(t, cli.ExitOK, "defer", "SHOP-482/a", "--reason", "later", "--until", inDays(2))
 	r.opts.Clock = func() time.Time { return time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC) }
-	res := r.must(t, cli.ExitUndecided, "ledger")
-	contains(t, "the table", res.stdout, "Blocked (1)", "the deferral by tester expired on "+inDays(2), "not drafted")
+	res := r.must(t, cli.ExitUndecided, "status")
+	contains(t, "the table", squash(res.stdout), "no test 1", "the deferral by tester expired on "+inDays(2), "not drafted")
 }
 
 func TestRunSummaryHasCoverageLine(t *testing.T) {
@@ -573,7 +570,7 @@ func TestRunSummaryHasCoverageLine(t *testing.T) {
 	if len(lines) != 4 || lines[2] != "2 use cases: 1 verified, 1 blocked" || !strings.HasPrefix(lines[3], "report: ") {
 		t.Errorf("summary:\n%s", res.stdout)
 	}
-	if md := r.lastReport(t); !strings.Contains(md, "\n2 use cases: 1 verified, 1 blocked\nDetails: `semar ledger --ticket SHOP-482`\n") {
+	if md := r.lastReport(t); !strings.Contains(md, "\n2 use cases: 1 verified, 1 blocked\nDetails: `semar status --ticket SHOP-482`\n") {
 		t.Errorf("report:\n%s", md)
 	}
 }
@@ -585,7 +582,7 @@ func TestRunWithoutObligationsHasNoCoverageLine(t *testing.T) {
 	if strings.Contains(res.stdout, "use case") || res.stderr != "semar: running against local (test, test data)\n" {
 		t.Errorf("a repository with no obligation changed the summary:\n%s\n%s", res.stdout, res.stderr)
 	}
-	if md := r.lastReport(t); strings.Contains(md, "use case") || strings.Contains(md, "ledger") || !strings.HasPrefix(md, "# Semar report r-test-0001\n\n- Environment: local (test)\n") {
+	if md := r.lastReport(t); strings.Contains(md, "use case") || strings.Contains(md, "status") || !strings.HasPrefix(md, "# Semar report r-test-0001\n\n- Environment: local (test)\n") {
 		t.Errorf("a repository with no obligation changed the report:\n%s", md)
 	}
 }
@@ -647,7 +644,7 @@ func TestLedgerRefusesStoredRecordsThatTheCommandsWouldRefuse(t *testing.T) {
 			r := ledgerRepo(t)
 			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Left for later", `gap: "not drafted"`)))
 			r.writeRel(t, ".semar/store/obligations/SHOP-482/a/"+tt.kind+"/"+tt.file, tt.body)
-			res := r.must(t, cli.ExitError, "ledger")
+			res := r.must(t, cli.ExitError, "status")
 			contains(t, "stderr", res.stderr, tt.kind+" record", tt.file, tt.want)
 			if res.stdout != "" {
 				t.Errorf("a table was printed from a record that cannot be trusted:\n%s", res.stdout)
@@ -679,7 +676,7 @@ const (
 	buildsOther = `, "builds": [{"service": "orders", "commit": "9f3c2ab"}]`
 )
 
-func TestLedgerExitCodeWithManualResults(t *testing.T) {
+func TestStatusExitCodeWithManualResults(t *testing.T) {
 	tests := []struct {
 		name, result, builds string
 		failedScenario       bool
@@ -687,18 +684,18 @@ func TestLedgerExitCodeWithManualResults(t *testing.T) {
 		want                 int
 		lines                []string
 	}{
-		{"no manual result", "", "", false, []string{"--env", "local"}, cli.ExitUndecided, nil},
+		{"no manual result", "", "", false, []string{"--env", "local"}, cli.ExitUndecided, []string{"for a person 1 SHOP-482/a"}},
 		{"passed on the builds that run now", "passed", buildsNow, false, []string{"--env", "local"}, cli.ExitOK,
-			[]string{"Checked by a person: 1 passed."}},
+			[]string{"verified 1 SHOP-482/a checked by tester", "Ship: yes."}},
 		{"passed without builds", "passed", "", false, []string{"--env", "local"}, cli.ExitUndecided,
-			[]string{"recorded without --env, so it is not tied to a build", "1 passed (0 on the builds that run now)"}},
+			[]string{"for a person 1 SHOP-482/a", "recorded without --env, so it is not tied to a build"}},
 		{"passed on another commit", "passed", buildsOther, false, []string{"--env", "local"}, cli.ExitUndecided,
-			[]string{"checked by a person on another build: rerun the check and record it with --env", "1 passed (0 on the builds that run now)"}},
+			[]string{"checked by a person on another build: rerun the check and record it with --env"}},
 		{"failed on the builds that run now", "failed", buildsNow, false, []string{"--env", "local"}, cli.ExitFailed,
-			[]string{"Checked by a person: 1 failed."}},
-		{"passed beside a failed scenario", "passed", buildsNow, true, []string{"--env", "local"}, cli.ExitFailed, nil},
-		{"passed without --env on the ledger", "passed", buildsNow, false, nil, cli.ExitUndecided,
-			[]string{"Checked by a person: 1 passed."}},
+			[]string{"failing 1 SHOP-482/a", "failed, checked by a person"}},
+		{"passed beside a failed scenario", "passed", buildsNow, true, []string{"--env", "local"}, cli.ExitFailed, []string{"failing 1 SHOP-482/b"}},
+		{"passed, with the only environment read by default", "passed", buildsNow, false, nil, cli.ExitOK,
+			[]string{"verified 1 SHOP-482/a checked by tester"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -712,47 +709,18 @@ func TestLedgerExitCodeWithManualResults(t *testing.T) {
 			if tt.result != "" {
 				r.plantManual(t, tt.result, tt.builds)
 			}
-			res := r.must(t, tt.want, append([]string{"ledger"}, tt.args...)...)
-			contains(t, "the ledger", res.stdout, tt.lines...)
-			if strings.Contains(res.stdout, "1 verified") && !strings.Contains(res.stdout, "0 verified") && !tt.failedScenario {
-				t.Errorf("a manual result counted as a pass:\n%s", res.stdout)
-			}
+			res := r.must(t, tt.want, append([]string{"status"}, tt.args...)...)
+			contains(t, "the status", squash(res.stdout), tt.lines...)
 		})
-	}
-}
-
-func TestRecordWithEnvStoresTheBuilds(t *testing.T) {
-	r := newRepo(t, repoOptions{app: sampleapp.Options{Commit: "c0ffee1"}})
-	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "By hand", manualEntryFields)))
-
-	res := r.must(t, cli.ExitOK, "ledger", "record", "SHOP-482/a", "passed", "--notes", "ok", "--env", "local")
-	contains(t, "the record", res.stdout, "recorded passed for SHOP-482/a as tester", "checked by a person on orders c0ffee1")
-	files, err := filepath.Glob(r.path(".semar", "store", "obligations", "SHOP-482", "a", "manual", "*.json"))
-	if err != nil || len(files) != 1 {
-		t.Fatalf("%v %v", files, err)
-	}
-	data, err := os.ReadFile(files[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	contains(t, "the stored record", string(data), `"service": "orders"`, `"commit": "c0ffee1"`)
-	if strings.Contains(string(data), "configHash") {
-		t.Errorf("the record holds more than the service and the commit:\n%s", data)
-	}
-
-	// Without --env, the record has no builds.
-	res = r.must(t, cli.ExitOK, "ledger", "record", "SHOP-482/a", "passed", "--notes", "ok")
-	if strings.Contains(res.stdout, " on ") {
-		t.Errorf("a record without --env names builds: %s", res.stdout)
 	}
 }
 
 func TestRecordBuildNeedsEnvAndEnvMustBeReadable(t *testing.T) {
 	r := ledgerRepo(t)
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "By hand", manualEntryFields)))
-	res := r.must(t, cli.ExitError, "ledger", "record", "SHOP-482/a", "passed", "--notes", "x", "--build", "abcdef1")
-	contains(t, "stderr", res.stderr, "--build needs --env")
-	res = r.must(t, cli.ExitError, "ledger", "record", "SHOP-482/a", "passed", "--notes", "x", "--env", "local")
+	res := r.must(t, cli.ExitError, "check", "SHOP-482/a", "pass", "--note", "x", "--build", "abcdef1")
+	contains(t, "stderr", res.stderr, "--build needs an environment")
+	res = r.must(t, cli.ExitError, "check", "SHOP-482/a", "pass", "--note", "x", "--env", "local")
 	contains(t, "stderr", res.stderr, "the build of orders could not be read")
 	if exists(t, r.path(".semar", "store", "obligations")) {
 		t.Error("a refused record was stored")
@@ -769,7 +737,7 @@ func TestLedgerRefusesHostileBuildsOnRead(t *testing.T) {
 			r := ledgerRepo(t)
 			r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "By hand", manualEntryFields)))
 			r.plantManual(t, "passed", builds)
-			res := r.must(t, cli.ExitError, "ledger")
+			res := r.must(t, cli.ExitError, "status")
 			contains(t, "stderr", res.stderr, "manual record", "is not counted")
 			if res.stdout != "" {
 				t.Errorf("a table was printed:\n%s", res.stdout)
@@ -779,5 +747,5 @@ func TestLedgerRefusesHostileBuildsOnRead(t *testing.T) {
 	r := ledgerRepo(t)
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "By hand", manualEntryFields)))
 	r.plantManual(t, "passed", "")
-	r.must(t, cli.ExitUndecided, "ledger")
+	r.must(t, cli.ExitUndecided, "status")
 }

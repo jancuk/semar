@@ -27,7 +27,10 @@ type Cover struct {
 	Outcome  string // a scenario outcome or a journey outcome
 	Run      domain.RunID
 	Reason   string // the first reason of the result
-	Builds   []domain.BuildRef
+	// Word is what a person reads for the result (Plan 26, D7). "needs review" says that an
+	// approval is missing. Empty means the outcome is the word.
+	Word   string
+	Builds []domain.BuildRef
 	// ScenarioChanged is true when the result stored the expectation hash of its scenario and the
 	// scenario file has another one now, or cannot be read: the pass judged something else.
 	ScenarioChanged bool
@@ -40,6 +43,9 @@ type Results struct {
 	Scenarios map[domain.ScenarioID]Cover
 	Journeys  map[string]Cover  // nil until Plan 18 wires it
 	Current   []domain.BuildRef // nil when the builds were not read
+	// Links are the manual checks that a person said a scenario does. A link counts only while
+	// its scenario is in the covers of the obligation.
+	Links map[string]Link
 }
 
 type Entry struct {
@@ -52,6 +58,11 @@ type Entry struct {
 	Deferral   *Deferral // the deferral that holds: its expiry is after now
 	Expired    *Deferral // a deferral that was ignored because it expired
 	NoReason   bool      // no cover, no gap, and no manual reason
+	Link       *Link     // the link that gives the state of a manual use case to a scenario
+
+	// An open use case waits for some of these: a person's approval of a cover, a run on the
+	// current build or of a scenario that changed, or a first run.
+	Review, Stale, NotRun bool
 }
 
 // ManualTie says how a passed manual result relates to the builds that the environment runs now
@@ -150,14 +161,29 @@ func deriveOne(o Located, r Results, deferrals map[string]Deferral, manual map[s
 		case !known:
 			notPassed = append(notPassed, label+" was deleted: no scenario or journey covers this")
 		case !c.Found:
+			e.NotRun = true
 			notPassed = append(notPassed, label+" has no result: run it")
 		case c.Outcome == string(domain.OutcomeFailed):
 			failed = append(failed, label+" failed in "+string(c.Run)+withReason(c.Reason))
 		case c.Outcome != string(domain.OutcomePassed):
-			notPassed = append(notPassed, fmt.Sprintf("%s is %s in %s%s", label, strings.ReplaceAll(c.Outcome, "_", " "), c.Run, withReason(c.Reason)))
+			word := strings.ReplaceAll(c.Outcome, "_", " ")
+			if c.Word != "" {
+				word = c.Word
+			}
+			switch word {
+			case "needs review":
+				e.Review = true
+				notPassed = append(notPassed, fmt.Sprintf("%s needs review in %s%s", label, c.Run, withReason(c.Reason)))
+				return
+			case "stale":
+				e.Stale = true
+			}
+			notPassed = append(notPassed, fmt.Sprintf("%s is %s in %s%s", label, word, c.Run, withReason(c.Reason)))
 		case c.ScenarioChanged:
+			e.Stale = true
 			notPassed = append(notPassed, fmt.Sprintf("%s: rerun: the scenario changed since %s", label, c.Run))
 		case !onCurrent(c, r.Current):
+			e.Stale = true
 			notPassed = append(notPassed, fmt.Sprintf("%s ran %s: rerun on the current build", label, strings.Join(staleDetails(c, r.Current), "; ")))
 		default:
 			passed++
@@ -180,6 +206,9 @@ func deriveOne(o Located, r Results, deferrals map[string]Deferral, manual map[s
 		add(label, c, known)
 	}
 	covered := len(e.Covers) > 0
+	if l, ok := r.Links[o.ID]; ok && o.Manual != nil && slices.Contains(o.Covers, l.Scenario) {
+		e.Link = &l
+	}
 
 	switch {
 	case len(failed) > 0:
@@ -189,7 +218,10 @@ func deriveOne(o Located, r Results, deferrals map[string]Deferral, manual map[s
 	case e.Deferral != nil:
 		e.State = Deferred
 		e.Reasons = append(e.Reasons, notes...)
-	case o.Manual != nil:
+	case o.Manual != nil && e.Link == nil && e.Manual != nil && e.Manual.Result == "passed" && e.ManualTie == TieCurrent:
+		e.State = Verified
+		e.Reasons = append(e.Reasons, "checked by "+e.Manual.User)
+	case o.Manual != nil && e.Link == nil:
 		e.State = NeedsAPerson
 		e.Reasons = append(e.Reasons, o.Manual.Text)
 		if e.Manual != nil {

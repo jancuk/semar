@@ -181,10 +181,9 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 			return err
 		},
 	})
-	root.AddCommand(newRunCommand(o), newScriptCommand(), newConfirmCommand(o), newActivityCommand(),
+	root.AddCommand(newRunCommand(o), newScriptCommand(), newConfirmCommand(o), newActivityCommand(), newStatusCommand(o), newCheckCommand(o), newDeferCommand(o),
 		newInitCommand(), newChangesCommand(), newPlanCommand(o), newProvidersCommand(o), newDashboardCmd(o), newFixtureCommand(o))
 	root.AddCommand(newExportCommand())
-	root.AddCommand(newLedgerCommand(o))
 	root.AddCommand(newJourneyCommand(o))
 	root.AddCommand(newLoginCommand(o), newScreensCommand(o), newScenariosCommand())
 	return root

@@ -65,7 +65,7 @@ func checkItem(w io.Writer, n int, e Entry) error {
 	if r := e.Manual; r != nil {
 		fmt.Fprintf(&b, "   Recorded: %s, checked by a person (%s, %s)\n", Safe(r.Result), Safe(r.User), day(r.At))
 	}
-	fmt.Fprintf(&b, "   Record:   semar ledger record %s passed|failed --notes \"<what you saw>\"\n", Safe(o.ID))
+	fmt.Fprintf(&b, "   Check:    semar check %s pass|fail --note \"<what you saw>\"\n", Safe(o.ID))
 	_, err := io.WriteString(w, b.String())
 	return err
 }

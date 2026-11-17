@@ -447,7 +447,7 @@ func TestLedgerReadsJourneyOutcome(t *testing.T) {
 		entry("SHOP-482/flow", "An order is placed, paid, and shown as paid", "journeys: [checkout]"),
 		entry("SHOP-482/gone", "A journey that no file defines", "journeys: [vanished]")))
 
-	before := r.must(t, cli.ExitUndecided, "ledger")
+	before := r.must(t, cli.ExitUndecided, "status")
 	contains(t, "the ledger", before.stdout, "journey checkout has no result: run it", "journey vanished was deleted: no scenario or journey covers this")
 
 	run := r.must(t, cli.ExitOK, "journey", "run", "checkout")
@@ -457,30 +457,30 @@ func TestLedgerReadsJourneyOutcome(t *testing.T) {
 	}
 	contains(t, "the summary", run.stdout, "1 use case: 1 verified")
 
-	res := r.must(t, cli.ExitUndecided, "ledger", "--env", "local")
-	contains(t, "the ledger", res.stdout, "2 use cases: 1 verified, 1 blocked", "Verified (1)", "SHOP-482/flow")
+	res := r.must(t, cli.ExitUndecided, "status", "--env", "local")
+	contains(t, "the ledger", squash(res.stdout), "2 use cases", "verified 1", "blocked 1 SHOP-482/gone")
 
 	// A failed journey makes the use case failed, whatever the build.
 	r2 := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{Defects: defects(sampleapp.PaymentAmountWrong)})
 	r2.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/flow", "An order is placed", "journeys: [checkout]")))
 	r2.must(t, cli.ExitFailed, "journey", "run", "checkout")
-	failed := r2.must(t, cli.ExitFailed, "ledger")
-	contains(t, "the ledger", failed.stdout, "Failed (1)", "journey checkout failed in r-test-0001: invariant 1 is false")
+	failed := r2.must(t, cli.ExitFailed, "status")
+	contains(t, "the ledger", squash(failed.stdout), "failing 1", "journey checkout failed in r-test-0001: invariant 1 is false")
 }
 
 func TestLedgerCountsAStaleJourney(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/flow", "An order is placed", "journeys: [checkout]")))
 	r.must(t, cli.ExitOK, "journey", "run", "checkout")
-	r.must(t, cli.ExitOK, "ledger", "--env", "local")
+	r.must(t, cli.ExitOK, "status", "--env", "local")
 
 	// A newer result on another commit: the environment has moved on since.
 	pay := r.commitOf(t, r.paymentsURL, "tok-pay")
 	old := manifestOf(domain.BuildRef{Service: "orders", Commit: "0ld0ld0"}, domain.BuildRef{Service: "payments", Commit: pay})
 	r.storedRun(t, "r-test-9999", old.Services, domain.JourneyResult{Journey: "checkout", Manifest: old, ManifestEnd: &old, Outcome: domain.JourneyPassed,
 		Legs: []domain.LegResult{}, Invariants: []domain.InvariantResult{}, Reasons: []domain.Reason{}})
-	res := r.must(t, cli.ExitUndecided, "ledger", "--env", "local")
-	contains(t, "the ledger", res.stdout, "journey checkout ran on orders 0ld0ld0, and the environment runs 9f3c2ab: rerun on the current build")
+	res := r.must(t, cli.ExitUndecided, "status", "--env", "local")
+	contains(t, "the ledger", squash(res.stdout), "journey checkout ran on orders 0ld0ld0, and the environment runs 9f3c2ab: rerun on the current build")
 }
 
 func TestJourneyRunOfAnInvalidFileShowsItSafely(t *testing.T) {

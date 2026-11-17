@@ -1,7 +1,7 @@
 # Semar report run-20261114-0001
 
 42 use cases: 35 verified, 2 failed, 3 blocked, 2 need a person
-Details: `semar ledger --ticket SHOP-482 --ticket refunds`
+Details: `semar status --ticket SHOP-482 --ticket refunds`
 
 - Environment: uat (test)
 - Started: 2026-11-14T02:30:00Z

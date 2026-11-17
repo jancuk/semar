@@ -452,3 +452,45 @@ func TestManualRefusesHostileBuilds(t *testing.T) {
 		t.Error("33 builds were stored")
 	}
 }
+
+func TestALinkIsStoredAndTheNewestIsRead(t *testing.T) {
+	s := obligation.NewStore(t.TempDir())
+	if got, _, err := s.Links(now); err != nil || len(got) != 0 {
+		t.Fatalf("an empty store gave %v, %v", got, err)
+	}
+	first := obligation.Link{Obligation: "SHOP-482/difference-1", Scenario: "SHOP-482-01", User: "tester", At: t0}
+	second := obligation.Link{Obligation: "SHOP-482/difference-1", Scenario: "SHOP-482-02", User: "other", At: t0.Add(time.Hour)}
+	for _, l := range []obligation.Link{first, second} {
+		if err := s.Link(l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, problems, err := s.Links(now)
+	if err != nil || len(problems) != 0 {
+		t.Fatalf("links: %v, problems %v", err, problems)
+	}
+	l := got["SHOP-482/difference-1"]
+	if l.Scenario != "SHOP-482-02" || l.User != "other" || l.Schema != 1 || l.Identity != obligation.LocalIdentity {
+		t.Errorf("newest link is %+v", l)
+	}
+}
+
+func TestALinkNeedsAUserAScenarioAndATime(t *testing.T) {
+	s := obligation.NewStore(t.TempDir())
+	ok := obligation.Link{Obligation: "SHOP-482/difference-1", Scenario: "SHOP-482-01", User: "tester", At: t0}
+	for name, mod := range map[string]func(*obligation.Link){
+		"no user":        func(l *obligation.Link) { l.User = " " },
+		"no scenario":    func(l *obligation.Link) { l.Scenario = "" },
+		"no time":        func(l *obligation.Link) { l.At = time.Time{} },
+		"a bad scenario": func(l *obligation.Link) { l.Scenario = "../x" },
+	} {
+		l := ok
+		mod(&l)
+		if err := s.Link(l); err == nil {
+			t.Errorf("%s: the link was stored", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(s.Root(), "store")); err == nil {
+		t.Error("a refused link left a store")
+	}
+}

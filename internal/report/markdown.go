@@ -100,7 +100,7 @@ func buildView(d Data) markdownView {
 	}
 	if d.Coverage != "" {
 		v.Coverage = shown(d.Coverage)
-		v.CoverageDetail = ledgerCommand(d.CoverageTickets)
+		v.CoverageDetail = statusCommand(d.CoverageTickets)
 	}
 	v.Journeys = journeyViews(d)
 	legs := legJourneys(d.Journeys)
@@ -145,10 +145,10 @@ func buildView(d Data) markdownView {
 	return v
 }
 
-// ledgerCommand is the command that shows the use cases of the tickets. A key that is not safe
+// statusCommand is the command that shows the use cases of the tickets. A key that is not safe
 // as an ID is left out, because it sits in a code span where nothing can be escaped.
-func ledgerCommand(tickets []string) string {
-	cmd := "semar ledger"
+func statusCommand(tickets []string) string {
+	cmd := "semar status"
 	for _, t := range tickets {
 		if idcheck.Check("ticket", t) == nil {
 			cmd += " --ticket " + t
