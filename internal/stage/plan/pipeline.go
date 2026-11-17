@@ -107,15 +107,32 @@ type CriterionOutcome struct {
 	Output      []byte    // the accepted output; the last output when there is none
 }
 
+func newRunState(in Input) *runState {
+	rs := &runState{in: in, uses: make([]ModelUse, len(in.Ladder)), webUses: make([]ModelUse, len(in.Ladder)), cache: map[string]StoredAnswer{}}
+	for i, r := range in.Ladder {
+		rs.uses[i] = ModelUse{PlannerID: r.Planner.ID(), Kind: r.Planner.Kind(), Model: r.Label(), Asked: r.Model, Reasoning: r.Reasoning}
+		rs.webUses[i] = rs.uses[i]
+	}
+	for _, a := range in.Previous { // the newest plan comes first and wins
+		if _, ok := rs.cache[a.Hash]; !ok {
+			rs.cache[a.Hash] = a
+		}
+	}
+	return rs
+}
+
 type runState struct {
 	in    Input
 	mu    sync.Mutex
 	total provider.Result
 	uses  []ModelUse
-	calls int
-	corr  int
-	done  int
-	cache map[string]StoredAnswer
+	// webUses are the calls of the turns of web flows, for each rung. They are in total and calls too.
+	webUses []ModelUse
+	webCorr int
+	calls   int
+	corr    int
+	done    int
+	cache   map[string]StoredAnswer
 	// limited is set when the cost limit refused a job.
 	limited bool
 }
@@ -146,15 +163,7 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 		return Output{}, errors.New("plan: the criteria pipeline plans from the acceptance criteria in the ticket files, and the change has none; " +
 			"list a tickets folder under knowledge in semar.yaml, and write each ticket's criteria under a heading that holds \"Acceptance criteria\", or plan with --pipeline single")
 	}
-	rs := &runState{in: in, uses: make([]ModelUse, len(in.Ladder)), cache: map[string]StoredAnswer{}}
-	for i, r := range in.Ladder {
-		rs.uses[i] = ModelUse{PlannerID: r.Planner.ID(), Kind: r.Planner.Kind(), Model: r.Label(), Asked: r.Model, Reasoning: r.Reasoning}
-	}
-	for _, a := range in.Previous { // the newest plan comes first and wins
-		if _, ok := rs.cache[a.Hash]; !ok {
-			rs.cache[a.Hash] = a
-		}
-	}
+	rs := newRunState(in)
 
 	outcomes := make([]CriterionOutcome, len(packets))
 	if in.Progress != nil {
@@ -376,6 +385,12 @@ func (rs *runState) call(ctx context.Context, rung int, p Packet, previous []byt
 
 // run sends one job with no tools to a rung. correction says that the job repairs an answer.
 func (rs *runState) run(ctx context.Context, rung int, text string, schema json.RawMessage, correction bool) (raw []byte, soft string, err error) {
+	return rs.send(ctx, rung, text, schema, correction, false)
+}
+
+// send is run for a job of the criteria pipeline, or for a turn of a web flow when web is set. The
+// two are counted apart, and both are in the total and in the cost limit.
+func (rs *runState) send(ctx context.Context, rung int, text string, schema json.RawMessage, correction, web bool) (raw []byte, soft string, err error) {
 	r := rs.in.Ladder[rung]
 	dir := rs.in.JobDir
 	if dir == "" {
@@ -389,11 +404,16 @@ func (rs *runState) run(ctx context.Context, rung int, text string, schema json.
 	rs.mu.Lock()
 	sum(&rs.total, res)
 	u := &rs.uses[rung]
+	if web {
+		u = &rs.webUses[rung]
+	}
 	u.Calls++
 	u.Took += time.Since(started)
 	sumUse(&u.Result, res)
 	rs.calls++
-	if correction {
+	if correction && web {
+		rs.webCorr++
+	} else if correction {
 		rs.corr++
 	}
 	rs.mu.Unlock()

@@ -17,10 +17,14 @@ var criterionSource string
 //go:embed fixture.md
 var fixtureSource string
 
+//go:embed web.md
+var webSource string
+
 // The prompt text shows {{name}} variables to the model, so the template uses other delimiters.
 var planVersion, planTemplate = mustParse("plan.md", planSource)
 var criterionVersion, criterionTemplate = mustParse("criterion.md", criterionSource)
 var fixtureVersion, fixtureTemplate = mustParse("fixture.md", fixtureSource)
+var webVersion, webTemplate = mustParse("web.md", webSource)
 
 // PlanData fills the planner prompt. Every field is data: text from the repository or the
 // model reaches the prompt only through these values, never through the template itself.
@@ -68,6 +72,35 @@ type FixtureData struct {
 	Correction bool   // the job repairs a previous answer
 	Previous   string // the previous answer as a fenced block
 	Problems   string // a Markdown list of what the previous answer got wrong
+}
+
+// WebData fills the prompt of one turn of a web flow. Every field is data, as in PlanData. The text of
+// the page reaches the prompt only through Page.
+type WebData struct {
+	Criterion  string // the criterion with its cite, as a fenced block
+	Reading    string // what a first job wrote for a person to do; empty when there is none
+	Fixtures   string // a Markdown list of the fixtures that may be named; empty when given is not allowed
+	Data       string // a Markdown list of the values that the fixtures of the flow gave; empty when there are none
+	Done       string // the actions so far, as a numbered list; empty in the first turn
+	Page       string // the page list, as a fenced block
+	Note       string // what went wrong with the last answer; empty when nothing did
+	Turn       int
+	MaxTurns   int
+	Correction bool   // the job repairs a previous answer
+	Previous   string // the previous answer as a fenced block
+	Problems   string // a Markdown list of what the previous answer got wrong
+}
+
+// WebVersion is the version line of the web prompt.
+func WebVersion() string { return webVersion }
+
+// Web renders the prompt of one turn of a web flow, without its version line.
+func Web(d WebData) (string, error) {
+	var b strings.Builder
+	if err := webTemplate.Execute(&b, d); err != nil {
+		return "", fmt.Errorf("render the web prompt: %w", err)
+	}
+	return b.String(), nil
 }
 
 // FixtureVersion is the version line of the fixture prompt.
