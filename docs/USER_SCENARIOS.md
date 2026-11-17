@@ -472,7 +472,9 @@ A developer who works alone can confirm their own expected results. Semar then l
 
 From here, Scenario 1 works for everyone who clones the repository and has test accounts.
 
-### Sign in once for the web and Android (M2, M3)
+### Sign in once for the web and Android (web built in M2, Android in M3)
+
+Built for the web as `semar login <service> --env <environment> [--as <account>]`. The profile is at `browser/<environment>/<account>` below the Semar home, and the window returns when you close it. A page that keeps its session only in the storage of one tab, which a browser forgets when it closes, cannot be signed in this way. A web step signs in with `fill` and a secret instead. The `signedInWhen` check, the expiry message, and Android are not built.
 
 Semar creates a new Chrome profile of its own and opens the browser on it. You do not choose or prepare a profile. Your own Chrome stays open and unchanged: Semar never uses your profile, never attaches to your browser, and never closes it.
 

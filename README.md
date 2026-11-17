@@ -69,10 +69,11 @@ These parts are implemented in Go.
 * **API journeys:** a business flow across services, such as an order that is placed, paid, and shown as paid, runs leg by leg against one set of builds. See [Test a business flow with a journey](#test-a-business-flow-with-a-journey).
 * **The use case ledger:** each use case that needs testing ends in one stated state, so that nothing is skipped without a word. See [See that nothing is skipped: the use case ledger](#see-that-nothing-is-skipped-the-use-case-ledger).
 * **Exports:** `semar export` writes a stored run as CTRF, JUnit XML, or SARIF. See [Send results to your tools](#send-results-to-your-tools).
+* **The web:** a journey leg or a scenario with `surface: web` drives Chrome on a profile of Semar's own, finds elements through screen objects that a person approves, and repairs a broken locator with no model. `semar login`, `semar confirm --screens`, and `semar screens repair`. Plan 22 describes it.
 
 An environment is declared as `test` or `production`, and Semar acts in it only as its rules allow.
 
-These are specified in `docs/implementation/` and are not built yet: live recording of scripts by an agent, the tracker and risk levels, security probes, providers and agents, data stores, team mode, web and Android, engines and the MCP gateway, screens and UI legs, packs and the registry, the dashboard views of fixtures, journeys, and the ledger, the Arazzo format, the import of Postman collections and HAR files, signed evidence bundles, and the enterprise features. [docs/implementation/README.md](docs/implementation/README.md) gives the sequence of plans and what each one adds. Plans 01 to 04 are the first usable version, from a plan to a report for one API ticket.
+These are specified in `docs/implementation/` and are not built yet: live recording of scripts by an agent, the tracker and risk levels, security probes, providers and agents, data stores, team mode, Android, the web tools of an agent and a pilot, engines and the MCP gateway, packs and the registry, the dashboard views of fixtures, journeys, and the ledger, the Arazzo format, the import of Postman collections and HAR files, signed evidence bundles, and the enterprise features. [docs/implementation/README.md](docs/implementation/README.md) gives the sequence of plans and what each one adds. Plans 01 to 04 are the first usable version, from a plan to a report for one API ticket.
 
 ## Build the binary
 
@@ -649,7 +650,7 @@ Cleanup never changes an outcome. A record that cleanup could not remove is list
 
 A journey is a business flow that crosses services, such as "an order is placed, paid, and shown as paid". A scenario tests one service. No service owns a journey: a named person, the owner, does. A journey runs one leg at a time against one set of builds, and its result is valid only for those builds.
 
-Only API legs are built. A leg on the web or on Android is refused when the file loads.
+API legs and web legs are built. A leg on Android is refused when the file loads.
 
 **1. Write the journey** in `.semar/journeys/<id>.yaml`. The file name is the ID.
 

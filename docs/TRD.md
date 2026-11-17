@@ -13,7 +13,7 @@
 * [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger): every use case that needs testing ends in a state, or on a short list for a person, with the reason. Built in Plan 19, from the sources that exist today. Obligations from acceptance criteria, the feature map, and past defects, and obligations proposed by the planner, are not built.
 * [Fixtures](#fixtures): reviewed preparation flows across services. They replace the fragments of [Plan 11](implementation/11-configuration.md) for preparation steps. Built in Plan 17 for one repository and one machine. The Arazzo format, the Postman and HAR imports, and packs are not built.
 * [Trial run](#trial-run): the read-only steps of a plan are sent once before the plan is final. Built in Plan 16.
-* [Journeys](#journeys): product flows across services and surfaces, on one target manifest. They replace the narrow journey of [Plan 10](implementation/10-android.md). Built in Plan 18 for API legs only. Web and Android legs are not built.
+* [Journeys](#journeys): product flows across services and surfaces, on one target manifest. They replace the narrow journey of [Plan 10](implementation/10-android.md). Built in Plan 18 for API legs and in Plan 22 for web legs. Android legs are not built.
 * [Screens and UI legs](#screens-and-ui-legs): how an agent authors a UI leg and how Semar replays it. Not built.
 * [Engines and the gateway](#engines-and-the-gateway): existing MCP servers as engines, behind one gateway that records every call. Not built.
 * [Packs and the registry](#packs-and-the-registry) and [Dashboard views](#dashboard-views). Not built. [Standards and interchange](#standards-and-interchange): the CTRF, JUnit XML, and SARIF exports are built in Plan 20. The schemas, the imports, the Arazzo format, and signed bundles are not built.
@@ -160,7 +160,7 @@ A developer or a QA engineer changes what Semar tests by editing files under `.s
 | `.semar/probes/` | Security probes. Semar's own probes ship in the same format |
 | `.semar/agents/<name>.md` | Extra guidance for one agent |
 | `.semar/fixtures/<id>.yaml` | Built in Plan 17. Reviewed preparation flows. See [Fixtures](#fixtures) |
-| `.semar/journeys/<id>.yaml` | Built in Plan 18 for API legs. Product flows across services. See [Journeys](#journeys) |
+| `.semar/journeys/<id>.yaml` | Built in Plans 18 and 22 for API legs and web legs. Product flows across services. See [Journeys](#journeys) |
 | `.semar/obligations/*.yaml` | Built in Plan 19. The use cases of a change. See [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger) |
 | `.semar/screens/<app>.yaml` | Planned. Screen objects for UI legs. See [Screens and UI legs](#screens-and-ui-legs) |
 | `.semar/packs.lock` | Planned. The exact versions and digests of the packs the repository names. See [Packs and the registry](#packs-and-the-registry) |
@@ -654,19 +654,19 @@ No stage waits for a person. A scenario with an unconfirmed expected result is t
 | - | Explore | `semar explore` | Yes | Findings for a person to triage |
 | - | Security | part of `semar verify`, or `semar explore --security` | Yes | Security findings, confirmed by code where code can check |
 | - | Regression | `semar regression run` | No | Evidence and an outcome for every scenario in the suite |
-| - | Journey, built for API legs (Plan 18) | `semar journey run` | No. A UI leg that needs an agent to author or repair it is planned | An outcome per journey on one target manifest. See [Journeys](#journeys) |
+| - | Journey, built for API legs and web legs (Plans 18 and 22) | `semar journey run` | No. A UI leg that needs an agent to author it is planned. A web leg is repaired with no model | An outcome per journey on one target manifest. See [Journeys](#journeys) |
 | - | Ledger, built (Plan 19) | `semar ledger`, and the use case line in the report of `semar run`. `semar publish` is not built | No | A state per obligation, and the manual checklist. See [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger) |
 
 ### Where the planned parts run
 
-The parts added on 2026-11-17 slot into the stages above without renumbering them. Items 1, 2, 4, 5, and 7 are built, and item 6 is built for API legs. The differences from the design are named in each item:
+The parts added on 2026-11-17 slot into the stages above without renumbering them. Items 1, 2, 4, 5, and 7 are built, and item 6 is built for API legs and web legs. The differences from the design are named in each item:
 
 1. **Plan.** Built (Plans 17 and 19). Each scenario names its fixtures under `given`. Plan validation checks the draft as today, and also checks that every named fixture exists in the catalogue of the repository and that every output a step uses is an output of that fixture. The planner does not draft obligations. Code writes them after validation from the scenarios, the cases not drafted, the files that no scenario covers, and the document differences of the draft. A check that every obligation has a cover or a stated reason is not part of plan validation. The ledger reports it.
 2. **Trial run.** Built (Plan 16). After validation passes, code resolves each fixture's `find` steps and sends the read-only steps once. Problems go back to the planner inside the same three attempts. The plan lists journeys whose legs call a route that a drafted scenario tests.
 3. **Gate and sign in.** As today.
 4. **Author and Run.** Built (Plan 17), in Run. Before the first step of a scenario, code resolves each `given` entry: lease, then `find`, then `create` when `find` gives nothing, then `until`. These actions are recorded in the `setup` pass. After the last step, also after a failure, code runs `cleanup` in the `cleanup` pass and releases the leases. Author is not built.
 5. **Observe and Verdict.** As today. A fixture that could not give its state ends the scenario `blocked`.
-6. **Journey.** Built for API legs (Plan 18). A journey runs alone with `semar journey run`. It does not run after the scenarios of the same `semar run`. Code forms the target manifest, runs the legs in `needs` order, checks the invariants, and reads the manifest again at the end.
+6. **Journey.** Built for API legs (Plan 18) and web legs (Plan 22). A journey runs alone with `semar journey run`. It does not run after the scenarios of the same `semar run`. Code forms the target manifest, runs the legs in `needs` order, checks the invariants, and reads the manifest again at the end.
 7. **Ledger.** Built (Plan 19). After the verdicts, code derives each obligation's state from the outcomes of the scenarios and journeys that cover it. `semar ledger` prints the states and the manual checklist, and the report of `semar run` opens with one line. `semar publish` is not built.
 
 ### Plan
@@ -1398,7 +1398,7 @@ A fixture never makes a scenario `failed`, because a failed preparation is not e
 
 ## Journeys
 
-Built in [Plan 18](implementation/18-journeys.md) for journeys whose legs are all on the API. Web legs and Android legs are not built, and the registry owner lookup is not built. Each is marked below. A journey is a business flow that belongs to the product, not to one service: for example a mobile app places an order, a warehouse service packs it, the web app shows it, and a billing service records it. It is the fourth layer, above scenarios. This replaces the narrow journey of [Plan 10](implementation/10-android.md), an ordered list of scenario IDs and shared names, which is a specification that is not built.
+Built in [Plan 18](implementation/18-journeys.md) for API legs and in [Plan 22](implementation/22-web-engine.md) for web legs. Android legs are not built, and the registry owner lookup is not built. Each is marked below. A journey is a business flow that belongs to the product, not to one service: for example a mobile app places an order, a warehouse service packs it, the web app shows it, and a billing service records it. It is the fourth layer, above scenarios. This replaces the narrow journey of [Plan 10](implementation/10-android.md), an ordered list of scenario IDs and shared names, which is a specification that is not built.
 
 ### The file
 
@@ -1503,7 +1503,7 @@ A failed journey points to the owner of the failing leg's service, read from the
 
 ### Sequence
 
-API-only journeys come first, in M1.1, because they use the engine that exists. They are built (Plan 18). Web legs follow in M2, and Android legs in M3, with no change to the journey format. Both are not built. Until the UI engines exist, a mobile leg may be tested through the API calls that the app itself makes.
+API-only journeys come first, in M1.1, because they use the engine that exists. They are built (Plan 18). Web legs follow in M2 and are built (Plan 22), and Android legs in M3, with no change to the journey format. Android legs are not built. Until the UI engines exist, a mobile leg may be tested through the API calls that the app itself makes.
 
 ### Failure modes
 
@@ -2079,7 +2079,7 @@ A script that breaks one of these rules is rejected, and the agent tries again w
 
 A replay runs the Script as a batch through the same engines, with `By: replay`. When a locator no longer finds its element, the step stops, and the scenario ends `inconclusive` with the reason "an element was not found: either the product changed or the script is out of date". Semar cannot tell the two apart. A moved button is not a defect, and a removed button may be the regression, so a person decides.
 
-`semar author --repair` lets the agent propose new locators. A repair cannot change an expectation, add a step, or remove a step. Semar shows the repair as the old locator beside the new one. When the element's role or name changed, a person approves the repair before the script counts again. A repair that only follows a moved element needs no approval.
+Built for the web in Plan 22 without a model: `semar screens repair <run id>` proposes up to three locators from the accessibility tree and `--apply` rewrites one element of the screens file, which a person then approves again. Not built: `semar author --repair`, which lets the agent propose new locators. A repair cannot change an expectation, add a step, or remove a step. Semar shows the repair as the old locator beside the new one. When the element's role or name changed, a person approves the repair before the script counts again. A repair that only follows a moved element needs no approval.
 
 **Native replay artifacts (planned, not verified).** Where an engine adapter supports a native replay format, such as a Playwright script or a Maestro flow, the stored script may be that native artifact. The Script then keeps the binding beside it: for each step with an expected result, which action of the artifact carries it out. Replay runs the artifact through the gateway, so that the recorder still stores one `Action` per step, and the verdict engine reads those actions as today. Whether a native artifact can be bound this way is not verified. Spike S17 checks it. Without it, Semar stores its own script format only.
 
@@ -2128,7 +2128,7 @@ Exploring never produces `passed`. It produces findings through `qa_finding`. Ea
 
 ## Screens and UI legs
 
-Planned, not built. The web and Android engines are specified and not built. Only API replay is built. This section says how an agent knows what to click in a UI leg of a journey or in a UI scenario, and how Semar repeats it.
+Built for the web in [Plan 22](implementation/22-web-engine.md). Planned, not built, for Android, and for the parts marked below. This section says how Semar knows what to click in a UI leg of a journey or in a UI scenario, and how it repeats it. The author phase, where an agent does the leg like a tester, is not built: a person writes the steps and the screens file, and replay is built.
 
 ### Two phases
 
@@ -2150,6 +2150,7 @@ The model runs only in authoring and repair, so replay costs no model call. This
 ### The screens file
 
 ```yaml
+# Android, planned. A web screens file is shown below.
 # .semar/screens/shop.yaml
 apiVersion: semar/v1
 kind: Screens
@@ -2180,6 +2181,25 @@ A UI step may carry `screen:`, a capture `from: { screen, element }`, and an exp
       cite: "SHOP-482: the customer sees that the order was placed"
 ```
 
+### The web, as built
+
+A web screens file gives each element a locator. Every field may hold `{{variables}}`, and `within` limits the search to another element of the same screen:
+
+```yaml
+# .semar/screens/shop.yaml
+apiVersion: semar/v1
+kind: Screens
+app: shop
+screens:
+  Cart:
+    place-order: { role: button, name: Place order }
+    cart-list:   { testId: cart }
+    line:        { css: "li.line", within: cart-list }
+    card:        { role: button, name: "{{title}}" }
+```
+
+A web step of a journey leg has one action, `do: open | click | fill | press | drag | wait`, and names the `screen` and the `element`. A check or a capture names an `element` of that screen. A person approves the file with `semar confirm --screens shop`. When a locator does not find its element, `semar screens repair <run id>` proposes up to three locators from the accessibility tree, with no model, and `--apply` rewrites one element. The file then needs an approval again. The Plan 22 text has the details and the decisions.
+
 ### Rules
 
 | # | Rule |
@@ -2193,12 +2213,12 @@ A UI step may carry `screen:`, a capture `from: { screen, element }`, and an exp
 | 7 | An element without a stable ID is recorded with a warning, and the report lists it, as Plan 10 rule R5 says |
 | 8 | A script that uses a screen object that no person approved ends `inconclusive`, like an unconfirmed expectation |
 
-Until the UI engines exist, a mobile leg may be tested through the API calls that the app itself makes.
+Rules 1, 2, 3, 5, and 8 are built for the web. Rule 4 is built for the web as the test ID, then the role and the accessible name, then the exact text, then css. Rules 6 and 7 are not built. Until the Android engine exists, a mobile leg may be tested through the API calls that the app itself makes.
 
 ### What is not verified
 
 * That an agent proposes screen objects that stay stable across app releases.
-* That a snapshot from each candidate engine gives roles and accessible names that are good enough for locators. Spikes S6 and S7.
+* That a snapshot of the Android screen gives roles and accessible names that are good enough for locators. Spike S7. For the web, the accessibility tree of Chrome gave a unique role and name for every element of the sample web app that a leg needed, apart from the columns of a board, which are found by css.
 
 ## Engines and the gateway
 

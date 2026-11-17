@@ -109,6 +109,27 @@ screens:
 | W5 | A web action is recorded whatever its outcome, so that a refused or a failed action is evidence |
 | W6 | A test never writes to the real Semar home or to the keychain of the machine. Chrome runs with a mock keychain and a password store of its own kind |
 
+## As built
+
+The data shapes are those of the decisions, with these additions.
+
+* `WebAction` has `service` and `app` (D3). A leg sets both. The script of a web scenario writes them.
+* `ElementState` has `found`, `count`, `text`, `visible`, and also `presence` (a check asked only whether the element is there, or how many) and `locator` (what was looked up). `Found` is true when exactly one visible element matched. `Count` counts every match. `Visible` is true when at least one match is visible.
+* `WebRecord` has `app`, `screen`, and `blocked` (the hosts that the browser refused to reach, with no path) besides the fields of D2. `Candidate` has the name of its `element`. Up to three candidates are recorded for each element.
+* Repair candidates are read from the page as the action saw it, and only for an element that the action could not find or that a check reads the text of. A button that is gone after its click is no miss, and a check of `exists` or `count` on an absent element is an answer and no miss.
+* A step whose action did not finish, for example because its element was not found, decides none of its checks. The page is as it was, so a check of it would fail a step that did nothing. The step ends `inconclusive`.
+* The path of `open` may end in a route or a query, such as `/#/boards/{{id}}`. The part before `?` or `#` is checked as the path of a request.
+* A journey leg that is a web leg has no `wait`. A step with `do: wait` and an `element` waits up to ten seconds for the element.
+* `semar login` uses the auth profile of the service when `--as` is not given. `semar screens repair latest` names the newest run.
+* `--apply` changes the text of one element and leaves every other byte of the file as it was. A candidate that has another name than the old locator, once its variables are filled in, writes that name as a literal. A candidate that only changes the role keeps a name such as `{{title}}`.
+* The browser dismisses a JavaScript dialog, because a step never accepts what a page asks.
+* `environments.<name>.web.chrome` must be an absolute path. The configuration is committed to the repository under test, so a path there names a program that a run starts: set it only for a repository that you trust.
+* The planner's draft schema stays API only: a check with `element` is not offered to it.
+
+### Tests
+
+Unit tests cover locator resolution in a browser (test ID, role and name, text, css, within, zero and several matches), the validation of actions, legs, checks, and screens in plain words, the refusal of a write in a read-only environment, host blocking and the `traceparent` header (a second listed origin included), the approval gate, the candidates, and `--apply`. Browser tests use a local server with small pages and a headless Chrome, and skip when Chrome is absent. Every test sets the Semar home to a temporary directory, and Chrome runs with a mock keychain.
+
 ## Not built
 
 * The engine gateway and the engine registry, packs, and the conformance suite.
