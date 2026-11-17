@@ -143,11 +143,16 @@
   }
 
   const TEXT_TYPES = ['text', 'search', 'email', 'tel', 'url', 'password', 'number', ''];
+  const PICKER_TYPES = ['date', 'datetime-local', 'time', 'month', 'week'];
+  const typeOf = el => (el.getAttribute('type') || '').toLowerCase();
   function isField(el) {
     if (!el || el.nodeType !== 1) return false;
     if (el.tagName === 'TEXTAREA') return true;
-    return el.tagName === 'INPUT' && TEXT_TYPES.includes((el.getAttribute('type') || '').toLowerCase());
+    return el.tagName === 'INPUT' && (TEXT_TYPES.includes(typeOf(el)) || PICKER_TYPES.includes(typeOf(el)));
   }
+  // A picker field changes at every digit that makes a valid value, and a pick leaves the focus where
+  // it was, so its value is read when the person moves on, as for a text, and never at a change.
+  const isPicker = el => el.tagName === 'INPUT' && PICKER_TYPES.includes(typeOf(el));
   function isSecret(el) {
     return el.tagName === 'INPUT' && ((el.getAttribute('type') || '').toLowerCase() === 'password' || /password/i.test(el.getAttribute('autocomplete') || ''));
   }
@@ -202,7 +207,7 @@
 
   on('input', e => { if (isTrusted(e) && isField(e.target)) pending = e.target; });
   on('focusout', e => { if (isTrusted(e) && pending === e.target) flush(); });
-  on('change', e => { if (isTrusted(e) && pending === e.target) flush(); });
+  on('change', e => { if (isTrusted(e) && pending === e.target && !isPicker(e.target)) flush(); });
   on('pagehide', flush);
 
   // A drag is the button pressed on one element and let go on another, with the pointer moved in

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -99,6 +100,21 @@ func (r *recRig) must(err error) {
 	if err != nil {
 		r.t.Fatal(err)
 	}
+}
+
+// focus puts the keyboard on the first part of a field, as a press of Tab does.
+func (r *recRig) focus(sel string) {
+	r.t.Helper()
+	_, err := chromedp.Run(r.rec.Context(), chromedp.Evaluate[bool](fmt.Sprintf(`document.querySelector(%q).focus() === undefined`, sel)))
+	r.must(err)
+}
+
+// valueOf is what a field holds now.
+func (r *recRig) valueOf(sel string) string {
+	r.t.Helper()
+	v, err := chromedp.Run(r.rec.Context(), chromedp.Evaluate[string](fmt.Sprintf(`document.querySelector(%q).value`, sel)))
+	r.must(err)
+	return v
 }
 
 func (r *recRig) click(sel string)          { r.t.Helper(); r.must(r.driver().Click(sel)) }
@@ -458,5 +474,60 @@ func TestATypedTextIsSentBeforeTheCheckThatFollowsIt(t *testing.T) {
 	got := r.events(2)
 	if got[0].Kind != record.KindFill || got[0].Value != "57" || got[1].Kind != record.KindCheck {
 		t.Errorf("a check must come after the text that was typed before it: %s", describeEvents(got))
+	}
+}
+
+const dueRecordPage = `<!doctype html><html><head><title>Due</title></head><body>
+<label for="due">Due date</label><input id="due" type="date">
+<label for="when">Due at</label><input id="when" type="datetime-local">
+<button id="save">Save</button>
+</body></html>`
+
+// A date or time field is typed with its segments, in an order that depends on the language of the
+// browser, so the test asks the field what it holds. The page hears an input for each digit that makes
+// a valid date, and the recorder sends the value once, when the person is done with the field.
+func TestRecorderSendsADateFieldOnceWithItsValue(t *testing.T) {
+	r := newRecRig(t, map[string]string{"/due": dueRecordPage})
+	r.open("/due")
+	r.events(1)
+
+	r.focus("#due")
+	r.key("03092026")
+	held := r.valueOf("#due")
+	if !regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`).MatchString(held) {
+		t.Fatalf("the date field holds %q after the keys", held)
+	}
+	r.click("#save")
+	got := r.events(2)
+	if got[0].Kind != record.KindFill || got[0].Value != held || got[0].Target == nil {
+		t.Errorf("the date field: %s", describeEvents(got))
+	}
+	if got[1].Kind != record.KindClick {
+		t.Errorf("the click after it: %s", describeEvents(got))
+	}
+	r.quiet()
+
+	r.focus("#when")
+	r.key("03092026" + kb.ArrowRight + "0230P")
+	held = r.valueOf("#when")
+	if !regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$`).MatchString(held) {
+		t.Fatalf("the datetime field holds %q after the keys", held)
+	}
+	r.click("#save")
+	got = r.events(2)
+	if got[0].Kind != record.KindFill || got[0].Value != held || got[0].Target == nil || got[0].Target.Hint != "Due at" {
+		t.Errorf("the datetime field: %s", describeEvents(got))
+	}
+	r.quiet()
+
+	r.click("#due")
+	r.key(kb.Backspace)
+	if v := r.valueOf("#due"); v != "" {
+		t.Fatalf("the date field holds %q after Backspace", v)
+	}
+	r.click("#save")
+	got = r.events(2)
+	if got[0].Kind != record.KindFill || got[0].Value != "" || got[1].Kind != record.KindClick {
+		t.Errorf("a cleared date field: %s", describeEvents(got))
 	}
 }

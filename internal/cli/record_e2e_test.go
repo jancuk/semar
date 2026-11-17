@@ -7,10 +7,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/chromedp/chromedp"
 
 	"github.com/jancuk/semar/internal/cli"
 	"github.com/jancuk/semar/internal/engine/web"
@@ -101,6 +104,10 @@ func recordRepoWith(t *testing.T, o repoOptions) (*repo, *shopPages) {
 		mux.HandleFunc("/echo", func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprint(w, `<!doctype html><title>Echo</title><label>Name <input id="name" type="text"></label><button id="save">Save</button><p id="out"></p>
 <script>document.getElementById('save').addEventListener('click', () => { document.getElementById('out').textContent = 'Saved ' + document.getElementById('name').value; });</script>`)
+		})
+		mux.HandleFunc("/due", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, `<!doctype html><title>Due</title><label>Due date <input id="due" type="date"></label><button id="save">Save</button><p id="shown"></p>
+<script>document.getElementById('save').addEventListener('click', () => { document.getElementById('shown').textContent = 'Due ' + document.getElementById('due').value; });</script>`)
 		})
 		mux.HandleFunc("/braces", func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprint(w, `<!doctype html><title>Braces</title><p id="t">hello {{x}} world</p>`)
@@ -225,6 +232,28 @@ func TestRecordWritesATestThatReplaysAndFailsWhenACheckIsWrong(t *testing.T) {
 	failed := r.run(t, trusted, cli.ExitFailed, "--scenario", "SHOP-482-07")
 	contains(t, "the run", failed.stdout, "SHOP-482-07  failed")
 	contains(t, "the report", r.lastReport(t), "6.00")
+}
+
+// A date that a person keys into a date field is one step with the value of the field, and the replay
+// sets the same value: the page shows it again.
+func TestRecordWritesADateFieldAsOneFillThatReplays(t *testing.T) {
+	r, _ := recordRepo(t)
+	ctx := t.Context()
+	flow := person(func(d webtest.Driver) {
+		_, err := chromedp.Run(d.Tab, chromedp.Evaluate[bool](`document.getElementById('due').focus() === undefined`))
+		must(t, err)
+		must(t, d.Keys("03092026"))
+		must(t, d.Click("#save"))
+		must(t, d.OptionClick("#shown"))
+	})
+	r.record(t, ctx, cli.ExitOK, flow, "SHOP-482-08", "--open", "/due", "--service", "orders")
+	feature, err := os.ReadFile(r.path(".semar", "scenarios", "SHOP-482", "SHOP-482-08.feature"))
+	must(t, err)
+	if !regexp.MustCompile(`When Type "\d{4}-\d{2}-\d{2}" in due-date\n\s+# step: fill-due-date\n\s+And Click save\n`).Match(feature) {
+		t.Errorf("the scenario has no single fill of the date field before the click:\n%s", feature)
+	}
+	passed := r.run(t, cli.WithTrustedScreens(ctx, "orders"), cli.ExitOK, "--scenario", "SHOP-482-08")
+	contains(t, "the run", passed.stdout, "SHOP-482-08  passed")
 }
 
 // Each scenario signs in by itself, so the second must not start in the tab that the first left signed in.
