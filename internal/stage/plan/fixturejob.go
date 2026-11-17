@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/prompt"
@@ -265,6 +266,34 @@ func capNeeds(needs []FixtureNeed) (kept, left []FixtureNeed) {
 	return needs[:MaxFixtureDrafts], needs[MaxFixtureDrafts:]
 }
 
+// maxFixtureOperations bounds the operations of a fixture job, which its schema lists in full.
+const maxFixtureOperations = 40
+
+// fixtureOperations are the operations that a fixture job may call: the ones that the criteria which
+// need it could call, and then the rest of the API documents, because the state that a criterion
+// needs often takes an operation that its own packet left out. Only a method that the environment
+// allows is offered.
+func fixtureOperations(in Input, first []PacketOperation) []PacketOperation {
+	ops := slices.Clone(first)
+	for _, s := range in.Knowledge {
+		if !s.Usable() || s.Kind != config.KnowledgeOpenAPI || s.API == nil {
+			continue
+		}
+		for _, op := range s.API.Operations {
+			po := packetOperation(s, op)
+			switch {
+			case len(ops) >= maxFixtureOperations:
+				return ops
+			case len(in.Methods) > 0 && !slices.Contains(in.Methods, po.Method):
+			case slices.ContainsFunc(ops, func(x PacketOperation) bool { return x.Key == po.Key }):
+			default:
+				ops = append(ops, po)
+			}
+		}
+	}
+	return ops
+}
+
 // needOperations are the operations of the criteria that need a fixture, once each, in the order of
 // the criteria.
 func needOperations(n FixtureNeed, outcomes []CriterionOutcome) []PacketOperation {
@@ -291,7 +320,7 @@ func (rs *runState) draftFixtures(ctx context.Context, needs []FixtureNeed, outc
 	g.SetLimit(MaxParallelJobs)
 	for i, n := range kept {
 		g.Go(func() error {
-			fp := NewFixturePacket(rs.in, n, needOperations(n, outcomes), prompt.FixtureVersion())
+			fp := NewFixturePacket(rs.in, n, fixtureOperations(rs.in, needOperations(n, outcomes)), prompt.FixtureVersion())
 			d, err := rs.draftFixture(gctx, fp)
 			if err != nil {
 				return fmt.Errorf("fixture %s: %w", n.ID, err)

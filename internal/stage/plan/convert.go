@@ -244,7 +244,11 @@ func (p Packet) convertStep(st AnswerStep, path string, in Input, ps *problems) 
 		if !captureName.MatchString(c.Name) {
 			ps.add(cp+".name", "the capture name %q must start with a letter and hold letters, digits, and underscores", c.Name)
 		}
+		before := len(ps.list)
 		p.checkResponsePath(op, c.JSONPath, cp+".jsonpath", "capture "+c.Name+" reads", ps)
+		if len(ps.list) == before {
+			p.checkCaptureIsOneValue(op, c, cp+".jsonpath", ps)
+		}
 		sd.Captures = append(sd.Captures, c)
 	}
 
@@ -494,6 +498,39 @@ func listOf(lead string, names []string, none string) string {
 		return none
 	}
 	return lead + " " + strings.Join(names, ", ")
+}
+
+// checkCaptureIsOneValue refuses a capture of a whole object or array, which a later request cannot use
+// as an ID or a value. It names a field below it, when the document declares one.
+func (p Packet) checkCaptureIsOneValue(op PacketOperation, c CaptureDraft, path string, ps *problems) {
+	declared := map[string]openapi.Field{}
+	for _, r := range op.Responses {
+		for _, f := range r.Fields {
+			declared[f.Name] = f
+		}
+	}
+	norm := indexPattern.ReplaceAllString(c.JSONPath, "[*]")
+	f, ok := declared[norm]
+	if !ok || (f.Type != "object" && f.Type != "array") {
+		return
+	}
+	hint := ""
+	var below []string
+	for name, g := range declared {
+		if strings.HasPrefix(name, norm+".") && g.Type != "object" && g.Type != "array" {
+			below = append(below, name)
+		}
+	}
+	slices.SortFunc(below, func(a, b string) int {
+		if c := strings.Count(a, ".") - strings.Count(b, "."); c != 0 {
+			return c
+		}
+		return strings.Compare(a, b)
+	})
+	if len(below) > 0 {
+		hint = ", such as " + below[0]
+	}
+	ps.add(path, "capture %s reads %s, which is %s %s, and a capture holds one value: read a field of it%s", c.Name, c.JSONPath, article(f.Type), f.Type, hint)
 }
 
 // checkResponsePath checks that a JSONPath names a field that a response of the operation declares.

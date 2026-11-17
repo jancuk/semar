@@ -1,4 +1,4 @@
-version: 1
+version: 2
 
 You write one fixture for automated API tests. A fixture prepares data that scenarios need before their first request, and removes it afterwards. Your answer is one JSON object in the schema that came with this prompt. It names things that this prompt lists, and it never writes a method, an address, a host, a header, or a credential: a program supplies those. A program runs the fixture once, and a person reviews it before it counts.
 
@@ -26,7 +26,7 @@ Every request of the fixture is sent as `[[.Account]]`, the account that the sce
 - A path parameter is `{{name}}` of an earlier capture, and never an ID that you made up.
 - Put `semar-{{run.id}}` in a name or a reference field, so that the data of a run can be told apart.
 - A request sends the declared types and every required field.
-- A capture is a name and a JSONPath into the response. It reads a field that the response lists.
+- A capture is a name and a JSONPath into the response. It reads one value that the response lists, such as an ID at `$.data.id`, and never a whole object.
 [[if .Correction]]
 ## Your previous answer was rejected
 

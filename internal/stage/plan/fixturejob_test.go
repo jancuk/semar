@@ -8,8 +8,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/fixture"
+	"github.com/jancuk/semar/internal/knowledge"
+	"github.com/jancuk/semar/internal/openapi"
 	"github.com/jancuk/semar/internal/provider"
 	"github.com/jancuk/semar/internal/provider/fake"
 )
@@ -306,5 +309,61 @@ func TestOnlyTheFirstFiveNeedsAreDrafted(t *testing.T) {
 	kept, left := capNeeds(needs)
 	if len(kept) != MaxFixtureDrafts || len(left) != 2 || left[0].ID != "f.n5" {
 		t.Errorf("kept %d, left %v", len(kept), left)
+	}
+}
+
+func bigDocument(n int) string {
+	var b strings.Builder
+	b.WriteString("openapi: 3.0.3\npaths:\n")
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "  /v1/thing%d:\n    post:\n      operationId: makeThing%d\n      responses:\n        \"201\": {description: made}\n", i, i)
+	}
+	return b.String()
+}
+
+func TestAFixtureSeesTheOperationsOfTheDocumentsAndNotOnlyThoseOfItsCriteria(t *testing.T) {
+	in := shopInput(t)
+	doc, err := openapi.Parse([]byte(bigDocument(60)), "docs/big.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Knowledge = []knowledge.Source{{ID: "api", Kind: config.KnowledgeOpenAPI, Path: "docs/big.yaml", Files: 1, API: &doc}}
+	in.Methods = []string{"POST"}
+	first := []PacketOperation{{Key: "makeThing30", Method: "POST", Route: "/v1/thing30"}}
+
+	ops := fixtureOperations(in, first)
+	if len(ops) != maxFixtureOperations || ops[0].Key != "makeThing30" {
+		t.Fatalf("got %d operations, the first %q; want %d, led by the one of the criterion", len(ops), ops[0].Key, maxFixtureOperations)
+	}
+	seen := map[string]bool{}
+	for _, op := range ops {
+		if seen[op.Key] {
+			t.Errorf("operation %s is listed twice", op.Key)
+		}
+		seen[op.Key] = true
+	}
+
+	in.Methods = []string{"GET"}
+	if got := fixtureOperations(in, nil); len(got) != 0 {
+		t.Errorf("an operation with a method that the environment refuses is offered: %d", len(got))
+	}
+}
+
+func TestACaptureOfAWholeObjectIsAProblemInAFixtureAndInAScenario(t *testing.T) {
+	in, fp := fixturePacket(t)
+	whole := strings.Replace(refundedFixtureAnswer, `"$.data.id"`, `"$.data"`, 1)
+	_, ps := fp.Convert(decodeFixture(t, whole), in)
+	want := "capture id reads $.data, which is an object, and a capture holds one value: read a field of it, such as $.data.id"
+	if !strings.Contains(messages(ps), want) {
+		t.Errorf("problems = %q, want one that holds %q", messages(ps), want)
+	}
+
+	in2, p := firstPacket(t)
+	a := withStep(t, func(st map[string]any) {
+		st["captures"] = []any{map[string]any{"name": "order", "jsonpath": "$.data"}}
+	})
+	_, ps = p.Convert(a, in2)
+	if !strings.Contains(messages(ps), "capture order reads $.data, which is an object") {
+		t.Errorf("a scenario step may capture an object: %q", messages(ps))
 	}
 }
