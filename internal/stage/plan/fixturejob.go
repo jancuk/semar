@@ -25,7 +25,7 @@ import (
 // attempt, and a plan that needs more has criteria that a person should look at first.
 const MaxFixtureDrafts = 5
 
-// maxFixtureSteps are the limits of a fixture file (rule F8).
+// The limits of a fixture file (rule F8).
 const (
 	maxCreateSteps  = 16
 	maxCleanupSteps = 8
@@ -344,7 +344,7 @@ func (rs *runState) draftFixture(ctx context.Context, fp FixturePacket) (Fixture
 	d := FixtureDraft{Need: fp.Need}
 	try := func(rung int, previous []byte, ps []Problem) (accepted bool, err error) {
 		if rs.overLimit() {
-			d.Reason, d.LimitReached = rs.notPlannedText(), true
+			d.Reason, d.LimitReached = notPlanned(rs.in), true
 			return false, errLimit
 		}
 		raw, soft, err := rs.callFixture(ctx, rung, fp, previous, ps)
@@ -477,7 +477,7 @@ func (rs *runState) replan(ctx context.Context, outcomes []CriterionOutcome, dra
 			if again.NotPlanned {
 				if o.Result.NotDrafted != nil {
 					nd := *o.Result.NotDrafted
-					nd.Needs += ". The fixture was drafted, and the criterion was not planned again: " + strings.TrimPrefix(rs.notPlannedText(), "not planned: ")
+					nd.Needs += ". The fixture was drafted, and the criterion was not planned again: " + strings.TrimPrefix(notPlanned(rs.in), "not planned: ")
 					outcomes[i].Result.NotDrafted = &nd
 				}
 				return nil

@@ -657,7 +657,7 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, p
 		fmt.Fprintf(w, "fixture not drafted: %s: %s\n", terminalSafe(d.Need.ID), terminalSafe(oneLine(why)))
 	}
 	if st := out.Pipeline; st != nil && st.NotPlanned > 0 {
-		fmt.Fprintf(w, "criteria not planned: the cost limit of %s was reached: %d\n", plan.Dollars(maxCostOf(out)), st.NotPlanned)
+		fmt.Fprintf(w, "criteria not planned: the cost limit of %s was reached: %d\n", plan.Dollars(out.MaxCost), st.NotPlanned)
 	}
 	if st := out.Pipeline; st != nil && st.Unanswered > 0 {
 		fmt.Fprintf(w, "criteria that no model answered: %d, listed as gaps in the plan\n", st.Unanswered)
@@ -716,9 +716,6 @@ func stoppedWords(out plan.Output) string {
 	}
 	return "a fixture was not drafted, or a criterion was not planned again, as plan.md says"
 }
-
-// maxCostOf is the limit that a plan ran under, read back from its not drafted entries.
-func maxCostOf(out plan.Output) float64 { return out.MaxCost }
 
 // firstToReview is what a person reads first: a drafted fixture, then the first scenario.
 func firstToReview(out plan.Output) string {

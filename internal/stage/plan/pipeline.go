@@ -132,11 +132,6 @@ func (rs *runState) overLimit() bool {
 	return false
 }
 
-// notPlannedText is why a criterion has no answer when the cost limit stopped its job.
-func (rs *runState) notPlannedText() string {
-	return "not planned: the cost limit of " + Dollars(rs.in.MaxCost) + " was reached"
-}
-
 // RunCriteria plans one criterion at a time. Code builds a packet for each criterion of each
 // ticket file. A job with no tools answers each packet in a closed schema, and code checks the
 // answer. An answer with a problem goes back once to the same model with the problems in plain
@@ -543,6 +538,7 @@ func assemble(in Input, outcomes []CriterionOutcome) (Draft, []int) {
 	return d, owners
 }
 
+// notPlanned is why a criterion or a fixture has no answer when the cost limit stopped its job.
 func notPlanned(in Input) string {
 	return "not planned: the cost limit of " + Dollars(in.MaxCost) + " was reached"
 }
