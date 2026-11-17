@@ -491,3 +491,16 @@ func TestAPasswordIsNeverReadOrSent(t *testing.T) {
 	}
 	r.rec.Finish()
 }
+
+func TestATypedTextIsSentBeforeTheCheckThatFollowsIt(t *testing.T) {
+	r := newRecRig(t, map[string]string{"/totals": checkPage})
+	r.open("/totals")
+	r.events(1)
+
+	r.typeInto("#amount", "7")
+	r.altClick("#status")
+	got := r.events(2)
+	if got[0].Kind != record.KindFill || got[0].Value != "57" || got[1].Kind != record.KindCheck {
+		t.Errorf("a check must come after the text that was typed before it: %s", describeEvents(got))
+	}
+}

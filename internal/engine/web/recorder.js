@@ -193,6 +193,7 @@
     let el = e.target;
     while (el.parentElement && el.parentElement !== document.body && !textOf(el)) el = el.parentElement;
     if (el === document.body || el === document.documentElement || (el.tagName === 'INPUT' && isSecret(el))) return;
+    flush();
     flash(el);
     send({ kind: 'check', target: describe(el, 'check'), value: textOf(el) });
   });
