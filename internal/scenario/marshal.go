@@ -186,6 +186,9 @@ func (e *enc) check(path string, ex domain.Expectation) (*yaml.Node, domain.Expe
 	if c.Header != "" {
 		put(n, "header", e.str(path+".header", c.Header))
 	}
+	if c.Element != "" {
+		put(n, "element", e.str(path+".element", c.Element))
+	}
 	operand := func(key string, v *any) {
 		if *v == nil {
 			return

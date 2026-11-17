@@ -46,6 +46,11 @@ func Eval(c domain.Check, a domain.Action) (res Result) {
 		return Result{State: domain.CheckNotEvaluated, Detail: "the check is malformed: " + problem}
 	}
 	res.Expected = short(describe(c, ops))
+	if c.Element != "" {
+		evalElement(&res, c, ops[0], a.Web)
+		res.Observed = short(res.Observed)
+		return res
+	}
 	if a.Response == nil {
 		res.State = domain.CheckNotEvaluated
 		res.Detail = noResponse
@@ -89,13 +94,16 @@ func malformed(c domain.Check, ops []string) string {
 	if c.Header != "" {
 		kinds++
 	}
+	if c.Element != "" {
+		kinds++
+	}
 	switch {
 	case kinds != 1:
-		return "it must name exactly one of status, jsonpath, or header"
+		return "it must name exactly one of status, jsonpath, header, or element"
 	case c.Status != nil && len(ops) > 0:
 		return "a status check takes no operator"
 	case c.Status == nil && len(ops) != 1:
-		return "a jsonpath or header check needs exactly one operator"
+		return "a jsonpath, header, or element check needs exactly one operator"
 	}
 	return ""
 }
@@ -124,7 +132,10 @@ func describe(c domain.Check, ops []string) string {
 		return statusText(*c.Status)
 	}
 	subject := c.JSONPath
-	if subject == "" {
+	switch {
+	case c.Element != "":
+		subject = "element " + c.Element
+	case subject == "":
 		subject = "header " + c.Header
 	}
 	return subject + " " + ops[0] + " " + operandText(c, ops[0])

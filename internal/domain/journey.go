@@ -43,6 +43,8 @@ type Leg struct {
 	ID      LegID   `yaml:"id"`
 	Surface Surface `yaml:"surface"`
 	Service string  `yaml:"service"`
+	// App names the screens file, .semar/screens/<app>.yaml, of a web leg.
+	App string `yaml:"app,omitempty"`
 	// As names an auth profile: every step of the leg is sent with that profile's session, unless
 	// the step has its own as.
 	As      string    `yaml:"as,omitempty"`
@@ -63,14 +65,16 @@ type LegUntil struct {
 	Equals   any    `yaml:"equals"`
 }
 
-// LegStep is a scenario step with the request that carries it out.
+// LegStep is a scenario step with the request, or the browser action, that carries it out. Exactly
+// one of Request and Web is set, and Web belongs to a leg with surface web.
 type LegStep struct {
 	ID       StepID        `yaml:"id"`
 	Setup    bool          `yaml:"setup,omitempty"`
 	Action   string        `yaml:"action"`
-	Hint     *RequestHint  `yaml:"hint"`
+	Hint     *RequestHint  `yaml:"hint,omitempty"`
 	Expect   []Expectation `yaml:"expect,omitempty"`
 	Request  APIRequest    `yaml:"request"`
+	Web      *WebAction    `yaml:"web,omitempty"`
 	Captures []Capture     `yaml:"captures,omitempty"`
 	// As names an auth profile for this step. It wins over the leg's.
 	As string `yaml:"as,omitempty"`

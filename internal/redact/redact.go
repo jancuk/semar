@@ -135,6 +135,10 @@ func (r *Redactor) Action(a domain.Action) domain.Action {
 	if a.Captures != nil {
 		out.Captures = capturesOf(s, a.Captures)
 	}
+	if a.Web != nil {
+		w := webRecord(s, *a.Web)
+		out.Web = &w
+	}
 	out.Err = s.text(a.Err)
 	out.Refused = s.text(a.Refused)
 	out.Why = s.text(a.Why)

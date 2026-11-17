@@ -351,7 +351,10 @@ func TestSchema(t *testing.T) {
 	ct := reflect.TypeFor[domain.Check]()
 	for i := range ct.NumField() {
 		name, _, _ := strings.Cut(ct.Field(i).Tag.Get("yaml"), ",")
-		want = append(want, name)
+		// The planner drafts steps for the API. An element check belongs to a web step, which a person writes.
+		if name != "element" {
+			want = append(want, name)
+		}
 	}
 	if !sameSet(got, want) {
 		t.Errorf("check properties %v, want the fields of domain.Check %v", got, want)

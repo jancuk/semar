@@ -112,7 +112,7 @@ func Compute(in Input) domain.ScenarioResult {
 			}
 		}
 		refused := a != nil && a.Refused != ""
-		noResponse := !step.Setup && !refused && a != nil && (a.Err != "" || !hasResponse(a))
+		noResponse := !step.Setup && !refused && a != nil && (a.Err != "" || !answered(a))
 		if len(ev.Checks) > len(step.Expect) {
 			add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("%s: step %s has %d check results for %d expectations", msgMismatch, step.ID, len(ev.Checks), len(step.Expect)))
 		}
@@ -252,12 +252,20 @@ func setupFailure(a *domain.Action) string {
 		return "has no recorded result"
 	case a.Err != "":
 		return "failed: " + a.Err
-	case !hasResponse(a):
+	case !answered(a):
 		return "has no response"
+	case a.Web != nil:
+		return ""
 	case a.Response.Status >= 400:
 		return fmt.Sprintf("answered %d", a.Response.Status)
 	}
 	return ""
+}
+
+// answered is true for an action that got an answer: an HTTP response, or a browser action that ran
+// and settled. A web action that failed or was refused has Err or Refused set.
+func answered(a *domain.Action) bool {
+	return hasResponse(a) || (a != nil && a.Web != nil)
 }
 
 // hasResponse: a status under 100 is not an HTTP response, for instance 0 from an empty stored object.

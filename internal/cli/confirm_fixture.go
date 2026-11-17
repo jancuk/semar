@@ -78,6 +78,9 @@ func fixtureStepLine(phase string, n int, st domain.FixtureStep) string {
 		caps := make([]string, len(st.Captures))
 		for i, c := range st.Captures {
 			caps[i] = c.Name + "=" + c.JSONPath
+			if c.Element != "" {
+				caps[i] += " element " + c.Element
+			}
 		}
 		b.WriteString(", captures " + strings.Join(caps, ", "))
 	}

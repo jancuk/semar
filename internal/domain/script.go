@@ -15,9 +15,11 @@ type ProviderRef struct {
 	Harness  string `yaml:"harness" json:"harness"`
 }
 
+// ScriptStep is one action. Exactly one of Request and Web is set.
 type ScriptStep struct {
 	Step     StepID      `yaml:"step"`
-	Request  *APIRequest `yaml:"request"`
+	Request  *APIRequest `yaml:"request,omitempty"`
+	Web      *WebAction  `yaml:"web,omitempty"`
 	Captures []Capture   `yaml:"captures,omitempty"`
 }
 
@@ -31,7 +33,10 @@ type APIRequest struct {
 	JSON    any               `yaml:"json,omitempty"`
 }
 
+// Capture takes one value from the answer of a step. Exactly one of JSONPath and Element is set: an
+// Element capture takes the text of an element of the screen of the step.
 type Capture struct {
 	Name     string `yaml:"name"`
-	JSONPath string `yaml:"jsonpath"`
+	JSONPath string `yaml:"jsonpath,omitempty"`
+	Element  string `yaml:"element,omitempty"`
 }

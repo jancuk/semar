@@ -46,16 +46,18 @@ type UseCase struct {
 }
 
 type Action struct {
-	Schema        int               `json:"schema"` // 1
-	ID            ActionID          `json:"id"`
-	Seq           int               `json:"seq"`
-	Run           RunID             `json:"run"`
-	Surface       Surface           `json:"surface"`
-	Op            string            `json:"op"` // "request"
-	Use           UseCase           `json:"use"`
-	By            Actor             `json:"by"`
-	Request       *HTTPRequest      `json:"request,omitempty"`
-	Response      *HTTPResponse     `json:"response,omitempty"`
+	Schema   int           `json:"schema"` // 1
+	ID       ActionID      `json:"id"`
+	Seq      int           `json:"seq"`
+	Run      RunID         `json:"run"`
+	Surface  Surface       `json:"surface"`
+	Op       string        `json:"op"` // "request" on the API, or the verb of a web action
+	Use      UseCase       `json:"use"`
+	By       Actor         `json:"by"`
+	Request  *HTTPRequest  `json:"request,omitempty"`
+	Response *HTTPResponse `json:"response,omitempty"`
+	// Web is set on an action of the web engine, which has no Request and no Response.
+	Web           *WebRecord        `json:"web,omitempty"`
 	Captures      map[string]string `json:"captures,omitempty"`
 	Refused       string            `json:"refused,omitempty"`       // why policy refused it. No request was sent
 	Err           string            `json:"error,omitempty"`         // transport error
@@ -95,6 +97,8 @@ type Activity struct {
 	Why      string     `json:"why,omitempty"`
 	TraceID  string     `json:"traceId"`
 	Evidence string     `json:"evidence"` // path of the action file, relative to the run directory
+	// Screenshot is the path of the screenshot of a web action, relative to the run directory.
+	Screenshot string `json:"screenshot,omitempty"`
 }
 
 type ObjectRef struct {

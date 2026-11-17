@@ -117,6 +117,20 @@ func (e *enc) step(path string, st domain.ScriptStep) (*yaml.Node, domain.Script
 		put(n, "request", rn)
 		want.Request = &r
 	}
+	if st.Web != nil {
+		w := *st.Web
+		wn := mapping()
+		for _, f := range []struct{ key, val string }{
+			{"service", w.Service}, {"app", w.App}, {"do", string(w.Do)}, {"path", w.Path},
+			{"screen", w.Screen}, {"element", w.Element}, {"to", w.To}, {"value", w.Value}, {"secret", w.Secret},
+		} {
+			if f.val != "" {
+				put(wn, f.key, e.str(path+".web."+f.key, f.val))
+			}
+		}
+		put(n, "web", wn)
+		want.Web = &w
+	}
 	want.Captures = nil
 	if len(st.Captures) > 0 {
 		seq := sequence()
@@ -125,7 +139,12 @@ func (e *enc) step(path string, st domain.ScriptStep) (*yaml.Node, domain.Script
 			p := fmt.Sprintf("%s.captures[%d]", path, i)
 			cn := mapping()
 			put(cn, "name", e.str(p+".name", c.Name))
-			put(cn, "jsonpath", e.str(p+".jsonpath", c.JSONPath))
+			if c.JSONPath != "" {
+				put(cn, "jsonpath", e.str(p+".jsonpath", c.JSONPath))
+			}
+			if c.Element != "" {
+				put(cn, "element", e.str(p+".element", c.Element))
+			}
 			seq.Content = append(seq.Content, cn)
 		}
 		put(n, "captures", seq)

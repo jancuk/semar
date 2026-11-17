@@ -84,8 +84,21 @@ func ValidateWith(sc domain.Scenario, s domain.Script, outputs map[string][]stri
 		}
 		bound[ss.Step] = true
 
-		if ss.Request == nil && len(ss.Captures) > 0 {
-			add(ss.Step, "a capture needs a request")
+		switch {
+		case ss.Request != nil && ss.Web != nil:
+			add(ss.Step, "a step has a request or a web action, and not both")
+		case ss.Request == nil && ss.Web == nil && len(ss.Captures) > 0:
+			add(ss.Step, "a capture needs a request or a web action")
+		}
+		if ss.Web != nil {
+			for _, m := range ss.Web.Problems() {
+				add(ss.Step, "web: %s", m)
+			}
+			for _, name := range ss.Web.Variables() {
+				if msg := unknown(name); msg != "" {
+					add(ss.Step, "web: %s", msg)
+				}
+			}
 		}
 		if ss.Request != nil {
 			var hint *domain.RequestHint
@@ -103,8 +116,22 @@ func ValidateWith(sc domain.Scenario, s domain.Script, outputs map[string][]stri
 			case !namePattern.MatchString(c.Name):
 				add(ss.Step, "capture name %s is not a valid variable name", c.Name)
 			}
-			if _, err := jsonpath.Parse(c.JSONPath); err != nil {
-				add(ss.Step, "capture %s: jsonpath does not parse: %v", c.Name, err)
+			switch {
+			case c.JSONPath != "" && c.Element != "":
+				add(ss.Step, "capture %s takes a jsonpath or an element, and not both", c.Name)
+			case c.Element != "":
+				if ss.Web == nil {
+					add(ss.Step, "capture %s names an element, so the step needs a web action", c.Name)
+				}
+			case c.JSONPath == "":
+				add(ss.Step, "capture %s needs a jsonpath or an element", c.Name)
+			default:
+				if _, err := jsonpath.Parse(c.JSONPath); err != nil {
+					add(ss.Step, "capture %s: jsonpath does not parse: %v", c.Name, err)
+				}
+				if ss.Web != nil {
+					add(ss.Step, "capture %s names a jsonpath, and a web step has no response to read: use an element", c.Name)
+				}
 			}
 			if c.Name != "" && (captured[c.Name] || seen[c.Name]) {
 				add(ss.Step, "capture %s is defined more than once", c.Name)
@@ -116,6 +143,12 @@ func ValidateWith(sc domain.Scenario, s domain.Script, outputs map[string][]stri
 		}
 		if known {
 			for j, e := range sc.Steps[i].Expect {
+				if e.Check.Element != "" && ss.Web == nil {
+					add(ss.Step, "expect[%d] checks element %s, so the step needs a web action", j, e.Check.Element)
+				}
+				if ss.Web != nil && (e.Check.Status != nil || e.Check.JSONPath != "" || e.Check.Header != "") {
+					add(ss.Step, "expect[%d] reads a response, and a web step has none: check an element", j)
+				}
 				for _, o := range []struct {
 					op string
 					v  any
@@ -139,15 +172,15 @@ func ValidateWith(sc domain.Scenario, s domain.Script, outputs map[string][]stri
 	}
 
 	for _, st := range sc.Steps {
-		if len(st.Expect) > 0 && !hasRequest(s, st.ID) {
-			add(st.ID, "step %s has an expected result and no request", st.ID)
+		if len(st.Expect) > 0 && !hasAction(s, st.ID) {
+			add(st.ID, "step %s has an expected result and no request or web action", st.ID)
 		}
 	}
 	return ps
 }
 
-func hasRequest(s domain.Script, id domain.StepID) bool {
-	return slices.ContainsFunc(s.Steps, func(ss domain.ScriptStep) bool { return ss.Step == id && ss.Request != nil })
+func hasAction(s domain.Script, id domain.StepID) bool {
+	return slices.ContainsFunc(s.Steps, func(ss domain.ScriptStep) bool { return ss.Step == id && (ss.Request != nil || ss.Web != nil) })
 }
 
 // RequestProblems holds the request rules of Validate that need no scenario step: a service, a

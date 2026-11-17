@@ -50,6 +50,9 @@ func (r *Recorder) Record(a domain.Action) (domain.Action, error) {
 		}
 		class = r.classify(a.Request.Method, u)
 	}
+	if a.Web != nil && domain.WebOp(a.Web.Op).Writes() {
+		class = effects.Write
+	}
 	red := r.red.Action(a)
 	path, err := r.sink.WriteAction(red)
 	if err != nil {

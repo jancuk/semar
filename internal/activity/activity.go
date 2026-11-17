@@ -14,6 +14,9 @@ import (
 
 // FromAction takes the redacted action, so nothing it returns can hold a secret.
 func FromAction(a domain.Action, class effects.Class, evidencePath string) domain.Activity {
+	if a.Web != nil {
+		return fromWebAction(a, class, evidencePath)
+	}
 	method, target, template, realPath := "", "", "", ""
 	if a.Request != nil {
 		method = strings.ToUpper(a.Request.Method)

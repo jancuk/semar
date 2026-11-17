@@ -70,11 +70,14 @@ type Expectation struct {
 	By string `yaml:"by,omitempty"`
 }
 
-// Exactly one of Status, JSONPath, Header is set. JSONPath and Header take exactly one operator.
+// Exactly one of Status, JSONPath, Header, Element is set. JSONPath, Header, and Element take exactly
+// one operator. An Element check names an element of the screen of the step, and reads its text with
+// Equals, NotEquals, and Contains, whether it is there with Exists, and how many match with Count.
 type Check struct {
 	Status     *int     `yaml:"status,omitempty"`
 	JSONPath   string   `yaml:"jsonpath,omitempty"`
 	Header     string   `yaml:"header,omitempty"`
+	Element    string   `yaml:"element,omitempty"`
 	Equals     any      `yaml:"equals,omitempty"`
 	NotEquals  any      `yaml:"notEquals,omitempty"`
 	Contains   any      `yaml:"contains,omitempty"`

@@ -304,7 +304,7 @@ func TestDescribeMatchesEval(t *testing.T) {
 		{"status: 422", "status 422"},
 		{"{jsonpath: $.error.code, equals: REFUND_EXCEEDS_TOTAL}", "$.error.code equals REFUND_EXCEEDS_TOTAL"},
 		{"{header: Content-Type, contains: json}", "header Content-Type contains json"},
-		{"{status: 200, jsonpath: $.a, equals: 1}", "malformed check: it must name exactly one of status, jsonpath, or header"},
+		{"{status: 200, jsonpath: $.a, equals: 1}", "malformed check: it must name exactly one of status, jsonpath, header, or element"},
 	}
 	for _, c := range cases {
 		t.Run(c.src, func(t *testing.T) {

@@ -134,14 +134,20 @@ func validateExpectation(path string, e domain.Expectation, origin Origin) []Pro
 	if c.Header != "" {
 		kinds++
 	}
+	if c.Element != "" {
+		kinds++
+	}
 	if kinds != 1 {
-		add(cp, "a check needs exactly one of status, jsonpath, header")
+		add(cp, "a check needs exactly one of status, jsonpath, header, element")
 	}
 
 	if c.JSONPath != "" {
 		if _, err := jsonpath.Parse(c.JSONPath); err != nil {
 			add(cp+".jsonpath", "jsonpath does not parse: %v", err)
 		}
+	}
+	if c.Element != "" {
+		ps = append(ps, elementCheckProblems(cp, c)...)
 	}
 	if c.JSONPath != "" || c.Header != "" {
 		ops := 0
@@ -259,3 +265,40 @@ func operandProblems(path string, v any) []Problem {
 	}
 	return ps
 }
+
+// elementCheckProblems holds the rules of a check on an element: one operator, and one that reads a
+// page. The element is named by the ID that the screens file gives it.
+func elementCheckProblems(path string, c domain.Check) []Problem {
+	var ps []Problem
+	add := func(p, format string, args ...any) {
+		ps = append(ps, Problem{Path: p, Message: fmt.Sprintf(format, args...)})
+	}
+	if !elementNamePattern.MatchString(c.Element) {
+		add(path+".element", "element %q must start with a letter or a digit and hold letters, digits, - and _", c.Element)
+	}
+	var ops []string
+	for _, o := range []struct {
+		name string
+		set  bool
+	}{
+		{"equals", c.Equals != nil}, {"notEquals", c.NotEquals != nil}, {"contains", c.Contains != nil},
+		{"exists", c.Exists != nil}, {"count", c.Count != nil},
+		{"greater", c.Greater != nil}, {"less", c.Less != nil}, {"equalsPath", c.EqualsPath != ""},
+	} {
+		if o.set {
+			ops = append(ops, o.name)
+		}
+	}
+	switch {
+	case len(ops) != 1:
+		add(path, "an element check needs exactly one operator: equals, notEquals, contains, exists, or count")
+	case ops[0] == "greater" || ops[0] == "less" || ops[0] == "equalsPath":
+		add(path, "the operator %s is not for an element: use equals, notEquals, contains, exists, or count", ops[0])
+	}
+	if c.Count != nil && *c.Count < 0 {
+		add(path+".count", "count must not be negative")
+	}
+	return ps
+}
+
+var elementNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)

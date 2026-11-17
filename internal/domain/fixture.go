@@ -109,6 +109,7 @@ type hashedRequest struct {
 type hashedCapture struct {
 	Name     string `json:"name"`
 	JSONPath string `json:"jsonpath"`
+	Element  string `json:"element,omitempty"`
 }
 
 type hashedUntil struct {
@@ -145,7 +146,7 @@ func hashedSteps(in []FixtureStep) []hashedFixtureStep {
 	for i, st := range in {
 		hs := hashedFixtureStep{Request: hashedRequest(st.Request)}
 		for _, c := range st.Captures {
-			hs.Captures = append(hs.Captures, hashedCapture(c))
+			hs.Captures = append(hs.Captures, hashedCapture{Name: c.Name, JSONPath: c.JSONPath, Element: c.Element})
 		}
 		if st.Until != nil {
 			hs.Until = &hashedUntil{

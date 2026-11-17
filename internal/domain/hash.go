@@ -17,6 +17,7 @@ type hashedCheck struct {
 	Status     *int     `json:"status,omitempty"`
 	JSONPath   string   `json:"jsonpath,omitempty"`
 	Header     string   `json:"header,omitempty"`
+	Element    string   `json:"element,omitempty"`
 	Equals     any      `json:"equals,omitempty"`
 	NotEquals  any      `json:"notEquals,omitempty"`
 	Contains   any      `json:"contains,omitempty"`
