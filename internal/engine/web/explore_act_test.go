@@ -189,11 +189,11 @@ func TestAFillOfAPasswordFieldIsNeverReadBack(t *testing.T) {
 	}
 }
 
-func TestADateFieldIsListedForWhatItIsAndRefusesTypedText(t *testing.T) {
-	page := `<!doctype html><title>Due</title><label for="d">Due date</label><input id="d" type="datetime-local"><label for="m">Month</label><input id="m" type="month"><input type="text" aria-label="Plain">`
-	r := newRecRig(t, map[string]string{"/due": page})
-	x, l := r.explore("/due")
-	for _, kind := range []string{"datetime-local", "month"} {
+func TestAColorSliderOrFileFieldIsListedForWhatItIsAndRefusesTypedText(t *testing.T) {
+	page := `<!doctype html><title>Pick</title><input type="color" aria-label="Tint"><input type="range" aria-label="Level"><input type="file" aria-label="Attach"><input type="text" aria-label="Plain">`
+	r := newRecRig(t, map[string]string{"/pick": page})
+	x, l := r.explore("/pick")
+	for _, kind := range []string{"color", "slider", "file"} {
 		ref := ""
 		for _, e := range l.Elements {
 			if e.Role == kind {
@@ -203,10 +203,35 @@ func TestADateFieldIsListedForWhatItIsAndRefusesTypedText(t *testing.T) {
 		if ref == "" {
 			t.Fatalf("the list has no %s field:\n%s", kind, l.String())
 		}
-		err := x.Fill(t.Context(), ref, "2026-12-01")
+		err := x.Fill(t.Context(), ref, "x")
 		if err == nil || !strings.Contains(err.Error(), "a "+kind+" field, which a flow cannot type into") {
 			t.Errorf("fill of a %s field: %v", kind, err)
 		}
 	}
 	r.must(x.Fill(t.Context(), refOf(t, l, "textbox", "Plain"), "ok"))
+}
+
+const dueExplorePage = `<!doctype html><title>Due</title><label for="d">Due date</label><input id="d" type="datetime-local"><label for="m">Month</label><input id="m" type="month">
+<button id="save">Save</button>
+<script>document.getElementById('save').addEventListener('click', () => { document.title = 'saved ' + document.getElementById('d').value; });</script>`
+
+// A model that fills a date field is heard as one fill with the value, before the click that follows it, and
+// what is heard replays by setting the same value.
+func TestAFillOfADateFieldIsHeardAsAFillWithItsValue(t *testing.T) {
+	r := newRecRig(t, map[string]string{"/due": dueExplorePage})
+	x, l := r.explore("/due")
+	ctx := t.Context()
+	r.must(x.Fill(ctx, refOf(t, l, "datetime-local", "Due date"), "2026-03-09T14:30"))
+	r.must(x.Fill(ctx, refOf(t, l, "month", "Month"), "2026-03"))
+	r.must(x.Click(ctx, refOf(t, l, "button", "Save")))
+	got := r.events(3)
+	if got[0].Kind != record.KindFill || got[0].Value != "2026-03-09T14:30" || got[0].Target == nil || got[0].Target.Hint != "Due date" {
+		t.Errorf("the date field: %s", describeEvents(got))
+	}
+	if got[1].Kind != record.KindFill || got[1].Value != "2026-03" || got[2].Kind != record.KindClick {
+		t.Errorf("the month field and the click: %s", describeEvents(got))
+	}
+	if err := x.Fill(ctx, refOf(t, l, "datetime-local", "Due date"), "tomorrow"); err == nil || !strings.Contains(err.Error(), "2026-03-09T14:30") {
+		t.Errorf("a text that the field does not keep: %v", err)
+	}
 }

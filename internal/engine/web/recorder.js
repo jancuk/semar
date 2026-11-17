@@ -171,6 +171,12 @@
     }
   }
   window.__semarFlush = flush;
+  // The explorer sets a picker field by script, and the events of a script are not trusted: it asks for the fill.
+  window.__semarHear = el => {
+    if (pending && pending !== el) flush();
+    pending = el;
+    flush();
+  };
 
   function on(type, fn) { window.addEventListener(type, fn, true); }
 

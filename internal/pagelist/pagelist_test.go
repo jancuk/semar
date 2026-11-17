@@ -100,3 +100,26 @@ func TestARoleThatAPageWroteCannotAddALine(t *testing.T) {
 		t.Errorf("list:\n%s", l.String())
 	}
 }
+
+func TestADateOrTimeFieldLineNamesTheFormOfItsValue(t *testing.T) {
+	l := pagelist.Build("http://shop.example.com/board", "Board", []pagelist.Item{
+		{Index: 1, Role: "date", Name: "Start", Acts: true},
+		{Index: 2, Role: "datetime-local", Name: "Due date", Value: "2026-03-09T14:30", Acts: true},
+		{Index: 3, Role: "time", Name: "At", Acts: true},
+		{Index: 4, Role: "month", Name: "Month", Acts: true},
+		{Index: 5, Role: "week", Name: "Week", Acts: true},
+		{Index: 6, Role: "color", Name: "Tint", Acts: true},
+	})
+	want := `Page: http://shop.example.com/board
+Title: Board
+e1 date "Start" form=YYYY-MM-DD
+e2 datetime-local "Due date" value="2026-03-09T14:30" form=YYYY-MM-DDTHH:MM
+e3 time "At" form=HH:MM
+e4 month "Month" form=YYYY-MM
+e5 week "Week" form=YYYY-Www
+e6 color "Tint"
+`
+	if got := l.String(); got != want {
+		t.Errorf("list:\n%s\nwant:\n%s", got, want)
+	}
+}

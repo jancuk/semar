@@ -123,6 +123,12 @@ func (l List) Find(ref string) (Element, bool) {
 	return Element{}, false
 }
 
+// valueForms are the roles of the fields that the browser draws with a picker, and the form that their
+// value takes, which is the only text that a fill of them can hold.
+var valueForms = map[string]string{
+	"date": "YYYY-MM-DD", "datetime-local": "YYYY-MM-DDTHH:MM", "time": "HH:MM", "month": "YYYY-MM", "week": "YYYY-Www",
+}
+
 // String is the list as the prompt shows it: the address, the title, and a line for each element.
 func (l List) String() string {
 	var b strings.Builder
@@ -131,6 +137,9 @@ func (l List) String() string {
 		fmt.Fprintf(&b, "%s %s %s", e.Ref, e.Role, strconv.Quote(e.Name))
 		if e.Value != "" {
 			fmt.Fprintf(&b, " value=%s", strconv.Quote(e.Value))
+		}
+		if form, ok := valueForms[e.Role]; ok {
+			b.WriteString(" form=" + form)
 		}
 		if e.State != "" {
 			b.WriteString(" " + e.State)

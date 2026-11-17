@@ -6,8 +6,24 @@ import (
 )
 
 func TestWebVersion(t *testing.T) {
-	if got := WebVersion(); got != "3" {
-		t.Errorf("WebVersion() = %q, want 3", got)
+	if got := WebVersion(); got != "4" {
+		t.Errorf("WebVersion() = %q, want 4", got)
+	}
+}
+
+func TestWebAllowsADateFieldWithItsFormsAndKeepsTheOthersRefused(t *testing.T) {
+	got, err := Web(fullWeb())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"`date`", "`datetime-local`", "2026-03-09T14:30", "14:30", "2026-W11", "same at every run", "far in the past or far in the future",
+		"`color`, `slider`, or `file` cannot be typed into", "cannot show that something is gone", "the whole text of the element"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the prompt lacks %q", want)
+		}
+	}
+	if strings.Contains(got, "`datetime-local`, `time`, `month`, `week`, `color`") {
+		t.Error("the prompt still refuses a date field")
 	}
 }
 

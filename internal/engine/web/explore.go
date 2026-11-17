@@ -165,6 +165,14 @@ func (x *Explorer) Fill(ctx context.Context, ref, text string) error {
 	if err := t.rd.fill(t.id, text); err != nil {
 		return fmt.Errorf("%s: %w", t.name, err)
 	}
+	// A value that is set by a script comes with events that the page marks as not from a person, so
+	// the recorder does not hear it. It is asked to, as it would hear the person who picked the date.
+	if _, picker, err := t.rd.temporalForm(t.obj); err == nil && picker {
+		_, err := chromedp.Call(x.rec.tab, runtime.CallFunctionOn, runtime.CallFunctionOnParams{
+			FunctionDeclaration: `function(){ if (window.__semarHear) window.__semarHear(this); }`, ObjectID: t.obj,
+		})
+		return err
+	}
 	return nil
 }
 
@@ -285,12 +293,13 @@ func (x *Explorer) Check(ctx context.Context, ref string) (shown string, err err
 }
 
 // untypedKind is the kind of a field that a flow cannot type into, from the role that the list gave it:
-// the browser draws these with a picker of its own, and text that is inserted does not reach them.
+// the browser draws these with a picker of its own, and no text of a value fits them. A date or a time
+// field is not one of them: its value is set, in the form that the list shows.
 func untypedKind(name string) string {
 	_, rest, _ := strings.Cut(name, " (")
 	role, _, _ := strings.Cut(rest, " ")
 	switch role {
-	case "date", "datetime-local", "time", "month", "week", "color", "slider", "file":
+	case "color", "slider", "file":
 		return role
 	}
 	return ""
