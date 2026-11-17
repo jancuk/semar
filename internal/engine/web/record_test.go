@@ -378,3 +378,69 @@ func TestRecorderChoosesLocatorsInTheOrderOfThePlan(t *testing.T) {
 		t.Errorf("the search field: %s", describeEvents(got[:1]))
 	}
 }
+
+const checkPage = `<!doctype html><html><head><title>Totals</title></head><body>
+<h2 id="h">Totals</h2>
+<button id="go">Go</button>
+<p id="status">idle</p>
+<p id="sum">Total: <b>5.00</b></p>
+<label>Amount <input id="amount" type="text" value="5"></label>
+<label>Password <input id="pw" type="password" value="hunter2"></label>
+<script>
+document.getElementById('go').addEventListener('click', () => { document.getElementById('status').textContent = 'clicked'; });
+document.addEventListener('mousedown', () => { document.getElementById('status').textContent = 'mousedown'; });
+</script></body></html>`
+
+func TestOptionClickRecordsACheckAndTheCheckedPageNeverSeesIt(t *testing.T) {
+	r := newRecRig(t, map[string]string{"/totals": checkPage})
+	r.open("/totals")
+	r.events(1)
+
+	for _, c := range []struct {
+		sel   string
+		want  string
+		loc   domain.Locator
+		hint  string
+		label string
+	}{
+		{"#status", "idle", domain.Locator{CSS: "#status"}, "status", "a paragraph"},
+		{"#go", "Go", domain.Locator{CSS: "#go"}, "go", "a button: its own text is what the check reads, so it is not the way to find it"},
+		{"#h", "Totals", domain.Locator{CSS: "#h"}, "h", "a heading, for the same reason"},
+		{"#amount", "5", domain.Locator{Role: "textbox", Name: "Amount"}, "Amount", "a field, found by its label"},
+		{"#sum b", "5.00", domain.Locator{CSS: "#sum > b"}, "b", "text inside a paragraph"},
+	} {
+		r.altClick(c.sel)
+		ev := r.events(1)[0]
+		if ev.Kind != record.KindCheck || ev.Value != c.want || ev.Target == nil || ev.Target.Locator != c.loc || ev.Target.Hint != c.hint {
+			t.Errorf("%s: %s, want the text %q at %+v called %q", c.label, describeEvents([]record.Event{ev}), c.want, c.loc, c.hint)
+		}
+		if ev.Page.Title != "Totals" {
+			t.Errorf("%s: the page is %+v", c.label, ev.Page)
+		}
+	}
+	r.quiet()
+
+	// The page saw nothing: no mousedown, and no click on the button.
+	status, err := chromedp.Run(r.rec.Context(), chromedp.Evaluate[string](`document.getElementById('status').textContent`))
+	if err != nil || status != "idle" {
+		t.Errorf("the page saw the Option click: status is %q, %v", status, err)
+	}
+
+	// The element shows an outline for a moment.
+	r.altClick("#status")
+	r.events(1)
+	outline, err := chromedp.Run(r.rec.Context(), chromedp.Evaluate[string](`getComputedStyle(document.getElementById('status')).outlineStyle`))
+	if err != nil || outline == "none" {
+		t.Errorf("the checked element has outline %q, %v", outline, err)
+	}
+
+	// A password is never a check.
+	r.altClick("#pw")
+	r.quiet()
+
+	// A click with no Option key is still a click.
+	r.click("#go")
+	if ev := r.events(1)[0]; ev.Kind != record.KindClick {
+		t.Errorf("a click: %s", describeEvents([]record.Event{ev}))
+	}
+}

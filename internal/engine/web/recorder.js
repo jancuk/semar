@@ -106,7 +106,8 @@
       const same = cur.parentElement ? Array.from(cur.parentElement.children).filter(c => c.tagName === cur.tagName) : [];
       if (same.length > 1) seg += ':nth-of-type(' + (same.indexOf(cur) + 1) + ')';
       parts.unshift(seg);
-      if (document.querySelectorAll(parts.join(' > ')).length === 1) break;
+      // One tag alone breaks as soon as the page gets another of it, so the path has two.
+      if (parts.length > 1 && document.querySelectorAll(parts.join(' > ')).length === 1) break;
     }
     return parts.join(' > ');
   }
@@ -165,6 +166,36 @@
   window.__semarFlush = flush;
 
   function on(type, fn) { window.addEventListener(type, fn, true); }
+
+  // What an element shows, as the engine of a replay reads it: a field gives its value.
+  function textOf(el) {
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return norm(el.value);
+    if (el.tagName === 'SELECT') return norm(Array.from(el.selectedOptions).map(o => o.text).join(', '));
+    return norm(visible(el) ? el.innerText : el.textContent);
+  }
+
+  function flash(el) {
+    const was = [el.style.outline, el.style.outlineOffset];
+    el.style.outline = '2px solid #e0245e';
+    el.style.outlineOffset = '2px';
+    setTimeout(() => { el.style.outline = was[0]; el.style.outlineOffset = was[1]; }, 700);
+  }
+
+  // A click with the Option key is a check and does nothing on the page: the page never sees any of
+  // its events, and the element that it points at shows an outline for a moment.
+  ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'dblclick', 'contextmenu'].forEach(type => on(type, e => {
+    if (isTrusted(e) && e.altKey) { e.preventDefault(); e.stopImmediatePropagation(); }
+  }));
+  on('click', e => {
+    if (!isTrusted(e) || !e.altKey) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    let el = e.target;
+    while (el.parentElement && el.parentElement !== document.body && !textOf(el)) el = el.parentElement;
+    if (el === document.body || el === document.documentElement || (el.tagName === 'INPUT' && isSecret(el))) return;
+    flash(el);
+    send({ kind: 'check', target: describe(el, 'check'), value: textOf(el) });
+  });
 
   on('input', e => { if (isTrusted(e) && isField(e.target)) pending = e.target; });
   on('focusout', e => { if (isTrusted(e) && pending === e.target) flush(); });
