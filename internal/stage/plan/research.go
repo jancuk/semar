@@ -31,6 +31,7 @@ const (
 // prefix when it has exactly one.
 type PacketOperation struct {
 	Key          string
+	Service      string // the service of the document, "" when it names none
 	Method       string
 	Route        string
 	Summary      string
@@ -51,7 +52,7 @@ func packetOperation(s knowledge.Source, op openapi.Operation) PacketOperation {
 		route = s.API.Prefixes[0] + op.Path
 	}
 	po := PacketOperation{
-		Key: op.Key, Method: op.Method, Route: route, Summary: oneLine(op.Summary, maxAPISummary),
+		Key: op.Key, Service: s.Service, Method: op.Method, Route: route, Summary: oneLine(op.Summary, maxAPISummary),
 		Params: op.Params, Body: op.Body, BodyRequired: op.BodyRequired, BodyKnown: op.BodyKnown, BodyOpen: op.BodyOpen,
 		Statuses: op.Statuses, Responses: op.Responses,
 	}
