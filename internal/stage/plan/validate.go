@@ -55,6 +55,9 @@ type Input struct {
 	Ladder   []Rung
 	JobDir   string
 	Previous []StoredAnswer
+	// FixtureTrial runs a drafted fixture once on a test environment that allows writes. Nil turns
+	// the run off, and the fixture is drafted without it.
+	FixtureTrial FixtureTrialer
 }
 
 // Account is an auth profile of the configuration: its name and its one-line description.

@@ -76,6 +76,9 @@ type PipelineStats struct {
 	Unanswered  int          // criteria that no rung answered
 	Uses        []ModelUse   // one for each rung that was called, in the order of the ladder
 	Labels      []string     // the label of each rung of the ladder
+	// FixtureJobs are the fixtures that a model was asked to draft, and FixturesDrafted those that it
+	// drafted. Their calls are in Calls, Corrections, and Uses.
+	FixtureJobs, FixturesDrafted int
 }
 
 // modelOf is the label of the model of a rung, "" when there is none.
@@ -155,6 +158,25 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 		return rs.failed(), err
 	}
 
+	needs := collectNeeds(outcomes)
+	var drafts []FixtureDraft
+	if len(needs) > 0 {
+		var err error
+		if drafts, err = rs.draftFixtures(ctx, needs, outcomes); err != nil {
+			return rs.failed(), err
+		}
+		rs.in.Fixtures = slices.Clone(rs.in.Fixtures)
+		for _, d := range drafts {
+			if d.Drafted {
+				rs.in.Fixtures = append(rs.in.Fixtures, entryOf(d.Fixture))
+			}
+		}
+		if err := rs.replan(ctx, outcomes, drafts); err != nil {
+			return rs.failed(), err
+		}
+		in.Fixtures = rs.in.Fixtures
+	}
+
 	b, ps := rs.build(outcomes)
 	if len(ps) > 0 {
 		out := rs.failed()
@@ -175,7 +197,15 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 	}
 
 	out := rs.output(b.Outcomes)
-	out.FixtureNeeds = collectNeeds(b.Outcomes)
+	out.FixtureNeeds, out.FixtureDrafts = needs, drafts
+	for _, d := range drafts {
+		if d.Reason == "" {
+			out.Pipeline.FixtureJobs++
+		}
+		if d.Drafted {
+			out.Pipeline.FixturesDrafted++
+		}
+	}
 	out.Draft, out.Scenarios, out.Scripts = b.Draft, b.Scenarios, b.Scripts
 	out.Notes = compare(in, b.Scenarios, b.Scripts)
 	out.Trial, out.TrialReturned, out.Refused = tr, returned, refused
@@ -312,13 +342,18 @@ func noAnswer(err error) (string, bool) {
 	return "", false
 }
 
-// call runs one job at a rung and adds it to the totals. A provider error is returned. A job that
-// returned no answer in the schema gives no output and the reason in soft.
+// call runs one job for a packet at a rung and adds it to the totals. A provider error is returned. A
+// job that returned no answer in the schema gives no output and the reason in soft.
 func (rs *runState) call(ctx context.Context, rung int, p Packet, previous []byte, problems []Problem) (raw []byte, soft string, err error) {
 	text, err := p.Prompt(previous, problems)
 	if err != nil {
 		return nil, "", err
 	}
+	return rs.run(ctx, rung, text, p.AnswerSchema(), len(problems) > 0)
+}
+
+// run sends one job with no tools to a rung. correction says that the job repairs an answer.
+func (rs *runState) run(ctx context.Context, rung int, text string, schema json.RawMessage, correction bool) (raw []byte, soft string, err error) {
 	r := rs.in.Ladder[rung]
 	dir := rs.in.JobDir
 	if dir == "" {
@@ -326,7 +361,7 @@ func (rs *runState) call(ctx context.Context, rung int, p Packet, previous []byt
 	}
 	started := time.Now()
 	res, err := r.Planner.Run(ctx, provider.Job{
-		Prompt: text, Workdir: dir, Schema: p.AnswerSchema(), Model: r.Model, Reasoning: r.Reasoning,
+		Prompt: text, Workdir: dir, Schema: schema, Model: r.Model, Reasoning: r.Reasoning,
 		MaxTurns: CriterionMaxTurns, Timeout: rs.in.Limits.Timeout, NoTools: true, SchemaInPrompt: true,
 	})
 	rs.mu.Lock()
@@ -336,7 +371,7 @@ func (rs *runState) call(ctx context.Context, rung int, p Packet, previous []byt
 	u.Took += time.Since(started)
 	sumUse(&u.Result, res)
 	rs.calls++
-	if len(problems) > 0 {
+	if correction {
 		rs.corr++
 	}
 	rs.mu.Unlock()

@@ -75,6 +75,8 @@ type Output struct {
 	Answers  []StoredAnswer
 	// FixtureNeeds are the distinct fixtures that the answers named and no catalogue entry gives.
 	FixtureNeeds []FixtureNeed
+	// FixtureDrafts are the fixtures that the plan drafted for them, or tried to, in the same order.
+	FixtureDrafts []FixtureDraft
 }
 
 // RefusedDraft is a draft that was not used: a problem of its own, or a problem that the trial
