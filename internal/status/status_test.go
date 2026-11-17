@@ -116,18 +116,22 @@ func TestTextHasTheShapeOfTheContract(t *testing.T) {
 		Entries: []obligation.Entry{
 			entry("SHOP-482/1", obligation.Verified, nil),
 			entry("SHOP-482/2", obligation.Failed, func(e *obligation.Entry) {
+				e.Obligation.Title = "A refund above the paid amount is refused"
 				e.Reasons = []string{"SHOP-482-02 failed in r-1: expected status 422, observed status 200"}
 			}),
 			entry("SHOP-482/3", obligation.Blocked, func(e *obligation.Entry) {
+				e.Obligation.Title = "A refund is confirmed by the buyer"
 				e.Review = true
 				e.Covers = []obligation.Cover{{Scenario: "SHOP-482-03", Word: "needs review"}}
 				e.Reasons = []string{"SHOP-482-03 needs review in r-1: an expected result is not confirmed"}
 			}),
 			entry("SHOP-482/manual-1", obligation.NeedsAPerson, func(e *obligation.Entry) {
-				e.Obligation.Manual = &obligation.Manual{Text: "Check the refund receipt on a phone"}
-				e.Reasons = []string{"Check the refund receipt on a phone"}
+				e.Obligation.Title = "Check the refund receipt on a phone"
+				e.Obligation.Manual = &obligation.Manual{Text: "Only a person can check this criterion"}
+				e.Reasons = []string{"Only a person can check this criterion"}
 			}),
 			entry("SHOP-490/1", obligation.Blocked, func(e *obligation.Entry) {
+				e.Obligation.Title = "Refund limit per day"
 				e.Obligation.Gap = "not planned"
 				e.Reasons = []string{"not planned"}
 			}),
@@ -138,16 +142,87 @@ func TestTextHasTheShapeOfTheContract(t *testing.T) {
 5 use cases of SHOP-482, SHOP-490
 
   verified      1
-  failing       1  SHOP-482/2         SHOP-482-02 failed in r-1: expected status 422, observed status 200
-  needs review  1  SHOP-482/3         SHOP-482-03 needs review in r-1: an expected result is not confirmed → semar review SHOP-482-03
-  for a person  1  SHOP-482/manual-1  Check the refund receipt on a phone → semar check SHOP-482/manual-1 pass
-  no test       1  SHOP-490/1         not planned → semar plan
+  failing       1
+    SHOP-482/2  A refund above the paid amount is refused
+      SHOP-482-02 failed in r-1: expected status 422, observed status 200
+  needs review  1  → semar review
+    SHOP-482/3  A refund is confirmed by the buyer
+  for a person  1  → semar check <id> pass
+    SHOP-482/manual-1  Check the refund receipt on a phone
+  no test       1  → semar plan
+    SHOP-490/1  Refund limit per day
+      not planned
 
 Ship: no. 1 failing, 3 open.
 `
 	if got != want {
 		t.Errorf("text:\n%s\nwant:\n%s", got, want)
 	}
+}
+
+func TestAGroupNamesItsCommandOnceAndTheSameSentenceIsNotRepeated(t *testing.T) {
+	var entries []obligation.Entry
+	for _, n := range []string{"01", "02", "03"} {
+		id := "SHOP-482/scenario-SHOP-482-" + n
+		entries = append(entries, entry(id, obligation.Blocked, func(e *obligation.Entry) {
+			e.Review = true
+			e.Obligation.Title = "Refund " + n
+			e.Covers = []obligation.Cover{{Scenario: domain.ScenarioID("SHOP-482-" + n), Word: "needs review"}}
+			e.Reasons = []string{"SHOP-482-" + n + " needs review in r-1: an expected result is not confirmed"}
+		}))
+	}
+	entries = append(entries,
+		entry("SHOP-482/manual-1", obligation.NeedsAPerson, func(e *obligation.Entry) {
+			e.Obligation.Title = "Check the receipt on a phone"
+			e.Obligation.Manual = &obligation.Manual{Text: "Only a person can check this criterion, on a screen, on a device, or by a gesture"}
+			e.Reasons = []string{e.Obligation.Manual.Text}
+		}),
+		entry("SHOP-482/stale-1", obligation.Blocked, func(e *obligation.Entry) {
+			e.Stale = true
+			e.Covers = []obligation.Cover{{Scenario: "A-1"}}
+			e.Obligation.Title = "Refund after a change"
+			e.Reasons = []string{"A-1 passed on another build"}
+		}),
+	)
+	got := render(t, status.Input{Branch: "b", Base: "main", Tickets: []string{"SHOP-482"}, Entries: entries})
+	for _, want := range []string{
+		"  needs review  3  → semar review\n    SHOP-482/scenario-SHOP-482-01  Refund 01\n",
+		"  for a person  1  → semar check <id> pass\n    SHOP-482/manual-1  Check the receipt on a phone\n",
+		"  stale         1  → semar run\n    SHOP-482/stale-1  Refund after a change\n      A-1 passed on another build\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("text lacks %q:\n%s", want, got)
+		}
+	}
+	for _, not := range []string{"not confirmed", "Only a person can check", "→ semar review SHOP"} {
+		if strings.Contains(got, not) {
+			t.Errorf("text holds %q:\n%s", not, got)
+		}
+	}
+	if n := strings.Count(got, "→"); n != 3 {
+		t.Errorf("%d commands, want one per group:\n%s", n, got)
+	}
+}
+
+func TestATitleIsCutAtAReadableWidth(t *testing.T) {
+	long := "A refund of an order that was paid in two parts, by card and by wallet, is split in proportion to what each part paid and is shown on the receipt"
+	e := entry("SHOP-482/1", obligation.Blocked, func(e *obligation.Entry) {
+		e.Obligation.Title = long
+		e.NoReason = true
+	})
+	got := render(t, status.Input{Entries: []obligation.Entry{e}})
+	for _, l := range strings.Split(got, "\n") {
+		if strings.HasPrefix(l, "    SHOP-482/1") {
+			if n := len([]rune(l)); n > 100 {
+				t.Errorf("a use case line has %d characters: %q", n, l)
+			}
+			if !strings.HasSuffix(l, "…") {
+				t.Errorf("a cut title has no mark: %q", l)
+			}
+			return
+		}
+	}
+	t.Errorf("no line for the use case:\n%s", got)
 }
 
 func TestShipIsYesOnlyWhenTheCodeIsZero(t *testing.T) {
@@ -174,7 +249,7 @@ func TestAnUnplannedTicketIsOpen(t *testing.T) {
 		t.Errorf("code %d, want 2: a ticket with no use case has no test", r.Code)
 	}
 	got := render(t, in)
-	for _, want := range []string{"  not planned  1  SHOP-490 → semar plan\n", "Ship: no. 1 open.\n"} {
+	for _, want := range []string{"  not planned   1  → semar plan\n    SHOP-490\n", "Ship: no. 1 open.\n"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("text lacks %q:\n%s", want, got)
 		}

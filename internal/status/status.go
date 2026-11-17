@@ -92,7 +92,8 @@ type Item struct {
 	Entry    obligation.Entry
 	Group    Group
 	Notes    []string
-	Next     string
+	Next     string // the command for this use case, with its ID
+	Command  string // the command that every use case of the group shares, or "" when there is none
 	ByAuthor bool
 }
 
@@ -116,7 +117,7 @@ func Build(in Input) Report {
 	r := Report{Input: in, Counts: map[Group]int{}}
 	for _, e := range in.Entries {
 		g := Classify(e)
-		it := Item{Entry: e, Group: g, Next: next(g, e), ByAuthor: in.ByAuthor[e.Obligation.ID]}
+		it := Item{Entry: e, Group: g, Next: next(g, e), Command: command(g, e), ByAuthor: in.ByAuthor[e.Obligation.ID]}
 		it.Notes = notes(g, it)
 		r.Items = append(r.Items, it)
 		r.Counts[g]++
@@ -161,6 +162,17 @@ func next(g Group, e obligation.Entry) string {
 		return "semar plan"
 	}
 	return ""
+}
+
+// command is next with the ID left out, so that a group can name it once.
+func command(g Group, e obligation.Entry) string {
+	switch g {
+	case NeedsReview:
+		return "semar review"
+	case ForAPerson:
+		return "semar check <id> pass"
+	}
+	return next(g, e)
 }
 
 // notes are the lines that a verified use case shows, because it has something to say. Every other

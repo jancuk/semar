@@ -3,10 +3,16 @@ package status
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/jancuk/semar/internal/obligation"
+)
+
+const (
+	lineWidth     = 100
+	minTitleWidth = 30
+	maxIDWidth    = 40
 )
 
 // line makes text from a file or a service one safe line.
@@ -14,77 +20,117 @@ func line(s string) string {
 	return strings.NewReplacer("\n", `\n`, "\t", `\t`).Replace(obligation.Safe(s))
 }
 
-// Text writes what semar status prints: the first two lines, the groups with their use cases, the
-// tickets that have no use case, and the verdict.
+// showsReasons is false for a group whose next command already says what to do, and whose reason
+// is the same sentence on every use case.
+func showsReasons(g Group) bool { return g != NeedsReview && g != Verified }
+
+// Text writes what semar status prints: the first two lines, each group with one line per use case,
+// the tickets that have no use case, and the verdict.
 func Text(w io.Writer, r Report) error {
 	if _, err := fmt.Fprintf(w, "%s\n%s\n\n", line(r.Lead()), line(r.Count())); err != nil {
 		return err
 	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	var b strings.Builder
+	countWidth := len(fmt.Sprint(max(len(r.NotPlanned), maxCount(r.Counts))))
 	for _, g := range Groups {
-		n := r.Counts[g]
-		if n == 0 {
+		if r.Counts[g] == 0 {
 			continue
 		}
-		head := fmt.Sprintf("  %s\t%d", g, n)
-		first := true
+		var items []Item
 		for _, it := range r.Items {
-			if it.Group != g {
-				continue
-			}
-			rows := rowsOf(it)
-			if len(rows) == 0 {
-				continue
-			}
-			id := line(it.Entry.Obligation.ID)
-			for _, row := range rows {
-				if first {
-					fmt.Fprintf(tw, "%s\t%s\t%s\n", head, id, row)
-					first = false
-				} else {
-					fmt.Fprintf(tw, "\t\t%s\t%s\n", id, row)
-				}
-				id = ""
+			if it.Group == g {
+				items = append(items, it)
 			}
 		}
-		if first {
-			fmt.Fprintln(tw, head)
-		}
+		shared := sharedCommand(items)
+		groupLine(&b, string(g), r.Counts[g], countWidth, shared)
+		writeItems(&b, items, shared != "")
 	}
 	if len(r.NotPlanned) > 0 {
-		fmt.Fprintf(tw, "  not planned\t%d\t%s\n", len(r.NotPlanned), line(strings.Join(r.NotPlanned, ", "))+" → semar plan")
-	}
-	if err := tw.Flush(); err != nil {
-		return err
+		groupLine(&b, "not planned", len(r.NotPlanned), countWidth, "semar plan")
+		fmt.Fprintf(&b, "    %s\n", line(strings.Join(r.NotPlanned, ", ")))
 	}
 	for _, c := range r.NoTicket {
-		if _, err := fmt.Fprintf(w, "\nA commit has no ticket: %s", line(c)); err != nil {
-			return err
-		}
+		fmt.Fprintf(&b, "\nA commit has no ticket: %s", line(c))
 	}
 	if len(r.NoTicket) > 0 {
-		fmt.Fprintln(w)
+		b.WriteString("\n")
 	}
-	_, err := fmt.Fprintf(w, "\n%s\n", line(r.Verdict()))
+	fmt.Fprintf(&b, "\n%s\n", line(r.Verdict()))
+	_, err := io.WriteString(w, b.String())
 	return err
 }
 
-// rowsOf is the text of a use case in its group: the reasons, with the next command on the last.
-// A verified use case that has nothing to say has no row.
-func rowsOf(it Item) []string {
-	texts := it.Notes
-	if it.Group != Verified {
-		texts = it.Entry.Reasons
+func maxCount(m map[Group]int) int {
+	n := 0
+	for _, c := range m {
+		n = max(n, c)
 	}
-	rows := make([]string, 0, len(texts))
-	for _, t := range texts {
-		rows = append(rows, line(t))
+	return n
+}
+
+func groupLine(b *strings.Builder, name string, n, countWidth int, command string) {
+	head := fmt.Sprintf("  %-12s  %-*d", name, countWidth, n)
+	if command != "" {
+		head += "  → " + command
 	}
-	if len(rows) == 0 && it.Group != Verified {
-		rows = append(rows, line(it.Entry.Obligation.Title))
+	b.WriteString(strings.TrimRight(head, " ") + "\n")
+}
+
+// sharedCommand is the command that every use case of a group continues with, or "".
+func sharedCommand(items []Item) string {
+	if len(items) == 0 || items[0].Command == "" {
+		return ""
 	}
-	if len(rows) > 0 && it.Next != "" {
-		rows[len(rows)-1] += " → " + it.Next
+	for _, it := range items[1:] {
+		if it.Command != items[0].Command {
+			return ""
+		}
 	}
-	return rows
+	return items[0].Command
+}
+
+func writeItems(b *strings.Builder, items []Item, commandShared bool) {
+	idWidth := 0
+	for _, it := range items {
+		idWidth = max(idWidth, min(len([]rune(line(it.Entry.Obligation.ID))), maxIDWidth))
+	}
+	for _, it := range items {
+		notes := it.Notes
+		if showsReasons(it.Group) {
+			notes = withoutSentence(it.Entry)
+		}
+		if len(notes) == 0 && it.Group == Verified {
+			continue
+		}
+		id := line(it.Entry.Obligation.ID)
+		title := cut(line(it.Entry.Obligation.Title), lineWidth-4-idWidth-2)
+		row := fmt.Sprintf("    %-*s  %s", idWidth, id, title)
+		if !commandShared && it.Next != "" {
+			row += " → " + it.Next
+		}
+		b.WriteString(strings.TrimRight(row, " ") + "\n")
+		for _, n := range notes {
+			fmt.Fprintf(b, "      %s\n", line(n))
+		}
+	}
+}
+
+// cut shortens s to width characters, with a mark where it ends, and never below a readable minimum.
+func cut(s string, width int) string {
+	width = max(width, minTitleWidth)
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	return strings.TrimRight(string(r[:width-1]), " ") + "…"
+}
+
+// withoutSentence is the reasons of an entry less the sentence that a manual check carries for every
+// person, which says nothing about this check.
+func withoutSentence(e obligation.Entry) []string {
+	if e.Obligation.Manual == nil {
+		return e.Reasons
+	}
+	return slices.DeleteFunc(slices.Clone(e.Reasons), func(r string) bool { return r == e.Obligation.Manual.Text })
 }

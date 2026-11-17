@@ -42,8 +42,8 @@ func TestRmRetiresAScenarioAndTheUseCaseSaysSo(t *testing.T) {
 	st := r.must(t, cli.ExitUndecided, "status")
 	out := squash(st.stdout)
 	contains(t, "the status", out,
-		"no test 1 SHOP-482/a "+scenarioID+" was retired by tester on 2026-11-14: the refund rule moved to SHOP-490",
-		"blocked 1 SHOP-482/b SHOP-482-02 has no result: run it",
+		"no test 1 → semar plan\n SHOP-482/a", scenarioID+" was retired by tester on 2026-11-14: the refund rule moved to SHOP-490",
+		"blocked 1 → semar run\n SHOP-482/b", "SHOP-482-02 has no result: run it",
 		"Ship: no.")
 	if strings.Contains(out, "verified") {
 		t.Errorf("a use case whose test was retired reads as done:\n%s", st.stdout)
