@@ -20,6 +20,7 @@ import (
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/api"
 	"github.com/jancuk/semar/internal/recorder"
+	"github.com/jancuk/semar/internal/script"
 	"github.com/jancuk/semar/internal/secret"
 )
 
@@ -191,9 +192,13 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 	case w.Do.Writes() && e.o.Policy.ReadOnly():
 		a.Refused = fmt.Sprintf("%s: %s writes, and the environment is read only", effects.ReadOnly, w.Do)
 	case w.Do == domain.WebOpen:
-		u, err := api.JoinURL(base, w.Path, nil)
+		head, tail := script.SplitWebPath(w.Path)
+		u, err := api.JoinURL(base, head, nil)
+		if err == nil && tail != "" {
+			u, err = url.Parse(u.String() + tail)
+		}
 		if err != nil {
-			a.Err = err.Error()
+			a.Err = "the page address does not parse"
 			break
 		}
 		if err := e.o.Policy.Admit(effects.Request{Method: "GET", URL: u}); err != nil {

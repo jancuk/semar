@@ -113,3 +113,23 @@ func TestWebScriptRoundTrips(t *testing.T) {
 		t.Errorf("round trip lost the web step:\n%s", data)
 	}
 }
+
+func TestRenderWebPathMayHoldARouteOrAQuery(t *testing.T) {
+	vars := map[string]string{"id": "b-1", "bad": "a b"}
+	for in, want := range map[string]string{
+		"/":                     "/",
+		"/#/boards/{{id}}":      "/#/boards/b-1",
+		"/boards/{{id}}?tab=x":  "/boards/b-1?tab=x",
+		"/b/{{id}}?q={{id}}#/a": "/b/b-1?q=b-1#/a",
+	} {
+		got, err := script.RenderWeb(domain.WebAction{Do: domain.WebOpen, Path: in}, vars)
+		if err != nil || got.Path != want {
+			t.Errorf("RenderWeb(%q) = %q, %v, want %q", in, got.Path, err, want)
+		}
+	}
+	for _, in := range []string{"/#/boards/{{bad}}", "/x/{{bad}}", "/#/{{nobody}}", "/a/../b#x"} {
+		if _, err := script.RenderWeb(domain.WebAction{Do: domain.WebOpen, Path: in}, vars); err == nil {
+			t.Errorf("RenderWeb(%q) accepted it", in)
+		}
+	}
+}

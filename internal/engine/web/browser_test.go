@@ -691,3 +691,16 @@ func TestAnUnknownKeyIsAnError(t *testing.T) {
 		t.Errorf("err = %q", res.Action.Err)
 	}
 }
+
+func TestOpenAPageRouteAndQuery(t *testing.T) {
+	needChrome(t)
+	r := newRig(t, rigOptions{handler: func(mux *http.ServeMux) {
+		mux.HandleFunc("/spa", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, `<!doctype html><p id="where"></p><script>document.getElementById('where').textContent = location.search + location.hash;</script>`)
+		})
+	}})
+	res := r.do(open("/spa?tab=x#/boards/b-1"), map[string]domain.Locator{"where": {CSS: "#where"}}, text("where"))
+	if got := res.Action.Web.Elements["where"].Text; got != "?tab=x#/boards/b-1" {
+		t.Errorf("the page saw %q (err %q)", got, res.Action.Err)
+	}
+}

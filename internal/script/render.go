@@ -290,12 +290,20 @@ func RenderWeb(w domain.WebAction, vars map[string]string) (domain.WebAction, er
 	out := w
 	var err error
 	if w.Path != "" {
-		if out.Path, err = substitute(w.Path, vars, checkPathValue); err != nil {
+		// A page can be a route of the app: /#/boards/{{id}}, or have a query. The part before ? or #
+		// is a path as a request has it. The rest holds variables whose values are plain, as in a path.
+		head, tail := SplitWebPath(w.Path)
+		if out.Path, err = substitute(head, vars, checkPathValue); err != nil {
 			return domain.WebAction{}, fmt.Errorf("path: %w", err)
 		}
-		if err = checkRenderedPath(w.Path, out.Path); err != nil {
+		if err = checkRenderedPath(head, out.Path); err != nil {
 			return domain.WebAction{}, fmt.Errorf("path: %w", err)
 		}
+		rest, err := substitute(tail, vars, checkPathValue)
+		if err != nil {
+			return domain.WebAction{}, fmt.Errorf("path: %w", err)
+		}
+		out.Path += rest
 	}
 	if out.Value, err = substitute(w.Value, vars, nil); err != nil {
 		return domain.WebAction{}, fmt.Errorf("value: %w", err)
@@ -332,4 +340,13 @@ func LocatorVariables(l domain.Locator) []string {
 		}
 	}
 	return names
+}
+
+// SplitWebPath cuts the path of a web action at the first ? or #, which starts a query or a route
+// of the page. The tail keeps that character.
+func SplitWebPath(p string) (head, tail string) {
+	if i := strings.IndexAny(p, "?#"); i >= 0 {
+		return p[:i], p[i:]
+	}
+	return p, ""
 }
