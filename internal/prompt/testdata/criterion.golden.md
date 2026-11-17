@@ -66,6 +66,7 @@ Rules for a scenario:
 - Read the record again after a refused or changed request only when the criterion says something about its state afterwards, such as "nothing changes".
 - Never invent an ID. A path parameter is `{{name}}` of an earlier capture or of a fixture output, or `missing-{{run.id}}` for an ID that cannot exist, which a not-found test uses. A step that needs data that no fixture gives creates it in an earlier setup step and captures its ID.
 - A capture is a name and a JSONPath into the response. A later step writes `{{name}}`.
+- A request that the criterion says is refused with a status of 400 to 499 may send an invalid value, such as a string where a number is declared, or leave out a required field. Any other request sends the declared types and every required field.
 - Prefer requests that read. Send one that changes data only where the criterion is about that change.
 - A check has a `subject` of `status`, `jsonpath`, or `header`, an `operator`, and a `value`. For `status` the name is empty and the value is the code, such as 422. For `exists` and `notExists` the value is null.
 

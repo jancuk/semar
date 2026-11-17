@@ -164,7 +164,12 @@ func TestConvertSaysInPlainWordsWhatIsWrong(t *testing.T) {
 		}, "cannot compare with null"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, ps := p.Convert(withStep(t, tc.change), in)
+			// The step expects success, so the rules of a validation test do not apply to it.
+			ok := func(st map[string]any) {
+				st["expect"] = []any{map[string]any{"subject": "status", "name": "", "operator": "equals", "value": 201}}
+				tc.change(st)
+			}
+			_, ps := p.Convert(withStep(t, ok), in)
 			if got := messages(ps); !strings.Contains(got, tc.want) {
 				t.Errorf("problems:\n%swant one with %q", got, tc.want)
 			}
@@ -321,16 +326,20 @@ func TestAnswerSchemaIsClosed(t *testing.T) {
 		t.Errorf("kinds = %v", kinds)
 	}
 
-	// The value of amount is an integer, and the value of reason is a string.
-	found := map[string]any{}
+	// The value of a field says its type in words and accepts any scalar, so that a step that expects a
+	// refusal can send a value of another type.
+	found := map[string]string{}
 	walkSchema(root, func(n map[string]any) {
 		props, _ := n["properties"].(map[string]any)
 		if vs := enumValues(props["field"]); len(vs) == 1 {
-			found[vs[0]] = props["value"].(map[string]any)["type"]
+			found[vs[0]], _ = props["value"].(map[string]any)["description"].(string)
+			if _, ok := props["value"].(map[string]any)["anyOf"]; !ok {
+				t.Errorf("the value of %s is not any scalar: %v", vs[0], props["value"])
+			}
 		}
 	})
-	if found["amount"] != "integer" || found["reason"] != "string" {
-		t.Errorf("value types = %v", found)
+	if found["amount"] != "The value, an integer." || found["reason"] != "The value, a string." {
+		t.Errorf("value descriptions = %v", found)
 	}
 }
 
@@ -338,7 +347,6 @@ func TestAnswerSchemaFollowsTheDocument(t *testing.T) {
 	_, p := firstPacket(t)
 	p.Operations = []PacketOperation{{
 		Key: "patchOrder", Method: "PATCH", Route: "/orders/{id}", BodyKnown: true,
-		Params: nil,
 		Body: []openapi.Field{
 			{Name: "shipBy", Type: "string", Nullable: true},
 			{Name: "state", Type: "string", Enum: []string{"open", "done"}},
@@ -349,20 +357,59 @@ func TestAnswerSchemaFollowsTheDocument(t *testing.T) {
 	if err := json.Unmarshal(p.AnswerSchema(), &root); err != nil {
 		t.Fatal(err)
 	}
-	types := map[string]any{}
+	types := map[string]map[string]any{}
 	walkSchema(root, func(n map[string]any) {
 		props, _ := n["properties"].(map[string]any)
 		if vs := enumValues(props["field"]); len(vs) == 1 {
-			types[vs[0]] = props["value"]
+			types[vs[0]], _ = props["value"].(map[string]any)
 		}
 	})
-	if got, _ := json.Marshal(types["shipBy"]); string(got) != `{"type":["string","null"]}` {
-		t.Errorf("shipBy = %s: a nullable field accepts null", got)
+	if d := types["shipBy"]["description"]; d != "The value, a string. It may be null." {
+		t.Errorf("shipBy = %v: a nullable field says so", d)
 	}
-	if got, _ := json.Marshal(types["state"]); string(got) != `{"enum":["open","done"],"type":"string"}` {
-		t.Errorf("state = %s", got)
+	if d := types["state"]["description"]; d != "The value, a string. One of open, done." {
+		t.Errorf("state = %v", d)
 	}
-	if m, _ := types["tags"].(map[string]any); m["type"] != "string" {
+	if types["tags"]["type"] != "string" {
 		t.Errorf("an array is written as JSON text: %v", types["tags"])
+	}
+}
+
+func TestAStepThatExpectsARefusalMayBreakAValidationRule(t *testing.T) {
+	in, p := firstPacket(t)
+	refuse := func(st map[string]any) {
+		st["body"] = []any{map[string]any{"field": "amount", "value": "a lot"}}
+		st["expect"] = []any{map[string]any{"subject": "status", "name": "", "operator": "equals", "value": 400}}
+	}
+	res, ps := p.Convert(withStep(t, refuse), in)
+	if len(ps) > 0 {
+		t.Fatalf("problems:\n%s", messages(ps))
+	}
+	if body, _ := res.Scenario.Steps[0].JSON.(map[string]any); body["amount"] != "a lot" {
+		t.Errorf("body = %#v", res.Scenario.Steps[0].JSON)
+	}
+
+	omit := func(st map[string]any) {
+		st["body"] = []any{}
+		st["expect"] = []any{map[string]any{"subject": "status", "name": "", "operator": "equals", "value": 422}}
+	}
+	if _, ps := p.Convert(withStep(t, omit), in); len(ps) > 0 {
+		t.Errorf("a refusal may leave out a required field:\n%s", messages(ps))
+	}
+
+	// The refusal does not excuse a name that the document does not declare, or a step that expects success.
+	unknown := func(st map[string]any) {
+		refuse(st)
+		st["body"] = []any{map[string]any{"field": "amountt", "value": 1}}
+	}
+	if _, ps := p.Convert(withStep(t, unknown), in); !strings.Contains(messages(ps), "field amountt does not exist") {
+		t.Errorf("an undeclared field was accepted: %q", messages(ps))
+	}
+	success := func(st map[string]any) {
+		refuse(st)
+		st["expect"] = []any{map[string]any{"subject": "status", "name": "", "operator": "equals", "value": 201}}
+	}
+	if _, ps := p.Convert(withStep(t, success), in); !strings.Contains(messages(ps), "is an integer") {
+		t.Errorf("a wrong type was accepted in a step that expects success: %q", messages(ps))
 	}
 }

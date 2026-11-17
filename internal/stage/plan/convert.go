@@ -169,8 +169,11 @@ func (p Packet) convertStep(st AnswerStep, path string, in Input, ps *problems) 
 	sd.Method, sd.Hint, sd.Service = op.Method, op.Route, p.serviceOf(op, in)
 
 	sd.Path = p.fillPath(op, st, path, ps)
-	sd.Query = p.fillQuery(op, st, path, ps)
-	sd.JSON = p.fillBody(op, st, path, ps)
+	// A step that expects a refusal tests a validation rule, so it may leave out a required field and
+	// send a value of another type. It still cannot send a name that the document does not declare.
+	refusal := expectsRefusalStatus(st)
+	sd.Query = p.fillQuery(op, st, path, refusal, ps)
+	sd.JSON = p.fillBody(op, st, path, refusal, ps)
 
 	for j, c := range st.Captures {
 		cp := fmt.Sprintf("%s.captures[%d]", path, j)
@@ -253,7 +256,21 @@ func (p Packet) fillPath(op PacketOperation, st AnswerStep, path string, ps *pro
 	return route
 }
 
-func (p Packet) fillQuery(op PacketOperation, st AnswerStep, path string, ps *problems) map[string]string {
+// expectsRefusalStatus says whether a step expects a status of 400 to 499.
+func expectsRefusalStatus(st AnswerStep) bool {
+	for _, c := range st.Expect {
+		n, ok := c.Value.(json.Number)
+		if c.Subject != "status" || c.Operator != "equals" || !ok {
+			continue
+		}
+		if r, isNum := ratOf(n.String()); isNum && r.IsInt() && r.Num().IsInt64() && r.Num().Int64() >= 400 && r.Num().Int64() <= 499 {
+			return true
+		}
+	}
+	return false
+}
+
+func (p Packet) fillQuery(op PacketOperation, st AnswerStep, path string, refusal bool, ps *problems) map[string]string {
 	declared := map[string]openapi.Param{}
 	var names []string
 	for _, pa := range op.Params {
@@ -274,7 +291,7 @@ func (p Packet) fillQuery(op PacketOperation, st AnswerStep, path string, ps *pr
 		case !isString:
 			ps.add(qp, "the value of query parameter %s must be a string", nv.Name)
 			continue
-		case len(pa.Enum) > 0 && !slices.Contains(pa.Enum, val) && !refPattern.MatchString(val):
+		case !refusal && len(pa.Enum) > 0 && !slices.Contains(pa.Enum, val) && !refPattern.MatchString(val):
 			ps.add(qp, "query parameter %s of %s takes one of %s, and not %q", nv.Name, op.Key, strings.Join(pa.Enum, ", "), val)
 			continue
 		}
@@ -287,16 +304,16 @@ func (p Packet) fillQuery(op PacketOperation, st AnswerStep, path string, ps *pr
 		out[nv.Name] = val
 	}
 	for _, pa := range op.Params {
-		if _, ok := out[pa.Name]; pa.In == "query" && pa.Required && !ok {
+		if _, ok := out[pa.Name]; !refusal && pa.In == "query" && pa.Required && !ok {
 			ps.add(path+".query", "query parameter %s of %s is required and is missing", pa.Name, op.Key)
 		}
 	}
 	return out
 }
 
-func (p Packet) fillBody(op PacketOperation, st AnswerStep, path string, ps *problems) any {
+func (p Packet) fillBody(op PacketOperation, st AnswerStep, path string, refusal bool, ps *problems) any {
 	if len(st.Body) == 0 {
-		if op.BodyKnown && op.BodyRequired {
+		if !refusal && op.BodyKnown && op.BodyRequired {
 			for _, f := range op.Body {
 				if f.Required {
 					ps.add(path+".body", "field %s is required by %s and is missing", f.Name, op.Key)
@@ -327,7 +344,10 @@ func (p Packet) fillBody(op PacketOperation, st AnswerStep, path string, ps *pro
 			ps.add(bp, "field %s is given twice", bf.Field)
 			continue
 		}
-		v, problem := typedValue(f, ok, bf.Value)
+		v, problem := bf.Value, ""
+		if !refusal {
+			v, problem = typedValue(f, ok, bf.Value)
+		}
 		if problem != "" {
 			ps.add(bp, "field %s of %s %s", bf.Field, op.Key, problem)
 			given[bf.Field] = true // the missing field is not a second problem
@@ -336,7 +356,7 @@ func (p Packet) fillBody(op PacketOperation, st AnswerStep, path string, ps *pro
 		body[bf.Field], given[bf.Field] = v, true
 	}
 	for _, f := range op.Body {
-		if f.Required && !given[f.Name] {
+		if !refusal && f.Required && !given[f.Name] {
 			ps.add(path+".body", "field %s is required by %s and is missing", f.Name, op.Key)
 		}
 	}

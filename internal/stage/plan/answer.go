@@ -298,36 +298,27 @@ func bodyItems(op PacketOperation) any {
 	return anyOf(branches)
 }
 
-// valueSchema is the schema of the value of a body field. An object or an array is written as
-// the text of its JSON, because a closed schema cannot hold a free-form object.
+// valueSchema is the schema of the value of a body field. It names the type that the document gives
+// the field and accepts any scalar, because a step that expects a refusal may send a value of another
+// type, which is how a validation rule is tested. Code holds a step that expects no refusal to the
+// type. An object or an array is written as the text of its JSON, because a closed schema cannot hold
+// a free-form object.
 func valueSchema(f openapi.Field) map[string]any {
-	var types []any
 	switch f.Type {
-	case "string", "integer", "number", "boolean":
-		types = append(types, f.Type)
 	case "object", "array":
 		return map[string]any{"type": "string", "description": "The JSON text of the " + f.Type + ", for example " + map[string]string{"object": `{"a":1}`, "array": `["a"]`}[f.Type]}
-	default:
-		return jsonValue("The value.")
+	}
+	desc := "The value."
+	if f.Type != "" {
+		desc = "The value, " + article(f.Type) + " " + f.Type + "."
+	}
+	if len(f.Enum) > 0 {
+		desc += " One of " + strings.Join(f.Enum, ", ") + "."
 	}
 	if f.Nullable {
-		types = append(types, "null")
+		desc += " It may be null."
 	}
-	v := map[string]any{"type": types[0]}
-	if len(types) > 1 {
-		v["type"] = types
-	}
-	if len(f.Enum) > 0 && f.Type == "string" {
-		list := make([]any, len(f.Enum))
-		for i, e := range f.Enum {
-			list[i] = e
-		}
-		if f.Nullable {
-			list = append(list, nil)
-		}
-		v["enum"] = list
-	}
-	return v
+	return jsonValue(desc)
 }
 
 // captureItem lets a capture read a field that a success response declares. A document that
