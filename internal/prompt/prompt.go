@@ -11,8 +11,12 @@ import (
 //go:embed plan.md
 var planSource string
 
+//go:embed criterion.md
+var criterionSource string
+
 // The prompt text shows {{name}} variables to the model, so the template uses other delimiters.
 var planVersion, planTemplate = mustParse("plan.md", planSource)
+var criterionVersion, criterionTemplate = mustParse("criterion.md", criterionSource)
 
 // PlanData fills the planner prompt. Every field is data: text from the repository or the
 // model reaches the prompt only through these values, never through the template itself.
@@ -34,6 +38,33 @@ type PlanData struct {
 	Fixtures     string // a Markdown list of the fixtures the planner may name; empty when there is none
 	Tickets      string // the ticket files of the change, numbered by line; empty when there is none
 	Accounts     string // a Markdown list of the accounts a step may act as; empty with fewer than two
+}
+
+// CriterionData fills the prompt of a job for one criterion. Every field is data, as in PlanData.
+type CriterionData struct {
+	Criterion   string // the criterion with its cite, as a fenced block
+	Operations  string // a Markdown list of the operations that the job can call
+	Fixtures    string // a Markdown list of the fixtures; empty when there is none
+	Accounts    string // a Markdown list of the accounts; empty with fewer than two
+	Account     string // the account a step acts as when it names none
+	Diff        string // the diff of the ticket's files as a fenced block; empty when none is shown
+	DiffOmitted string // a Markdown list of the files that Diff lacks; empty when there is none
+	Existing    string // a Markdown list of the scenarios that exist; empty when there is none
+	Correction  bool   // the job repairs a previous answer
+	Previous    string // the previous answer as a fenced block
+	Problems    string // a Markdown list of what the previous answer got wrong
+}
+
+// CriterionVersion is the version line of the criterion prompt.
+func CriterionVersion() string { return criterionVersion }
+
+// Criterion renders the prompt of a job for one criterion, without its version line.
+func Criterion(d CriterionData) (string, error) {
+	var b strings.Builder
+	if err := criterionTemplate.Execute(&b, d); err != nil {
+		return "", fmt.Errorf("render the criterion prompt: %w", err)
+	}
+	return b.String(), nil
 }
 
 // PlanVersion is the version line of the planner prompt.

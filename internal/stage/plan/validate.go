@@ -50,6 +50,11 @@ type Input struct {
 	TrialOff      string             // why the trial is off, shown in plan.md; "" when the person did not turn it off
 	BaseAPI       []openapi.Document // the API documents at the merge base, to tell a new route from a wrong path
 	Progress      func(Progress)     // nil for no reports
+	// Ladder is the models of the criteria pipeline, the cheapest first. JobDir is an empty directory
+	// that its jobs run in, and Previous the stored answers of earlier plans.
+	Ladder   []Rung
+	JobDir   string
+	Previous []StoredAnswer
 }
 
 // Account is an auth profile of the configuration: its name and its one-line description.
@@ -209,9 +214,10 @@ func (v *validator) behaviourCovered(d Draft) {
 			continue
 		}
 		has := slices.ContainsFunc(d.Scenarios, func(s ScenarioDraft) bool { return s.Ticket == t.Key }) ||
-			slices.ContainsFunc(d.NotDrafted, func(n NotDrafted) bool { return n.Ticket == t.Key })
+			slices.ContainsFunc(d.NotDrafted, func(n NotDrafted) bool { return n.Ticket == t.Key }) ||
+			slices.ContainsFunc(d.ManualChecks, func(m ManualCheckDraft) bool { return m.Ticket == t.Key })
 		if !has {
-			v.add(fmt.Sprintf("tickets[%d]", i), "ticket %s changes behaviour and has neither a scenario nor a notDrafted entry", t.Key)
+			v.add(fmt.Sprintf("tickets[%d]", i), "ticket %s changes behaviour and has neither a scenario nor a notDrafted entry nor a manual check", t.Key)
 		}
 	}
 }

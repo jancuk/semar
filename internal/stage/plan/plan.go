@@ -27,10 +27,12 @@ const (
 	maxProblemRunes  = 400
 )
 
-// Progress is where a plan is. Attempt starts at 1.
+// Progress is where a plan is. Attempt starts at 1. The criteria pipeline has no attempt: it
+// reports how many of its criteria are answered, in Done of Total.
 type Progress struct {
-	Attempt  int
-	Problems int // the problems of the previous draft, 0 on the first attempt
+	Attempt     int
+	Problems    int // the problems of the previous draft, 0 on the first attempt
+	Done, Total int // the criteria that are answered, and all of them; Total is 0 outside the criteria pipeline
 	provider.Progress
 }
 
@@ -66,6 +68,11 @@ type Output struct {
 	// Unaccounted are the acceptance criteria that nothing in the plan cites, after the last
 	// attempt (D9). Code writes each as an obligation with a gap, so the ledger never loses it.
 	Unaccounted []Criterion
+	// Pipeline, Outcomes, and Answers are set by the criteria pipeline only. Answers are the accepted
+	// outputs of its jobs, which the next plan of the same tickets can reuse.
+	Pipeline *PipelineStats
+	Outcomes []CriterionOutcome
+	Answers  []StoredAnswer
 }
 
 // RefusedDraft is a draft that was not used: a problem of its own, or a problem that the trial
