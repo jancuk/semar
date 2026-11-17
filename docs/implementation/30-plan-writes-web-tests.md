@@ -1,14 +1,14 @@
 # Plan 30: The plan writes web tests
 
-* **Status:** Planned.
+* **Status:** Implemented. This text describes the system as built.
 * **Needs first:** Plans 25, 27, 28, and 29.
-* **Implements:** PRD decision D74 and FR-369 to FR-374.
+* **Implements:** PRD decision D74 and FR-369 to FR-374. TRD section "Plan writes web tests".
 
 ## Goal
 
 `semar plan` writes a web test for an acceptance criterion that a web page shows. A model reads the page and does the flow in a browser, and Semar writes what it did as a test that replays with no model. A person reads the result in `semar review`, as with an API test.
 
-Today the plan answers such a criterion with a manual check, because a model that cannot see the page invents locators (Plan 28). `semar record` gave the page to a person. This plan gives it to the model, and keeps everything that `record` does after the last click.
+Before this plan the plan answered such a criterion with a manual check, because a model that cannot see the page invents locators (Plan 28). `semar record` gave the page to a person. This plan gives it to the model, and keeps everything that `record` does after the last click.
 
 ## How it works
 
@@ -22,39 +22,150 @@ The explorer is the recorder of Plan 28 with a model in the seat of the person.
 
 ## Decisions
 
+Each row says what was built. Where it differs from the plan as first written, the last sentence of the reason says how and why.
+
 | # | Decision | Reason |
 | --- | --- | --- |
-| D1 | The answer `manualCheck` of a criterion job gains `surface`, one of `web`, `mobile`, and `other`. The prompt version rises | Code must know which manual checks a browser can do. The job has read the criterion already, so the question costs no job |
-| D2 | A web criterion is explored when the environment is a test environment that allows test data, Chrome is found, and the service has a web page. A service has a web page when `GET <base URL><start>` answers `text/html`, where `start` is `services[].web.start`, else `/`. The probe is one GET for each service of a plan. `--no-web` turns the exploring off. A criterion that is not explored stays a manual check, and the plan says why once | No setting is needed for the common case, and a service that is an API only costs one request. A recording clicks and types, so the rules of where `record` runs hold here too |
-| D3 | The page list has the address, the title, and at most 150 lines, one for each visible element that a person can act on or read: `e<n> <role> "<name>"`, with the text, the value of a field, and `disabled` when they apply. Texts are cut at 80 characters. An element out of the view is listed, and Semar scrolls to it before it acts | A small model reads a short list well. The reference is the only way to name an element, so the model cannot invent a locator |
-| D4 | The answer of a turn follows a closed schema and is one of three kinds. `act` has 1 to 5 actions, each `click`, `fill` (with `text`), `press` (`Enter` or `Escape`), `drag` (with `to`), or `check` (with `expect`), on a reference of the list. `done` has the title and the intent of the test. `manual` has the reason. Semar stops the actions of a turn at the first that cannot be done, and the next turn says which and why | Several actions in a turn make a form one turn and not five. A closed schema is what makes a small model usable (Plan 25) |
-| D5 | A `fill` text may hold `{{run.id}}`. Semar types the ID of the run, and the written step keeps the variable, through the values of Plan 28 (D6). The prompt asks for it in every name that the flow creates | A test that creates "Board" at every run meets its own leftovers |
-| D6 | The first answer may be `given`, with fixtures of the catalogue and an alias for each, in place of the three kinds. Semar makes them as `record --given` does, gives the model their outputs, and loads the page again. The catalogue in the prompt has the ID, the description, and the outputs of each fixture, drafts of this plan included | A flow needs data, and a fixture gives it with a cleanup. The model chooses before it acts, because a fixture that is made after a click would not be in the recording's start |
-| D7 | A `check` records what the element shows, as Plan 28 does. When `expect` equals it, the check is written with the source `ticket` and the cite of the criterion. When they differ, the check is written with the text of `expect`, and the plan lists it under "fails now" with what the page shows | The expectation comes from the ticket and not from the page, so a page with a defect gives a test that fails. This is the rule of the API scenarios |
-| D8 | A flow ends as a manual check, with the reason, when the model says `manual`, when it records no check, after 12 turns, after 40 actions, after 3 minutes, or when the replay of the written test does not end as the recording predicts. A flow that ends so on one model is tried once on the next model of the ladder, in a new browser with new fixtures. Nothing of a flow that ends so is written | A wrong test costs more than a manual check. The ladder is the one that the criteria jobs use |
-| D9 | The written scenario takes the next number of its ticket and the tag `@surface:web`. It covers the use case of its criterion, so the use case shows a test and not a manual check. The screens go into the screens file of the app, merged, as in Plan 28 | The status of the change must count the test |
+| D1 | The answer `manualCheck` of a criterion job gains `surface`, one of `web`, `mobile`, and `other`. The prompt version rises (criterion 3 to 4). The obligation keeps it as `manual.surface`, and `plan.md` shows it | Code must know which manual checks a browser can do. The job has read the criterion already, so the question costs no job. Changed: the plan did not say where the surface is kept. A person who reads the checklist sees which checks are for a phone |
+| D2 | A web criterion is explored when the environment is a test environment that allows test data, Chrome is found, and the service has a web page. A service has a web page when `GET <base URL><start>` answers `text/html`, where `start` is `services[].web.start`, else `/`. The probe is one GET for each service of a plan, up to the first that answers. `--no-web` turns the exploring off. A criterion that is not explored stays a manual check, and the plan says why once | No setting is needed for the common case, and a service that is an API only costs one request. A recording clicks and types, so the rules of where `record` runs hold here too. Changed: `services[].web.start` did not exist, so it is added to the configuration as `web: {start: /path}`, checked to be a path that starts with one `/`. Only the first service with a web page is explored. The reason is on standard error once, in `plan.md`, and not in the exit code |
+| D3 | The page list has the address, the title, and at most 150 lines, one for each visible element that a person can act on or read: `e<n> <role> "<name>"`, with the text, the value of a field, and `disabled` when they apply. Texts are cut at 80 characters. An element out of the view is listed, and Semar scrolls to it before it acts | A small model reads a short list well. The reference is the only way to name an element, so the model cannot invent a locator. Changed: one page function reads the page, and not the accessibility tree, because it must also know what is visible and what a person can drag or click, and it keeps the elements in `window.__semarRefs` so that a reference maps to an element. A list over 150 lines keeps what a person can act on first and says how many it left out. The address has no query and no fragment. A role that a page wrote can add no line. A text inside a button or a link is not listed again, and a text inside a card that can be dragged is, so that a badge can be checked on its own |
+| D4 | The answer of a turn follows a closed schema and is one of three kinds. `act` has 1 to 5 actions, each `click`, `fill` (with `text`), `press` (`Enter` or `Escape`), `drag` (with `to`), or `check` (with `expect`), on a reference of the list. `done` has the title and the intent of the test, and `unproved`. `manual` has the reason. Semar stops the actions of a turn at the first that cannot be done, and the next turn says which and why | Several actions in a turn make a form one turn and not five. A closed schema is what makes a small model usable (Plan 25). Changed: the references of the list are an enum of the schema, so a reference that is not on the page cannot be named. `press` takes an empty reference for a key that goes to the page. `done` names in `unproved` the part of the criterion that its checks did not prove, or nothing: the test is written for the rest, and the plan keeps a manual check of the same criterion for that part. A turn is a closed sum in code, `act`, `done`, `manual`, or `given`. An answer with a problem goes back once to the same model with the problems in plain words, as a criterion does, and then the flow ends as a manual check |
+| D5 | A `fill` text may hold `{{run.id}}`. Semar types the ID of the run, and the written step keeps the variable, through the values of Plan 28 (D6). The prompt asks for it in every name that the flow creates | A test that creates "Board" at every run meets its own leftovers. Changed: another `{{...}}` in a text is refused with a sentence, because the engine would read it as a variable of a step. `{{run.id}}` in the `expect` of a check is the ID of the run too. The run ID is a value of every flow, with or without fixtures, so that the text that a flow typed, the locators that follow it, and the text of a check all keep the variable. The prompt tells the model to make its own data, because a first live run used a board that an earlier run left, and its test did not run again |
+| D6 | The first answer may be `given`, with fixtures of the catalogue and an alias for each, in place of the three kinds. Semar makes them as `record --given` does, gives the model their outputs, and loads the page again. The catalogue in the prompt has the ID, the description, and the outputs of each fixture, drafts of this plan included | A flow needs data, and a fixture gives it with a cleanup. The model chooses before it acts, because a fixture that is made after a click would not be in the recording's start. Changed: "the page" that is loaded again is the first page of the service, `services[].web.start`, because the model has no action that opens an address. The recording starts over at that page. `given` is offered only when the catalogue has a fixture, and a `given` after the first answer is refused with a note and does nothing |
+| D7 | A `check` records what the element shows, as Plan 28 does. When `expect` equals it, the check is written with the source `ticket` and the cite of the criterion. When they differ, the check is written with the text of `expect`, and the plan lists it under "fails now" with what the page shows | The expectation comes from the ticket and not from the page, so a page with a defect gives a test that fails. This is the rule of the API scenarios. Changed: every check of a flow is by `model` as well, so it needs a person's confirmation as an API expectation of a model does. The replay inside the plan therefore treats the expectations of its one scenario as confirmed for that one run and stores nothing, because an unconfirmed result is `inconclusive` and never `failed`, and the plan must tell whether the page meets the criterion. Spaces do not make a claim differ from what the page showed. A check on an element that shows no text is refused with a sentence, because the recorder would read the element around it |
+| D8 | A flow ends as a manual check, with the reason, when the model says `manual`, when it records no check, after 12 turns, after 40 actions, after 3 minutes, or when the replay of the written test does not end as the recording predicts. A flow that ends so on one model is tried once on the next model of the ladder, in a new browser with new fixtures. Nothing of a flow that ends so is written | A wrong test costs more than a manual check. The ladder is the one that the criteria jobs use. Changed: the prediction is `passed` when every check met its claim and `failed` when one did not. A test that ends otherwise is removed: its scenario, its script, and what it added to the screens file, which `record.Written.Undo` puts back. A flow that never asked the model, because the browser could not be opened or the fixtures could not be made, is not tried on another model, since it would meet the same failure. A cost limit ends the flows that follow. A page gets 300 milliseconds after each action before Semar asks whether it is still, because a page starts its request a moment after a click. A plan that ends with an error removes the tests that its flows wrote. The replay declares the head of the change for a service with no build probe, because the plan does not judge a build |
+| D9 | The written scenario takes the next number of its ticket and the tag `@surface:web`. It covers the use case of its criterion, so the use case shows a test and not a manual check. The screens go into the screens file of the app, merged, as in Plan 28 | The status of the change must count the test. Changed: the web tests are explored before the plan numbers its own scenarios, so a web test of a ticket has the next number, and the API scenarios of the plan follow it. The criterion has no manual obligation, and its scenario has the obligation `<ticket>/scenario-<id>`. The Feature line is the sentence of the ticket, as for an API scenario, and the title and the intent come from the model |
 | D10 | Nothing is approved. The screens file and each scenario go through `semar review`, with the marks `(by model)` | A person reads what a model wrote before it counts |
 | D11 | One criterion is explored at a time | An account has one browser profile, and two flows in one application disturb each other |
-| D12 | Each turn is a job of the plan: it counts in the model use line, in `--max-cost`, and in the usage file with the pipeline `web`. The plan prints, for the web part, the criteria explored, the tests written, the ones left for a person with the reason, the turns, and the cost | The person sees what the web part cost, apart from the API part |
-| D13 | The text of the page is data. The prompt marks it as such, the model has no tool, its answer can only name an action on a reference, and the browser stays inside the hosts and the methods of the environment (Plan 22) | A page can hold text that reads as an instruction |
-| D14 | Not built: a mobile screen, a flow across two tabs, a file upload, a hover, and a select list, which the recorder does not hear (Plan 28). The estimate of `semar run` before a plan does not count the web part | Each is its own work. The count of web criteria is not known before the first jobs |
+| D12 | Each turn is a job of the plan: it counts in the model use line, in `--max-cost`, and in the usage file with the pipeline `web`. The plan prints, for the web part, the criteria explored, the tests written, the ones left for a person with the reason, the turns, and the cost | The person sees what the web part cost, apart from the API part. Changed: the turns are in the total and in the cost limit, and the use line adds `N web turns`. `plan.md` lists the web tests, the models of the web part, and the reason for each criterion left for a person |
+| D13 | The text of the page is data. The prompt marks it as such, the model has no tool, its answer can only name an action on a reference, and the browser stays inside the hosts and the methods of the environment (Plan 22) | A page can hold text that reads as an instruction. Changed: the recorder of a flow has the effects policy of the environment, and judges every request of the page as the engine of a replay does. That policy lists hosts and a deny list for a browser, and not methods, because a page sends requests that no step wrote. The environment of a flow is a test environment that allows test data, so a write is allowed |
+| D14 | Not built: a mobile screen, a flow across two tabs, a file upload, a hover, and a select list, which the recorder does not hear (Plan 28), and a date, time, color, or slider field, which a flow cannot type into. The estimate of `semar run` before a plan does not count the web part | Each is its own work. The count of web criteria is not known before the first jobs. Changed: the list names such a field by its kind, such as `datetime-local`, and a fill of it is refused with a sentence, so that a model says so early and leaves that part to a person |
 
-## Tasks
+## Contract
 
-Each task starts with a test that fails, and ends with one commit.
+```text
+$ semar plan --provider claude --base base-main
+...
+web: 2 criteria explored, 1 test written, 1 left for a person, 22 turns, $0.12
+web: left for a person: docs/tickets/SHOP-482.md:13: the due date field is a datetime-local input that cannot be typed into, so the due date and the Overdue badge cannot be shown on this page.
+```
 
-1. **Surface of a manual check.** D1: the schema, the prompt, the decoding, the obligations file, and the plan text. Tests in `internal/stage/plan`.
-2. **Page list.** D3: a function of the web engine that returns the list and a map from reference to element. Tests against pages of a test server: roles and names, a field with a value, a disabled button, hidden elements left out, the cut at 150 lines and 80 characters.
-3. **Act on a reference.** D4 and D5: click, fill, press, drag, and check as real input on the recorder's tab, with the scroll, and the error of an action that cannot be done. The input code of `internal/engine/web/webtest` moves to where both can use it. Tests: each action is heard by the recorder as the same event that a person makes.
-4. **The turn.** The prompt, the schema, the decoding, and the rules of D4, D6, and D8 as a loop that takes a function for the model and a function for the browser. Tests with a scripted model: a flow of two turns, an action that fails and is reported, `given` first, `given` later refused, the limits, no check.
-5. **Write and replay.** D7 and D9: the events go through the code of `record`; the check source and cite; "fails now"; the use case link; a replay that fails ends the flow as a manual check and removes what was written.
-6. **In the plan.** D2, D8 (the ladder), D10, D11, D12: the probe, the order after the fixture drafts, the output, the stats, `--no-web`, and `--max-cost`. Tests in `internal/cli` with a scripted provider and a test page: a plan of one API criterion and one web criterion writes both tests, and a run of them passes.
-7. **Docs.** This file as built with a Measured section, the README, the PRD (D74, FR-369 to FR-374), and the TRD.
+A check that the page does not meet is listed with what the page shows, for example:
 
-## Done when
+```text
+web: SHOP-482-03 fails now: due-date should show "2026-12-01" and the page shows "2026-12-02"
+```
 
-* On a sample application with a web page, `semar plan` with the Claude Code provider writes at least one web test for a web criterion, with no file written by hand, and `semar run` passes it after `semar review`.
-* The same test fails when the page shows a wrong value for its check.
-* A criterion on a mobile screen stays a manual check.
-* The Measured section gives, for that plan: the web criteria, the tests written, the turns, the models, the time, and the cost.
-* `go test ./...` passes.
+The scenario of a flow is the one in the Measured section. Every expected result is `by model` and cites its criterion.
+
+## Trust
+
+| Risk | Answer |
+| --- | --- |
+| A page tells the model what to do | The prompt calls every text of the page data. The model has no tool. Its answer can only name an action on a reference of the list, and the schema lists the references |
+| A flow changes data that it should not | A flow runs only on a test environment that allows test data. The browser is judged by the effects policy, host by host. Fixtures are cleaned up |
+| A password reaches the model or a file | The list never reads the value of a password field, a password field cannot be checked, and the sign-in is Plan 29's, in code |
+| A test is true whatever the product does | A check expects the text of the criterion, and not what the page shows. A check that the page does not meet is listed as "fails now" and replays as `failed` |
+| A wrong test is kept | The replay must end as the recording predicts, or the test is removed |
+| A model writes a test that counts | Every expectation is by `model` and needs a person's confirmation. Nothing is approved |
+
+## As built
+
+* **The list.** `internal/pagelist` is the shape (`Item`, `Element`, `List`) with the 150 lines and the 80 characters, and no browser. `internal/engine/web/pagelist.js` reads the page. `web.Explorer` is `NewExplorer(recorder)` with `List`, `Click`, `Fill`, `Press`, `Drag`, and `Check`, and `RunID` for `{{run.id}}`.
+* **The input.** `internal/engine/web/webinput` has the mouse and key calls that the replay engine, the explorer, and the tests of the recorder share. `webtest.Driver` finds an element by a selector and sends through it.
+* **The recorder.** `RecorderOptions.Policy` guards the tab. `Recorder.Settle` waits for the page, with no request open when guarded. `Recorder.Reopen` starts the recording over at an address. `watchJS` is in every window.
+* **The turn.** `plan.TurnSchema`, `DecodeTurn`, `TurnInput.Prompt`, and `runState.turnModel` in `webturn.go`. The prompt is `internal/prompt/web.md`, version 1. `plan.RunFlow` in `webflow.go` is the loop of a model function and a browser. `plan.WebExplorer` in `webexplore.go` is the seam that `internal/cli` gives, with `exploreWeb` and `exploreOne` for the order, the ladder, and the numbers.
+* **The files.** `record.Options.Claims` and `Draft.FailsNow`, and `record.Written.Undo`. `internal/cli/webexplore.go` is the explorer, with `planWeb` for the decision of D2. `startRecording`, `persistDraft`, and `replayScenario` in `record.go` are shared by `semar record` and the explorer.
+* **The plan.** `Output.WebTests`, `Draft.WebTests`, and `CriterionOutcome.Web`. The criteria table says `web test`, and the accounting cites the criterion by the test. `PipelineStats.Web` and `WebUses` hold the part, and `usage.PipelineWeb` is the pipeline of its records.
+
+### Tests
+
+* `internal/pagelist`: the format, the cuts, the 150 lines that keep what a person can act on, a secret value, and a role that adds a line.
+* `internal/engine/web` with a real Chrome: the page list of a page with every kind of element, hidden ones, a password, and 150 lines; each action on a reference as the same event that a person makes; a drag; a check that the page does not see; an element out of the view; every refusal in plain words; `{{run.id}}`; a password that is never read back; the guard against another host; settle after a slow request; reopen.
+* `internal/stage/plan` with a scripted model and a scripted browser: a flow of two turns, an action that fails and is reported, `given` first and `given` later, the limits, no check, a model that says manual, no usable answer, a cost limit, a cancel; the schema, the decoding, and the prompt; a turn as a job that counts apart; the exploring of a plan: the order and the numbers, a mobile check left alone, the next model, one at a time, "fails now", the cost limit, and a failed plan that removes the tests of its flows.
+* `internal/record`: the claims, "fails now", spaces, variables in a claim, and `Undo`.
+* `internal/cli`: the explorer with a real Chrome: a test that replays and runs as a recorded one does, a claim that the page does not meet, a flow that ends as manual and writes nothing, a replay that differs from the recording and removes the test, and fixtures that are made and cleaned up. A plan of one API criterion, one web criterion, and one Android criterion that writes the API scenario and the web test, lists both in `plan.md` and the obligations, and passes the web test after `semar review`. The reasons for not exploring, and the usage file.
+
+## Measured
+
+One plan of a real small model on a sample board application: an API, a web page with a sign-in form that keeps its session in `sessionStorage`, and two tickets with 16 acceptance criteria in all, among them web criteria (drag a card between lists, and the due date and the Overdue badge of a card) and Android criteria. The provider is Claude Code with the default ladder, `haiku`, then `sonnet`. The environment was a test environment on this machine, with a new backend and an empty `.semar` before the run. The ticket keys below are renamed. The numbers are from `plan.md` and the usage file of that run, and they are one run, not a mean.
+
+| What | Measured |
+| --- | --- |
+| Acceptance criteria | 16: 11 answered as API scenarios, 5 as manual checks |
+| Surface of the 5 manual checks | `web` 2, `mobile` 2, `other` 1 |
+| Web criteria explored | 2. The three others were never given to a browser |
+| Web tests written | 1, by `haiku`, in 11 turns |
+| Left for a person | 1, after `haiku` (6 turns) and `sonnet` (5 turns): the due date field is a `datetime-local` input that a flow cannot type into, so no card had a due date to show. The model said so in its reason |
+| Turns of the web part | 22: 17 by `haiku` and 5 by `sonnet`, 22 calls, no correction |
+| Time | 3 minutes 9 seconds for the plan, of which the web part took 2 minutes 6 seconds |
+| Cost | $0.19 for the plan: $0.12 for the web turns and $0.07 for the 16 first jobs, as the provider reported it. The live runs of this plan, which had five runs before it that found the defects that the rows of the decisions table describe, cost $1.34 in all, as the usage file counts them |
+| After `semar review` | `semar run` passed 12 of 12 scenarios, the web test among them: `SHOP-482-01  passed` |
+| The page made wrong | In a copy of the sample, one comparison of the drop code was turned round, so that a card dropped on another card went to the wrong place. `semar run --scenario SHOP-482-01` ended `failed` with exit code 1: `step drag-card-3-run-id-card-1-run-id-2: expected element button-2 equals Card 3 r-20261117T164822Z-d13f (written as element button-2 equals Card 3 {{run.id}}), observed Card 1 r-20261117T164822Z-d13f` |
+| A mobile screen | The two `mobile` criteria and the one `other` stayed manual checks, and no browser was opened for them |
+
+What the person is left with, from `semar status`: 11 use cases verified, and 5 for a person. One of the five is the rest of the drag criterion, which the test does not prove: the model named in `unproved` that the order after a reload and the refusal by the server were not checked, and the plan kept a manual check for them.
+
+The test that the model wrote, as it stands in the repository:
+
+```gherkin
+Feature: Move a card to another list
+
+  @id:SHOP-482-01 @ticket:SHOP-482 @surface:web
+  Scenario: Dragging cards moves them across lists and reorders them in place, without a reload
+    Before these drags, the board had Card 1 and Card 3 in List B and Card 2 in List A, with no drag between them. Now Card 1 was dragged into List B, and Card 3 was dragged onto Card 1's place, so the page shows Card 3 first and Card 1 second in List B, with no reload.
+
+    Given Open /
+    # step: open
+    When Type "Board {{run.id}}" in new-board
+    # step: fill-new-board
+    And Click new-board-2
+    # step: click-new-board-2
+    And Type "List A {{run.id}}" in add-list
+    # step: fill-add-list
+    And Click add-list-2
+    # step: click-add-list-2
+    And Type "Card 1 {{run.id}}" in add-card
+    # step: fill-add-card
+    And Click add-card-2
+    # step: click-add-card-2
+    And Type "Card 2 {{run.id}}" in add-card
+    # step: fill-add-card-2
+    And Click add-card-2
+    # step: click-add-card-2-2
+    And Type "List B {{run.id}}" in add-list
+    # step: fill-add-list-2
+    And Click add-list-2
+    # step: click-add-list-2-2
+    And Drag card-1-run-id to list-b-run-id
+    # step: drag-card-1-run-id-list-b-run-id
+    Then the element button equals "Card 1 {{run.id}}"
+    # ticket docs/tickets/SHOP-482.md:16 Web: dragging a card onto another list or another place in a list moves it, and the board shows the new order without a reload, by model
+    When Type "Card 3 {{run.id}}" in add-card-3
+    # step: fill-add-card-3
+    And Click add-card-4
+    # step: click-add-card-4
+    And Drag card-3-run-id to card-1-run-id-2
+    # step: drag-card-3-run-id-card-1-run-id-2
+    Then the element button-2 equals "Card 3 {{run.id}}"
+    # ticket docs/tickets/SHOP-482.md:16 Web: dragging a card onto another list or another place in a list moves it, and the board shows the new order without a reload, by model
+```
+
+Read as a QA would. The test makes its own board, lists, and cards with the ID of the run in each name, so it runs again. Its two checks prove something that the product can get wrong: after the first drag the first card of the second list is the card that was moved, and after the second drag the card that was dropped on it comes first. A page that drops to the wrong place fails the second check, as the row above shows. Its weak parts are the story in the intent, which does not match what the test does, and the locators of three elements, which are short CSS paths such as `section:nth-of-type(2) > ul > li > button`, the last choice of the recorder. A person fixes both in the file.
+
+What the five live runs before this one found, and the structure that now prevents each:
+
+* **Stale references.** A page that has just been clicked had not started its request when Semar read it, so the model chose an element that the page then replaced. A page now gets 300 milliseconds after an action before it is asked whether it is still.
+* **A field that cannot be typed into.** A `datetime-local` field kept none of the text of two models, and each said so after four turns. The list now gives such a field its kind, a fill of it is refused at once with a sentence, and the prompt says to prove what can be proved without it.
+* **A whole criterion left to a person.** A criterion with a part that the page cannot show, such as the refusal of a server, ended as `manual` on both models. `done` now carries `unproved`, and the plan keeps a manual check for that part.
+* **A test that did not run again.** A model used a board that an earlier run had left, and its check named a run ID that the replay did not have. The prompt now tells the model to make its own data, and the run ID is a value of every flow, so the typed text, the locators, and the text of a check keep the variable. Before this, a flow with no fixture wrote the literal ID.
+* **A check that proves nothing.** A model checked the label "Due date" and a "Clear due date" button, and the test listed a mismatch that only a wrong element caused. A check on an element with no text is refused, and the prompt says that a label or a control is not a result.
+* **Numbers.** A flow that proved part of a criterion left the number of its test out of the numbers of the plan, so an API scenario took the same number and no plan was written. The plan then removed the web test, as it does for every plan that fails, and the next run numbered correctly. A test now covers it.
+
+## Not built
+
+* A mobile screen, a flow across two tabs, a file upload, a hover, and a choice in a select list, which the recorder does not hear.
+* An action that opens an address. A flow starts at the first page of the service and moves by clicks.
+* More than one service with a web page in one plan: the first is explored.
+* The count of web criteria in the estimate before a plan.
+* A status line while a flow runs. The plan prints the web part when it ends.

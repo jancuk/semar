@@ -71,6 +71,7 @@ These parts are implemented in Go.
 * **Exports:** `semar export` writes a stored run as CTRF, JUnit XML, or SARIF. See [Send results to your tools](#send-results-to-your-tools).
 * **The web:** a journey leg or a scenario with the tag `@surface:web` drives Chrome on a profile of Semar's own, finds elements through screen objects that a person approves, and repairs a broken locator with no model. `semar login`, `semar review --screens`, and `semar screens repair`. Plan 22 describes it. An account may name its web user and password variable, and Semar then signs in by itself: see [Sign in to a web application](#sign-in-to-a-web-application).
 * **Record a web test:** `semar record` opens Chrome on Semar's own profile, records the flow that a person does, takes what the person points at with the Option key as the expected result, and writes the screens, the scenario, and the script. Nobody writes a locator. See [Record a web test](#record-a-web-test) and Plan 28.
+* **Web tests from a plan:** `semar plan` writes a web test for an acceptance criterion that a web page shows. A model reads the page as a list of elements, does the flow in Chrome, and Semar writes what it did as a test that replays with no model. See [Plan writes web tests](#plan-writes-web-tests) and Plan 30.
 * **Gherkin scenarios:** a scenario is a `.feature` file that product and QA read and confirm as it is, with the requests in a YAML script apart from it. `semar scenarios convert` moves older YAML scenario files over and keeps their confirmations. See [Hand-written scenarios](#hand-written-scenarios) and Plan 24.
 * **Planning with small models:** `semar plan` plans one acceptance criterion at a time when a ticket of the change has acceptance criteria. Code finds the operations, fields, diff, fixtures, and accounts that a criterion needs, a job with no tools answers in a fixed shape, code checks the answer, and a failing answer goes to the next model of the ladder. With Claude Code the ladder is `haiku`, then `sonnet`. A criterion that needs data no fixture gives gets a fixture that a job drafts and the plan runs once. `--max-cost` bounds what a plan spends. See [Plan with a small model](#plan-with-a-small-model).
 * **A first run with no hand-written files:** `semar init` asks for the address of the service, the variable of the token, and who each account is, and finds the build probe at `/version`. In a repository that is set up, `semar init` checks this machine and lists what is missing. See [Plan with a small model](#plan-with-a-small-model).
@@ -439,7 +440,7 @@ knowledge:
 * account for every criterion under a heading that contains "Acceptance criteria", a numbered line or a group of Given, When, and Then lines. Code reads those lines and checks that each one is cited by a scenario with the source `ticket`, by a manual check, or by a `notDrafted` entry with a `cite`. A criterion that nothing cites goes back to the planner. If it is still missing after the last draft, the plan is written and the criterion becomes an obligation `<ticket>/criterion-<n>` with the gap "criterion not accounted for by the planner", so the ledger keeps it. `plan.md` shows a table "Acceptance criteria" in each ticket's section, with what cites each one;
 * test a record that is not found with an ID that cannot exist, `missing-{{run.id}}`, in the path. It may not use any other made-up ID.
 
-**Manual checks.** Each manual check is listed in `plan.md` under its ticket, and becomes an obligation `<ticket>/manual-<n>` in `.semar/obligations/<ticket>.plan.yaml`, with `source: criterion` and a `manual` reason of the kind `judgement` that is written by `ai`. It derives `needs_a_person`, and `semar status --checklist` prints its steps and its expected result. A person records the result with `semar check`.
+**Manual checks.** The model names the surface of each one: `web`, `mobile`, or `other`, and the obligation keeps it as `manual.surface`. A `web` check that the plan explored and wrote as a test has no manual check: see [Plan writes web tests](#plan-writes-web-tests). Each manual check is listed in `plan.md` under its ticket, and becomes an obligation `<ticket>/manual-<n>` in `.semar/obligations/<ticket>.plan.yaml`, with `source: criterion` and a `manual` reason of the kind `judgement` that is written by `ai`. It derives `needs_a_person`, and `semar status --checklist` prints its steps and its expected result. A person records the result with `semar check`.
 
 **Accounts.** When `semar.yaml` has two auth profiles or more, the prompt lists their names and their one-line `description`, and tells the planner to add a scenario for the most likely access mistake, with `as`. The planner may use only these names. An unknown name is a problem that goes back to the planner. A [trial run](#the-trial-run) does not send a step that acts as another account, because it has the session of the plan's account only.
 
@@ -794,6 +795,38 @@ Semar writes the scenario with one line for each action and a `Then` line for ea
 
 It does not record on Android, a wait of time, a check of anything but the text of an element, a choice in a select list, hover, a file upload, or a second tab. Add them to the files by hand.
 
+### Plan writes web tests
+
+`semar plan` used to answer a criterion that a web page shows with a manual check, because a model that cannot see the page invents locators. `semar record` gave the page to a person. The plan now gives it to a model, and keeps everything that `record` does after the last click: the screens, the scenario, the script, and a replay.
+
+```bash
+semar plan --base main                 # writes the API tests and the web tests
+semar plan --base main --no-web        # the web criteria stay manual checks, for this run
+```
+
+The first job of a criterion says whether a manual check is on `web`, on `mobile`, or on `other`. A `web` check is explored when the environment is a test environment that allows test data, Chrome is found, and the service has a web page: `GET <base URL><start>` answers `text/html`, where `start` is `services[].web.start` (a path such as `/boards`) and else `/`. A criterion that is not explored stays a manual check, and the plan says why once.
+
+For each such criterion, Semar opens Chrome with no window on its own profile, signed in as in [Sign in to a web application](#sign-in-to-a-web-application), with the recorder of `semar record` in the page. Each turn is one job with no tools. The model gets the criterion, what was done so far, and a list of what the page shows, at most 150 lines such as `e3 button "Save"`, `e5 textbox "Title" value="Fix login"`, or `e9 text "Overdue"`. It answers in a closed shape with 1 to 5 actions on references of that list: `click`, `fill`, `press` Enter or Escape, `drag`, and `check`. Semar does each action as real mouse and key input, so the recorder hears what it hears from a person. A check is the Option-click of `semar record`. The model never writes a locator, an address, or a credential, and the text of the page is data: the prompt says so, the model has no tool, and the browser stays inside the hosts of the environment.
+
+```text
+$ semar plan --base main
+...
+web: 2 criteria explored, 1 test written, 1 left for a person, 22 turns, $0.12
+web: left for a person: docs/tickets/SHOP-482.md:13: the due date field is a datetime-local input that cannot be typed into, so the due date and the Overdue badge cannot be shown on this page.
+```
+
+
+* **A criterion with several parts.** A flow may end as done with the part of the criterion that the page shows, and name in `unproved` the part that its checks did not prove. The test is written for the first part, and the second stays a manual check of the same criterion, so a use case is never marked as tested for what no check proves.
+* **Data of its own.** A flow makes what it needs through the page, with names that hold `{{run.id}}`, and does not act on data that was there before, so that the test runs again. The prompt says so.
+* **A check comes from the ticket, not from the page.** `expect` is the text that the criterion says. When it equals what the element showed, the check is written with the source `ticket` and the cite of the criterion. When it differs, the check is written with the text of `expect`, and the plan lists it under "fails now" with what the page shows. A page with a defect gives a test that fails.
+* **Data.** In its first answer a model may name fixtures of the catalogue, drafts of this plan included. Semar makes them as `record --given` does, tells the model what they gave, loads the first page again, and cleans them up. A name that the flow creates holds `{{run.id}}`, which Semar types as the ID of the run and keeps as the variable in the test.
+* **When a flow ends as a manual check.** When the model says `manual`, when it records no check, after 12 turns, after 40 actions, after 3 minutes, or when the replay of the written test does not end as the recording predicts: `passed`, or `failed` when a check fails now. The same flow is then tried once on the next model of the ladder, in a new browser with new fixtures. Nothing of a flow that ends as a manual check is written.
+* **What is written.** The test takes the next number of its ticket, with the tag `@surface:web`, and it covers the use case of its criterion, so the use case shows a test and not a manual check. The screens go into `.semar/screens/<app>.yaml`, merged. Nothing is approved: `semar review` shows the screens file and each scenario, with `by model` on every expected result. Until a person confirms it, a run of the test is `inconclusive`.
+* **The cost.** Each turn is a job of the plan. It counts in the `model use` line, in `--max-cost`, and in the usage file with the pipeline `web`, apart from the criteria. The estimate that `semar run` shows before a plan does not count the web part, because the number of web criteria is not known before the first jobs.
+* **One criterion at a time.** An account has one browser profile, and two flows in one application disturb each other.
+
+It does not explore a mobile screen, a flow across two tabs, a file upload, a hover, a choice in a select list, or a date, time, color, or slider field, because the recorder does not hear them or a flow cannot type into them. The plan does not sign in through another site or with a second factor.
+
 ### Test a business flow with a journey
 
 A journey is a business flow that crosses services, such as "an order is placed, paid, and shown as paid". A scenario tests one service. No service owns a journey: a named person, the owner, does. A journey runs one leg at a time against one set of builds, and its result is valid only for those builds.
@@ -1114,6 +1147,7 @@ environments:
 | --- | --- |
 | `plan.trial` | `true` by default. `false` turns the [trial run](#the-trial-run) off. It must be a boolean |
 | `environments.<env>.data` | The data of the environment: a flat map from a dotted key to a string, at most 100 keys. A fixture reads a value as `{{data.<key>}}`, in a parameter default or in a `with` value |
+| `environments.<env>.services[].web.start` | The path below the base URL where the web page of the service starts, such as `/boards`. A plan probes it with one GET, and explores the web criteria only when it answers `text/html`. A service with no `web` starts at `/` |
 | `environments.<env>.services[].authProfile` | The auth profile that a fixture step or a journey leg uses for this service, unless the leg or its step has `as`. It must be defined under `authProfiles`. A service with none uses the auth profile of the scenario |
 | `authProfiles.<name>.description` | One line, at most 200 characters, with no control character: what the account can do, such as `a member of another board, without the owner's rights`. The planner reads it to draft access checks |
 
@@ -1146,7 +1180,7 @@ Every command takes `--dir <path>`, the root of the repository that holds `.sema
 | Command | What it does |
 | --- | --- |
 | `semar changes --diff <link or range>` | Prints the tickets, commits, and files of a change. No model |
-| `semar plan [--diff <link or range>]` | Drafts scenarios and scripts for a change. With no `--diff` it plans the change of the checked-out branch against its base, from the clone, with no fetch. `--base <branch>` names another base. It writes `plan.md` and the obligations. Tells the planner to read the documents that `knowledge` lists, and sends the read-only steps of the draft once to the environment. Also takes `--provider <id>`, `--model <name>`, `--reasoning <level>`, `--pipeline single\|criteria`, `--ladder <steps>`, `--max-cost <dollars>`, `--with-setup`, `--no-trial`, `--max-scenarios <n>`, and `--no-fetch` |
+| `semar plan [--diff <link or range>]` | Drafts scenarios and scripts for a change. With no `--diff` it plans the change of the checked-out branch against its base, from the clone, with no fetch. `--base <branch>` names another base. It writes `plan.md` and the obligations. Tells the planner to read the documents that `knowledge` lists, and sends the read-only steps of the draft once to the environment. Also takes `--provider <id>`, `--model <name>`, `--reasoning <level>`, `--pipeline single\|criteria`, `--ladder <steps>`, `--max-cost <dollars>`, `--with-setup`, `--no-trial`, `--no-web`, `--max-scenarios <n>`, and `--no-fetch` |
 | `semar dashboard` | Opens a page on your machine to manage the model providers and see usage. `--no-open` prints the address only, `--port <n>` sets the port |
 | `semar providers` | Prints your providers and marks the one that would plan here. No model |
 | `semar init` | On a terminal, asks for the address of the service, the token variable, and who each account is, then writes `.semar/semar.yaml`, with a `knowledge` entry for each conventional path that it finds and the build probe at `/version` when the service has one, and `.semar/.gitignore` when there is none. `--base-url <url>` and the other flags answer the questions. `--account <name>=<ENV>` adds an auth profile, `--describe <account>=<text>` says who an account is, `--web-user <account>=<user>` with `--web-password-env <account>=<NAME>` gives an account its web sign-in, and each can repeat. In a repository that is set up, it checks this machine and writes nothing |

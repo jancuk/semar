@@ -1,6 +1,6 @@
 # Semar implementation guide
 
-* **Status:** Draft 1. Plans 01, 12 to 22, and 24 to 29 are implemented. The other plans are specifications.
+* **Status:** Draft 1. Plans 01, 12 to 22, and 24 to 30 are implemented. The other plans are specifications.
 * **Date:** 2026-11-14
 * **Spec:** [product requirements](../PRD.md), [technical requirements](../TRD.md), [test workflow](../WORKFLOW.md), [user scenarios](../USER_SCENARIOS.md)
 
@@ -314,7 +314,7 @@ Checked on the Go module proxy on 2026-11-14. Pin the exact version in `go.mod`.
 | 27 | [A first run with no hand-written files](27-first-run.md) (implemented) | `semar init` asks for what it cannot find, finds the build probe at `/version`, and in a repository that is set up checks the machine. A plan uses the criteria pipeline by default when a ticket has criteria, with a haiku and sonnet ladder for Claude Code, drafts and runs the fixtures that its criteria need, and stops at a cost limit | Plans 13, 14, 16, 17, 23, and 25 | FR-356 to 360 and PRD decision D71 |
 | 28 | [Record a web test](28-record-a-web-test.md) (implemented) | `semar record` opens Chrome on Semar's profile, records what a person does and what the person points at as a check, and writes the screens, the script, and the scenario | Plans 17, 22, and 24 | FR-361 to 364 |
 | 29 | [Semar signs in to a web application](29-web-sign-in.md) (implemented) | An account names its web user and the variable of its password once. The engine signs in after any `open` that meets the sign-in form, and `semar record` starts signed in. `semar init` asks for it and `semar login --user` writes it | Plans 22 and 28 | FR-365 to 368 |
-| 30 | [The plan writes web tests](30-plan-writes-web-tests.md) (planned) | `semar plan` explores a web criterion with a model in the seat of the person of `semar record`, and writes a web test that replays with no model |
+| 30 | [The plan writes web tests](30-plan-writes-web-tests.md) (implemented) | `semar plan` explores a web criterion with a model in the seat of the person of `semar record`, and writes a web test that replays with no model. A manual check names its surface, and a flow that proves only part of a criterion leaves a manual check for the rest | Plans 25, 27, 28, and 29 | FR-369 to 374 |
 | 11 | [Configuration over code](11-configuration.md) | Cases, fragments, data sets, named checks, company rules, declared probes, passes, schemas, and `semar validate`. Every use case is a YAML edit | Plan 04. Parts need Plans 05 and 06 | FR-246 to 260 |
 
 Plans 01 to 04 are the first usable version: one API ticket from a plan to a report. Plans 05, 06, 07, and 11 do not depend on each other, apart from the tasks that Plan 11 names. They can be built in parallel after Plan 04, and Plan 06 can start after Plan 02. Tasks 1 to 5 and 11 to 13 of Plan 11 are worth doing early, because they are what a first user touches.

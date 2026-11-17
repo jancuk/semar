@@ -2133,6 +2133,29 @@ open ─► settle ─► signInForm ─► fill user ─► fill password ─�
 
 **Not built.** A form in two pages, a sign-in through another site, a second factor, a captcha, a form in a frame, and a form that appears after the page has settled.
 
+### Plan writes web tests
+
+Built in [Plan 30](implementation/30-plan-writes-web-tests.md). The explorer is the recorder of `semar record` with a model in the seat of the person. The criteria pipeline decides which criteria it explores, the command gives it a browser, and the code of `record` writes and replays what it did.
+
+```text
+first job: manualCheck{surface: web} ─► probe ─► [per criterion, one at a time]
+   recorder(hidden, signed in, guarded) ─► list ─► model turn ─► actions ─► list ─► ... ─► done
+                                                                                    │
+                      record.Build(events, claims) ─► write ─► replay once ─► as predicted? ─► keep │ remove, manual
+```
+
+* **The seam.** `plan.WebExplorer.Explore(ctx, request, drive)` is given by `internal/cli`, as `FixtureTrialer` is. The plan stage never imports the browser. `drive` plays the flow on a `plan.FlowBrowser` with `List`, `Act`, and `Given`. The explorer starts the recorder, hands the browser to `drive`, and when the flow is done it builds, writes, and replays. `semar record` and the explorer share `startRecording`, `persistDraft`, and `replayScenario`.
+* **The page list.** `internal/pagelist` holds the shape: `Item`, `Element`, and `List`, with the limit of 150 lines and 80 characters and the rule that what a person can act on is kept first. `internal/engine/web/pagelist.js` reads the page and keeps its elements in `window.__semarRefs`. The reference `e<n>` maps to the place in that array, so it is valid only for the last list. A password field's value is never read.
+* **Acting.** `web.Explorer` finds the element of a reference again, refuses a disabled, covered, or vanished one with a sentence for the model, scrolls to it, and sends the input through `internal/engine/web/webinput`, which the replay engine and the tests use as well. A check picks a point where the pointer meets the element or a part with all of its text, sends the Option-click, and waits until the recorder reports the check.
+* **The turn.** `plan.TurnSchema` is closed: the references of the list are an enum, and the fixtures of the catalogue are an enum in the first turn only. `DecodeTurn` reads strictly and checks what a schema cannot: the references, the text of a fill, the key, the required parameters of a fixture. An answer with a problem goes back once to the same rung, and then the flow ends as a manual check. A turn runs through `runState.send`, which counts it in the total, in the calls, and in the cost limit, and in `webUses` apart from the criteria.
+* **The loop.** `plan.RunFlow` is a function of a model and a browser. It holds the limits (12 turns, 40 actions, 3 minutes), "given first only", the stop at the first action that cannot be done, and "done needs a check". The tests drive it with a scripted model and a scripted browser.
+* **A part left out.** `done` carries `unproved`. The explorer keeps the test, and the plan keeps a manual check of the same criterion whose expected result is that text, so the criterion is cited by both and the use case of the test never claims more than its checks prove.
+* **The claims.** `record.Options.Claims` gives each check the text of the criterion and its cite. `Build` then writes a `ticket` expectation by `model`, and lists a check whose claim differs from what the page showed in `Draft.FailsNow`.
+* **The replay.** The replay of a plan runs with the screens of the app and the expectations of its one scenario treated as confirmed for that one run, so that its outcome says whether the page meets the criterion. Nothing is stored. A scenario that does not end as predicted is removed through `record.Written.Undo`, which puts the screens file back, and the script is removed from the store.
+* **Where it stops.** The recorder of a flow has a `Policy`: every request of the page is judged by the effects policy as the engine does it, and the browser settles when no request is open. `--no-web`, a production or read-only environment, no Chrome, and a service with no web page leave the criteria as manual checks, with the reason.
+
+**Not built.** A mobile screen, a flow across two tabs, a file upload, a hover, a select list, and the count of web criteria in the estimate that precedes a plan.
+
 ### Android engine
 
 The engine drives an emulator or a device through `adb`. It installs the build under test, launches the app, reads the screen as a list of elements with refs, sends input, and captures screenshots and `logcat`. [Signing in](#signing-in) describes sign-in on the device.
