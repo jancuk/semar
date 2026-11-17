@@ -51,7 +51,7 @@ func TestParseRefusesAnOperandThatIsNotExact(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := scenario.Parse(tt.data, "s.yaml")
+			_, err := scenario.ParseYAML(tt.data, "s.yaml")
 			if err == nil {
 				t.Fatal("Parse accepted the operand")
 			}
@@ -95,7 +95,7 @@ func TestParseKeepsAnExactOperand(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s, err := scenario.Parse(withCheck(tt.check), "s.yaml")
+			s, err := scenario.ParseYAML(withCheck(tt.check), "s.yaml")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -136,7 +136,7 @@ func FuzzExactOperand(f *testing.F) {
 		if bound {
 			key = "greater"
 		}
-		s, err := scenario.Parse(withCheck("jsonpath: $.a, "+key+": "+text), "fuzz.yaml")
+		s, err := scenario.ParseYAML(withCheck("jsonpath: $.a, "+key+": "+text), "fuzz.yaml")
 		if err != nil {
 			return
 		}

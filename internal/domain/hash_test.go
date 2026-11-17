@@ -113,7 +113,7 @@ func TestExpectHashGolden(t *testing.T) {
 // confirmation and script of such a scenario would lapse.
 func TestExpectHashUnchangedWithoutGiven(t *testing.T) {
 	const dir = "../../testdata/e2e/"
-	sc, err := scenario.Load(dir + ".semar/scenarios/SHOP-482/SHOP-482-01.yaml")
+	sc, err := scenario.Load(dir + ".semar/scenarios/SHOP-482/SHOP-482-01.feature")
 	if err != nil {
 		t.Fatal(err)
 	}

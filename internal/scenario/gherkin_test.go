@@ -13,6 +13,8 @@ import (
 	"github.com/jancuk/semar/internal/scenario"
 )
 
+func ptr[T any](v T) *T { return &v }
+
 func gOne(c domain.Check) domain.Scenario {
 	return domain.Scenario{
 		APIVersion: "semar/v1", Kind: "Scenario", ID: "A-1", Title: "t", Ticket: "T-1", Surface: domain.SurfaceAPI, AuthProfile: "default",
@@ -30,7 +32,7 @@ func gRoundTrip(t *testing.T, in, want domain.Scenario) string {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	got, err := scenario.ParseGherkin(data, "m.feature")
+	got, err := scenario.Parse(data, "m.feature")
 	if err != nil {
 		t.Fatalf("Parse(Render(x)): %v\n%s", err, data)
 	}
@@ -576,7 +578,7 @@ Feature: Refunds
     * $.b exists
     # diff
 `
-	got, err := scenario.ParseGherkin([]byte(text), "h.feature")
+	got, err := scenario.Parse([]byte(text), "h.feature")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -636,7 +638,7 @@ func TestParseErrorsNameTheLineInPlainWords(t *testing.T) {
 		{"the ID comment after a blank line", head + "    When do it\n\n    # step: s\n", []string{"f.feature:5:", "no ID", "directly under"}},
 		{"a Then that Semar cannot read", head + step + "    Then the answer is nice\n    # diff\n", []string{"f.feature:7:", `"the answer is nice"`, "the status is 422", "does not exist", "the element <id>"}},
 		{"a Then with a value that is not JSON", head + step + "    Then $.a equals yes\n    # diff\n", []string{"f.feature:7:", `"$.a equals yes"`, "double quotes"}},
-		{"a Then that equals null", head + step + "    Then $.a equals null\n    # diff\n", []string{"f.feature:7:", "equals null"}},
+		{"a Then that equals null", head + step + "    Then $.a equals null\n    # diff\n", []string{"f.feature:7:", "null cannot be checked"}},
 		{"a Then with no source", head + step + "    Then the status is 200\n", []string{"f.feature:7:", "no source", "# ticket"}},
 		{"a Then with an empty source comment", head + step + "    Then the status is 200\n    #\n", []string{"f.feature:8:", "no source"}},
 		{"a Then before any When", head + "    Then the status is 200\n    # diff\n", []string{"f.feature:5:", "put it under a When"}},
@@ -652,7 +654,7 @@ func TestParseErrorsNameTheLineInPlainWords(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := scenario.ParseGherkin([]byte(tt.text), "f.feature")
+			_, err := scenario.Parse([]byte(tt.text), "f.feature")
 			if err == nil {
 				t.Fatal("Parse accepted the file")
 			}
@@ -670,19 +672,55 @@ func TestParseErrorsNameTheLineInPlainWords(t *testing.T) {
 
 func TestFeatureFilesInTheRepositoryRoundTrip(t *testing.T) {
 	for _, path := range []string{
-		"testdata/valid.yaml",
-		"../../testdata/e2e/.semar/scenarios/SHOP-482/SHOP-482-01.yaml",
-		"../../testdata/e2e-fixtures/.semar/scenarios/SHOP-482/SHOP-482-05.yaml",
-		"../replay/testdata/SHOP-482-01.scenario.yaml",
-		"../replay/testdata/SHOP-482-05.scenario.yaml",
+		"testdata/valid.feature",
+		"testdata/full.feature",
+		"../../testdata/e2e/.semar/scenarios/SHOP-482/SHOP-482-01.feature",
+		"../../testdata/e2e-fixtures/.semar/scenarios/SHOP-482/SHOP-482-05.feature",
+		"../replay/testdata/SHOP-482-01.feature",
+		"../replay/testdata/SHOP-482-05.feature",
 	} {
 		t.Run(path, func(t *testing.T) {
 			s, err := scenario.Load(path)
 			if err != nil {
 				t.Fatal(err)
 			}
+			text, err := scenario.Render(s, "")
+			if err != nil {
+				t.Fatal(err)
+			}
 			gRoundTrip(t, s, s)
+			if path != "testdata/full.feature" && string(text) != readFile(t, path) {
+				t.Errorf("%s is not what Render writes for it:\n%s", path, text)
+			}
 		})
+	}
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// The YAML file and the Gherkin file of one scenario give the same scenario, and so the same
+// expectation hash: a confirmation or a script that was made for one is valid for the other.
+func TestConvertedFileIsTheSameScenario(t *testing.T) {
+	old, err := scenario.LoadYAML("testdata/valid.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now, err := scenario.Load("testdata/valid.feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(old, now) {
+		t.Errorf("YAML %#v\nGherkin %#v", old, now)
+	}
+	if domain.ExpectHash(old) != domain.ExpectHash(now) {
+		t.Error("the expectation hash differs")
 	}
 }
 
@@ -729,7 +767,7 @@ func FuzzRender(f *testing.F) {
 		if err != nil {
 			return
 		}
-		got, err := scenario.ParseGherkin(data, "fuzz.feature")
+		got, err := scenario.Parse(data, "fuzz.feature")
 		if err != nil {
 			t.Fatalf("Parse refused what Render wrote: %v\n%q", err, data)
 		}
@@ -751,7 +789,7 @@ func FuzzRender(f *testing.F) {
 	})
 }
 
-func FuzzParseGherkin(f *testing.F) {
+func FuzzParseFeature(f *testing.F) {
 	for _, p := range []string{"testdata/full.feature"} {
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -763,7 +801,7 @@ func FuzzParseGherkin(f *testing.F) {
 	f.Add([]byte("Feature: x\n  Scenario: y\n    Given the fixture a.b as c\n      | k | v |\n"))
 	f.Add([]byte("\x00\xff: ~\n"))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		s, err := scenario.ParseGherkin(data, "fuzz.feature")
+		s, err := scenario.Parse(data, "fuzz.feature")
 		if err != nil {
 			return
 		}
@@ -779,7 +817,7 @@ func FuzzParseGherkin(f *testing.F) {
 		if err != nil {
 			return
 		}
-		back, err := scenario.ParseGherkin(out, "fuzz.feature")
+		back, err := scenario.Parse(out, "fuzz.feature")
 		if err != nil || !reflect.DeepEqual(back, s) {
 			t.Fatalf("Render(Parse(x)) does not read back: %v\n%s", err, out)
 		}

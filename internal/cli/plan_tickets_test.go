@@ -79,14 +79,14 @@ func TestPlanDraftsTheTicketCriterionAndMarksItExpectedToFail(t *testing.T) {
 		t.Error("the ticket file added a heading to the prompt")
 	}
 
-	scenario, err := os.ReadFile(p.path(".semar", "scenarios", "SHOP-482", "SHOP-482-01.yaml"))
+	scenario, err := os.ReadFile(p.path(".semar", "scenarios", "SHOP-482", "SHOP-482-01.feature"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	contains(t, "the scenario", string(scenario),
-		"status: 409", "source: ticket", "by: model", "cite: \"docs/tickets/SHOP-482.md:3 a refund above the rest is refused with", "as: outsider")
-	if strings.Count(string(scenario), "by: model") != 2 {
-		t.Errorf("by: model on %d expectations, want both:\n%s", strings.Count(string(scenario), "by: model"), scenario)
+		"Then the status is 409", "# ticket docs/tickets/SHOP-482.md:3 a refund above the rest is refused with", ", by model", "When as outsider, ")
+	if strings.Count(string(scenario), ", by model\n") != 2 {
+		t.Errorf(", by model on %d expectations, want both:\n%s", strings.Count(string(scenario), ", by model\n"), scenario)
 	}
 
 	md, err := os.ReadFile(p.path(".semar", "plans", p.head(t)[:12], "plan.md"))

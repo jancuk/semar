@@ -113,7 +113,7 @@ func TestSARIFShape(t *testing.T) {
 	if first.Message.Text != "SHOP-482-01 step refund-too-much: expected status 422, observed status 200 (source ticket)" {
 		t.Errorf("message = %q", first.Message.Text)
 	}
-	if len(first.Locations) != 1 || first.Locations[0].PhysicalLocation.ArtifactLocation.URI != ".semar/scenarios/SHOP-482/SHOP-482-01.yaml" ||
+	if len(first.Locations) != 1 || first.Locations[0].PhysicalLocation.ArtifactLocation.URI != ".semar/scenarios/SHOP-482/SHOP-482-01.feature" ||
 		first.Locations[0].PhysicalLocation.Region == nil || first.Locations[0].PhysicalLocation.Region.StartLine != 14 {
 		t.Errorf("locations = %+v", first.Locations)
 	}

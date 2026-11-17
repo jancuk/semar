@@ -22,7 +22,7 @@ func (r *repo) actAs(t *testing.T, account string) {
 	r.rewriteConfig(t, func(s string) string {
 		return s + "  bob:\n    session: {header: Authorization, value: \"Bearer {{secret.TOKEN}}\"}\n    secrets: {TOKEN: \"env:SEMAR_SAMPLE_TOKEN_BOB\"}\n"
 	})
-	file := r.path(".semar", "scenarios", "SHOP-482", scenarioID+".yaml")
+	file := r.path(".semar", "scenarios", "SHOP-482", scenarioID+".feature")
 	data, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +34,7 @@ func (r *repo) actAs(t *testing.T, account string) {
 		}
 		return domain.ExpectHash(sc)
 	}()
-	changed := strings.Replace(string(data), "    action: Read the order again\n", "    action: Read the order again\n    as: "+account+"\n", 1)
+	changed := strings.Replace(string(data), "    When Read the order again\n", "    When as "+account+", Read the order again\n", 1)
 	if changed == string(data) {
 		t.Fatal("the scenario did not change")
 	}

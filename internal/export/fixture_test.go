@@ -83,26 +83,26 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-const scenarioYAML = `apiVersion: semar/v1
-kind: Scenario
-id: SHOP-482-01
-title: Refund above the order total is rejected
-ticket: SHOP-482
-surface: api
-steps:
-  - id: create-order
-    setup: true
-    action: Create a paid order
-  - id: refund-too-much
-    action: Request a refund of 150000
-    expect:
-      - check: { status: 422 }
-        source: ticket
+const scenarioFeature = `Feature: Refunds
+
+  @id:SHOP-482-01 @ticket:SHOP-482 @surface:api
+  Scenario: Refund above the order total is rejected
+    Given Create a paid order
+    # step: create-order
+    When Request a refund of 150000
+    # step: refund-too-much
+    Then the status is 422
+    # ticket SHOP-482: a refund above the total is refused
 `
+
+// scenarioWithID is a scenario file with one step and the title given.
+func scenarioWithID(id, title string) string {
+	return "Feature: F\n\n  @id:" + id + " @ticket:SHOP-1 @surface:api\n  Scenario: " + title + "\n    When Do it\n    # step: do\n"
+}
 
 func writeScenario(t *testing.T, repo, subdir, id, content string) string {
 	t.Helper()
-	p := filepath.Join(repo, ".semar", "scenarios", subdir, id+".yaml")
+	p := filepath.Join(repo, ".semar", "scenarios", subdir, id+".feature")
 	writeFile(t, p, content)
 	return p
 }

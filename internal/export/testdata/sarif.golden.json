@@ -43,7 +43,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": ".semar/scenarios/SHOP-482/SHOP-482-01.yaml"
+                  "uri": ".semar/scenarios/SHOP-482/SHOP-482-01.feature"
                 },
                 "region": {
                   "startLine": 14
@@ -71,7 +71,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": ".semar/scenarios/SHOP-482/SHOP-482-01.yaml"
+                  "uri": ".semar/scenarios/SHOP-482/SHOP-482-01.feature"
                 },
                 "region": {
                   "startLine": 14

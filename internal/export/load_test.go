@@ -172,7 +172,7 @@ func TestLoadRefusesAnActionPathThatLeavesTheRun(t *testing.T) {
 
 func TestLoadTitleFromScenarioFile(t *testing.T) {
 	repo := t.TempDir()
-	p := writeScenario(t, repo, "SHOP-482", "SHOP-482-01", scenarioYAML)
+	p := writeScenario(t, repo, "SHOP-482", "SHOP-482-01", scenarioFeature)
 	store := writeRun(t, repo, runSpec{id: "r-1", results: []domain.ScenarioResult{result("SHOP-482-01", domain.OutcomeFailed, "step refund-too-much: expected status 422")}})
 	r, err := export.Load(store, repo, "r-1", "0.9.0")
 	if err != nil {
@@ -182,7 +182,7 @@ func TestLoadTitleFromScenarioFile(t *testing.T) {
 	if s.Title != "Refund above the order total is rejected" || s.Ticket != "SHOP-482" {
 		t.Errorf("title %q, ticket %q", s.Title, s.Ticket)
 	}
-	if s.File != ".semar/scenarios/SHOP-482/SHOP-482-01.yaml" {
+	if s.File != ".semar/scenarios/SHOP-482/SHOP-482-01.feature" {
 		t.Errorf("File = %q", s.File)
 	}
 	if s.Result.Outcome != domain.OutcomeFailed {
@@ -209,26 +209,26 @@ func TestLoadScenarioFileIsNotTrusted(t *testing.T) {
 		name  string
 		setup func(t *testing.T, repo string)
 	}{
-		{"not YAML", func(t *testing.T, repo string) {
+		{"not Gherkin", func(t *testing.T, repo string) {
 			writeScenario(t, repo, "x", "A-1", "title: [unclosed\n  - : :\n")
 		}},
-		{"title is not text", func(t *testing.T, repo string) {
-			writeScenario(t, repo, "x", "A-1", "title: {a: b}\nsteps: 4\n")
+		{"the YAML format", func(t *testing.T, repo string) {
+			writeScenario(t, repo, "x", "A-1", "apiVersion: semar/v1\nkind: Scenario\nid: A-1\ntitle: old\n")
 		}},
 		{"a file above the limit", func(t *testing.T, repo string) {
-			writeScenario(t, repo, "x", "A-1", "title: big\n# "+strings.Repeat("x", 2<<20)+"\n")
+			writeScenario(t, repo, "x", "A-1", "Feature: big\n# "+strings.Repeat("x", 2<<20)+"\n")
 		}},
 		{"two files for one ID", func(t *testing.T, repo string) {
-			writeScenario(t, repo, "x", "A-1", "title: one\n")
-			writeScenario(t, repo, "y", "A-1", "title: two\n")
+			writeScenario(t, repo, "x", "A-1", scenarioWithID("A-1", "one"))
+			writeScenario(t, repo, "y", "A-1", scenarioWithID("A-1", "two"))
 		}},
 		{"a link", func(t *testing.T, repo string) {
-			other := filepath.Join(t.TempDir(), "A-1.yaml")
-			writeFile(t, other, "title: outside\n")
+			other := filepath.Join(t.TempDir(), "A-1.feature")
+			writeFile(t, other, scenarioWithID("A-1", "outside"))
 			if err := os.MkdirAll(filepath.Join(repo, ".semar", "scenarios"), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Symlink(other, filepath.Join(repo, ".semar", "scenarios", "A-1.yaml")); err != nil {
+			if err := os.Symlink(other, filepath.Join(repo, ".semar", "scenarios", "A-1.feature")); err != nil {
 				t.Skip(err)
 			}
 		}},
@@ -263,13 +263,13 @@ func TestLoadScenarioWithAnInvalidIDIsNotLookedUp(t *testing.T) {
 
 func TestLoadStepLines(t *testing.T) {
 	repo := t.TempDir()
-	writeScenario(t, repo, "SHOP-482", "SHOP-482-01", scenarioYAML)
+	writeScenario(t, repo, "SHOP-482", "SHOP-482-01", scenarioFeature)
 	store := writeRun(t, repo, runSpec{id: "r-1", results: []domain.ScenarioResult{result("SHOP-482-01", domain.OutcomePassed)}})
 	r, err := export.Load(store, repo, "r-1", "0.9.0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[domain.StepID]int{"create-order": 8, "refund-too-much": 11}
+	want := map[domain.StepID]int{"create-order": 5, "refund-too-much": 7}
 	got := r.Scenarios[0].StepLines
 	if len(got) != len(want) {
 		t.Fatalf("StepLines = %v, want %v", got, want)
@@ -300,7 +300,7 @@ func TestLoadKeepsTheOrderOfResults(t *testing.T) {
 // checkout.pay is the scenario of a journey leg: a scenario file of that name does not label it.
 func TestLoadLegScenarioIsNotLabelledByAScenarioFile(t *testing.T) {
 	repo := t.TempDir()
-	writeScenario(t, repo, "SHOP-1", "checkout.pay", "apiVersion: semar/v1\nkind: Scenario\nid: checkout.pay\ntitle: A real scenario\nticket: SHOP-1\nsteps: []\n")
+	writeScenario(t, repo, "SHOP-1", "checkout.pay", scenarioWithID("checkout.pay", "A real scenario"))
 	store := writeRun(t, repo, runSpec{id: "r-1", results: []domain.ScenarioResult{result("checkout.pay", domain.OutcomePassed)}})
 	r, err := export.Load(store, repo, "r-1", "0.9.0")
 	if err != nil {

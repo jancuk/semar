@@ -292,20 +292,20 @@ authProfiles:
 	}
 
 	for _, f := range []string{
-		p.path(".semar", "scenarios", "SHOP-482", "SHOP-482-01.yaml"),
-		p.path(".semar", "scenarios", "SHOP-483", "SHOP-483-01.yaml"),
+		p.path(".semar", "scenarios", "SHOP-482", "SHOP-482-01.feature"),
+		p.path(".semar", "scenarios", "SHOP-483", "SHOP-483-01.feature"),
 		p.path(".semar", "plans", p.head(t)[:12], "draft.json"),
 	} {
 		if !exists(t, f) {
 			t.Errorf("%s was not written", f)
 		}
 	}
-	sc, err := os.ReadFile(p.path(".semar", "scenarios", "SHOP-483", "SHOP-483-01.yaml"))
+	sc, err := os.ReadFile(p.path(".semar", "scenarios", "SHOP-483", "SHOP-483-01.feature"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	contains(t, "SHOP-483-01.yaml", string(sc), "source: diff", `cite: "internal/orders/read.go:5`, "equals: 100000\n", "authProfile: default")
-	if info, err := os.Stat(p.path(".semar", "scenarios", "SHOP-483", "SHOP-483-01.yaml")); err != nil || info.Mode().Perm() != 0o644 {
+	contains(t, "SHOP-483-01.feature", string(sc), "Feature: an order is read by its ID\n", "# diff internal/orders/read.go:5", " equals 100000\n", "@id:SHOP-483-01")
+	if info, err := os.Stat(p.path(".semar", "scenarios", "SHOP-483", "SHOP-483-01.feature")); err != nil || info.Mode().Perm() != 0o644 {
 		t.Errorf("scenario mode %v, %v; want 0644", info.Mode().Perm(), err)
 	}
 	stored, err := filepath.Glob(p.path(".semar", "store", "scripts", "*", "*.yaml"))
@@ -770,7 +770,7 @@ func TestASecondPlanOfTheSameDiff(t *testing.T) {
 	p.must(t, cli.ExitOK, "plan", "--diff", "main..release")
 	for _, id := range []string{"SHOP-482-02", "SHOP-483-02"} {
 		ticket := id[:len("SHOP-48x")]
-		if !exists(t, p.path(".semar", "scenarios", ticket, id+".yaml")) {
+		if !exists(t, p.path(".semar", "scenarios", ticket, id+".feature")) {
 			t.Errorf("scenario %s was not written", id)
 		}
 	}

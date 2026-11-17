@@ -12,7 +12,7 @@ import (
 
 func loadPair(t *testing.T) (domain.Scenario, domain.Script) {
 	t.Helper()
-	sc, err := scenario.Load("../scenario/testdata/valid.yaml")
+	sc, err := scenario.Load("../scenario/testdata/valid.feature")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func loadPair(t *testing.T) (domain.Scenario, domain.Script) {
 func TestFixtureHashMatchesScenario(t *testing.T) {
 	sc, s := loadPair(t)
 	if got := domain.ExpectHash(sc); got != s.ExpectHash {
-		t.Fatalf("internal/scenario/testdata/valid.yaml now hashes to %s: set expectHash in internal/script/testdata/valid.yaml to it", got)
+		t.Fatalf("internal/scenario/testdata/valid.feature now hashes to %s: set expectHash in internal/script/testdata/valid.yaml to it", got)
 	}
 }
 

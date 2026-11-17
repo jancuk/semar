@@ -456,7 +456,7 @@ func TestScriptAddRefusesAScriptThatDoesNotFit(t *testing.T) {
 				return strings.Replace(s, "method: POST, path: \"/v1/orders/{{order_id}}/refunds\"", "method: PUT, path: \"/v1/orders/{{order_id}}/refunds\"", 1)
 			},
 			want: func(t *testing.T, r *repo, file string) []string {
-				sc, err := scenario.Load(r.path(".semar", "scenarios", "SHOP-482", scenarioID+".yaml"))
+				sc, err := scenario.Load(r.path(".semar", "scenarios", "SHOP-482", scenarioID+".feature"))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -557,8 +557,8 @@ func TestRunAgainstAServiceThatIsNotThere(t *testing.T) {
 
 func TestDuplicatedScenarioID(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
-	original := r.path(".semar", "scenarios", "SHOP-482", scenarioID+".yaml")
-	copied := r.path(".semar", "scenarios", "OTHER", scenarioID+".yaml")
+	original := r.path(".semar", "scenarios", "SHOP-482", scenarioID+".feature")
+	copied := r.path(".semar", "scenarios", "OTHER", scenarioID+".feature")
 	data, err := os.ReadFile(original)
 	if err != nil {
 		t.Fatal(err)
@@ -695,13 +695,13 @@ func TestASessionValueWrittenInThePlaceIsRedacted(t *testing.T) {
 
 func TestConfirmListsTheWholeOperandAndNothingHostile(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
-	scenarioFile := r.path(".semar", "scenarios", "SHOP-482", scenarioID+".yaml")
+	scenarioFile := r.path(".semar", "scenarios", "SHOP-482", scenarioID+".feature")
 	head, tail := strings.Repeat("A", 150), strings.Repeat("C", 150)
 	data, err := os.ReadFile(scenarioFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed := strings.Replace(string(data), "equals: REFUND_EXCEEDS_TOTAL", `equals: "`+head+`\u001b[31m\u202eB\u200b\t`+tail+`"`, 1)
+	changed := strings.Replace(string(data), `equals "REFUND_EXCEEDS_TOTAL"`, `equals "`+head+`\u001b[31m\u202eB\u200b\t`+tail+`"`, 1)
 	if changed == string(data) {
 		t.Fatal("the change did not apply")
 	}
@@ -732,44 +732,33 @@ func TestConfirmRefusesAnEmptyName(t *testing.T) {
 	}
 }
 
-func TestScenarioFilesOtherThanRegularYAMLAreNotSkipped(t *testing.T) {
+func TestScenarioFilesOtherThanRegularFeaturesAreNotSkipped(t *testing.T) {
 	dir := func(r *repo) string { return r.path(".semar", "scenarios", "SHOP-482") }
 
 	t.Run("a symlinked scenario is an error that names it", func(t *testing.T) {
+		r := newRepo(t, repoOptions{offline: true})
+		link := filepath.Join(dir(r), "LINK-1.feature")
+		if err := os.Symlink(filepath.Join(dir(r), scenarioID+".feature"), link); err != nil {
+			t.Skipf("no symlinks here: %v", err)
+		}
+		for _, args := range [][]string{{"run", "--all"}, {"confirm", scenarioID, "--yes"}} {
+			res := r.must(t, cli.ExitError, args...)
+			contains(t, "stderr", res.stderr, link)
+		}
+	})
+
+	t.Run("a YAML scenario file is an error that says how to convert it", func(t *testing.T) {
 		for _, ext := range []string{".yaml", ".yml"} {
 			r := newRepo(t, repoOptions{offline: true})
-			link := filepath.Join(dir(r), "LINK-1"+ext)
-			if err := os.Symlink(filepath.Join(dir(r), scenarioID+".yaml"), link); err != nil {
-				t.Skipf("no symlinks here: %v", err)
+			old := filepath.Join(dir(r), "OLD-1"+ext)
+			if err := os.WriteFile(old, []byte("apiVersion: semar/v1\nkind: Scenario\nid: OLD-1\n"), 0o600); err != nil {
+				t.Fatal(err)
 			}
-			for _, args := range [][]string{{"run", "--all"}, {"confirm", scenarioID, "--yes"}} {
+			for _, args := range [][]string{{"run", "--all"}, {"run", "--scenario", scenarioID}, {"confirm", scenarioID, "--yes"}} {
 				res := r.must(t, cli.ExitError, args...)
-				contains(t, "stderr", res.stderr, link)
+				contains(t, "stderr", res.stderr, "scenario files are Gherkin now: run semar scenarios convert", old)
 			}
 		}
-	})
-
-	t.Run("a .yml scenario is loaded like a .yaml one", func(t *testing.T) {
-		r := newRepo(t, repoOptions{offline: true})
-		if err := os.Rename(filepath.Join(dir(r), scenarioID+".yaml"), filepath.Join(dir(r), scenarioID+".yml")); err != nil {
-			t.Fatal(err)
-		}
-		res := r.must(t, cli.ExitOK, "confirm", scenarioID, "--yes")
-		contains(t, "stdout", res.stdout, "confirmed scenario "+scenarioID)
-	})
-
-	t.Run("the same ID in .yaml and .yml is a duplicate", func(t *testing.T) {
-		r := newRepo(t, repoOptions{offline: true})
-		yaml, yml := filepath.Join(dir(r), scenarioID+".yaml"), filepath.Join(dir(r), scenarioID+".yml")
-		data, err := os.ReadFile(yaml)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(yml, data, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		res := r.must(t, cli.ExitError, "run", "--all")
-		contains(t, "stderr", res.stderr, yaml, yml, "more than one file")
 	})
 }
 

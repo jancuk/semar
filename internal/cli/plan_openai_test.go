@@ -64,7 +64,7 @@ func TestPlanThroughTheOpenAIKind(t *testing.T) {
 	contains(t, "stderr", res.stderr, "provider acme (openai) plans release with acme-chat, and sends the files it reads to "+srv.URL+"/v1;")
 	contains(t, "stdout", res.stdout, "SHOP-482 (behaviour): 1 scenario")
 
-	for _, f := range []string{"SHOP-482/SHOP-482-01.yaml", "SHOP-483/SHOP-483-01.yaml"} {
+	for _, f := range []string{"SHOP-482/SHOP-482-01.feature", "SHOP-483/SHOP-483-01.feature"} {
 		if !exists(t, p.path(".semar", "scenarios", filepath.FromSlash(f))) {
 			t.Errorf("scenario file %s was not written", f)
 		}

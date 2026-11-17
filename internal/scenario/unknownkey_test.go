@@ -14,7 +14,7 @@ func TestParseNamesAnUnknownKeyAndATypeMismatchInPlainWords(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := scenario.Parse([]byte(c.text), "s.yaml")
+			_, err := scenario.ParseYAML([]byte(c.text), "s.yaml")
 			if err == nil || err.Error() != c.want {
 				t.Fatalf("err = %v, want %q", err, c.want)
 			}

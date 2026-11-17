@@ -219,7 +219,7 @@ func TestRoundTripProperty(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Render refused scenario %d: %v\n%#v", i, err, s)
 		}
-		got, err := scenario.ParseGherkin(data, "p.feature")
+		got, err := scenario.Parse(data, "p.feature")
 		if err != nil {
 			t.Fatalf("Parse refused scenario %d: %v\n%s", i, err, data)
 		}

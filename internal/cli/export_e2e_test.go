@@ -297,23 +297,18 @@ func exportE2ERepo(t *testing.T, arm *atomic.Pointer[func()]) *repo {
 	// 01 fails: the refund above the total is accepted, and the customer and the echoed credential
 	// are not what the checks say, so their observed values are redacted in the evidence.
 	r.exportScenario(t, exportFailedID, "Refund above the order total is rejected", `
-  - id: create-order
-    setup: true
-    action: Create a paid order for 100000
-    hint: { method: POST, path: /v1/orders }
-  - id: refund-too-much
-    action: Request a refund of 150000 for that order
-    hint: { method: POST, path: "/v1/orders/{id}/refunds" }
-    expect:
-      - check: { status: 422 }
-        source: ticket
-        cite: "SHOP-482: a refund above the order total must be rejected"
-  - id: order-unchanged
-    action: Read the order again
-    hint: { method: GET, path: "/v1/orders/{id}" }
-    expect:
-      - { check: { jsonpath: "$.data.customer", equals: nobody }, source: ticket, cite: "SHOP-482: the customer is kept" }
-      - { check: { header: X-Echo, equals: nothing }, source: ticket, cite: "SHOP-482: no credential is echoed" }
+    Given Create a paid order for 100000
+    # step: create-order; POST /v1/orders
+    When Request a refund of 150000 for that order
+    # step: refund-too-much; POST /v1/orders/{id}/refunds
+    Then the status is 422
+    # ticket SHOP-482: a refund above the order total must be rejected
+    When Read the order again
+    # step: order-unchanged; GET /v1/orders/{id}
+    Then $.data.customer equals "nobody"
+    # ticket SHOP-482: the customer is kept
+    And the header X-Echo equals "nothing"
+    # ticket SHOP-482: no credential is echoed
 `, fmt.Sprintf(`
   - step: create-order
     request: { service: orders, method: POST, path: /v1/orders, json: { amount: 100000, customer: %s } }
@@ -326,15 +321,12 @@ func exportE2ERepo(t *testing.T, arm *atomic.Pointer[func()]) *repo {
 
 	// 02 passes: a refund within the total is accepted.
 	r.exportScenario(t, exportPassedID, "Refund within the order total is accepted", `
-  - id: create-order
-    setup: true
-    action: Create a paid order for 100000
-    hint: { method: POST, path: /v1/orders }
-  - id: refund-some
-    action: Request a refund of 50000 for that order
-    hint: { method: POST, path: "/v1/orders/{id}/refunds" }
-    expect:
-      - { check: { status: 201 }, source: person }
+    Given Create a paid order for 100000
+    # step: create-order; POST /v1/orders
+    When Request a refund of 50000 for that order
+    # step: refund-some; POST /v1/orders/{id}/refunds
+    Then the status is 201
+    # person
 `, `
   - step: create-order
     request: { service: orders, method: POST, path: /v1/orders, json: { amount: 100000 } }
@@ -345,15 +337,12 @@ func exportE2ERepo(t *testing.T, arm *atomic.Pointer[func()]) *repo {
 
 	// 03 is blocked: the setup order is refused, so the scenario cannot say anything about refunds.
 	r.exportScenario(t, exportBlockedID, "Refund of a second order is accepted", `
-  - id: create-order
-    setup: true
-    action: Create a paid order for 100000
-    hint: { method: POST, path: /v1/orders }
-  - id: refund-some
-    action: Request a refund of 50000 for that order
-    hint: { method: POST, path: "/v1/orders/{id}/refunds" }
-    expect:
-      - { check: { status: 201 }, source: person }
+    Given Create a paid order for 100000
+    # step: create-order; POST /v1/orders
+    When Request a refund of 50000 for that order
+    # step: refund-some; POST /v1/orders/{id}/refunds
+    Then the status is 201
+    # person
 `, `
   - step: create-order
     request: { service: orders, method: POST, path: /v1/orders, json: { amount: -5 } }
@@ -371,9 +360,9 @@ func exportE2ERepo(t *testing.T, arm *atomic.Pointer[func()]) *repo {
 // exportScenario writes a scenario file and its script, adds the script, and confirms the scenario.
 func (r *repo) exportScenario(t *testing.T, id, title, steps, scriptSteps string) {
 	t.Helper()
-	file := ".semar/scenarios/SHOP-482/" + id + ".yaml"
-	r.writeRel(t, file, "apiVersion: semar/v1\nkind: Scenario\nid: "+id+"\ntitle: "+title+"\nticket: SHOP-482\n"+
-		"intent: Refunds of an order follow its total.\nsurface: api\nauthProfile: support-agent\nsteps:"+steps)
+	file := ".semar/scenarios/SHOP-482/" + id + ".feature"
+	r.writeRel(t, file, "Feature: Refunds of an order\n\n  @id:"+id+" @ticket:SHOP-482 @surface:api @auth:support-agent\n  Scenario: "+title+"\n"+
+		"    Refunds of an order follow its total.\n"+steps)
 	sc, err := scenario.Load(r.path(filepath.FromSlash(file)))
 	if err != nil {
 		t.Fatal(err)
@@ -486,7 +475,7 @@ func TestExportEndToEnd(t *testing.T) {
 			t.Fatalf("%d results for %d false confirmed checks, want 1:\n%s", len(results), falseChecks, e.raw["sarif"])
 		}
 		for _, x := range results {
-			if len(x.Locations) != 1 || x.Locations[0].PhysicalLocation.ArtifactLocation.URI != ".semar/scenarios/SHOP-482/"+exportFailedID+".yaml" {
+			if len(x.Locations) != 1 || x.Locations[0].PhysicalLocation.ArtifactLocation.URI != ".semar/scenarios/SHOP-482/"+exportFailedID+".feature" {
 				t.Errorf("result %+v is not located in the failed scenario file", x)
 			}
 			if x.Properties["semarScenario"] != "" && x.Properties["semarScenario"] != exportFailedID {

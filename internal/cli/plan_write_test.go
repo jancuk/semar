@@ -217,12 +217,12 @@ func TestARefusedPlanLeavesSemarAsItWas(t *testing.T) {
 	t.Run("a target scenario file exists", func(t *testing.T) {
 		p := newPlanRepo(t, sampleapp.Options{})
 		p.configure(t, goodDraft)
-		if err := os.MkdirAll(p.path(".semar", "scenarios", "SHOP-482", "SHOP-482-01.yaml"), 0o700); err != nil {
+		if err := os.MkdirAll(p.path(".semar", "scenarios", "SHOP-482", "SHOP-482-01.feature"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		before := tree(t, p.path(".semar"))
 		res := p.must(t, cli.ExitError, "plan", "--diff", "main..release", "--no-trial")
-		contains(t, "stderr", res.stderr, "SHOP-482-01.yaml exists already; nothing was written")
+		contains(t, "stderr", res.stderr, "SHOP-482-01.feature exists already; nothing was written")
 		if after := tree(t, p.path(".semar")); !slices.Equal(after, before) {
 			t.Errorf(".semar changed:\nbefore %q\nafter  %q", before, after)
 		}

@@ -9,7 +9,7 @@ import (
 )
 
 // A scenario that Parse accepts and Validate passes must have a hash, or it could not run.
-func FuzzParse(f *testing.F) {
+func FuzzParseYAML(f *testing.F) {
 	valid, err := os.ReadFile("testdata/valid.yaml")
 	if err != nil {
 		f.Fatal(err)
@@ -26,7 +26,7 @@ func FuzzParse(f *testing.F) {
 	f.Add([]byte("given: [{fixture: a.b, as: x}, {fixture: a.b, as: x}]\nsteps:\n  - id: s\n"))
 	f.Add([]byte("given:\n  - fixture: \"{{order.id}}\"\n    as: \"a.b\"\n    with: { \"{{x.y}}\": \"{{data.k}}\" }\n"))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		s, err := scenario.Parse(data, "fuzz.yaml")
+		s, err := scenario.ParseYAML(data, "fuzz.yaml")
 		if err != nil {
 			return
 		}

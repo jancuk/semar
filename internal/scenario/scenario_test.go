@@ -12,7 +12,7 @@ import (
 
 func load(t *testing.T) domain.Scenario {
 	t.Helper()
-	s, err := scenario.Load("testdata/valid.yaml")
+	s, err := scenario.Load("testdata/valid.feature")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,14 +20,14 @@ func load(t *testing.T) domain.Scenario {
 }
 
 func TestParseRejectsUnknownKey(t *testing.T) {
-	_, err := scenario.Parse([]byte("apiVersion: semar/v1\nkind: Scenario\nid: A-1\nsteps:\n  - id: s\n    expects: []\n"), "a.yaml")
+	_, err := scenario.ParseYAML([]byte("apiVersion: semar/v1\nkind: Scenario\nid: A-1\nsteps:\n  - id: s\n    expects: []\n"), "a.yaml")
 	if err == nil || !strings.Contains(err.Error(), "a.yaml:6") || !strings.Contains(err.Error(), "expects") {
 		t.Fatalf("want an error that names a.yaml:6 and the key, got %v", err)
 	}
 }
 
 func TestParseRejectsMalformedYAML(t *testing.T) {
-	_, err := scenario.Parse([]byte("id: [unclosed\n"), "b.yaml")
+	_, err := scenario.ParseYAML([]byte("id: [unclosed\n"), "b.yaml")
 	if err == nil || !strings.Contains(err.Error(), "b.yaml") {
 		t.Fatalf("want an error that names b.yaml, got %v", err)
 	}
@@ -39,7 +39,7 @@ func TestParseGivesEncodableCheckValues(t *testing.T) {
 		t.Fatalf("hash of a parsed scenario = %q, want 64 hex characters", got)
 	}
 	nested := "apiVersion: semar/v1\nkind: Scenario\nid: A-1\nsteps:\n  - id: s\n    expect:\n      - check: {jsonpath: $.a, equals: {k: [1, {m: x}]}}\n        source: diff\n"
-	n, err := scenario.Parse([]byte(nested), "n.yaml")
+	n, err := scenario.ParseYAML([]byte(nested), "n.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestValidateReturnsEveryProblem(t *testing.T) {
 
 func TestParseRejectsSecondDocument(t *testing.T) {
 	data := []byte("apiVersion: semar/v1\nkind: Scenario\nid: A-1\nsteps:\n  - id: s\n---\nid: A-2\n")
-	_, err := scenario.Parse(data, "multi.yaml")
+	_, err := scenario.ParseYAML(data, "multi.yaml")
 	if err == nil || !strings.Contains(err.Error(), "multi.yaml") || !strings.Contains(err.Error(), "more than one") {
 		t.Fatalf("want an error that names multi.yaml and says more than one document, got %v", err)
 	}
@@ -139,7 +139,7 @@ func TestParseGiven(t *testing.T) {
 		"  - fixture: order.paid\n    as: order\n    with: { customer: c-1, count: \"3\" }\n    lease: exclusive\n" +
 		"  - { fixture: customer.verified, as: customer }\n" +
 		"steps:\n  - id: s\n"
-	s, err := scenario.Parse([]byte(src), "g.yaml")
+	s, err := scenario.ParseYAML([]byte(src), "g.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestParseGiven(t *testing.T) {
 
 func TestParseRejectsUnknownGivenKey(t *testing.T) {
 	src := givenHead[:strings.Index(givenHead, "steps:")] + "given:\n  - fixture: order.paid\n    as: order\n    retries: 3\nsteps:\n  - id: s\n"
-	_, err := scenario.Parse([]byte(src), "g.yaml")
+	_, err := scenario.ParseYAML([]byte(src), "g.yaml")
 	if err == nil || !strings.Contains(err.Error(), "g.yaml:9") || !strings.Contains(err.Error(), "retries") {
 		t.Fatalf("want an error that names g.yaml:9 and the key, got %v", err)
 	}
@@ -165,7 +165,7 @@ func TestParseRejectsUnknownGivenKey(t *testing.T) {
 
 func TestParseGivenWithKeysThatNameCheckOperators(t *testing.T) {
 	src := givenHead[:strings.Index(givenHead, "steps:")] + "given:\n  - fixture: order.paid\n    as: order\n    with: { status: paid, count: 3, equals: 1.50, greater: x, header: y }\nsteps:\n  - id: s\n"
-	s, err := scenario.Parse([]byte(src), "g.yaml")
+	s, err := scenario.ParseYAML([]byte(src), "g.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

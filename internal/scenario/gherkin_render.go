@@ -114,7 +114,7 @@ func Render(s domain.Scenario, subject string) ([]byte, error) {
 	}
 
 	out := []byte(b.String())
-	got, err := ParseGherkin(out, "scenario "+string(s.ID))
+	got, err := Parse(out, "scenario "+string(s.ID))
 	if err != nil {
 		return nil, fmt.Errorf("scenario %s cannot be written as Gherkin that Parse accepts: %w", s.ID, err)
 	}

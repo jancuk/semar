@@ -14,7 +14,7 @@ import (
 
 // sampleRun holds one scenario of every outcome in two tickets, and one with no file.
 func sampleRun() export.Run {
-	file := func(ticket, id string) string { return ".semar/scenarios/" + ticket + "/" + id + ".yaml" }
+	file := func(ticket, id string) string { return ".semar/scenarios/" + ticket + "/" + id + ".feature" }
 	check := func(step domain.StepID, idx int, source string, state domain.CheckState, exp, obs string, confirmed bool) domain.CheckResult {
 		return domain.CheckResult{Step: step, Index: idx, Source: source, State: state, Expected: exp, Observed: obs, Confirmed: confirmed}
 	}
@@ -60,7 +60,7 @@ func sampleRun() export.Run {
 func oneOutcome(o domain.Outcome) export.Run {
 	r := sampleRun()
 	r.Scenarios = []export.Scenario{{Result: result("SHOP-482-01", o, "a reason"), Title: "A title", Ticket: "SHOP-482",
-		File: ".semar/scenarios/SHOP-482/SHOP-482-01.yaml"}}
+		File: ".semar/scenarios/SHOP-482/SHOP-482-01.feature"}}
 	return r
 }
 

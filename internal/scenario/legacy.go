@@ -1,5 +1,8 @@
 package scenario
 
+// This file reads the YAML scenario files that Semar wrote before scenarios became Gherkin. Only
+// semar scenarios convert uses it. Nothing else reads or writes that format.
+
 import (
 	"fmt"
 	"os"
@@ -8,7 +11,8 @@ import (
 	"github.com/jancuk/semar/internal/yamlfile"
 )
 
-func Parse(data []byte, name string) (domain.Scenario, error) {
+// ParseYAML reads a scenario in the old YAML format. The decode is strict, as it always was.
+func ParseYAML(data []byte, name string) (domain.Scenario, error) {
 	var s domain.Scenario
 	if err := yamlfile.Decode(data, name, &s); err != nil {
 		return domain.Scenario{}, err
@@ -31,12 +35,13 @@ func Parse(data []byte, name string) (domain.Scenario, error) {
 	return s, nil
 }
 
-func Load(path string) (domain.Scenario, error) {
+// LoadYAML reads the old YAML scenario file at path.
+func LoadYAML(path string) (domain.Scenario, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return domain.Scenario{}, fmt.Errorf("read scenario %s: %w", path, err)
 	}
-	return Parse(data, path)
+	return ParseYAML(data, path)
 }
 
 // operandKind names the keys of a check that hold a number, and the type each is decoded into.

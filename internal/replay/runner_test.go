@@ -160,7 +160,7 @@ func newRig(t *testing.T, o rigOptions) *rig {
 
 func loadScenario(t *testing.T) domain.Scenario {
 	t.Helper()
-	p := filepath.Join("testdata", "SHOP-482-01.scenario.yaml")
+	p := filepath.Join("testdata", "SHOP-482-01.feature")
 	data, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)
@@ -836,7 +836,7 @@ const givenID domain.ScenarioID = "SHOP-482-05"
 
 func loadGivenScenario(t *testing.T) domain.Scenario {
 	t.Helper()
-	p := filepath.Join("testdata", "SHOP-482-05.scenario.yaml")
+	p := filepath.Join("testdata", "SHOP-482-05.feature")
 	data, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)

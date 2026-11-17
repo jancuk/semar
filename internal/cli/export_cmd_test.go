@@ -23,8 +23,8 @@ func exportRepo(t *testing.T) string {
 	if err := os.MkdirAll(scenarioDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	file := "id: SHOP-482-01\ntitle: Refund above the order total is rejected\nticket: SHOP-482\nsteps:\n  - id: refund-too-much\n"
-	if err := os.WriteFile(filepath.Join(scenarioDir, "SHOP-482-01.yaml"), []byte(file), 0o600); err != nil {
+	file := "Feature: Refunds\n\n  @id:SHOP-482-01 @ticket:SHOP-482 @surface:api\n  Scenario: Refund above the order total is rejected\n    When Request a refund of 150000\n    # step: refund-too-much\n"
+	if err := os.WriteFile(filepath.Join(scenarioDir, "SHOP-482-01.feature"), []byte(file), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	store, err := evidence.Open(filepath.Join(repo, ".semar"))
@@ -93,7 +93,7 @@ func TestExportToStdout(t *testing.T) {
 					t.Errorf("stdout = %s", out)
 				}
 			case "sarif":
-				if !json.Valid([]byte(out)) || !strings.Contains(out, `"startLine": 5`) || !strings.Contains(out, ".semar/scenarios/SHOP-482/SHOP-482-01.yaml") {
+				if !json.Valid([]byte(out)) || !strings.Contains(out, `"startLine": 5`) || !strings.Contains(out, ".semar/scenarios/SHOP-482/SHOP-482-01.feature") {
 					t.Errorf("stdout = %s", out)
 				}
 			}

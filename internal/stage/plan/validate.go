@@ -231,7 +231,7 @@ func (v *validator) scenario(i int, sd ScenarioDraft, id domain.ScenarioID, titl
 	}
 
 	sc := domain.Scenario{
-		APIVersion: "semar/v1", Kind: "Scenario", ID: id, Title: sd.Title, Ticket: sd.Ticket, Intent: sd.Intent,
+		APIVersion: "semar/v1", Kind: "Scenario", ID: id, Title: sd.Title, Ticket: sd.Ticket, Intent: strings.TrimSpace(sd.Intent),
 		Surface: domain.SurfaceAPI, AuthProfile: v.in.AuthProfile,
 	}
 	var unknownAliases map[string]bool
@@ -280,16 +280,20 @@ func (v *validator) scenario(i int, sd ScenarioDraft, id domain.ScenarioID, titl
 		v.add(sp, "a scenario needs at least one expected result")
 	}
 
-	for _, pr := range scenario.Validate(sc, scenario.FromFile) {
+	problems := scenario.Validate(sc, scenario.FromFile)
+	for _, pr := range problems {
 		v.add(scenarioPath(sp, pr.Path), "%s", pr.Message)
 	}
-	if data, err := scenario.Marshal(sc); err != nil {
-		path, msg := writerProblem(sp, err)
-		v.add(path, "the scenario cannot be written: %s", msg)
-	} else if back, err := scenario.Parse(data, string(id)); err != nil {
-		v.add(sp, "the scenario cannot be read back: %v", err)
-	} else {
-		sc = back
+	// A scenario that fails the rules has said why. Writing it would add the same complaint in other words.
+	if len(problems) == 0 {
+		if data, err := scenario.Render(sc, ""); err != nil {
+			path, msg := writerProblem(sp, err)
+			v.add(path, "the scenario cannot be written: %s", msg)
+		} else if back, err := scenario.Parse(data, string(id)); err != nil {
+			v.add(sp, "the scenario cannot be read back: %v", err)
+		} else {
+			sc = back
+		}
 	}
 
 	scr.ExpectHash = domain.ExpectHash(sc)

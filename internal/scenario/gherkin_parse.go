@@ -34,18 +34,18 @@ const AcceptedThen = `A Then or And line after a When step is one of these. A va
   the header <Name> equals "text"   (a header takes the operators of a JSON path)
   the element <id> equals "text"    (an element takes equals, does not equal, contains, exists, and has N items)`
 
-// LoadGherkin reads the Gherkin file at path.
-func LoadGherkin(path string) (domain.Scenario, error) {
+// Load reads the Gherkin file at path.
+func Load(path string) (domain.Scenario, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return domain.Scenario{}, fmt.Errorf("read scenario %s: %w", path, err)
 	}
-	return ParseGherkin(data, path)
+	return Parse(data, path)
 }
 
-// ParseGherkin reads a Gherkin feature file that holds one Scenario. name is how an error calls the file.
+// Parse reads a Gherkin feature file that holds one Scenario. name is how an error calls the file.
 // An error starts with <name>:<line> and says in plain words what Semar cannot read there.
-func ParseGherkin(data []byte, name string) (domain.Scenario, error) {
+func Parse(data []byte, name string) (domain.Scenario, error) {
 	p := &reader{name: name, comments: map[int64]string{}}
 	var next int
 	doc, err := gherkin.ParseGherkinDocument(bytes.NewReader(data), func() string { next++; return strconv.Itoa(next) })
@@ -63,6 +63,8 @@ type reader struct {
 func (p *reader) fail(line int64, format string, args ...any) error {
 	return fmt.Errorf("%s:%d: %s", p.name, line, fmt.Sprintf(format, args...))
 }
+
+const maxParserErrors = 5
 
 var parserLine = regexp.MustCompile(`^\((\d+):\d+\): (.*)$`)
 
@@ -85,6 +87,10 @@ func (p *reader) parserErrors(err error) error {
 	}
 	if len(errs) == 0 {
 		return fmt.Errorf("%s: %w", p.name, err)
+	}
+	if len(errs) > maxParserErrors {
+		more := fmt.Errorf("%s: and %d more lines that Gherkin cannot read", p.name, len(errs)-maxParserErrors)
+		errs = append(errs[:maxParserErrors], more)
 	}
 	return errors.Join(errs...)
 }
@@ -288,9 +294,13 @@ func (p *reader) steps(in []*messages.Step) ([]domain.Step, []domain.Given, erro
 			if len(steps) == 0 || steps[len(steps)-1].Setup {
 				return nil, nil, p.fail(line, "a %s line is an expected result of the When step above it, and there is none: put it under a When", strings.TrimSpace(st.Keyword))
 			}
-			c, ok := parseThen(st.Text)
-			if !ok {
-				return nil, nil, p.fail(line, "Semar cannot read the %s line %q.\n%s", strings.TrimSpace(st.Keyword), st.Text, AcceptedThen)
+			c, err := parseThen(st.Text)
+			if err != nil {
+				reason := ""
+				if !errors.Is(err, errNotASentence) {
+					reason = ": " + err.Error()
+				}
+				return nil, nil, p.fail(line, "Semar cannot read the %s line %q%s.\n%s", strings.TrimSpace(st.Keyword), st.Text, reason, AcceptedThen)
 			}
 			if !hasComment {
 				return nil, nil, p.fail(end, "this expected result has no source. Put a comment line directly under it: # ticket <where the ticket says so>, or # diff, # testcase, # baseline, # person")
@@ -398,14 +408,17 @@ func (p *reader) source(line int64, comment string, c domain.Check) (domain.Expe
 
 var statusLine = regexp.MustCompile(`^the status is (-?[0-9]+)$`)
 
-// parseThen reads the sentence of a Then line.
-func parseThen(text string) (domain.Check, bool) {
+var errNotASentence = errors.New("not a sentence of any form")
+
+// parseThen reads the sentence of a Then line. The error says what is wrong with the value when the
+// sentence has the form of one that takes a value, and it is errNotASentence when it has no form.
+func parseThen(text string) (domain.Check, error) {
 	if m := statusLine.FindStringSubmatch(text); m != nil {
 		n, err := strconv.Atoi(m[1])
 		if err != nil {
-			return domain.Check{}, false
+			return domain.Check{}, fmt.Errorf("the status %s is too large", m[1])
 		}
-		return domain.Check{Status: &n}, true
+		return domain.Check{Status: &n}, nil
 	}
 	for _, s := range []struct {
 		prefix string
@@ -417,7 +430,7 @@ func parseThen(text string) (domain.Check, bool) {
 		if rest, ok := strings.CutPrefix(text, s.prefix); ok {
 			name, op, ok := strings.Cut(rest, " ")
 			if !ok || name == "" {
-				return domain.Check{}, false
+				return domain.Check{}, errNotASentence
 			}
 			var c domain.Check
 			s.set(&c, name)
@@ -425,32 +438,43 @@ func parseThen(text string) (domain.Check, bool) {
 		}
 	}
 	if !strings.HasPrefix(text, "$") {
-		return domain.Check{}, false
+		return domain.Check{}, errNotASentence
 	}
-	// A path may hold spaces, so the first split that leaves a sentence that reads is the one.
+	// A path may hold spaces, so the first split that leaves a sentence that reads is the one. When
+	// none reads, the problem of the first split that had the form of an operator is the answer.
+	var first error
 	for i := 1; i < len(text); i++ {
 		if text[i] != ' ' {
 			continue
 		}
 		c := domain.Check{JSONPath: text[:i]}
-		if operator(&c, text[i+1:]) {
-			return c, true
+		switch err := operator(&c, text[i+1:]); {
+		case err == nil:
+			return c, nil
+		case !errors.Is(err, errNotASentence) && first == nil:
+			first = err
 		}
 	}
-	return domain.Check{}, false
+	if first != nil {
+		return domain.Check{}, first
+	}
+	return domain.Check{}, errNotASentence
 }
 
 // operator reads the words after the subject of a check into c.
-func operator(c *domain.Check, text string) bool {
+func operator(c *domain.Check, text string) error {
 	switch text {
 	case "exists", "does not exist":
 		v := text == "exists"
 		c.Exists = &v
-		return true
+		return nil
 	}
 	if path, ok := strings.CutPrefix(text, "equals the value at "); ok {
+		if !strings.HasPrefix(path, "$") {
+			return fmt.Errorf("%q is not a JSON path: it starts with $", path)
+		}
 		c.EqualsPath = path
-		return strings.HasPrefix(path, "$")
+		return nil
 	}
 	for _, o := range []struct {
 		prefix string
@@ -462,11 +486,14 @@ func operator(c *domain.Check, text string) bool {
 	} {
 		if lit, ok := strings.CutPrefix(text, o.prefix); ok {
 			v, err := decodeLiteral(lit)
-			if err != nil || v == nil {
-				return false
+			if err != nil {
+				return err
+			}
+			if v == nil {
+				return errors.New("a value of null cannot be checked: use exists or does not exist")
 			}
 			*o.dst(c) = v
-			return true
+			return nil
 		}
 	}
 	for _, o := range []struct {
@@ -478,25 +505,25 @@ func operator(c *domain.Check, text string) bool {
 	} {
 		if lit, ok := strings.CutPrefix(text, o.prefix); ok {
 			if !jsonNumber.MatchString(lit) {
-				return false
+				return fmt.Errorf("%q is not a number", lit)
 			}
-			f, err := strconv.ParseFloat(lit, 64)
-			if err != nil || math.IsInf(f, 0) {
-				return false
+			f, err := exactFloat(lit)
+			if err != nil {
+				return err
 			}
 			*o.dst(c) = &f
-			return true
+			return nil
 		}
 	}
 	if m := countLine.FindStringSubmatch(text); m != nil {
 		n, err := strconv.Atoi(m[1])
 		if err != nil {
-			return false
+			return fmt.Errorf("the number %s is too large", m[1])
 		}
 		c.Count = &n
-		return true
+		return nil
 	}
-	return false
+	return errNotASentence
 }
 
 var countLine = regexp.MustCompile(`^has (-?[0-9]+) items?$`)
@@ -508,12 +535,26 @@ func decodeLiteral(text string) (any, error) {
 	dec.UseNumber()
 	var v any
 	if err := dec.Decode(&v); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%q is not a JSON value: write text in double quotes, and numbers, true, false, lists, and objects as JSON", text)
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, errors.New("text after the value")
+		return nil, fmt.Errorf("%q is not one JSON value: write text in double quotes", text)
 	}
 	return normalize(v)
+}
+
+// exactFloat reads text as a float64 only when the float64 is the number that the text says. A float64 is
+// the shortest decimal that gives it back, which is how a check reads an operand, so a number with
+// more digits than that would be compared as a different number than the person confirmed.
+func exactFloat(text string) (float64, error) {
+	f, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsInf(f, 0) {
+		return 0, fmt.Errorf("the number %s is outside the range that Semar can hold", text)
+	}
+	if decimalKey(text) != decimalKey(strconv.FormatFloat(f, 'e', -1, 64)) {
+		return 0, fmt.Errorf("the number %s cannot be held exactly: write fewer digits", text)
+	}
+	return f, nil
 }
 
 func normalize(v any) (any, error) {
@@ -526,15 +567,11 @@ func normalize(v any) (any, error) {
 			}
 			u, err := strconv.ParseUint(text, 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("%s is a whole number too wide to be held exactly", text)
+				return nil, fmt.Errorf("the number %s cannot be held exactly: write fewer digits", text)
 			}
 			return u, nil
 		}
-		f, err := strconv.ParseFloat(text, 64)
-		if err != nil || math.IsInf(f, 0) {
-			return nil, fmt.Errorf("%s is outside the range of a number", text)
-		}
-		return f, nil
+		return exactFloat(text)
 	case map[string]any:
 		for k, e := range x {
 			n, err := normalize(e)
@@ -555,4 +592,53 @@ func normalize(v any) (any, error) {
 		return x, nil
 	}
 	return v, nil
+}
+
+// Outline holds what a report needs to point at a scenario file: the scenario's ID, title, and ticket, and
+// the line of each step. It is read without the checks that Parse makes, so a file that Parse refuses
+// may still have one.
+type Outline struct {
+	ID, Title, Ticket string
+	StepLines         map[domain.StepID]int // the line of the step's Given or When
+}
+
+// ReadOutline reads the Outline of a feature file, and says false when the file is not Gherkin with one Scenario.
+func ReadOutline(data []byte) (Outline, bool) {
+	var next int
+	doc, err := gherkin.ParseGherkinDocument(bytes.NewReader(data), func() string { next++; return strconv.Itoa(next) })
+	if err != nil || doc.Feature == nil || len(doc.Feature.Children) != 1 || doc.Feature.Children[0].Scenario == nil {
+		return Outline{}, false
+	}
+	p := &reader{comments: map[int64]string{}}
+	for _, c := range doc.Comments {
+		p.comments[c.Location.Line] = c.Text
+	}
+	sc := doc.Feature.Children[0].Scenario
+	o := Outline{Title: sc.Name, StepLines: map[domain.StepID]int{}}
+	for _, t := range sc.Tags {
+		switch key, value, _ := strings.Cut(strings.TrimPrefix(t.Name, "@"), ":"); key {
+		case "id":
+			o.ID = value
+		case "ticket":
+			o.Ticket = value
+		}
+	}
+	for _, st := range sc.Steps {
+		end := st.Location.Line
+		if st.DataTable != nil {
+			end = st.DataTable.Rows[len(st.DataTable.Rows)-1].Location.Line
+		}
+		comment, ok := p.comment(end + 1)
+		rest, isStep := strings.CutPrefix(comment, "step:")
+		if !ok || !isStep {
+			continue
+		}
+		id, _, _ := strings.Cut(rest, ";")
+		if id = strings.TrimSpace(id); id != "" {
+			if _, dup := o.StepLines[domain.StepID(id)]; !dup {
+				o.StepLines[domain.StepID(id)] = int(st.Location.Line)
+			}
+		}
+	}
+	return o, true
 }

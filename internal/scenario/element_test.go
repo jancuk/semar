@@ -27,7 +27,7 @@ steps:
 
 func problems(t *testing.T, check string) string {
 	t.Helper()
-	sc, err := scenario.Parse([]byte(webScenario(check)), "board-web.yaml")
+	sc, err := scenario.ParseYAML([]byte(webScenario(check)), "board-web.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,18 +66,18 @@ func TestElementChecksValidate(t *testing.T) {
 }
 
 func TestElementCheckRoundTrips(t *testing.T) {
-	sc, err := scenario.Parse([]byte(webScenario(`{ element: card, equals: Buy milk }`)), "board-web.yaml")
+	sc, err := scenario.ParseYAML([]byte(webScenario(`{ element: card, equals: Buy milk }`)), "board-web.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := scenario.Marshal(sc)
+	data, err := scenario.Render(sc, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "element: card") {
+	if !strings.Contains(string(data), `Then the element card equals "Buy milk"`) {
 		t.Errorf("the element was not written:\n%s", data)
 	}
-	back, err := scenario.Parse(data, "x.yaml")
+	back, err := scenario.Parse(data, "x.feature")
 	if err != nil || back.Steps[0].Expect[0].Check.Element != "card" {
 		t.Errorf("round trip: %v, %+v", err, back)
 	}

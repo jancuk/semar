@@ -3,7 +3,6 @@
 package export
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -13,11 +12,10 @@ import (
 	"sort"
 	"strings"
 
-	yaml "go.yaml.in/yaml/v4"
-
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/idcheck"
+	"github.com/jancuk/semar/internal/scenario"
 )
 
 // maxScenarioFile is the largest scenario file that Load reads. A larger one is treated as gone.
@@ -35,14 +33,14 @@ type Scenario struct {
 	Title      string                // "" when the scenario file is gone
 	Ticket     string                // "" when the scenario file is gone or names none
 	File       string                // the scenario file from the repository root, "" when gone
-	StepLines  map[domain.StepID]int // the line of each step's id key in the file
+	StepLines  map[domain.StepID]int // the line of each step in the file
 	DurationMS int64
 	Unknown    bool // an action was too large to read
 }
 
 // Load refuses a run that is interrupted, that changed after it was written, or that has no
 // scenario result. The scenario files are read only for labels and locations: a file that
-// is gone, too large, not YAML, or one of several for an ID leaves the scenario with none.
+// is gone, too large, not Gherkin, or one of several for an ID leaves the scenario with none.
 func Load(store *evidence.Store, repo string, id domain.RunID, version string) (Run, error) {
 	if err := idcheck.Check("run ID", string(id)); err != nil {
 		return Run{}, err
@@ -124,9 +122,9 @@ func actionTime(store *evidence.Store, id domain.RunID, acts []domain.Activity, 
 	return ms, unknown, nil
 }
 
-// scenarioPaths maps each scenario ID to the files .semar/scenarios/**/<id>.yaml or <id>.yml,
-// as paths from the repository root. A link, a special file, and anything that cannot be read
-// is left out: the files give labels only.
+// scenarioPaths maps each scenario ID to the files .semar/scenarios/**/<id>.feature, as paths from
+// the repository root. A link, a special file, and anything that cannot be read is left out: the
+// files give labels only.
 func scenarioPaths(repo string) map[domain.ScenarioID][]string {
 	paths := map[domain.ScenarioID][]string{}
 	base := filepath.Join(repo, ".semar")
@@ -140,7 +138,7 @@ func scenarioPaths(repo string) map[domain.ScenarioID][]string {
 			return nil
 		}
 		ext := filepath.Ext(p)
-		if ext != ".yaml" && ext != ".yml" {
+		if ext != ".feature" {
 			return nil
 		}
 		rel, err := filepath.Rel(repo, p)
@@ -166,39 +164,15 @@ func readLabels(repo string, id domain.ScenarioID, rel string, sc *Scenario) {
 	if !ok {
 		return
 	}
-	var doc yaml.Node
-	if err := yaml.NewDecoder(bytes.NewReader(data)).Decode(&doc); err != nil {
-		return
-	}
-	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return
-	}
-	top := doc.Content[0]
-	if got, ok := textOf(field(top, "id")); !ok || got != string(id) {
+	o, ok := scenario.ReadOutline(data)
+	if !ok || o.ID != string(id) {
 		return
 	}
 	sc.File = filepath.ToSlash(rel)
-	if t, ok := textOf(field(top, "title")); ok {
-		sc.Title = cutMessage(t)
-	}
-	if t, ok := textOf(field(top, "ticket")); ok {
-		sc.Ticket = cutMessage(t)
-	}
-	steps := field(top, "steps")
-	if steps == nil || steps.Kind != yaml.SequenceNode {
-		return
-	}
-	sc.StepLines = map[domain.StepID]int{}
-	for _, step := range steps.Content {
-		if step.Kind != yaml.MappingNode {
-			continue
-		}
-		key, val := fieldPair(step, "id")
-		if text, ok := textOf(val); ok && text != "" {
-			if _, dup := sc.StepLines[domain.StepID(text)]; !dup {
-				sc.StepLines[domain.StepID(text)] = key.Line
-			}
-		}
+	sc.Title = cutMessage(o.Title)
+	sc.Ticket = cutMessage(o.Ticket)
+	if len(o.StepLines) > 0 {
+		sc.StepLines = o.StepLines
 	}
 }
 
@@ -223,26 +197,4 @@ func readSmallFile(repo, rel string) ([]byte, bool) {
 		return nil, false
 	}
 	return data, true
-}
-
-func fieldPair(m *yaml.Node, name string) (key, val *yaml.Node) {
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		if k := m.Content[i]; k.Kind == yaml.ScalarNode && k.Value == name {
-			return k, m.Content[i+1]
-		}
-	}
-	return nil, nil
-}
-
-func field(m *yaml.Node, name string) *yaml.Node {
-	_, v := fieldPair(m, name)
-	return v
-}
-
-// textOf accepts a scalar that YAML reads as a string. A number, a list, and an alias are not text.
-func textOf(n *yaml.Node) (string, bool) {
-	if n == nil || n.Kind != yaml.ScalarNode || n.ShortTag() != "!!str" {
-		return "", false
-	}
-	return n.Value, true
 }

@@ -29,23 +29,18 @@ screens:
     status: { css: "#status" }
 `
 
-const webScenarioFile = `apiVersion: semar/v1
-kind: Scenario
-id: WEB-1
-title: Placing an order shows that it was ordered
-ticket: SHOP-1
-intent: The cart says that the order was placed
-surface: web
-authProfile: support-agent
-steps:
-  - id: open
-    setup: true
-    action: Open the cart
-  - id: pay
-    action: Press Place order
-    expect:
-      - check: { element: status, equals: ordered }
-        source: person
+const webScenarioFile = `Feature: Placing an order
+
+  @id:WEB-1 @ticket:SHOP-1 @surface:web @auth:support-agent
+  Scenario: Placing an order shows that it was ordered
+    The cart says that the order was placed
+
+    Given Open the cart
+    # step: open
+    When Press Place order
+    # step: pay
+    Then the element status equals "ordered"
+    # person
 `
 
 const webScriptFile = `apiVersion: semar/v1
@@ -80,7 +75,7 @@ func webRepo(t *testing.T) *repo {
 		}
 	}
 	write(".semar/screens/shop.yaml", shopScreens)
-	write(".semar/scenarios/WEB-1.yaml", webScenarioFile)
+	write(".semar/scenarios/WEB-1.feature", webScenarioFile)
 	write("scripts/WEB-1.yaml", webScriptFile)
 	r.must(t, cli.ExitOK, "script", "add", r.path("scripts", "WEB-1.yaml"))
 	return r
@@ -169,7 +164,7 @@ func TestScreensRepairProposesAndApplies(t *testing.T) {
 	}
 
 	// The repair never touches a scenario or a script.
-	scenario, _ := os.ReadFile(r.path(".semar", "scenarios", "WEB-1.yaml"))
+	scenario, _ := os.ReadFile(r.path(".semar", "scenarios", "WEB-1.feature"))
 	if string(scenario) != webScenarioFile {
 		t.Error("a repair changed the scenario")
 	}
@@ -209,9 +204,9 @@ func TestLoginWithoutChromeSaysSo(t *testing.T) {
 func TestNoChromeBlocksAWebScenario(t *testing.T) {
 	r := newRepo(t, repoOptions{})
 	for rel, text := range map[string]string{
-		".semar/screens/shop.yaml":    shopScreens,
-		".semar/scenarios/WEB-1.yaml": webScenarioFile,
-		"scripts/WEB-1.yaml":          webScriptFile,
+		".semar/screens/shop.yaml":       shopScreens,
+		".semar/scenarios/WEB-1.feature": webScenarioFile,
+		"scripts/WEB-1.yaml":             webScriptFile,
 	} {
 		p := r.path(filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {

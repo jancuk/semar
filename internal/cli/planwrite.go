@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/jancuk/semar/internal/atomicfile"
 	"github.com/jancuk/semar/internal/domain"
@@ -26,6 +28,32 @@ const planFileMode = 0o644
 type planFile struct {
 	rel  string // below the repository
 	data []byte
+}
+
+// maxSubjectRunes bounds the Feature line of a scenario file.
+const maxSubjectRunes = 100
+
+// featureSubject is what the Feature line of a ticket's scenario files says: the planner's sentence on
+// what the ticket changes, cut at a word, and the ticket key when the planner gave none.
+func featureSubject(d plan.Draft, ticket string) string {
+	for _, t := range d.Tickets {
+		if t.Key != ticket {
+			continue
+		}
+		words := strings.Fields(t.Behaviour)
+		var b strings.Builder
+		for _, w := range words {
+			if utf8.RuneCountInString(b.String())+utf8.RuneCountInString(w) >= maxSubjectRunes {
+				return strings.TrimRight(b.String(), " ,;:") + "..."
+			}
+			if b.Len() > 0 {
+				b.WriteByte(' ')
+			}
+			b.WriteString(w)
+		}
+		return b.String()
+	}
+	return ""
 }
 
 // writePlan writes every file or none (R21). Every byte is made, and every directory on the
@@ -53,11 +81,11 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 		if known[sc.ID] {
 			return "", fmt.Errorf("scenario %s exists already; nothing was written", sc.ID)
 		}
-		data, err := scenario.Marshal(sc)
+		data, err := scenario.Render(sc, featureSubject(out.Draft, sc.Ticket))
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("scenario %s: %w", sc.ID, err)
 		}
-		f := planFile{filepath.Join(".semar", "scenarios", sc.Ticket, string(sc.ID)+".yaml"), data}
+		f := planFile{filepath.Join(".semar", "scenarios", sc.Ticket, string(sc.ID)+featureExt), data}
 		scenarioFiles = append(scenarioFiles, f)
 		s := out.Scripts[i]
 		s.ExpectHash = domain.ExpectHash(sc)
