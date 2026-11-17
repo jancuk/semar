@@ -87,3 +87,58 @@ func TestCriteriaTextIsOneCleanLine(t *testing.T) {
 		t.Errorf("text is not clean or not cut: %q", got[0].Text)
 	}
 }
+
+const gwtFile = `# Refunds
+
+## Acceptance criteria
+
+Given a paid order
+When the owner refunds more than the total
+Then the API answers 422 with the code REFUND_EXCEEDS_TOTAL
+And the order stays as it was
+
+- Given a paid order
+  - When the support agent refunds part of it
+  - Then the API answers 201
+
+**Given** a card on the board
+**When** it is dragged to another list
+**Then** the board shows the new order
+
+## Notes
+
+Given this is not under the heading.
+`
+
+func TestCriteriaReadsGivenWhenThenGroups(t *testing.T) {
+	got := criteriaOf(gwtFile)
+	if len(got) != 3 {
+		t.Fatalf("got %d criteria, want 3: %+v", len(got), got)
+	}
+	for i, want := range []struct {
+		number, line, end int
+		text              string
+	}{
+		{1, 5, 8, "Given a paid order When the owner refunds more than the total Then the API answers 422 with the code REFUND_EXCEEDS_TOTAL And the order stays as it was"},
+		{2, 10, 12, "Given a paid order When the support agent refunds part of it Then the API answers 201"},
+		{3, 14, 16, "Given a card on the board When it is dragged to another list Then the board shows the new order"},
+	} {
+		c := got[i]
+		if c.Number != want.number || c.Line != want.line || c.End != want.end || c.Text != want.text {
+			t.Errorf("criterion %d = %+v\nwant number %d lines %d-%d %q", i, c, want.number, want.line, want.end, want.text)
+		}
+	}
+}
+
+func TestCriteriaGivenInsideANumberedCriterionContinuesIt(t *testing.T) {
+	got := criteriaOf("## Acceptance criteria\n\n1. Refunds work.\n   Given a paid order, when it is refunded, then 201.\n2. Another.\n")
+	if len(got) != 2 || got[0].End != 4 || !strings.Contains(got[0].Text, "Given a paid order") {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestCriteriaWhenAndThenWithoutGivenAreNotCriteria(t *testing.T) {
+	if got := criteriaOf("## Acceptance criteria\n\nWhen it rains\nThen it pours\n"); len(got) != 0 {
+		t.Errorf("got %+v", got)
+	}
+}

@@ -15,6 +15,9 @@ var (
 	headingPattern   = regexp.MustCompile(`^ {0,3}#{1,6}(?:[ \t]+(.*?))?[ \t#]*$`)
 	criterionPattern = regexp.MustCompile(`^([0-9]{1,6})\. +(.*)$`)
 	fencePattern     = regexp.MustCompile("^ {0,3}(```|~~~)")
+	// gwtPattern reads a Gherkin step that a ticket file writes as a bullet or a plain line, with
+	// the keyword in bold or not.
+	gwtPattern = regexp.MustCompile(`^ {0,6}(?:[-*+] +)?(?:\*\*|__)?(Given|When|Then|And|But)(?:\*\*|__)? +(.*)$`)
 )
 
 // Criterion is one numbered acceptance criterion of a ticket file (D9). Line is its first line
@@ -31,23 +34,28 @@ type Criterion struct {
 // Cite is the place of the first line of the criterion.
 func (c Criterion) Cite() string { return c.Path + ":" + strconv.Itoa(c.Line) }
 
-// Criteria reads the acceptance criteria of a ticket file: the lines that start with "<n>. "
-// under a heading whose text contains "acceptance criteria" (any case), up to the next heading.
-// A criterion ends at the next numbered line, a blank line, or a heading. A fenced block never
-// holds a heading. Lines are counted as the prompt counts them, so a cite names the line that
+// Criteria reads the acceptance criteria of a ticket file under a heading whose text contains
+// "acceptance criteria" (any case), up to the next heading. A criterion is a line that starts with
+// "<n>. ", or a Given/When/Then group: a line that starts with Given, as a bullet or as plain
+// text, and the When, Then, And, and But lines after it. A Given line after a Given group starts
+// the next one, and a group has the number of its place among the criteria of the heading. A
+// criterion ends at the next criterion, a blank line, or a heading. A fenced block never holds a
+// heading. Lines are counted as the prompt counts them, so a cite names the line that
 // the planner saw. The text is repository text: it is returned as data, one clean line.
 func Criteria(t knowledge.Ticket) []Criterion {
 	var out []Criterion
 	var parts []string
 	open := false
-	in := false // under a matching heading
+	gwt := false // the open criterion is a Given/When/Then group
+	seq := 0     // the criteria of the heading so far
+	in := false  // under a matching heading
 	fenced := false
 	flush := func() {
 		if open {
 			c := &out[len(out)-1]
 			c.Text = cutRunes(oneLine(strings.Join(parts, " "), 1<<20), maxCriterionText)
 		}
-		open, parts = false, nil
+		open, gwt, parts = false, false, nil
 	}
 	if t.Text == "" {
 		return nil
@@ -67,6 +75,7 @@ func Criteria(t knowledge.Ticket) []Criterion {
 			if m := headingPattern.FindStringSubmatch(line); m != nil {
 				flush()
 				in = strings.Contains(strings.ToLower(m[1]), "acceptance criteria")
+				seq = 0
 				continue
 			}
 		}
@@ -86,8 +95,16 @@ func Criteria(t knowledge.Ticket) []Criterion {
 			if err != nil {
 				continue
 			}
+			seq++
 			out = append(out, Criterion{Ticket: t.Key, Path: t.Path, Number: num, Line: n, End: n})
 			open, parts = true, []string{m[2]}
+			continue
+		}
+		if g := gwtPattern.FindStringSubmatch(line); g != nil && g[1] == "Given" && (!open || gwt) {
+			flush()
+			seq++
+			out = append(out, Criterion{Ticket: t.Key, Path: t.Path, Number: seq, Line: n, End: n})
+			open, gwt, parts = true, true, []string{g[1] + " " + g[2]}
 			continue
 		}
 		if strings.TrimSpace(line) == "" {
@@ -95,6 +112,9 @@ func Criteria(t knowledge.Ticket) []Criterion {
 			continue
 		}
 		if open {
+			if g := gwtPattern.FindStringSubmatch(line); g != nil && gwt {
+				line = g[1] + " " + g[2]
+			}
 			parts = append(parts, line)
 			out[len(out)-1].End = n
 		}
