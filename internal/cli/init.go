@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -39,9 +40,11 @@ type initFlags struct {
 	buildURL, buildCommit, kind                            string
 	accounts                                               []string // name=ENV, one for each extra account
 	describe                                               []string // name=text, one for each account that has a description
+	webUsers                                               []string // name=user, one for each account that signs in on the web
+	webPasswordEnvs                                        []string // name=ENV, the variable of that password
 }
 
-var initFlagNames = []string{"base-url", "service", "auth-header", "auth-value", "token-env", "build-url", "build-commit", "kind", "account", "describe"}
+var initFlagNames = []string{"base-url", "service", "auth-header", "auth-value", "token-env", "build-url", "build-commit", "kind", "account", "describe", "web-user", "web-password-env"}
 
 func addInitFlags(cmd *cobra.Command, f *initFlags) {
 	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "the address of the service in the environment, such as https://orders.uat.example.com")
@@ -52,6 +55,8 @@ func addInitFlags(cmd *cobra.Command, f *initFlags) {
 	cmd.Flags().StringVar(&f.kind, "kind", config.KindTest, "the kind of the environment, test or production; production is read only and allows GET and HEAD")
 	cmd.Flags().StringArrayVar(&f.accounts, "account", nil, "another account as <name>=<ENV>: an auth profile with the same session header and the token in the environment variable ENV; repeatable")
 	cmd.Flags().StringArrayVar(&f.describe, "describe", nil, "who an account is, as <account>=<text>, one line; the planner chooses the account of a step from it; default names the default account; repeatable")
+	cmd.Flags().StringArrayVar(&f.webUsers, "web-user", nil, "the user that an account signs in with on the web, as <account>=<user>; default names the default account; needs --web-password-env; repeatable")
+	cmd.Flags().StringArrayVar(&f.webPasswordEnvs, "web-password-env", nil, "the environment variable that holds the web password of an account, as <account>=<ENV>; needs --web-user; repeatable")
 	cmd.Flags().StringVar(&f.buildURL, "build-url", "", "an address on the host of --base-url that answers with the commit the service runs, such as https://orders.uat.example.com/version")
 	cmd.Flags().StringVar(&f.buildCommit, "build-commit", "", "the JSONPath of the commit in the answer of --build-url (default "+defaultBuildPath+")")
 }
@@ -170,6 +175,11 @@ func printAccounts(w io.Writer, f initFlags) {
 			fmt.Fprintf(w, "export %s=<the token of the account %s>\n", env, name)
 		}
 	}
+	for _, a := range f.webPasswordEnvs {
+		if name, env, ok := strings.Cut(a, "="); ok {
+			fmt.Fprintf(w, "export %s=<the web password of the account %s>\n", env, name)
+		}
+	}
 }
 
 var (
@@ -245,6 +255,10 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	signIns, err := parseWebSignIns(f.webUsers, f.webPasswordEnvs, accounts)
+	if err != nil {
+		return nil, err
+	}
 
 	flow := func(n *yaml.Node) *yaml.Node { n.Style = yaml.FlowStyle; return n }
 	profile := func(name, env string) *yaml.Node {
@@ -254,6 +268,9 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 		)
 		if d := descriptions[name]; d != "" {
 			n.Content = append([]*yaml.Node{text("description"), quoted(d)}, n.Content...)
+		}
+		if w, ok := signIns[name]; ok {
+			n.Content = append(n.Content, text("web"), flow(mapping("user", text(w.User), "password", quoted(w.Password))))
 		}
 		return n
 	}
@@ -341,6 +358,65 @@ func parseDescribe(values []string, accounts []account) (map[string]string, erro
 			return nil, fmt.Errorf("--describe %q: the text %s", v, problem)
 		}
 		out[name] = text
+	}
+	return out, nil
+}
+
+// parseWebSignIns reads --web-user and --web-password-env, both <account>=<value>. The account is
+// default or one of the --account names, and an account has both flags or neither.
+func parseWebSignIns(users, envs []string, accounts []account) (map[string]config.WebSignIn, error) {
+	known := func(name string) bool {
+		return name == "default" || slices.ContainsFunc(accounts, func(a account) bool { return a.name == name })
+	}
+	read := func(flag string, values []string, check func(name, value string) error) (map[string]string, error) {
+		out := map[string]string{}
+		for _, v := range values {
+			name, value, ok := strings.Cut(v, "=")
+			switch {
+			case !ok || name == "" || value == "":
+				return nil, fmt.Errorf("--%s %q must be <account>=<value>", flag, v)
+			case !known(name):
+				return nil, fmt.Errorf("--%s %q: %q is not default or an account of --account", flag, v, name)
+			case out[name] != "":
+				return nil, fmt.Errorf("--%s: the account %s is given more than once", flag, name)
+			}
+			if err := check(name, value); err != nil {
+				return nil, fmt.Errorf("--%s %q: %w", flag, v, err)
+			}
+			out[name] = value
+		}
+		return out, nil
+	}
+	byUser, err := read("web-user", users, func(_, user string) error {
+		if problem := config.DescriptionProblem(user); problem != "" {
+			return fmt.Errorf("the user %s", problem)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	byEnv, err := read("web-password-env", envs, func(_, env string) error {
+		if !envVarPattern.MatchString(env) {
+			return fmt.Errorf("%q is not the name of an environment variable", env)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]config.WebSignIn{}
+	for _, name := range slices.Sorted(maps.Keys(byUser)) {
+		env, ok := byEnv[name]
+		if !ok {
+			return nil, fmt.Errorf("--web-user gives the account %s a user, and it needs --web-password-env %s=<ENV> for the password", name, name)
+		}
+		out[name] = config.WebSignIn{User: byUser[name], Password: "env:" + env}
+	}
+	for _, name := range slices.Sorted(maps.Keys(byEnv)) {
+		if _, ok := byUser[name]; !ok {
+			return nil, fmt.Errorf("--web-password-env gives the account %s a password, and it needs --web-user %s=<user>", name, name)
+		}
 	}
 	return out, nil
 }

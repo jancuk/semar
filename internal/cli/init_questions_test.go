@@ -26,9 +26,11 @@ func TestInitAsksForWhatNoFlagGave(t *testing.T) {
 		"https://orders.example.com",
 		"ORDERS_TOKEN",
 		"a customer with paid orders",
+		"",
 		"support",
 		"ORDERS_TOKEN_SUPPORT",
 		"a support agent who can refund any order",
+		"",
 		"",
 	)
 	t.Setenv("ORDERS_TOKEN", "x")

@@ -176,6 +176,27 @@ func diffInitFlags(cfg config.Config, envFlag, profileFlag string, f initFlags, 
 			}
 		}
 	}
+	if given["web-user"] || given["web-password-env"] {
+		var known []account
+		for name := range cfg.AuthProfiles {
+			known = append(known, account{name: name})
+		}
+		signIns, err := parseWebSignIns(f.webUsers, f.webPasswordEnvs, known)
+		if err != nil {
+			return nil, err
+		}
+		for name, want := range signIns {
+			have := cfg.AuthProfiles[name].Web
+			switch {
+			case have == nil:
+				diffs = append(diffs, fmt.Sprintf("  --web-user %s is %s, and the file has no web sign-in for it", terminalSafe(name), terminalSafe(want.User)))
+			case have.User != want.User:
+				diffs = append(diffs, fmt.Sprintf("  --web-user %s is %s, and the file has %s", terminalSafe(name), terminalSafe(want.User), terminalSafe(have.User)))
+			case have.Password != want.Password:
+				diffs = append(diffs, fmt.Sprintf("  --web-password-env %s uses %s, and the file has %s", terminalSafe(name), terminalSafe(want.PasswordEnv()), terminalSafe(have.PasswordEnv())))
+			}
+		}
+	}
 	slices.Sort(diffs)
 	return diffs, nil
 }

@@ -94,6 +94,19 @@ func (m *machineCheck) tokens(o options, cfg config.Config) {
 			}
 			m.add(stateMissing, "%s is not set: export it with the token of the account %q", env, name)
 		}
+		if prof.Web == nil {
+			continue
+		}
+		env := prof.Web.PasswordEnv()
+		if seen[env] {
+			continue
+		}
+		seen[env] = true
+		if v, set := o.LookupEnv(env); set && v != "" {
+			m.add(stateOK, "%s is set", env)
+			continue
+		}
+		m.add(stateMissing, "%s is not set: export it with the web password of the account %q", env, name)
 	}
 }
 

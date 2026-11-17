@@ -71,6 +71,9 @@ func askInit(a *asker, dir string, f *initFlags, given map[string]bool) error {
 			f.describe = append(f.describe, "default="+d)
 		}
 	}
+	if err := askWebSignIn(a, f, "default", ""); err != nil {
+		return err
+	}
 	if given["account"] {
 		return nil
 	}
@@ -92,7 +95,29 @@ func askInit(a *asker, dir string, f *initFlags, given map[string]bool) error {
 				f.describe = append(f.describe, name+"="+d)
 			}
 		}
+		if err := askWebSignIn(a, f, name, "  "); err != nil {
+			return err
+		}
 	}
+}
+
+// askWebSignIn asks which user an account signs in with on the web, and the variable of its
+// password. It asks nothing of an account that a flag named.
+func askWebSignIn(a *asker, f *initFlags, name, indent string) error {
+	if describedAlready(f.webUsers, name) || describedAlready(f.webPasswordEnvs, name) {
+		return nil
+	}
+	user, _ := a.ask(indent + "User that this account signs in with on the web, or Enter for none")
+	if user == "" {
+		return nil
+	}
+	env, _ := a.ask(indent + "Environment variable of its web password")
+	if env == "" {
+		return fmt.Errorf("the account %s needs the environment variable that holds its web password", name)
+	}
+	f.webUsers = append(f.webUsers, name+"="+user)
+	f.webPasswordEnvs = append(f.webPasswordEnvs, name+"="+env)
+	return nil
 }
 
 func describedAlready(describe []string, name string) bool {
@@ -151,15 +176,20 @@ func countFiles(dir, rel, skip string) int {
 func printAskedDone(w io.Writer, f initFlags, lookup func(string) (string, bool)) {
 	fmt.Fprintf(w, "Wrote %s.", configFileName)
 	var missing []string
-	need := func(env, who string) {
+	need := func(env, what, who string) {
 		if v, ok := lookup(env); !ok || v == "" {
-			missing = append(missing, fmt.Sprintf("export %s=<the token of %s>", env, who))
+			missing = append(missing, fmt.Sprintf("export %s=<the %s of %s>", env, what, who))
 		}
 	}
-	need(f.tokenEnv, "the default account")
+	need(f.tokenEnv, "token", "the default account")
 	for _, a := range f.accounts {
 		if name, env, ok := strings.Cut(a, "="); ok {
-			need(env, "the account "+name)
+			need(env, "token", "the account "+name)
+		}
+	}
+	for _, a := range f.webPasswordEnvs {
+		if name, env, ok := strings.Cut(a, "="); ok {
+			need(env, "web password", "the account "+name)
 		}
 	}
 	if len(missing) == 0 {
