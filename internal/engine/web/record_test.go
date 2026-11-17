@@ -15,6 +15,7 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
 
+	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/engine/web"
 	"github.com/jancuk/semar/internal/record"
 )
@@ -53,6 +54,13 @@ func newRecRig(t *testing.T, pages map[string]string) *recRig {
 	}
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
+	return recRigOn(t, srv)
+}
+
+// recRigOn starts a recorder in front of a server that the test already has.
+func recRigOn(t *testing.T, srv *httptest.Server) *recRig {
+	t.Helper()
+	needChrome(t)
 	rec, err := web.StartRecorder(context.Background(), web.RecorderOptions{
 		Home: t.TempDir(), Environment: "test", Account: "default", Hidden: true,
 	})
@@ -296,5 +304,77 @@ func TestRecorderSendsADragAndNoClickAfterIt(t *testing.T) {
 	r.click("#end")
 	if got = r.events(1); got[0].Kind != record.KindClick {
 		t.Errorf("a click: %s", describeEvents(got))
+	}
+}
+
+const locatorPage = `<!doctype html><html><head><title>Locators</title></head><body>
+<button id="a1" data-testid="save-order">Save</button>
+<button id="d1" data-testid="dup">One</button><button id="d2" data-testid="dup">Two</button>
+<button id="p1">Place order</button><button id="p2" style="display:none">Place order</button>
+<button id="c1">Cancel</button><button id="c2">Cancel</button>
+<label>Email <input type="text" id="email"></label>
+<input type="text" id="q" placeholder="Search">
+<p class="note" id="n1">Remember to pay</p>
+<span id="m1" data-qa="qa-mark">mark</span>
+<a href="/nowhere" id="home" onclick="event.preventDefault()">Home</a>
+<h2 id="h">Totals</h2>
+<div role="button" id="x" aria-label="Close dialog">x</div>
+<div class="box"><div class="item" style="height:20px;width:20px;background:#ccc"></div><div class="item" id="second" style="height:20px;width:20px;background:#999"></div></div>
+</body></html>`
+
+func TestRecorderChoosesLocatorsInTheOrderOfThePlan(t *testing.T) {
+	rig := newRig(t, rigOptions{handler: func(mux *http.ServeMux) {
+		mux.HandleFunc("/locators", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, locatorPage) })
+	}})
+	r := recRigOn(t, rig.srv)
+	r.open("/locators")
+	r.events(1)
+
+	cases := []struct {
+		sel  string
+		want domain.Locator
+		hint string
+	}{
+		{"#a1", domain.Locator{TestID: "save-order"}, "save-order"},
+		{"#d1", domain.Locator{Role: "button", Name: "One"}, "One"},
+		{"#p1", domain.Locator{Role: "button", Name: "Place order"}, "Place order"},
+		{"#c2", domain.Locator{CSS: "#c2"}, "Cancel"},
+		{"#home", domain.Locator{Role: "link", Name: "Home"}, "Home"},
+		{"#h", domain.Locator{Role: "heading", Name: "Totals"}, "Totals"},
+		{"#x", domain.Locator{Role: "button", Name: "Close dialog"}, "Close dialog"},
+		{"#n1", domain.Locator{Text: "Remember to pay"}, "Remember to pay"},
+		{"#m1", domain.Locator{CSS: `[data-qa="qa-mark"]`}, "qa-mark"},
+		{"#second", domain.Locator{CSS: "#second"}, "second"},
+	}
+	for _, c := range cases {
+		r.click(c.sel)
+		ev := r.events(1)[0]
+		if ev.Kind != record.KindClick || ev.Target == nil {
+			t.Fatalf("%s: %s", c.sel, describeEvents([]record.Event{ev}))
+		}
+		if ev.Target.Locator != c.want || ev.Target.Hint != c.hint {
+			t.Errorf("%s: locator %+v and hint %q, want %+v and %q", c.sel, ev.Target.Locator, ev.Target.Hint, c.want, c.hint)
+		}
+		// The engine of a replay must find that one element again by the same locator.
+		res := rig.do(domain.WebAction{Do: domain.WebOpen, Path: "/locators"}, nil)
+		_ = res
+		got := rig.do(domain.WebAction{Do: domain.WebWait}, map[string]domain.Locator{"e": ev.Target.Locator}, text("e")).Action.Web.Elements["e"]
+		if !got.Found || got.Count != 1 {
+			t.Errorf("%s: the engine reads %+v for %+v", c.sel, got, ev.Target.Locator)
+		}
+	}
+
+	// Fields are found by the label or the placeholder.
+	r.typeInto("#email", "a@b.c")
+	r.click("#a1")
+	got := r.events(2)
+	if got[0].Kind != record.KindFill || got[0].Target.Locator != (domain.Locator{Role: "textbox", Name: "Email"}) {
+		t.Errorf("the email field: %s", describeEvents(got[:1]))
+	}
+	r.typeInto("#q", "milk")
+	r.click("#a1")
+	got = r.events(2)
+	if got[0].Target.Locator != (domain.Locator{Role: "textbox", Name: "Search"}) {
+		t.Errorf("the search field: %s", describeEvents(got[:1]))
 	}
 }
