@@ -10,12 +10,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chromedp/cdproto/fetch"
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 
 	"github.com/jancuk/semar/internal/config"
+	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/record"
 	"github.com/jancuk/semar/internal/secret"
 )
@@ -44,6 +47,10 @@ type RecorderOptions struct {
 	// SignIn makes Open sign in to the first page, and start to record after that: what the window
 	// does to sign in is no part of the recording. Nil starts to record at once.
 	SignIn *RecorderSignIn
+	// Policy keeps the browser inside the hosts and the methods of an environment, as a step of a
+	// replay is kept: a request that the policy does not admit is failed before it is sent. Nil
+	// leaves the window free, as it is for a person.
+	Policy *effects.Policy
 }
 
 // RecorderSignIn is the account that the window signs in with. Settle and ActionTimeout bound the wait
@@ -65,12 +72,15 @@ type Recorder struct {
 	stop  context.CancelFunc
 	alloc context.CancelFunc
 
+	guard *guard // nil with no Policy
+
 	mu        sync.Mutex
 	events    []record.Event
 	requested time.Time // when a page last asked for a navigation: a click or a form did
 	closeOnce sync.Once
 	gone      bool // Wait has returned: the window is closed, or the browser is gone
 	signedIn  bool
+	armed     bool // the recorder is in every page of the window
 }
 
 // StartRecorder starts Chrome on the profile of the account and puts the recorder in every page of
@@ -107,15 +117,40 @@ func (r *Recorder) start() error {
 	if _, err := chromedp.Call(r.tab, page.Enable, page.EnableParams{}); err != nil {
 		return err
 	}
+	if r.o.Policy != nil {
+		if err := r.guardTab(); err != nil {
+			return err
+		}
+	}
+	if _, err := chromedp.Call(r.tab, page.AddScriptToEvaluateOnNewDocument, page.AddScriptToEvaluateOnNewDocumentParams{Source: watchJS}); err != nil {
+		return err
+	}
 	if r.o.SignIn == nil {
 		return r.arm()
 	}
-	_, err := chromedp.Call(r.tab, page.AddScriptToEvaluateOnNewDocument, page.AddScriptToEvaluateOnNewDocumentParams{Source: watchJS})
+	return nil
+}
+
+// guardTab judges every request that the page makes, as the engine of a replay does.
+func (r *Recorder) guardTab() error {
+	r.guard = newGuard(r.o.Policy, func() string { return randomHex(8) })
+	if err := chromedp.Listen(r.tab, r.guard.onEvent); err != nil {
+		return err
+	}
+	go r.guard.serve(r.tab)
+	if _, err := chromedp.Call(r.tab, network.Enable, network.EnableParams{}); err != nil {
+		return err
+	}
+	_, err := chromedp.Call(r.tab, fetch.Enable, fetch.EnableParams{Patterns: []*fetch.RequestPattern{{URLPattern: "*"}}})
 	return err
 }
 
 // arm puts the recorder in every page of the window, and in the page that is open now.
 func (r *Recorder) arm() error {
+	if r.armed {
+		return nil
+	}
+	r.armed = true
 	if _, err := chromedp.Call(r.tab, runtime.AddBinding, runtime.AddBindingParams{Name: bindingName}); err != nil {
 		return err
 	}
@@ -198,8 +233,41 @@ type recorderTab struct {
 	limit time.Duration
 }
 
-func (t recorderTab) settle(ctx context.Context) {
-	settleUntil(ctx, t.limit, func(time.Time) (time.Duration, int) { return time.Hour, 0 })
+func (t recorderTab) settle(ctx context.Context) { t.r.settle(ctx, t.limit) }
+
+// settle waits until the page is complete, its tree has not changed for a short time, and, with a
+// Policy, no request is open.
+func (r *Recorder) settle(ctx context.Context, limit time.Duration) {
+	idle := func(time.Time) (time.Duration, int) { return time.Hour, 0 }
+	if r.guard != nil {
+		idle = r.guard.idle
+	}
+	settleUntil(ctx, limit, idle)
+}
+
+// Settle waits for the page to look still, for at most a few seconds, and then returns whatever the
+// page shows: a page that never settles is read as it is.
+func (r *Recorder) Settle(ctx context.Context) {
+	c, cancel := context.WithCancel(r.tab)
+	defer cancel()
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancel()
+		case <-c.Done():
+		}
+	}()
+	r.settle(c, defaultSettle)
+}
+
+// Reopen throws away what was recorded and goes to the address again, as the first move of a new
+// recording. A flow does it after its fixtures are made, so that the page shows their data and the
+// test starts at the first page.
+func (r *Recorder) Reopen(rawURL string) error {
+	r.mu.Lock()
+	r.events = nil
+	r.mu.Unlock()
+	return r.Open(rawURL)
 }
 
 func (t recorderTab) location(ctx context.Context) (string, error) {

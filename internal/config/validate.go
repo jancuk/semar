@@ -176,6 +176,11 @@ func validateEnvironment(name string, e Environment, profiles map[string]AuthPro
 		case !hostrule.Allowed(u, e.Hosts):
 			add("%s: baseUrl host %s is not in hosts", sp, originHost(u))
 		}
+		if s.Web != nil {
+			if st := s.Web.Start; !strings.HasPrefix(st, "/") || strings.HasPrefix(st, "//") || strings.ContainsAny(st, " \t\r\n\\") {
+				add("%s.web.start must be a path below the base URL that starts with one /, got %q", sp, st)
+			}
+		}
 		if _, ok := profiles[s.AuthProfile]; s.AuthProfile != "" && !ok {
 			add("%s.authProfile: auth profile %s is not defined under authProfiles", sp, s.AuthProfile)
 		}

@@ -44,7 +44,19 @@ type Options struct {
 	SecretEnv   string // the environment variable that holds the password that was typed
 	Date        time.Time
 	Existing    domain.Screens // the screens file as it is now; the zero value when there is none
+	// Claims, when there are any, are what a flow meant each of its checks to prove, one for each check in
+	// the order of the events. A check of a recording with claims is a ticket expectation with the cite
+	// of its claim, written by a model, and it expects the claim and not what the page showed.
+	Claims []Claim
 }
+
+// Claim is what a check is meant to prove: the text that the element must show, which comes from the
+// criterion, and the cite of the criterion.
+type Claim struct{ Expect, Cite string }
+
+// FailNow is a check whose claim differs from what the page showed when the flow read it: the test
+// that the recording makes fails on this build. Element is the name that the test gives the element.
+type FailNow struct{ Element, Expect, Shown, Cite string }
 
 // NamedLocator is an element of a screen.
 type NamedLocator = screens.Element
@@ -60,6 +72,8 @@ type Draft struct {
 	Added    []ScreenAdd
 	Actions  int // what the person did: opens, clicks, texts, keys, and drags
 	Checks   int
+	// FailsNow are the checks of a recording with claims that the page did not meet when it was read.
+	FailsNow []FailNow
 	// Notes name what the recording left out, in plain words.
 	Notes []string
 }
@@ -93,6 +107,9 @@ func Build(events []Event, o Options) (Draft, error) {
 	if checks == 0 {
 		return Draft{}, ErrNoCheck
 	}
+	if len(o.Claims) > 0 && len(o.Claims) != checks {
+		return Draft{}, fmt.Errorf("the flow made %s and gave %d claims: each check needs its claim", plural(checks, "check"), len(o.Claims))
+	}
 	if secret && o.SecretEnv == "" {
 		return Draft{}, ErrSecretName
 	}
@@ -117,6 +134,8 @@ type builder struct {
 	namers map[string]*Namer
 	added  map[string]int // screen to its index in draft.Added
 	ids    map[string]int
+	// claimed is how many claims the checks have used.
+	claimed int
 }
 
 // items applies the fixture values, leaves out what a file cannot say, and merges what repeats.
@@ -223,10 +242,17 @@ func (b *builder) check(it item) {
 		b.script = append(b.script, domain.ScriptStep{Step: domain.StepID(sid), Web: &w})
 		last++
 	}
-	b.steps[last].Expect = append(b.steps[last].Expect, domain.Expectation{
-		Check:  domain.Check{Element: name, Equals: it.ev.Value},
-		Source: domain.SourcePerson,
-	})
+	ex := domain.Expectation{Check: domain.Check{Element: name, Equals: it.ev.Value}, Source: domain.SourcePerson}
+	if len(b.o.Claims) > 0 {
+		c := b.o.Claims[b.claimed]
+		b.claimed++
+		want := oneLine(b.o.Values.Replace(c.Expect))
+		ex = domain.Expectation{Check: domain.Check{Element: name, Equals: want}, Source: domain.SourceTicket, Cite: c.Cite, By: "model"}
+		if shown := oneLine(it.ev.Value); shown != want {
+			b.draft.FailsNow = append(b.draft.FailsNow, FailNow{Element: name, Expect: want, Shown: shown, Cite: c.Cite})
+		}
+	}
+	b.steps[last].Expect = append(b.steps[last].Expect, ex)
 }
 
 func (b *builder) unique(id string) string {
@@ -325,3 +351,10 @@ func pathOf(raw string) string {
 
 // oneLine is a text as a sentence of the scenario shows it, on one line.
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}

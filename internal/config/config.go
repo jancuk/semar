@@ -69,6 +69,21 @@ type Service struct {
 	// AuthProfile is the profile that a fixture step to this service uses. Empty means the
 	// profile of the scenario.
 	AuthProfile string `yaml:"authProfile"`
+	// Web is set when the service has a web page whose address differs from the base URL.
+	Web *ServiceWeb `yaml:"web"`
+}
+
+// ServiceWeb says where the web page of a service starts: a path below its base URL.
+type ServiceWeb struct {
+	Start string `yaml:"start"`
+}
+
+// WebStart is the path where the web page of the service starts, and / when none is named.
+func (s Service) WebStart() string {
+	if s.Web == nil {
+		return "/"
+	}
+	return s.Web.Start
 }
 
 // BuildProbe's Probe is "http" and Commit is a JSONPath.

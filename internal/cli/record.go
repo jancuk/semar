@@ -17,7 +17,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jancuk/semar/internal/config"
+	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/api"
 	"github.com/jancuk/semar/internal/engine/web"
 	"github.com/jancuk/semar/internal/fixture"
@@ -106,6 +108,36 @@ func trustedScreens(ctx context.Context) string {
 	return app
 }
 
+// trustedExpectationsKey carries the scenario whose expectations a run treats as confirmed, with no
+// confirmation stored. Only a plan sets it, for the replay of the test that a flow has just written: that
+// replay says whether the page meets what the criterion says, which a person has not read yet.
+type trustedExpectationsKey struct{}
+
+func withTrustedExpectations(ctx context.Context, id domain.ScenarioID) context.Context {
+	return context.WithValue(ctx, trustedExpectationsKey{}, id)
+}
+
+func trustedExpectations(ctx context.Context) domain.ScenarioID {
+	id, _ := ctx.Value(trustedExpectationsKey{}).(domain.ScenarioID)
+	return id
+}
+
+// trustingConfirm confirms every source of one scenario and leaves every other scenario to the store.
+type trustingConfirm struct {
+	confirm.Store
+	id domain.ScenarioID
+}
+
+func (t trustingConfirm) Get(id domain.ScenarioID, h domain.Hash) (confirm.Record, bool, error) {
+	if id != t.id {
+		return t.Store.Get(id, h)
+	}
+	return confirm.Record{
+		Scenario: id, ExpectHash: h, User: "plan", Identity: "this replay only",
+		Sources: []domain.Source{domain.SourceTicket, domain.SourceTestcase, domain.SourceDiff, domain.SourceBaseline},
+	}, true, nil
+}
+
 func recordTest(ctx context.Context, cmd *cobra.Command, o options, f recordTestFlags, id, envArg string) error {
 	out := cmd.OutOrStdout()
 	if err := idcheck.Scenario(id); err != nil {
@@ -175,7 +207,7 @@ func recordTest(ctx context.Context, cmd *cobra.Command, o options, f recordTest
 		return err
 	}
 
-	values, release, err := makeFixtures(ctx, cmd, o, f, cfg, envName, env, id, authProfile, given)
+	values, release, err := makeFixtures(ctx, out, cmd.ErrOrStderr(), o, f.dir, cfg, envName, env, id, authProfile, given)
 	if err != nil {
 		return err
 	}
@@ -186,20 +218,11 @@ func recordTest(ctx context.Context, cmd *cobra.Command, o options, f recordTest
 		return err
 	}
 	hooks := recordingOf(ctx)
-	ro := web.RecorderOptions{
-		Chrome: env.Web.Chrome, Home: home, Environment: envName, Account: account, Hidden: hooks.hidden,
-	}
-	if who := cfg.AuthProfiles[account].Web; who != nil {
-		ro.SignIn = &web.RecorderSignIn{Account: account, Who: *who, Secrets: secret.NewEnv(o.LookupEnv)}
-	}
-	rec, err := web.StartRecorder(ctx, ro)
+	rec, err := startRecording(ctx, o, cfg, recordingWindow{Home: home, Environment: envName, Chrome: env.Web.Chrome, Account: account, Hidden: hooks.hidden}, first)
 	if err != nil {
-		return err
-	}
-	defer rec.Finish()
-	if err := rec.Open(first); err != nil {
 		return fmt.Errorf("nothing was recorded: %w", err)
 	}
+	defer rec.Finish()
 	if who, ok := rec.SignedIn(); ok {
 		fmt.Fprintf(out, "Signed in as %s.\n", who)
 	}
@@ -238,31 +261,9 @@ func recordTest(ctx context.Context, cmd *cobra.Command, o options, f recordTest
 	if err != nil {
 		return err
 	}
-	if ps := scenario.Validate(draft.Scenario, scenario.FromFile); len(ps) > 0 {
-		return fmt.Errorf("nothing was written: the recording makes a scenario that is not valid: %s: %s", ps[0].Path, terminalSafe(oneLine(ps[0].Message)))
-	}
-
-	if ps := script.Validate(draft.Scenario, draft.Script); len(ps) > 0 {
-		msgs := make([]string, len(ps))
-		for i, p := range ps {
-			msgs[i] = terminalSafe(oneLine(p.Message))
-			if p.Step != "" {
-				msgs[i] = "step " + string(p.Step) + ": " + msgs[i]
-			}
-		}
-		return fmt.Errorf("nothing was written: the recording makes a script that does not fit its scenario: %s", strings.Join(msgs, "; "))
-	}
-
-	written, err := record.Write(f.dir, draft, record.WriteOptions{App: app, Subject: ticket, Replace: replace})
+	written, err := persistDraft(f.dir, draft, app, ticket, replace)
 	if err != nil {
 		return err
-	}
-	_, _, problems, err := storeScript(f.dir, draft.Script)
-	if err != nil {
-		return err
-	}
-	if len(problems) > 0 {
-		return fmt.Errorf("the script of the recording does not fit its scenario: %s", strings.Join(problems, "; "))
 	}
 
 	fmt.Fprintf(out, "\nRecorded %s and %s.\n", plural(draft.Actions, "action"), plural(draft.Checks, "check"))
@@ -414,13 +415,12 @@ type fixtureValues struct{ vars map[string]string }
 
 // makeFixtures makes the fixtures of the recording before the window opens. The function that it
 // returns cleans them up, and may be called more than once.
-func makeFixtures(ctx context.Context, cmd *cobra.Command, o options, f recordTestFlags, cfg config.Config, envName string, env config.Environment, id, authProfile string, given []domain.Given) (fixtureValues, func(), error) {
+func makeFixtures(ctx context.Context, out, errw io.Writer, o options, dir string, cfg config.Config, envName string, env config.Environment, id, authProfile string, given []domain.Given) (fixtureValues, func(), error) {
 	none := func() {}
 	if len(given) == 0 {
 		return fixtureValues{vars: map[string]string{}}, none, nil
 	}
-	out, errw := cmd.OutOrStdout(), cmd.ErrOrStderr()
-	cat, err := fixture.Load(f.dir, allServices(cfg), fixtureAccounts(cfg))
+	cat, err := fixture.Load(dir, allServices(cfg), fixtureAccounts(cfg))
 	if err != nil {
 		return fixtureValues{}, none, err
 	}
@@ -428,7 +428,7 @@ func makeFixtures(ctx context.Context, cmd *cobra.Command, o options, f recordTe
 		fmt.Fprintf(errw, "semar: fixture file %s: %s; this recording does not use it\n", terminalSafe(p.File), terminalSafe(oneLine(problemText(p))))
 	}
 	needs := sessionNeeds(cfg, env, []domain.Scenario{{ID: domain.ScenarioID(id), AuthProfile: authProfile, Given: given}}, &cat)
-	rg, err := newEnvRig(ctx, o, f.dir, cfg, env, nil, needs)
+	rg, err := newEnvRig(ctx, o, dir, cfg, env, nil, needs)
 	if err != nil {
 		return fixtureValues{}, none, err
 	}
@@ -468,38 +468,125 @@ func makeFixtures(ctx context.Context, cmd *cobra.Command, o options, f recordTe
 	return fixtureValues{vars: vars}, release, nil
 }
 
-// replayOnce runs the scenario that was just written, with no window, and says how it ended. A
-// scenario that does not replay stays written, so that the person can fix a step or record again.
-func replayOnce(ctx context.Context, out io.Writer, o options, f recordTestFlags, envName, app, id string) {
-	var result *domain.ScenarioResult
-	var report string
+// replayed is how the replay of a written scenario ended.
+type replayed struct {
+	result *domain.ScenarioResult // nil when the scenario did not finish
+	report string
+	stderr string
+	err    error
+}
+
+// replayScenario runs the scenario that was just written, with no window, as semar run does, with the
+// screens of its app treated as approved for this one run, and, when trustExpectations is set, the
+// expectations of the scenario treated as confirmed for it.
+func replayScenario(ctx context.Context, o options, dir, envName, app, id string, trustExpectations bool) replayed {
+	var r replayed
 	var stderr bytes.Buffer
 	flags := runFlags{
-		scenarios: []string{id}, env: envName, dir: f.dir,
+		scenarios: []string{id}, env: envName, dir: dir,
 		done: func(run domain.Run, path string) {
 			if len(run.Results) == 1 {
-				result, report = &run.Results[0], path
+				r.result, r.report = &run.Results[0], path
 			}
 		},
 	}
-	err := runDaily(withTrustedScreens(ctx, app), io.Discard, &stderr, o, flags)
+	ctx = withTrustedScreens(ctx, app)
+	if trustExpectations {
+		ctx = withTrustedExpectations(ctx, domain.ScenarioID(id))
+	}
+	r.err = runDaily(ctx, io.Discard, &stderr, o, flags)
+	r.stderr = stderr.String()
+	return r
+}
+
+// replayOnce runs the scenario that was just written and says how it ended. A scenario that does not
+// replay stays written, so that the person can fix a step or record again.
+func replayOnce(ctx context.Context, out io.Writer, o options, f recordTestFlags, envName, app, id string) {
+	r := replayScenario(ctx, o, f.dir, envName, app, id, false)
 	var exit exitError
 	switch {
-	case result == nil && err != nil && !errors.As(err, &exit):
-		fmt.Fprintf(out, "Replayed once: it could not run: %s\n", terminalSafe(oneLine(err.Error())))
-	case result == nil:
-		fmt.Fprintf(out, "Replayed once: it did not finish.\n%s", terminalSafe(stderr.String()))
-	case result.Outcome == domain.OutcomePassed:
+	case r.result == nil && r.err != nil && !errors.As(r.err, &exit):
+		fmt.Fprintf(out, "Replayed once: it could not run: %s\n", terminalSafe(oneLine(r.err.Error())))
+	case r.result == nil:
+		fmt.Fprintf(out, "Replayed once: it did not finish.\n%s", terminalSafe(r.stderr))
+	case r.result.Outcome == domain.OutcomePassed:
 		fmt.Fprintln(out, "Replayed once: passed.")
 	default:
-		fmt.Fprintf(out, "Replayed once: %s.\n", result.Outcome)
-		for _, r := range result.Reasons {
+		fmt.Fprintf(out, "Replayed once: %s.\n", r.result.Outcome)
+		for _, rs := range r.result.Reasons {
 			step := ""
-			if r.Step != "" {
-				step = "step " + string(r.Step) + ": "
+			if rs.Step != "" {
+				step = "step " + string(rs.Step) + ": "
 			}
-			fmt.Fprintf(out, "  %s%s\n", step, terminalSafe(oneLine(r.Text)))
+			fmt.Fprintf(out, "  %s%s\n", step, terminalSafe(oneLine(rs.Text)))
 		}
-		fmt.Fprintf(out, "  The files are written. Fix the step in the file, or record it again with --replace.\n  report: %s\n", report)
+		fmt.Fprintf(out, "  The files are written. Fix the step in the file, or record it again with --replace.\n  report: %s\n", r.report)
 	}
+}
+
+// recordingWindow is what a recorder needs to open: the profile that it browses on.
+type recordingWindow struct {
+	Home, Environment, Chrome, Account string
+	Hidden                             bool
+	Policy                             *effects.Policy
+}
+
+// startRecording opens the recorder, signs in when the account has a web sign-in, and goes to the first
+// page. The recording starts there. The person of semar record and the model of a plan use it alike.
+func startRecording(ctx context.Context, o options, cfg config.Config, w recordingWindow, first string) (*web.Recorder, error) {
+	ro := web.RecorderOptions{Chrome: w.Chrome, Home: w.Home, Environment: w.Environment, Account: w.Account, Hidden: w.Hidden, Policy: w.Policy}
+	if who := cfg.AuthProfiles[w.Account].Web; who != nil {
+		ro.SignIn = &web.RecorderSignIn{Account: w.Account, Who: *who, Secrets: secret.NewEnv(o.LookupEnv)}
+	}
+	rec, err := web.StartRecorder(ctx, ro)
+	if err != nil {
+		return nil, err
+	}
+	if err := rec.Open(first); err != nil {
+		rec.Finish()
+		return nil, err
+	}
+	return rec, nil
+}
+
+// checkDraft refuses a draft that makes a scenario or a script that is not valid, in the words that
+// semar record prints, before anything is written.
+func checkDraft(draft record.Draft) error {
+	if ps := scenario.Validate(draft.Scenario, scenario.FromFile); len(ps) > 0 {
+		return fmt.Errorf("nothing was written: the recording makes a scenario that is not valid: %s: %s", ps[0].Path, terminalSafe(oneLine(ps[0].Message)))
+	}
+	if ps := script.Validate(draft.Scenario, draft.Script); len(ps) > 0 {
+		msgs := make([]string, len(ps))
+		for i, p := range ps {
+			msgs[i] = terminalSafe(oneLine(p.Message))
+			if p.Step != "" {
+				msgs[i] = "step " + string(p.Step) + ": " + msgs[i]
+			}
+		}
+		return fmt.Errorf("nothing was written: the recording makes a script that does not fit its scenario: %s", strings.Join(msgs, "; "))
+	}
+	return nil
+}
+
+// persistDraft checks a draft and writes its screens, its scenario, and its script. A script that does
+// not fit its scenario is stored by neither, and the files are put back.
+func persistDraft(dir string, draft record.Draft, app, ticket string, replace []string) (record.Written, error) {
+	if err := checkDraft(draft); err != nil {
+		return record.Written{}, err
+	}
+	written, err := record.Write(dir, draft, record.WriteOptions{App: app, Subject: ticket, Replace: replace})
+	if err != nil {
+		return record.Written{}, err
+	}
+	_, _, problems, err := storeScript(dir, draft.Script)
+	if err == nil && len(problems) > 0 {
+		err = fmt.Errorf("the script of the recording does not fit its scenario: %s", strings.Join(problems, "; "))
+	}
+	if err != nil {
+		if undoErr := written.Undo(); undoErr != nil {
+			err = errors.Join(err, undoErr)
+		}
+		return record.Written{}, err
+	}
+	return written, nil
 }

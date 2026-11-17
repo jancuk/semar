@@ -31,6 +31,10 @@ type Written struct {
 	ScenarioPath string
 	Screens      int // in the screens file after the write
 	Elements     int
+	// Undo puts the repository back as it was before the write: it removes the files and the folders
+	// that the write made and puts back the screens file as it was. It is nil for a value that no write
+	// made.
+	Undo func() error
 }
 
 // Write puts the screens and the scenario of a draft in the repository. Both files are made in
@@ -96,6 +100,15 @@ func Write(repo string, d Draft, o WriteOptions) (Written, error) {
 	w := &writer{root: root}
 	if err := w.run(res, merged, feature, o.Replace); err != nil {
 		return Written{}, w.undo(err)
+	}
+	res.Undo = func() error {
+		again, err := os.OpenRoot(repo)
+		if err != nil {
+			return err
+		}
+		defer again.Close()
+		w.root = again
+		return w.undo(nil)
 	}
 	return res, nil
 }

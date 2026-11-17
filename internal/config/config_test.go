@@ -575,3 +575,30 @@ func TestAuthProfileWebSignIn(t *testing.T) {
 		}
 	}
 }
+
+func TestAServiceMayNameItsWebStartPage(t *testing.T) {
+	svc := func(web string) string {
+		return envHead + envBody + "    services:\n      - {name: orders, baseUrl: \"https://api.uat.example.com\"" + web + "}\n"
+	}
+	cfg, err := loadText(t, svc(", web: {start: /boards}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := cfg.Environments["uat"].Services[0]
+	if s.WebStart() != "/boards" {
+		t.Errorf("web start = %q", s.WebStart())
+	}
+	cfg, err = loadText(t, svc(""))
+	if err != nil || cfg.Environments["uat"].Services[0].WebStart() != "/" {
+		t.Errorf("a service with no web block starts at /: %v", err)
+	}
+	for _, bad := range []string{"boards", "https://other.example.com/", "//other.example.com/", "/a b", ""} {
+		_, err := loadText(t, svc(", web: {start: \""+bad+"\"}"))
+		if err == nil || !strings.Contains(err.Error(), "services[0].web.start") {
+			t.Errorf("start %q: error %v", bad, err)
+		}
+	}
+	if _, err := loadText(t, svc(", web: {strat: /x}")); err == nil || !strings.Contains(err.Error(), "strat") {
+		t.Errorf("an unknown key under web: %v", err)
+	}
+}
