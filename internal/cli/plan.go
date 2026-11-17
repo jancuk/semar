@@ -170,6 +170,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if err != nil {
 		return err
 	}
+	in.Now = o.Clock()
 	var catalogue fixture.Catalogue
 	if in.Fixtures, catalogue, err = planFixtures(stderr, f.dir, cfg); err != nil {
 		return err

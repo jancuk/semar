@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
@@ -46,6 +47,7 @@ type Input struct {
 	Accounts      []Account          // the auth profiles of the configuration, which a step may act as
 	Journeys      []domain.Journey   // the valid journey files; the plan lists the ones to rerun
 	Environment   string             // the environment that a run command in plan.md names; "" names none
+	Now           time.Time          // the time of the plan, for the rule against a typed date that is near it; zero turns the rule off
 	Trial         Trialer            // nil turns the trial off
 	TrialOff      string             // why the trial is off, shown in plan.md; "" when the person did not turn it off
 	BaseAPI       []openapi.Document // the API documents at the merge base, to tell a new route from a wrong path
@@ -295,6 +297,7 @@ func (v *validator) scenario(i int, sd ScenarioDraft, id domain.ScenarioID, titl
 	if expectations == 0 {
 		v.add(sp, "a scenario needs at least one expected result")
 	}
+	v.dates(sp, sd)
 
 	problems := scenario.Validate(sc, scenario.FromFile)
 	for _, pr := range problems {
