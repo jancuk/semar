@@ -419,3 +419,42 @@ func TestReadOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestAdmitPage(t *testing.T) {
+	p, err := effects.New(config.Environment{
+		Hosts:   []string{"app.test"},
+		Methods: []string{"GET"},
+		Effects: config.Effects{Mode: "read_only", Deny: []config.OpPattern{{Method: "GET", Path: "/admin/**"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := func(raw string) *url.URL {
+		parsed, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parsed
+	}
+	for name, c := range map[string]struct {
+		method, url string
+		kind        effects.RefusalKind
+	}{
+		"a read of a listed host":     {"GET", "http://app.test/a.js", ""},
+		"a preflight":                 {"OPTIONS", "http://app.test/a", ""},
+		"a host that is not listed":   {"GET", "http://cdn.evil.test/a.js", effects.HostNotAllowed},
+		"a path on the deny list":     {"GET", "http://app.test/admin/x", effects.Denied},
+		"a write in a read-only mode": {"POST", "http://app.test/cards", effects.ReadOnly},
+	} {
+		err := p.AdmitPage(effects.Request{Method: c.method, URL: u(c.url)})
+		var r *effects.Refusal
+		switch {
+		case c.kind == "" && err != nil:
+			t.Errorf("%s: refused: %v", name, err)
+		case c.kind != "" && !errors.As(err, &r):
+			t.Errorf("%s: admitted, want %s", name, c.kind)
+		case c.kind != "" && r.Kind != c.kind:
+			t.Errorf("%s: kind = %s, want %s", name, r.Kind, c.kind)
+		}
+	}
+}

@@ -139,6 +139,24 @@ func (p *Policy) Admit(r Request) error {
 	return nil
 }
 
+// AdmitPage is Admit for a request that a page makes by itself, such as a script, an image, or a call
+// from the page's own code. The environment's list of methods does not apply to a browser, which also
+// sends requests that no step wrote. The host, the deny list, and the read-only mode do apply.
+func (p *Policy) AdmitPage(r Request) error {
+	if !hostrule.Allowed(r.URL, p.hosts) {
+		return &Refusal{HostNotAllowed, "the scheme or host of the request is not one the environment lists"}
+	}
+	method := strings.ToUpper(r.Method)
+	if matches(p.deny, method, r.URL, true) {
+		return &Refusal{Denied, fmt.Sprintf("%s %s matches the deny list", method, r.URL.Path)}
+	}
+	// A preflight asks what the server allows and changes nothing.
+	if p.readOnly && method != "OPTIONS" && p.Classify(r) == Write {
+		return &Refusal{ReadOnly, fmt.Sprintf("%s %s writes, and the environment is read only", method, r.URL.Path)}
+	}
+	return nil
+}
+
 // matches reports whether a pattern in list holds for the request. A deny or
 // once pattern (generous) is matched against the folded path, so a trailing
 // slash, a capital letter, or a ;parameter cannot slip past it. A reads
