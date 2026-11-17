@@ -58,6 +58,9 @@ type Input struct {
 	// FixtureTrial runs a drafted fixture once on a test environment that allows writes. Nil turns
 	// the run off, and the fixture is drafted without it.
 	FixtureTrial FixtureTrialer
+	// MaxCost bounds what the plan may spend, in dollars, as the providers report it. 0 sets no
+	// bound. When the sum reaches it, no new job starts.
+	MaxCost float64
 }
 
 // Account is an auth profile of the configuration: its name and its one-line description.

@@ -244,16 +244,17 @@ type FixtureTrial struct {
 
 // FixtureDraft is how one needed fixture fared.
 type FixtureDraft struct {
-	Need        FixtureNeed
-	Drafted     bool
-	Fixture     domain.Fixture
-	Rung        int // the rung that answered, or the last that tried
-	Corrections int
-	Trial       FixtureTrial
-	Problems    []Problem // the problems of the last answer, when none was accepted
-	Returned    []Problem // every problem that went back to a model
-	Reason      string    // why it was not drafted, when no model was asked
-	Output      []byte
+	Need         FixtureNeed
+	Drafted      bool
+	Fixture      domain.Fixture
+	Rung         int // the rung that answered, or the last that tried
+	Corrections  int
+	Trial        FixtureTrial
+	Problems     []Problem // the problems of the last answer, when none was accepted
+	Returned     []Problem // every problem that went back to a model
+	Reason       string    // why it was not drafted, when no model was asked
+	LimitReached bool      // the cost limit stopped the job
+	Output       []byte
 }
 
 // capNeeds keeps the first MaxFixtureDrafts needs, and returns the rest.
@@ -313,6 +314,10 @@ func (rs *runState) draftFixtures(ctx context.Context, needs []FixtureNeed, outc
 func (rs *runState) draftFixture(ctx context.Context, fp FixturePacket) (FixtureDraft, error) {
 	d := FixtureDraft{Need: fp.Need}
 	try := func(rung int, previous []byte, ps []Problem) (accepted bool, err error) {
+		if rs.overLimit() {
+			d.Reason, d.LimitReached = rs.notPlannedText(), true
+			return false, errLimit
+		}
 		raw, soft, err := rs.callFixture(ctx, rung, fp, previous, ps)
 		if err != nil {
 			return false, err
@@ -331,15 +336,25 @@ func (rs *runState) draftFixture(ctx context.Context, fp FixturePacket) (Fixture
 	}
 	for rung := range rs.in.Ladder {
 		if ok, err := try(rung, nil, nil); err != nil || ok {
-			return d, err
+			return d, stopped(err)
 		}
 		d.Corrections++
 		d.Returned = append(d.Returned, d.Problems...)
 		if ok, err := try(rung, d.Output, d.Problems); err != nil || ok {
-			return d, err
+			return d, stopped(err)
 		}
 	}
 	return d, nil
+}
+
+// errLimit ends a fixture job that the cost limit refused. It is not an error of the run.
+var errLimit = errors.New("the cost limit was reached")
+
+func stopped(err error) error {
+	if errors.Is(err, errLimit) {
+		return nil
+	}
+	return err
 }
 
 func (rs *runState) callFixture(ctx context.Context, rung int, fp FixturePacket, previous []byte, problems []Problem) ([]byte, string, error) {
@@ -430,6 +445,14 @@ func (rs *runState) replan(ctx context.Context, outcomes []CriterionOutcome, dra
 			}
 			mu.Lock()
 			defer mu.Unlock()
+			if again.NotPlanned {
+				if o.Result.NotDrafted != nil {
+					nd := *o.Result.NotDrafted
+					nd.Needs += ". The fixture was drafted, and the criterion was not planned again: " + strings.TrimPrefix(rs.notPlannedText(), "not planned: ")
+					outcomes[i].Result.NotDrafted = &nd
+				}
+				return nil
+			}
 			again.Corrections += o.Corrections
 			outcomes[i] = again
 			return nil

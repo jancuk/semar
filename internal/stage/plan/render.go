@@ -491,6 +491,8 @@ func writePipeline(b *strings.Builder, out Output) {
 			kind = "manual check"
 		case o.Result.NotDrafted != nil:
 			kind = "not drafted"
+		case o.NotPlanned:
+			kind = "not planned"
 		}
 		if o.Answered {
 			model = valueOr(st.modelOf(o.Rung), "-")

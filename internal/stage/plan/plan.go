@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/jancuk/semar/internal/changeset"
@@ -77,6 +78,33 @@ type Output struct {
 	FixtureNeeds []FixtureNeed
 	// FixtureDrafts are the fixtures that the plan drafted for them, or tried to, in the same order.
 	FixtureDrafts []FixtureDraft
+	// CostLimit says that Input.MaxCost stopped work that the plan would have done: a job that did not
+	// start, or an attempt that was not asked for.
+	CostLimit bool
+	// MaxCost is the limit the plan ran under, 0 for none.
+	MaxCost float64
+}
+
+// CostLimitError ends a plan whose cost reached Input.MaxCost before any draft passed.
+type CostLimitError struct {
+	Limit, Spent float64
+	Attempts     int
+}
+
+func (e *CostLimitError) Error() string {
+	return fmt.Sprintf("the cost limit of %s was reached after %d attempts, which spent %s, and no draft passed", Dollars(e.Limit), e.Attempts, Dollars(e.Spent))
+}
+
+// Dollars writes an amount as $0.02, or with more digits when it has them, such as $0.125.
+func Dollars(x float64) string {
+	s := strconv.FormatFloat(x, 'f', -1, 64)
+	switch i := strings.IndexByte(s, '.'); {
+	case i < 0:
+		s += ".00"
+	case len(s)-i-1 == 1:
+		s += "0"
+	}
+	return "$" + s
 }
 
 // RefusedDraft is a draft that was not used: a problem of its own, or a problem that the trial
@@ -144,6 +172,16 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 		}
 	}
 	for attempt := 1; attempt <= MaxAttempts; attempt++ {
+		if attempt > 1 && in.MaxCost > 0 && total.CostUSD >= in.MaxCost {
+			// One job cannot be cut, so the single planner is held between jobs.
+			if passed != nil {
+				out := finish(passed, attempt-1)
+				out.CostLimit, out.MaxCost = true, in.MaxCost
+				return out, nil
+			}
+			return Output{Result: total, Attempts: attempt - 1, PlannerID: p.ID(), PlannerKind: p.Kind()},
+				&CostLimitError{Limit: in.MaxCost, Spent: total.CostUSD, Attempts: attempt - 1}
+		}
 		turns := in.Limits.MaxTurns
 		if attempt > 1 {
 			data.Attempt = true

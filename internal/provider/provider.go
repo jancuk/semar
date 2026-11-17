@@ -166,6 +166,10 @@ const (
 	KindFake      = "fake"
 )
 
+// ReportsCost says whether a run of the kind reports what it cost. Claude Code does. Codex and the API
+// kinds report tokens only, so a limit on money cannot bind them.
+func ReportsCost(kind string) bool { return kind != KindCodex && !IsAPI(kind) }
+
 func IsHarness(kind string) bool { return kind == KindClaude || kind == KindCodex }
 func IsAPI(kind string) bool     { return kind == KindAnthropic || kind == KindOpenAI }
 

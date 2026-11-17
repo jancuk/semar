@@ -1,6 +1,7 @@
 package userconfig
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -441,5 +442,33 @@ func TestPlanLadderRoundTripAndRules(t *testing.T) {
 		if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "plan.ladder") {
 			t.Errorf("%s: Validate = %v", name, err)
 		}
+	}
+}
+
+func TestPlanMaxCostRoundTripAndRules(t *testing.T) {
+	home := t.TempDir()
+	f := valid()
+	f.Plan.MaxCost = 2.5
+	if err := Save(home, f); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := Load(home)
+	if err != nil || got.Plan.MaxCost != 2.5 {
+		t.Fatalf("Load = %+v, %v", got.Plan, err)
+	}
+	data, _ := os.ReadFile(filepath.Join(home, FileName))
+	if !strings.Contains(string(data), "maxCost: 2.5") {
+		t.Errorf("the file does not hold the limit:\n%s", data)
+	}
+	for name, cost := range map[string]float64{"negative": -1, "not a number": math.NaN(), "infinite": math.Inf(1)} {
+		bad := valid()
+		bad.Plan.MaxCost = cost
+		if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "plan.maxCost") {
+			t.Errorf("%s: Validate = %v", name, err)
+		}
+	}
+	unset := valid()
+	if err := Save(t.TempDir(), unset); err != nil {
+		t.Fatal(err)
 	}
 }

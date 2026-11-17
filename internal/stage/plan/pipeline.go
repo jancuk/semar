@@ -79,6 +79,8 @@ type PipelineStats struct {
 	// FixtureJobs are the fixtures that a model was asked to draft, and FixturesDrafted those that it
 	// drafted. Their calls are in Calls, Corrections, and Uses.
 	FixtureJobs, FixturesDrafted int
+	// NotPlanned are the criteria that no job answered because the cost limit was reached.
+	NotPlanned int
 }
 
 // modelOf is the label of the model of a rung, "" when there is none.
@@ -97,6 +99,7 @@ type CriterionOutcome struct {
 	Rung        int       // the rung that answered, or the last that tried
 	Corrections int       // calls that repaired an answer of this criterion
 	Reused      bool      // the answer is a stored answer of an earlier plan
+	NotPlanned  bool      // the cost limit was reached before a job for it started
 	Problems    []Problem // the problems of the last answer, when no model answered
 	Returned    []Problem // the problems that went back to a model, over every correction
 	Output      []byte    // the accepted output; the last output when there is none
@@ -111,6 +114,25 @@ type runState struct {
 	corr  int
 	done  int
 	cache map[string]StoredAnswer
+	// limited is set when the cost limit refused a job.
+	limited bool
+}
+
+// overLimit says that the cost of the jobs so far reached Input.MaxCost, and no new job may start. It
+// remembers that it refused one. A provider that reports no cost adds nothing, so it never refuses.
+func (rs *runState) overLimit() bool {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if rs.in.MaxCost > 0 && rs.total.CostUSD >= rs.in.MaxCost {
+		rs.limited = true
+		return true
+	}
+	return false
+}
+
+// notPlannedText is why a criterion has no answer when the cost limit stopped its job.
+func (rs *runState) notPlannedText() string {
+	return "not planned: the cost limit of " + Dollars(rs.in.MaxCost) + " was reached"
 }
 
 // RunCriteria plans one criterion at a time. Code builds a packet for each criterion of each
@@ -197,7 +219,7 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 	}
 
 	out := rs.output(b.Outcomes)
-	out.FixtureNeeds, out.FixtureDrafts = needs, drafts
+	out.FixtureNeeds, out.FixtureDrafts, out.CostLimit, out.MaxCost = needs, drafts, rs.limited || out.Pipeline.NotPlanned > 0, in.MaxCost
 	for _, d := range drafts {
 		if d.Reason == "" {
 			out.Pipeline.FixtureJobs++
@@ -297,6 +319,9 @@ func (rs *runState) output(outcomes []CriterionOutcome) Output {
 	var answers []StoredAnswer
 	for _, o := range outcomes {
 		switch {
+		case !o.Answered && o.NotPlanned:
+			st.NotPlanned++
+			continue
 		case !o.Answered:
 			st.Unanswered++
 			continue
@@ -423,6 +448,10 @@ func (rs *runState) answer(ctx context.Context, p Packet) (CriterionOutcome, err
 		if !fromCache {
 			var err error
 			var soft string
+			if rs.overLimit() {
+				o.NotPlanned = true
+				return o, nil
+			}
 			if raw, soft, err = rs.call(ctx, rung, p, nil, nil); err != nil {
 				return o, err
 			}
@@ -435,6 +464,10 @@ func (rs *runState) answer(ctx context.Context, p Packet) (CriterionOutcome, err
 		o.Returned = append(o.Returned, ps...)
 		var err error
 		var soft string
+		if rs.overLimit() {
+			o.NotPlanned, o.Problems, o.Output = true, ps, raw
+			return o, nil
+		}
 		if raw, soft, err = rs.call(ctx, rung, p, raw, ps); err != nil {
 			return o, err
 		}
@@ -461,6 +494,11 @@ func assemble(in Input, outcomes []CriterionOutcome) (Draft, []int) {
 	var dropped []CriterionOutcome
 	for i, o := range outcomes {
 		if !o.Answered {
+			if o.NotPlanned {
+				d.NotDrafted = append(d.NotDrafted, NotDrafted{
+					Ticket: o.Packet.Ticket, What: oneLine(o.Packet.Criterion, 160), Needs: notPlanned(in), Cite: o.Packet.Why(),
+				})
+			}
 			continue
 		}
 		switch {
@@ -501,6 +539,10 @@ func assemble(in Input, outcomes []CriterionOutcome) (Draft, []int) {
 	scenarios, manual, nd := len(d.Scenarios), len(d.ManualChecks), len(d.NotDrafted)
 	d.Summary = fmt.Sprintf("Planned one acceptance criterion at a time: %d scenarios, %d manual checks, and %d criteria or scenarios not drafted.", scenarios, manual, nd)
 	return d, owners
+}
+
+func notPlanned(in Input) string {
+	return "not planned: the cost limit of " + Dollars(in.MaxCost) + " was reached"
 }
 
 // criteriaTicket says what code knows of a ticket: it changes behaviour when a criterion of it gave a
