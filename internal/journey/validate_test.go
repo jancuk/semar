@@ -115,6 +115,7 @@ func TestValidateRules(t *testing.T) {
 		{rule: "J6", name: "id with a hyphen", edit: func(j *domain.Journey) { j.Legs[2].ID = "wait-paid"; j.Invariants = nil }, path: "legs[2].id", want: `id "wait-paid" must match ^[a-z][a-z0-9_]*$`},
 		{rule: "J6", name: "id with an underscore", edit: func(j *domain.Journey) { j.Legs[2].ID = "wait_paid"; j.Invariants = nil }},
 		{rule: "J6", name: "reserved run", edit: func(j *domain.Journey) { j.Legs[2].ID = "run"; j.Invariants = nil }, path: "legs[2].id", want: "the name run is reserved"},
+		{rule: "J6", name: "reserved date", edit: func(j *domain.Journey) { j.Legs[2].ID = "date"; j.Invariants = nil }, path: "legs[2].id", want: "the name date is reserved"},
 		{rule: "J6", name: "reserved secret", edit: func(j *domain.Journey) { j.Legs[2].ID = "secret"; j.Invariants = nil }, path: "legs[2].id", want: "the name secret is reserved"},
 		{rule: "J6", name: "no legs", edit: func(j *domain.Journey) { j.Legs, j.Invariants = nil, nil }, path: "legs", want: "a journey needs 1 to 12 legs"},
 		{rule: "J6", name: "twelve legs", edit: manyLegs(12)},
@@ -177,6 +178,8 @@ func TestValidateRules(t *testing.T) {
 		{rule: "J11", name: "header that the client sets", edit: func(j *domain.Journey) {
 			j.Legs[1].Steps[0].Request.Headers = map[string]string{"Host": "example.com"}
 		}, path: "legs[1].steps[0].request", want: "header Host is set by the HTTP client"},
+		{rule: "J11", name: "date variable", edit: payJSON("{{datetime.plus7d}}")},
+		{rule: "J11", name: "date name that is not a variable", edit: payJSON("{{date.soon}}"), path: "legs[1].steps[0].request.json.orderId", want: "date.soon"},
 		{rule: "J11", name: "secret", edit: payJSON("{{secret.TOKEN}}"), path: "legs[1].steps[0].request", want: "a script cannot use a secret"},
 		{rule: "J11", name: "data", edit: payJSON("{{data.customer}}"), path: "legs[1].steps[0].request", want: "put a data value in a fixture parameter"},
 		{rule: "J11", name: "malformed variable", edit: payJSON("{{place.id"), path: "legs[1].steps[0].request", want: "malformed variable"},

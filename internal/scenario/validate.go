@@ -43,8 +43,9 @@ var (
 	namePattern      = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 )
 
-// reservedAs are the names that a given entry may not take: they head variables that the run gives.
-var reservedAs = []string{"run", "data", "secret", "date", "datetime", "local"}
+// ReservedHeads are the names that head a variable the run gives, so a given entry or a leg may not
+// take one.
+var ReservedHeads = []string{"run", "data", "secret", "date", "datetime", "local"}
 
 func Validate(s domain.Scenario, origin Origin) []Problem {
 	var ps []Problem
@@ -215,7 +216,7 @@ func validateGiven(given []domain.Given) []Problem {
 		switch {
 		case !namePattern.MatchString(g.As):
 			add(p+".as", "as %q must match ^[a-z][a-z0-9_]*$", g.As)
-		case slices.Contains(reservedAs, g.As):
+		case slices.Contains(ReservedHeads, g.As):
 			add(p+".as", "the name %s is reserved", g.As)
 		case aliases[g.As]:
 			add(p+".as", "%s is used twice", g.As)

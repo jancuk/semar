@@ -14,6 +14,7 @@ import (
 
 	"github.com/theory/jsonpath"
 
+	"github.com/jancuk/semar/internal/datevar"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/scenario"
@@ -248,7 +249,7 @@ func (v *validator) legID(where string, id domain.LegID, seen map[domain.LegID]b
 	case !legIDPattern.MatchString(string(id)):
 		v.add(where+".id", "id %q must match %s", id, legIDRule)
 		return
-	case id == "run" || id == "data" || id == "secret":
+	case slices.Contains(scenario.ReservedHeads, string(id)):
 		v.add(where+".id", "the name %s is reserved", id)
 	case seen[id]:
 		v.add(where+".id", "%s is used twice", id)
@@ -403,7 +404,7 @@ func (v *validator) steps(li int, l domain.Leg, reach map[domain.LegID]bool) {
 
 	known := func(name string) bool {
 		head, _, dotted := strings.Cut(name, ".")
-		if !dotted || name == "run.id" || head == "secret" || head == "data" {
+		if !dotted || name == "run.id" || head == "secret" || head == "data" || datevar.Is(name) {
 			return true
 		}
 		return v.refProblem(l, reach, name) == ""
@@ -411,7 +412,7 @@ func (v *validator) steps(li int, l domain.Leg, reach map[domain.LegID]bool) {
 	for k, st := range l.Steps {
 		if st.Web != nil {
 			for _, name := range st.Web.Variables() {
-				if head, _, dotted := strings.Cut(name, "."); dotted && name != "run.id" && head != "secret" && head != "data" {
+				if head, _, dotted := strings.Cut(name, "."); dotted && name != "run.id" && head != "secret" && head != "data" && !datevar.Is(name) {
 					if msg := v.refProblem(l, reach, name); msg != "" {
 						v.add(fmt.Sprintf("%s.steps[%d].web", base, k), "%s", msg)
 					}
