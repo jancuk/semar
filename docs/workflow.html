@@ -147,8 +147,8 @@
 		<tr><td><span class="chip agent">Planner</span></td><td>Reads the ticket and the code, writes the plan</td><td>Claude Code (Anthropic) or Codex CLI (OpenAI)</td><td>Required</td></tr>
 		<tr><td><span class="chip agent">Tester</span></td><td>Scenarios, exploring, business-rule probes</td><td>The same, or DeepSeek at lower cost</td><td>Required</td></tr>
 		<tr><td><span class="chip agent">Second reader</span></td><td>Proposes scenarios the plan missed</td><td>A different vendor than the planner</td><td>Skipped</td></tr>
-		<tr><td><span class="chip fast">Pilot</span></td><td>Picks the next click or tap for a sub-goal</td><td>TypeSafe Jev</td><td>The tester acts step by step</td></tr>
-		<tr><td><span class="chip fast">Screener</span></td><td>Ranks odd responses, suggests a likely cause, merges findings</td><td>TypeSafe Jev</td><td>Code rules and the tester</td></tr>
+		<tr><td><span class="chip fast">Pilot</span></td><td>Picks the next click or tap for a sub-goal</td><td>A decision model</td><td>The tester acts step by step</td></tr>
+		<tr><td><span class="chip fast">Screener</span></td><td>Ranks odd responses, suggests a likely cause, merges findings</td><td>A decision model</td><td>Code rules and the tester</td></tr>
 	</table>
 	</div>
 

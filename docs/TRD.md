@@ -31,14 +31,14 @@ Authorization uses capabilities such as `confirm_intent`, `review_evidence`, and
 
 Adapter selection remains subject to contract tests. Validate whether an adapter supplies isolation, replay, and action-level evidence before choosing reuse, daemon integration, or a fork.
 
-This document says how Semar meets the product requirements. It names what was verified, what was read from the brojev sources, and what is still unproven. The [spikes](#spikes-before-milestone-1) section lists every unproven claim that the design depends on.
+This document says how Semar meets the product requirements. It names what was verified, what was read from documentation, and what is still unproven. The [spikes](#spikes-before-milestone-1) section lists every unproven claim that the design depends on.
 
 ## Summary of the design
 
 The draft proposes a Go core with API, web, and Android execution adapters and optional Grafana/database evidence connectors. iOS is a later execution adapter. The standalone runner and managed/private execution modes share contracts; the cloud control plane requires additional boundaries. Two choices shape the design:
 
 * **Agent harnesses.** Semar starts an installed harness and reads its events through one provider layer. See [Provider layer](#provider-layer).
-* **One tool layer.** A long-lived daemon owns the connections, a thin MCP server exposes them, and the tools come in three tiers. The web engine is brojev. See [QA tool layer](#qa-tool-layer).
+* **One tool layer.** A long-lived daemon owns the connections, a thin MCP server exposes them, and the tools come in three tiers. The web engine is built in process on a Chrome DevTools Protocol library, and it is built (Plan 22). See [QA tool layer](#qa-tool-layer).
 
 Semar has seven parts:
 
@@ -188,7 +188,7 @@ Three things stay in code, because they are what makes a result mean the same ev
 | T7 | Only actions that go through Semar's tools count as evidence. In an unattended job the agent's shell, network, and write tools are also switched off | Trust the agent to report what it did | Product rules 1 and 6. The recorder and the credentials stay in the daemon |
 | T8 | Three separate objects: Scenario (confirmed by people), Script (written by the agent), Run (executed by the runner) | One file that holds both expectations and requests | The agent can then repair a request without being able to change an expected result |
 | T9 | The API engine is a native Go HTTP client | An existing HTTP test tool as a child process | The recorder, trace-ID injection, credential injection, and redaction all sit in the HTTP client. Owning the client is less code than wrapping another tool |
-| T10 | The web engine is brojev's Chrome DevTools Protocol engine. The Android engine is chosen by spike S7 | Test files of an existing runner, run as child processes | Your instruction to use brojev. A snapshot-and-ref engine lets the agent act step by step like a person, and lets Semar record each action. A test-file runner only reports at the end |
+| T10 | The web engine is an in-process Chrome DevTools Protocol client built on chromedp, in `internal/engine/web` (Plan 22, D1). The Android engine is chosen by spike S7 | Another tool's engine by import, by its daemon, or by a copy. Test files of an existing runner, run as child processes | One maintained library gives real input events, the accessibility tree, request interception, and screenshots, with no second process. A snapshot-and-locator engine lets Semar act step by step like a person, and lets it record each action. A test-file runner only reports at the end |
 | T11 | The shared record is an orphan git branch in the service repository | A server with a database, or object storage | Works on any code host, needs nothing to operate, and is browsable in the code host's web interface |
 | T12 | Confirmation and sign-off identity comes from the code host | Names typed into a file | The code host already authenticates people |
 | T13 | A long-lived daemon owns every connection, and the MCP server is a thin client of it | One process per tool call, or state inside the MCP server | Sign-in, an open app, and a warm emulator persist across tool calls and across agent sessions |
@@ -226,7 +226,7 @@ Three things stay in code, because they are what makes a result mean the same ev
 | T45 | Each web auth profile has its own Chrome profile. A person signs in there once, and later runs reuse the session | Use the developer's everyday Chrome, or sign in from scratch on every run | Your instruction. Chrome also refuses remote debugging on its default profile since version 136 |
 | T46 | Sign-in with Google is done by a person, once, in an ordinary window. A test sign-in in the UAT build serves pipelines. Scripted Google pages are the last route | Script Google's pages as the main route | Google may block a browser that software controls. Semar does not work around that |
 | T47 | The agent names a secret, and Semar types it, only into an input field on a listed host. A fixed OTP code may be written in the configuration file | Give the agent the values, or forbid a fixed code in the file | Product rule 6. A fixed UAT code is a test constant and you asked for it in the configuration |
-| T48 | Two kinds of provider: agent harnesses, and decision models that Semar calls directly | Treat every vendor as an agent provider | TypeSafe's Jev returns choices with probabilities and cannot drive an agent. Anthropic, OpenAI, and DeepSeek can |
+| T48 | Two kinds of provider: agent harnesses, and decision models that Semar calls directly | Treat every vendor as an agent provider | A decision model returns choices with probabilities and cannot drive an agent. Anthropic, OpenAI, and DeepSeek can |
 | T49 | Each job has a model role, and each role names its provider. The decision roles are optional | One provider for everything, or a fixed dependency on one vendor | Planning needs the strongest model, and picking the next click needs the fastest. A team must be able to run with what it has |
 | T50 | A decision model gives hints, rankings, and proposals with a probability. It never sets an outcome | Let the fast model judge results | The same reason as for the agent, and a fast model errs more often |
 | T51 | Most security probes are variations of a recorded request, built and checked by code | The agent composes every probe request | Hundreds of small requests are slow and costly through an agent, and the variations replay with no model |
@@ -249,7 +249,7 @@ Three things stay in code, because they are what makes a result mean the same ev
 | T68 | A UI leg has two phases. The agent authors it once, and Semar replays it with no model. Screen objects (`kind: Screens`) give screens and elements stable names that a person approves | The model acts on every replay, or steps refer to positions and visible text | Replay must repeat and cost no model call. Screen objects are the Page Object pattern of QA practice. See [Screens and UI legs](#screens-and-ui-legs) |
 | T69 | During a verification run the agent sees one MCP server, `semar`. The gateway applies policy to each engine call, forwards it, and records it as an `Action` | Let the agent reach an engine's MCP server directly | A call that Semar did not see cannot become evidence (product rule 1). This extends T28 and PRD decision D44. See [Engines and the gateway](#engines-and-the-gateway) |
 | T70 | Engines and registries are configured only in the person's own Semar home, never in the repository under test. An engine runs at an exact version, and a changed tool description denies the tool until a person approves it again | Read engines from `.semar/`, or accept a version range | The repository is untrusted, which is the existing rule for providers. A tool description can change after approval |
-| T71 | A surface engine sits behind an engine adapter interface. Adapter profiles map one MCP server's tools to Semar's actions. T10 is not reversed: brojev stays the web candidate, and spikes S6 and S7 compare it with Playwright, mobile-mcp, Maestro, and Appium through the same interface | Pick one engine per surface now | No candidate is verified. One interface lets the spikes compare them on the same tests, and lets a team change engines without changing scenarios |
+| T71 | A surface engine sits behind an engine adapter interface. Adapter profiles map one MCP server's tools to Semar's actions. T10 stands for the web, which Plan 22 builds in process. Spike S7 compares the Android candidates, mobile-mcp, Maestro, and Appium, through the same interface | Pick one engine per surface now | No candidate is verified. One interface lets the spikes compare them on the same tests, and lets a team change engines without changing scenarios |
 | T72 | Where an adapter supports a native replay format, the stored script may be that native artifact, and Semar still binds each expected result to a recorded action. Spike S17 checks it | Store only Semar's own script format | A team can then run the same flow without Semar. Whether the binding survives a native artifact is not verified |
 | T73 | Packs come from a registry that is a git repository. `semar pack add` pins an exact version and writes a lock file with a digest. Precedence is repository, then organisation, then built-in. The registry address comes from the person's home | Copy shared fixtures into each repository, or float on the newest pack | Shared fixtures are defined once. Git gives review and history. A run must say which pack versions it used. See [Packs and the registry](#packs-and-the-registry) |
 | T74 | The dashboard is a view and an approval interface. Git stays the source of truth | Keep catalogues, approvals, or results in a dashboard database | A second record drifts from the files. See [Dashboard views](#dashboard-views) |
@@ -1820,7 +1820,7 @@ deciders:                         # decision models. See "Decision models"
     driver: systemone
     endpoint: https://api.typesafe.ai/v1/systemone
     key: "keychain:semar/typesafe"
-    model: jev-latest
+    model: decision-latest
     data: [responses, pages]
 
 roles:
@@ -1837,7 +1837,7 @@ roles:
 
 An agent harness is one kind of provider. A decision model is the other. It writes no text and calls no tool. It answers a fixed question about a given state, and each answer comes with a probability.
 
-The first decision model is Jev, from TypeSafe AI. Its documentation, read on 2026-11-14, says that Jev "does not generate text, write code, or hold a conversation", and that it is not a replacement for the model behind a coding agent. TypeSafe therefore cannot sit beside Anthropic, OpenAI, and DeepSeek as an agent provider. It serves the jobs where speed matters and the answer is a choice.
+The first decision model is served by TypeSafe AI. Its documentation, read on 2026-11-14, says that the model does not generate text, write code, or hold a conversation, and that it is not a replacement for the model behind a coding agent. TypeSafe therefore cannot sit beside Anthropic, OpenAI, and DeepSeek as an agent provider. It serves the jobs where speed matters and the answer is a choice.
 
 ```go
 package decide
@@ -1867,11 +1867,11 @@ type Answer struct {
 | How Semar reaches it | It spawns an installed harness | It calls the vendor's HTTP interface |
 | Credential | The harness holds it | Semar holds a key, in the keychain |
 | Returns | Text and tool calls | A choice, a score, or a box, with a probability |
-| First drivers | `claude`, `codex`, `acp` | `systemone`, for `https://api.typesafe.ai/v1/systemone`. brojev's source reaches the same interface through OpenRouter |
+| First drivers | `claude`, `codex`, `acp` | `systemone`, for `https://api.typesafe.ai/v1/systemone` |
 
 This is the one exception to "Semar never calls a vendor API". No harness exists for a decision model.
 
-Jev's documented limits shape the design: 64,000 tokens per request, input priced at $0.042 per million tokens with free output, and images as PNG or JPEG. TypeSafe's legal page says "Jev is not trained on customer requests or responses".
+The documented limits of this model shape the design: 64,000 tokens per request, input priced at $0.042 per million tokens with free output, and images as PNG or JPEG. TypeSafe's legal page says that the model is not trained on customer requests or responses.
 
 ### Model roles
 
@@ -1882,8 +1882,8 @@ Each job in the [test workflow](WORKFLOW.md) has a role, and each role names its
 | `planner` | Reads the ticket and the code. Writes the plan, the impact map, and the security plan | Agent, the strongest model available | Claude Code on Anthropic, or Codex CLI on OpenAI | Semar cannot plan |
 | `tester` | The scenario pass, the explore pass, and the business-rule probes | Agent | The same, or DeepSeek through Claude Code's compatible endpoint, at lower cost | Semar cannot test |
 | `secondReader` | Reads the plan and proposes missing scenarios. Advice only | Agent, from another vendor than the planner | DeepSeek, or the other of Claude and Codex | Skipped |
-| `pilot` | Picks the next action on a page or a screen for a sub-goal | Decision model | Jev | The tester acts one step at a time |
-| `screener` | Ranks, scores, and classifies. See [Screening with a decision model](#screening-with-a-decision-model) | Decision model | Jev | Code rules and the tester do the work |
+| `pilot` | Picks the next action on a page or a screen for a sub-goal | Decision model | The first decision model | The tester acts one step at a time |
+| `screener` | Ranks, scores, and classifies. See [Screening with a decision model](#screening-with-a-decision-model) | Decision model | The first decision model | Code rules and the tester do the work |
 
 Replay, checks, outcomes, probe variations, and publishing use no model.
 
@@ -1942,7 +1942,7 @@ Guidance that follows: a person on their own machine can use a subscription logi
 
 ### Tool layer concepts
 
-The web engine is brojev 0.5.0, which is MIT-licensed. The tool layer is built on these concepts.
+The tool layer is built on these concepts. The web engine of Plan 22 is built, and it runs in the process of `semar run`: it has no daemon and no tools yet.
 
 | Concept | In Semar |
 | --- | --- |
@@ -1980,7 +1980,7 @@ A long-lived daemon is needed because sign-in, an open app, and a warm emulator 
 
 | Tier | Who decides each action | Speed | When it is used |
 | --- | --- | --- | --- |
-| 1. `run` | The pilot, a small fast model that picks one action per step from fixed options | Fast. brojev reports 1 to 10 seconds for a browser sub-task | A whole sub-goal on the web or Android: "open the refund form for order 123" |
+| 1. `run` | The pilot, a small fast model that picks one action per step from fixed options | Fast. A browser sub-task takes seconds, not measured here | A whole sub-goal on the web or Android: "open the refund form for order 123" |
 | 2. Primitives | The main agent, one action per call | Slow. One model turn per action | When `run` hands back, or when exact control matters |
 | 3. `batch` | Nobody. The steps are already known | Fastest. No model call | Known sequences, and every replay of a stored Script |
 
@@ -2017,23 +2017,17 @@ A native client on `net/http`. For each request it resolves variables and captur
 
 ### Web engine
 
-The web engine is brojev's engine: a Chrome DevTools Protocol client with snapshots, stable element refs, actionability checks, and real input events. Semar does not write a second browser engine.
+Built in [Plan 22](implementation/22-web-engine.md). The web engine is a Chrome DevTools Protocol client of Semar's own in `internal/engine/web`, built on `github.com/chromedp/chromedp`. It runs in the process of `semar run` and `semar journey run`, starts Chrome when the first web step needs it, and ends it with the run. It has no daemon and no MCP tools yet.
 
-A browser makes requests that the API engine never sees: page resources, background calls, and redirects. Semar blocks them inside the browser. It intercepts every request through the DevTools Protocol and fails any request to a host that is not listed under `web.allowHosts`.
+It does one action for each step: `open`, `click`, `fill`, `press`, `drag`, or `wait`. It finds the element of a step through a screen object (see [Screens and UI legs](#screens-and-ui-legs)), acts with real input events, waits for the page to settle, reads the state of every element that the checks and the captures of the step name, takes a screenshot, and hands the action to the recorder. It has no assertion logic. Checks belong to the verdict engine, and they read the recorded state and nothing else.
 
-brojev keeps its code under `internal/`, so another Go module cannot import it today. Spike S6 picks one of three routes:
+A browser makes requests that the API engine never sees: page resources, background calls, and redirects. Semar blocks them inside the browser. It intercepts every request through the DevTools Protocol and fails any request to a host that the environment does not list. In a read-only environment it also fails every request that is a write. The engine adds one thing to every request that it allows: the `traceparent` header, with the trace ID of the action. The observe engine can then attribute server errors to a web step.
 
-| Route | How | Cost |
-| --- | --- | --- |
-| A. Import | The brojev author moves the engine to importable packages. Semar depends on the module | Needs the author's agreement. The cleanest result |
-| B. Drive the daemon | Semar's web engine is a client of `brojevd` over its socket | The socket protocol is private to brojev. brojev requires the daemon and the client to be the same version |
-| C. Vendor | Copy the engine into Semar with the MIT notice | Semar then maintains a fork |
+The engine keeps the rules of the API engine. `click`, `fill`, `press`, and `drag` are writes, and a write is refused, and recorded as refused, when the environment is read only. `open` and `wait` are reads. The count limit of the API engine applies to actions. A secret that a step types is resolved by `internal/secret`, typed by the engine, and never recorded.
 
-Route A is the recommendation. Route C is the fallback.
+The engine runs Chrome on a profile of Semar's own, headless by default and with a window under `--headed`. When no Chrome is found, the web steps end `blocked`. See [A dedicated Chrome profile](#a-dedicated-chrome-profile).
 
-The engine adds one thing to every request the page makes to a listed host: the `traceparent` header, set through the DevTools Protocol. The observe engine can then attribute server errors to a web step. Spike S8 checks that this works for cross-origin requests.
-
-**Engine adapters (planned).** The web engine sits behind the engine adapter interface of [Engines and the gateway](#engines-and-the-gateway). brojev, by one of the routes above, is one adapter. An existing MCP server for the web, such as Playwright's, can be another, reached through the gateway with an adapter profile. This is not a decision. Decision T10 stands, and spike S6 compares the candidates on the same tests: snapshot quality, locators, actionability, host blocking inside the browser, the `traceparent` header, and recording of each action.
+**Not built.** The engine adapter interface and the gateway of [Engines and the gateway](#engines-and-the-gateway), and so the use of an existing MCP server for the web. The MCP tools `web_*`, the pilot, and an agent that authors web steps. Known interruptions of an app, and object storage for evidence.
 
 ### Android engine
 
@@ -2100,9 +2094,9 @@ type Pilot interface {
 
 The engine builds the options, so the pilot can only choose an action the engine can execute. The engine validates the choice against a fresh snapshot before it acts.
 
-The first pilot is Jev, the model brojev uses. brojev's README describes it as a TypeSafe model reached through OpenRouter or TypeSafe directly, at about 300 to 550 ms per decision. Those figures are brojev's claims and are not measured here.
+The first pilot is a hosted decision model that answers in a fraction of a second. That figure is the provider's claim and is not measured here.
 
-The pilot is the one place where Semar holds a model credential. It is optional and off by default. The key lives in the operating system keychain. `semar egress` lists what the pilot receives: the goal, the passed values, and the snapshot, with password fields masked. brojev's README notes that Jev is weak at numbers and comparisons, so the main agent does those from snapshots and passes exact values.
+The pilot is the one place where Semar holds a model credential. It is optional and off by default. The key lives in the operating system keychain. `semar egress` lists what the pilot receives: the goal, the passed values, and the snapshot, with password fields masked. A decision model is weak at numbers and comparisons, so the main agent does those from snapshots and passes exact values.
 
 ### Screening with a decision model
 
@@ -2208,7 +2202,7 @@ Until the UI engines exist, a mobile leg may be tested through the API calls tha
 
 ## Engines and the gateway
 
-Planned, not built. Semar does not build every surface engine itself. It integrates existing MCP servers as engines and adds what they do not provide: recording, verdicts computed by code, the effects policy, replay, journeys, and fixtures. The engine gateway extends the MCP client of [MCP gateway](#mcp-gateway) and the package `internal/gateway`. It does not reverse T10: brojev stays the web candidate, and the spikes compare it with the others through the same adapter interface (T71).
+Planned, not built. Semar does not build every surface engine itself. It integrates existing MCP servers as engines and adds what they do not provide: recording, verdicts computed by code, the effects policy, replay, journeys, and fixtures. The engine gateway extends the MCP client of [MCP gateway](#mcp-gateway) and the package `internal/gateway`. It does not reverse T10: the web engine is built in process (Plan 22), and the spikes compare the mobile candidates through the same adapter interface (T71).
 
 ### The rule
 
@@ -2286,11 +2280,11 @@ At the start of a run the gateway calls `tools/list` on each engine and hashes e
 
 ### Candidates
 
-None is verified. Spikes S6 and S7 compare them through the adapter interface.
+None is verified. Spike S7 compares the mobile candidates through the adapter interface.
 
 | Surface | Candidates |
 | --- | --- |
-| Web | brojev, as decided in T10. Playwright |
+| Web | The in-process engine of Plan 22, as decided in T10. An MCP server for the web, such as Playwright's, is possible and not planned |
 | Android | mobile-mcp, Maestro, Appium, and the candidates already in S7 |
 | iOS | mobile-mcp, Maestro, Appium. Whether iOS can come before M4 is an open question |
 
@@ -2343,7 +2337,7 @@ Each auth profile belongs to one surface and states how its session is made:
 
 ### A dedicated Chrome profile
 
-Semar never uses the Chrome profile that a developer browses with. It creates a new profile of its own for each web auth profile, on first use, under `~/.semar/profiles/<project>/<environment>/<auth profile>`. No setting points Semar at a profile that already exists. This follows brojev, which runs Chrome on a profile of its own and says "Log in to sites there once".
+Semar never uses the Chrome profile that a developer browses with. It creates a new profile of its own for each web auth profile, on first use, under `~/.semar/profiles/<project>/<environment>/<auth profile>`. No setting points Semar at a profile that already exists. Plan 22 builds this part for the web: the profile is at `browser/<environment>/<account>` below the Semar home, and `semar login <service> --env <environment>` opens it.
 
 * **Sign in once.** `semar login shop-web` opens that profile in an ordinary Chrome window. The window is named "Semar: shop-web", so it is easy to tell apart from the developer's own. A person signs in with whatever the application asks for: a password, Google, a second step. Semar then checks the `signedInWhen` condition and closes the window.
 * **Reuse.** Every later run starts Chrome on the same directory. The cookies are still there, so nobody signs in again.
@@ -3467,11 +3461,11 @@ internal/daemon/        semard: socket server, run state, engine ownership
 internal/mcpserver/     semar mcp: thin stdio server, tool definitions
 internal/qatools/       tool handlers shared by every surface
 internal/engine/api/    HTTP engine
-internal/engine/web/    web engine (brojev, by the route spike S6 picks)
+internal/engine/web/    web engine (Chrome DevTools Protocol, on chromedp)
 internal/engine/android/ adb and on-device UI server
 internal/engine/observe/ Grafana client: logs, traces, metrics, panels
 internal/engine/db/     read-only SQL: statement gate, grants check, drivers
-internal/pilot/         Pilot interface, jev
+internal/pilot/         Pilot interface, decision model
 internal/recorder/      action capture, locators, redaction
 internal/replay/        run a Script as a batch
 internal/auth/          auth profiles, OTP sources, secret lookup, sign-in on the API, the web, and Android, Chrome profile directories
@@ -3520,8 +3514,8 @@ Candidate dependencies. Confirm each one's current version and maintenance state
 | Need | Candidate |
 | --- | --- |
 | Command line | `github.com/spf13/cobra` |
-| MCP server | `github.com/modelcontextprotocol/go-sdk`, which brojev 0.5.0 also uses, at v1.8.0 |
-| Web engine | `github.com/barockok/brojev`, by route A, B, or C |
+| MCP server | `github.com/modelcontextprotocol/go-sdk` at v1.8.0 |
+| Web engine | `github.com/chromedp/chromedp` (MIT), pinned to one version in `go.mod` |
 | ACP client | `github.com/coder/acp-go-sdk` (community) |
 | JSON Schema validation | `github.com/santhosh-tekuri/jsonschema` |
 | Keychain | `github.com/zalando/go-keyring` |
@@ -3574,7 +3568,7 @@ Tests for the parts added on 2026-11-17. The tests of the ledger, fixtures, tria
 | M0 | Relevant spikes below; baseline of the team's actual verification effort, including developer work and skipped checks | Contracts and pilot criteria are recorded without assuming a QA team exists |
 | M1 | The daemon, `semar mcp`, the Claude Code plugin, the `api`, `observe`, and `db` engines, the recorder, replay, verdict, `claude` and `codex` drivers, the ticket gate with Jira read, the `semar`, `jira`, and `files` knowledge sources with `kb_search`, the feature map, Plan with earlier testing, the impact map, and recommendations, Gate, sign-in, Author, Explore, `regression run` and `regression coverage`, local report, `init`, `doctor`, `egress` | One real ticket runs from plan to a local report on UAT, in both the interactive and the unattended way. A local regression run replays the scenarios that ticket left behind. The sample-app suite passes |
 | M1.1 | Code host adapter, evidence branch, `publish` with the Jira result comment, the `testrail` source and TestRail results, the MCP gateway, memory notes, decisions in the merge request, `sync`, `status`, pipeline templates, promotion on sign-off, `regression bootstrap` with bulk confirmation, the regression comparison report, Postman import, `rollup`, `acp` driver. Added on 2026-11-17 and built (Plans 16 to 20): the trial run, local fixtures with leases on one machine and fixture health, the obligations and the ledger with the manual checklist, API-only journeys, and the CTRF, JUnit XML, and SARIF exports. Planned and not built: the Arazzo format and the Postman and HAR imports of fixtures | A ticket goes from an opened merge request to a signed-off report and a Jira comment with no person starting a command, and the nightly regression run publishes its report. Built: the report of a run opens with the use case line when obligations exist, and an API journey runs on the sample app on one manifest. Not built: the ticket report that publishes it |
-| M2 | The `web` engine on brojev, `web_run` with the pilot, locators, script repair, the object-storage evidence store. Planned on 2026-11-17: the engine gateway and the engine registry, packs and the registry, the published schemas and the conformance suite, screen objects, and web legs of journeys | One real web ticket runs from plan to a published report. Planned: a journey with a web leg passes on one manifest, and another tool's loader passes the conformance suite |
+| M2 | Built (Plan 22): the `web` engine, in process on chromedp, with a Chrome profile of Semar's own and `semar login`, `surface: web` legs of journeys and web scenarios on one replay runner, screen objects that a person approves with `semar confirm --screens`, elements as the subject of checks and captures, one screenshot per web action, host blocking and the `traceparent` header inside the browser, and deterministic repair of a broken locator with `semar screens repair`. Not built: `web_run` with the pilot, the engine gateway and the engine registry, packs and the registry, the published schemas and the conformance suite, an agent that authors web steps, and the object-storage evidence store | One real web ticket runs from plan to a published report. Built: a journey with a web leg passes on one manifest, and a broken locator ends the leg `inconclusive` with a repair proposal. Not built: another tool's loader passes the conformance suite |
 | M3 | Native Android adapter, app/device identity, evidence artifacts, and connected API/web/Android journeys; completes the initial platform scope. Planned on 2026-11-17: Android legs of journeys, in the format of [Journeys](#journeys) | Required checks run across each applicable surface on one target manifest and connected fixture; a QA engineer, a developer, or a product manager can review the evidence |
 | M4 | Native iOS adapter and separately validated runner/device capabilities; extend the existing Android support. Planned on 2026-11-17: signed evidence bundles, and the open question of whether iOS can come earlier through an engine that S7 finds | iOS journeys pass the same evidence/permission contracts without borrowing Android results |
 | Shadow | Compare with the team's existing checks from M1 onward; developers, leads, or product owners perform independent checks when QA is absent | Reliability and total human effort are measured; absent/skipped prior testing is disclosed rather than treated as zero-cost equivalent quality |
@@ -3600,7 +3594,7 @@ Each spike is a throwaway script with a written result. None needs product code.
 | S3 | Does `github.com/coder/acp-go-sdk` complete `initialize`, `session/new` with an MCP server, and `session/prompt` against `gemini --acp`? | The ACP driver |
 | S4 | Do the UAT services continue a `traceparent` header, and does the trace ID appear in Loki lines and Tempo traces? | Whether the observer can fail a scenario or is advisory only |
 | S5 | Can a model draft useful scenarios and request hints from three past merge requests of yours with blank tickets? Compare the draft with what QA tested | Whether the Plan stage has value at all |
-| S6 | Which route brings brojev's engine into Semar: import, drive the daemon, or vendor? Extended on 2026-11-17: through the same engine adapter interface, compare brojev with Playwright on one set of local pages: snapshot roles and names, locators that survive a reload, actionability checks, host blocking inside the browser, the `traceparent` header, and one recorded `Action` per call | The web engine, decisions T10 and T71 |
+| S6 | Settled on 2026-11-17: the web engine is an in-process client built on chromedp (Plan 22, D1). No other tool's engine is imported, driven, or copied | The web engine, decisions T10 and T71 |
 | S7 | Which on-device server gives a screen snapshot fast enough for a pilot loop, and does it run on your UAT Android build? Appium with UiAutomator2 is one candidate. Extended on 2026-11-17: compare mobile-mcp, Maestro, and Appium next to the existing candidates, on the same test APK, and check whether any of them covers iOS | The Android engine, decision T71, and whether iOS can come before M4 |
 | S8 | Can the web engine add a `traceparent` header to the page's requests, including cross-origin ones? | Whether a web step can be tied to server logs |
 | S9 | Which stores does UAT use (PostgreSQL, MySQL, Elasticsearch), can you get a read-only account for each, and which Go SQL parsers handle PostgreSQL and MySQL statements without cgo? | The `db` engine |
@@ -3608,7 +3602,7 @@ Each spike is a throwaway script with a written result. None needs product code.
 | S11 | Can Semar read cases and results from your TestRail, edit its own comment on your Jira, and place earlier tickets in the right feature? | The knowledge layer and the result comment |
 | S12 | For one past UAT deploy of yours, how many commits can code link to a ticket, and how many tickets span more than one repository? | The change set and the build view |
 | S13 | After a person signs in to Google once in the dedicated Chrome profile, does the session stay valid when Semar drives that profile, and for how long? Does the same hold for a test Google account on your Android emulator? | Route 1 of [Sign-in with Google](#sign-in-with-google) |
-| S14 | On your own failed runs and probe responses, how often is Jev's likely cause right, and does its ranking put the odd responses first? | The screener role |
+| S14 | On your own failed runs and probe responses, how often is the decision model's likely cause right, and does its ranking put the odd responses first? | The screener role |
 | S15 | Can an Arazzo workflow, with `x-semar` keys, express a fixture's find before create, `until` with a timeout, cleanup in reverse order, outputs, and a lease, and does a round trip from Semar's YAML to Arazzo and back lose nothing? Before M1.1 | The fixture format, decision T63 |
 | S16 | Can the gateway start a real MCP engine, read its version, list and hash its tools, forward a call after policy, and record one `Action` with a usable `Locator` from the engine's snapshot? Before M2 | The engine gateway, decisions T69 and T70 |
 | S17 | Can a native replay artifact, such as a Playwright script or a Maestro flow, be replayed through the gateway so that each expected result binds to one recorded action? Before M2 | Native replay artifacts, decision T72 |
@@ -3623,7 +3617,7 @@ S5 is the cheapest test of the whole idea. Run it first.
 * The wire format for `claude --input-format stream-json` control requests. Semar does not use it.
 * The stability of `codex exec --json` event names across versions. Mitigated by version pinning.
 * That DeepSeek's Anthropic-compatible endpoint handles the tool calls that Claude Code makes for MCP tools.
-* brojev's speed and cost figures for Jev, which come from its README.
+* The speed and the cost of the decision model, which come from its provider's documentation.
 * That a GitLab pipeline cannot start from a merge request comment, which decides whether `semar sync` is needed there.
 * That an agent can trace indirect impact reliably in a large repository. Spike S10 measures it.
 * The exact TestRail and Jira interfaces for your editions: cloud or self-hosted, and which comment format each accepts.
@@ -3631,11 +3625,9 @@ S5 is the cheapest test of the whole idea. Run it first.
 * How often your commits and merge requests carry the ticket key. Spike S12 counts it on a real deploy.
 * That the agent tells a behaviour change from a refactor reliably. A refactor hunk still gets a neighbour scenario for that reason.
 * How well Postman test scripts convert. Requests and status checks convert. Arbitrary script code does not.
-* That the brojev author agrees to export the engine as importable packages.
-* That a Jev-style pilot works on an Android screen snapshot. brojev proves it for web pages only.
+* That a decision-model pilot works on an Android screen snapshot. It is not tried for web pages either.
 * Every Android obstacle listed in [Android engine](#android-engine).
 * The current versions and maintenance state of every candidate dependency.
-* That brojev's engine lets Semar block requests by host inside the browser.
 * That your services can expose their feature flags or a configuration version to a probe.
 * That UAT has a second test account and an account with a lower role, which access checks need.
 * That the web engine can add the `X-Semar-Run` header without breaking cross-origin requests. Spike S8 tests it with the trace header.
@@ -3643,8 +3635,8 @@ S5 is the cheapest test of the whole idea. Run it first.
 * That an agent finds real security defects with the ten probe kinds. The sample app's seeded defects measure it.
 * That a Google session made by a person stays usable in a browser that Semar drives. Spike S13 checks it.
 * That your UAT build can offer a test sign-in for pipelines, and that your Android build runs on a system image with Google Play.
-* TypeSafe's facts come from its documentation and from brojev's README. Jev was not called. Spike S14 measures the screening jobs.
-* That OpenRouter serves the same decision interface. brojev's source uses it, and TypeSafe's documentation does not mention it.
+* TypeSafe's facts come from its documentation. The model was not called. Spike S14 measures the screening jobs.
+* That OpenRouter serves the same decision interface. TypeSafe's documentation does not mention it.
 * That an MCP server which signs in through a browser can be used by the daemon without a person each time.
 
 Added on 2026-11-17:
@@ -3657,7 +3649,7 @@ Added on 2026-11-17:
 * How obligations are imported from existing manual test cases, and their quality.
 * That the planner proposes the obligations that a QA engineer would list.
 * That trial problems lead the planner to a correct repair.
-* Which engine fits each surface: brojev or Playwright for the web, and mobile-mcp, Maestro, or Appium for mobile. Spikes S6 and S7.
+* Which engine fits Android: mobile-mcp, Maestro, or Appium. Spike S7.
 * Whether iOS can come before M4 through a mobile engine.
 * That the gateway can forward and record calls of a real MCP engine, and that each engine reports a version and stable tool descriptions. Spike S16.
 * That a native replay artifact can carry Semar's binding of expected results. Spike S17.

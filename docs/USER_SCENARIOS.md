@@ -59,8 +59,8 @@ Models
   planner        claude, Claude Code, signed in                      ready
   tester         codex, Codex CLI, signed in                         ready
   second reader  deepseek, through Claude Code                       ready      optional
-  pilot          typesafe, jev-latest                                ready      optional
-  screener       typesafe, jev-latest                                ready      optional
+  pilot          typesafe, decision-latest                           ready      optional
+  screener       typesafe, decision-latest                           ready      optional
 
 Connections
   Git            3 repositories readable                             ready

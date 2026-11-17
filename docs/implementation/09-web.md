@@ -1,5 +1,7 @@
 # Plan 09: Web
 
+> **Superseded by [Plan 22](22-web-engine.md).** The web engine is a Chrome DevTools Protocol client of Semar's own, built on chromedp, and the route decision below is dropped. The parts that Plan 22 does not build (the pilot, the `web_*` tools, and the gateway) are still planned and still follow this text.
+
 > **For agentic workers:** This is a specification. Before you execute it, expand each task into steps in the format of [Plan 01](01-core-replay.md), against the code that exists by then.
 
 * **Guide:** [implementation guide](README.md). **Spec:** TRD, [Web engine](../TRD.md#web-engine), [Signing in](../TRD.md#signing-in), [Pilot](../TRD.md#pilot), [Three tiers of tools](../TRD.md#three-tiers-of-tools)
@@ -32,7 +34,7 @@ web_batch (replay) +             |
 internal/engine/surface.go         the Surface port, shared by api, web, android
 internal/engine/web/engine.go      implements Surface for a browser
 internal/engine/web/driver.go      the Driver interface: what the engine needs from a browser
-internal/engine/web/brojev/        the driver, by the route of decision 4
+internal/engine/web/chrome.go        the driver, built on chromedp (Plan 22, D1)
 internal/engine/web/snapshot.go    a page as a list of elements with refs
 internal/engine/web/locator.go     role, name, and frame path. Find again in a fresh snapshot
 internal/engine/web/hosts.go       block requests to hosts that are not listed
@@ -95,7 +97,7 @@ func SignedIn(ctx context.Context, s engine.Surface, when config.SignedInWhen) (
 
 // internal/decide
 type Pilot struct{ /* a Decider, limits */ }
-// Run pursues one sub-goal. It returns Done, or NeedsAgent with the reason, as brojev's run does.
+// Run pursues one sub-goal. It returns Done, or NeedsAgent with the reason, as a pilot run does.
 func (p *Pilot) Run(ctx context.Context, s engine.Surface, goal string, values map[string]string) (PilotResult, error)
 ```
 
@@ -162,7 +164,7 @@ authProfiles:
 | 5 | Profile directories, `login`, and `logout` | `auth/profiles.go`, `cli/login.go` | The first call creates the directory with mode 0700, the marker, and the display name (R1, R1b). A second call reuses it. With `profilesDir` set to a folder that holds a Chrome profile without the marker, Semar refuses and names the folder. With a fake Chrome on `PATH`, the start command holds `--user-data-dir` with Semar's directory and no flag that attaches to a running browser (R1a). `logout` removes a marked directory and refuses an unmarked one (R4) |
 | 6 | Sign-in steps and the signed-in check | `auth/web.go` | Local pages with a password form, a one-box code field, and a six-box code field. An ended session with no steps is `blocked` with the command (R3) |
 | 7 | Secrets on a page | `engine/web/secrets.go` | The value appears nowhere (R7). An unlisted host and a search box are refused (R6). A sign-in host stores no screenshot (R8) |
-| 8 | The real driver | `engine/web/brojev` | The engine's tests run against real Chrome with a build tag, in CI |
+| 8 | The real driver | `engine/web/chrome.go` | The engine's tests run against real Chrome with a build tag, in CI |
 | 9 | Web tools and recording | `mcpserver/tools_web.go` | With local pages and the fake provider: a session is recorded and submitted as a script |
 | 10 | Replay and web checks | `replay`, `check` | A recorded session replays to the same results. A text check and an element check pass and fail as expected (R13) |
 | 11 | Web invariants and the accessibility check | `engine/web/invariants.go`, `a11y.go` | A page with a script error fails the invariant (R14). Accessibility results are findings (R18) |

@@ -1,6 +1,6 @@
 # Semar implementation guide
 
-* **Status:** Draft 1. Plans 01 and 12 to 20 are implemented. The other plans are specifications.
+* **Status:** Draft 1. Plans 01, 12 to 22 are implemented. The other plans are specifications.
 * **Date:** 2026-11-14
 * **Spec:** [product requirements](../PRD.md), [technical requirements](../TRD.md), [test workflow](../WORKFLOW.md), [user scenarios](../USER_SCENARIOS.md)
 
@@ -24,7 +24,7 @@ The owner decides these. Each one blocks the plan named.
 | 1 | The Go module path | Plan 01, Task 1 | Decided on 2026-11-14: `github.com/jancuk/semar` |
 | 2 | The license | The first public push | Apache-2.0. Semar copies no third-party code |
 | 3 | The code host: GitLab is assumed | Plan 08 | GitLab |
-| 4 | Which route brings in brojev's browser engine. See TRD, [Web engine](../TRD.md#web-engine) | Plan 09 | Route A, then route C |
+| 4 | Which browser engine the web engine uses. See TRD, [Web engine](../TRD.md#web-engine) | Plan 09 | Decided on 2026-11-17: an in-process Chrome DevTools Protocol client built on chromedp ([Plan 22](22-web-engine.md), D1) |
 
 ## Engineering rules
 
@@ -293,7 +293,7 @@ Checked on the Go module proxy on 2026-11-14. Pin the exact version in `go.mod`.
 | 06 | [Providers, agents, and assignments](06-providers.md) | Several providers, named agents with backups and parallel sessions, jobs assigned in YAML, and a decision provider used first where a job is a choice | Plan 02. Spikes S2, S3, S14 | FR-37, 206 to 212, 236 to 245 |
 | 07 | [Data stores](07-data-stores.md) | Read-only checks on PostgreSQL, MySQL, and Elasticsearch | Plan 04. Spike S9 | FR-81 to 88, 180 to 182 |
 | 08 | [Team mode](08-team-mode.md) | Results on the merge request and the ticket, decisions by reply, pipeline jobs, regression upkeep, and MCP import | Plan 04. Spike S11. Decision 3 | FR-8 to 10, 31 to 35, 62 to 76, 79, 80, 91 to 97, 103 to 114, 129, 158 to 163, 187 to 191, 213 to 216, 223, 225 to 227 |
-| 09 | [Web](09-web.md) | Web scenarios, a Chrome profile of Semar's own, `semar login`, and the pilot | Plan 06. Spikes S6, S8, S13. Decision 4 | FR-20, 44, 46, 51, 52, 192 to 202, 204 |
+| 09 | [Web](09-web.md) (superseded by [Plan 22](22-web-engine.md)) | Web scenarios, a Chrome profile of Semar's own, `semar login`, and the pilot | Plan 06. Spikes S6, S8, S13. Decision 4 | FR-20, 44, 46, 51, 52, 192 to 202, 204 |
 | 10 | [Android](10-android.md) | Android scenarios on an emulator or a device | Plan 09. Spike S7 | FR-21, 45, 136, 203 |
 | 12 | [A test plan from a diff](12-plan-from-a-diff.md) (implemented) | `semar plan --diff <compare link>` reads the difference of two branches, finds the tickets, and writes scenarios and scripts that `semar run` replays. It builds the parts of Plans 02 and 03 that this path needs | Plan 01 | FR-1 to 4, 16, 115, 116 |
 | 13 | [Model providers and the dashboard](13-model-providers-and-dashboard.md) (implemented) | `semar plan` uses Claude Code, Codex, the Anthropic API, or any server with the OpenAI chat format. Providers live in the person's own file. `semar dashboard` manages them, starts a sign-in, and shows usage. A harness provider loads the person's MCP servers and skills | Plan 12 | None yet |
@@ -305,6 +305,7 @@ Checked on the Go module proxy on 2026-11-14. Pin the exact version in `go.mod`.
 | 19 | [Obligations and the coverage ledger](19-coverage-ledger.md) (implemented) | `.semar/obligations/` holds the use cases of a change, and `semar plan` writes them. `semar ledger` gives each one a state, with `defer` and `record` for a person, and the run report opens with one use case line | Plans 01, 12, and 14, and Plan 17 for task 5 | FR-261 in part, FR-262 to 270 |
 | 20 | [Exports](20-exports.md) (implemented) | `semar export ctrf`, `junit`, and `sarif` write one stored run in a common format, from the stored evidence and with no new outcome | Plan 01 | FR-188, 335, 336 |
 | 21 | [Findings from a real delivery](21-field-findings.md) (implemented) | Ticket files are requirements: the planner expects what an acceptance criterion says, and every numbered criterion is accounted for by a check, a manual check, or a stated gap. Accounts with `as` on steps and journey legs, variables in expected values, `count` on arrays, plain unknown-key errors, `.semar/.gitignore`, and the problems of refused drafts in `plan.md` | Plans 12 to 20 | FR-123, FR-261 to FR-270 |
+| 22 | [The web engine and web legs](22-web-engine.md) (implemented) | `surface: web` journey legs and web scenarios drive Chrome on a profile of Semar's own through one in-process engine. Steps name elements through screen objects in `.semar/screens/` that a person approves with `semar confirm --screens`. A broken locator ends the leg `inconclusive`, and `semar screens repair` proposes a fix with no model. `semar login` signs in once. Supersedes Plan 09 | Plans 17, 18, 19, and 21 | FR-20 in part, FR-192 to FR-202 in part, FR-288 to 298 (web legs) |
 | 11 | [Configuration over code](11-configuration.md) | Cases, fragments, data sets, named checks, company rules, declared probes, passes, schemas, and `semar validate`. Every use case is a YAML edit | Plan 04. Parts need Plans 05 and 06 | FR-246 to 260 |
 
 Plans 01 to 04 are the first usable version: one API ticket from a plan to a report. Plans 05, 06, 07, and 11 do not depend on each other, apart from the tasks that Plan 11 names. They can be built in parallel after Plan 04, and Plan 06 can start after Plan 02. Tasks 1 to 5 and 11 to 13 of Plan 11 are worth doing early, because they are what a first user touches.

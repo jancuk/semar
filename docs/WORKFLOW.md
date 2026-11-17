@@ -35,7 +35,7 @@ A QA engineer and a security tester follow habits that an agent does not have by
 | Screener, a decision model | Ranks, scores, and classifies, with a probability | Set an outcome, or confirm a finding |
 | People | Confirm new intent, triage findings, accept gaps, sign off | Start runs, collect evidence, or keep lists |
 
-[Model roles](TRD.md#model-roles) says which provider fills each role. Anthropic, OpenAI, and DeepSeek serve the agent roles. TypeSafe's Jev serves the pilot and the screener.
+[Model roles](TRD.md#model-roles) says which provider fills each role. Anthropic, OpenAI, and DeepSeek serve the agent roles. A decision model serves the pilot and the screener.
 
 ## The flow
 
@@ -181,7 +181,7 @@ The developer fixes the defect and deploys. Code replays the stored scripts on t
 
 ## Where the fast model helps
 
-Jev answers in well under a second per question, according to brojev's README, and its input costs $0.042 per million tokens. It cannot write text or drive an agent. The workflow uses it where many small choices would otherwise each cost the tester a full turn:
+A decision model answers in well under a second per question and costs little per request. It cannot write text or drive an agent. The workflow uses it where many small choices would otherwise each cost the tester a full turn:
 
 | Phase | Job | Without it |
 | --- | --- | --- |

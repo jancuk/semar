@@ -35,7 +35,7 @@ assign      which agent does which job      plan, test, security, plan.review, s
 ```text
 internal/provider/codex/           driver.go, args.go, parse.go, health.go, testdata/
 internal/provider/acp/             driver.go, client.go
-internal/provider/presets.go       named presets: deepseek, typesafe, openrouter-jev
+internal/provider/presets.go       named presets: deepseek, typesafe, openrouter-decision
 internal/provider/data.go          the kinds of data a job sends, checked against the provider
 internal/agents/agents.go          Agent, Route, load and validate the agents block
 internal/agents/assign.go          Job, the fallback chain, "when" rules, Resolve
@@ -146,8 +146,8 @@ providers:
 | DeepSeek, or another vendor with an Anthropic-compatible endpoint | `kind: claude` with `preset:`, or with `env:` values |
 | A vendor with an OpenAI-compatible endpoint | `kind: codex` with `endpoint:` and `key:`. Confirmed against the Codex CLI in Task 3 |
 | Gemini CLI, OpenCode, or another harness that speaks ACP. OpenCode reaches many vendors | `kind: acp` with `command:` |
-| TypeSafe Jev | `kind: systemone` with `preset: typesafe` |
-| Jev through OpenRouter | `kind: systemone` with `preset: openrouter-jev` |
+| TypeSafe decision model | `kind: systemone` with `preset: typesafe` |
+| The decision model through OpenRouter | `kind: systemone` with `preset: openrouter-decision` |
 
 **Agents and assignments.**
 
