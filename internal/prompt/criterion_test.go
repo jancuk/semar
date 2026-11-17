@@ -31,7 +31,7 @@ func TestCriterionRendersEveryField(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{d.Criterion, d.Operations, d.Fixtures, d.Accounts, "acts as `default`", d.Diff, d.DiffOmitted, d.Existing,
-		"`scenario`", "`manualCheck`", "`surface`", "`notDrafted`", "{{name}}", "missing-{{run.id}}", "{{date.plus7d}}", "{{datetime.plus2h}}"} {
+		"`scenario`", "`manualCheck`", "`surface`", "`notDrafted`", "{{name}}", "missing-{{run.id}}", "{{date.plus7d}}", "{{datetime.plus2h}}", "`customerId`"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the prompt lacks %q", want)
 		}

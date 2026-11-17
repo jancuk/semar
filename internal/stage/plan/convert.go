@@ -239,8 +239,9 @@ func (p Packet) convertStep(st AnswerStep, path string, in Input, ps *problems) 
 	// A step that expects a refusal tests a validation rule, so it may leave out a required field and
 	// send a value of another type. It still cannot send a name that the document does not declare.
 	refusal := expectsRefusalStatus(st)
-	sd.Query = p.fillQuery(op, st, path, refusal, ps)
-	sd.JSON = p.fillBody(op, st, path, refusal, ps)
+	ids := idRule{ticket: ticketText(in.Tickets, p.Ticket), refusal: refusal}
+	sd.Query = p.fillQuery(op, st, path, ids, ps)
+	sd.JSON = p.fillBody(op, st, path, ids, ps)
 
 	for j, c := range st.Captures {
 		cp := fmt.Sprintf("%s.captures[%d]", path, j)
@@ -341,7 +342,8 @@ func expectsRefusalStatus(st AnswerStep) bool {
 	return false
 }
 
-func (p Packet) fillQuery(op PacketOperation, st AnswerStep, path string, refusal bool, ps *problems) map[string]string {
+func (p Packet) fillQuery(op PacketOperation, st AnswerStep, path string, ids idRule, ps *problems) map[string]string {
+	refusal := ids.refusal
 	declared := map[string]openapi.Param{}
 	var names []string
 	for _, pa := range op.Params {
@@ -365,6 +367,9 @@ func (p Packet) fillQuery(op PacketOperation, st AnswerStep, path string, refusa
 		case !refusal && len(pa.Enum) > 0 && !slices.Contains(pa.Enum, val) && !refPattern.MatchString(val):
 			ps.add(qp, "query parameter %s of %s takes one of %s, and not %q", nv.Name, op.Key, strings.Join(pa.Enum, ", "), val)
 			continue
+		case ids.typedIn(nv.Name, pa.Format, pa.Enum, val):
+			ps.add(qp, "query parameter %s of %s holds the ID %q, which no step or fixture gave: capture it in an earlier step, take it from a fixture, or name it in the ticket", nv.Name, op.Key, val)
+			continue
 		}
 		if out == nil {
 			out = map[string]string{}
@@ -382,7 +387,8 @@ func (p Packet) fillQuery(op PacketOperation, st AnswerStep, path string, refusa
 	return out
 }
 
-func (p Packet) fillBody(op PacketOperation, st AnswerStep, path string, refusal bool, ps *problems) any {
+func (p Packet) fillBody(op PacketOperation, st AnswerStep, path string, ids idRule, ps *problems) any {
+	refusal := ids.refusal
 	if len(st.Body) == 0 {
 		if !refusal && op.BodyKnown && op.BodyRequired {
 			for _, f := range op.Body {
@@ -422,6 +428,11 @@ func (p Packet) fillBody(op PacketOperation, st AnswerStep, path string, refusal
 		if problem != "" {
 			ps.add(bp, "field %s of %s %s", bf.Field, op.Key, problem)
 			given[bf.Field] = true // the missing field is not a second problem
+			continue
+		}
+		if f.Type != "object" && f.Type != "array" && ids.typedIn(bf.Field, f.Format, f.Enum, v) {
+			ps.add(bp, "field %s of %s holds the ID %q, which no step or fixture gave: capture it in an earlier step, take it from a fixture, or name it in the ticket", bf.Field, op.Key, fmt.Sprint(v))
+			given[bf.Field] = true
 			continue
 		}
 		body[bf.Field], given[bf.Field] = v, true

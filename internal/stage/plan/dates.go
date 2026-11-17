@@ -55,7 +55,7 @@ func (r dateRule) check(shown, day, ticket string) string {
 		return ""
 	}
 	diff := int(at.Sub(r.today).Hours() / 24)
-	if diff <= -nearDays || diff >= nearDays || namesDay(ticket, day) {
+	if diff <= -nearDays || diff >= nearDays || namesWord(ticket, day) {
 		return ""
 	}
 	form := "date"
@@ -68,23 +68,6 @@ func (r dateRule) check(shown, day, ticket string) string {
 	return fmt.Sprintf("holds the date %s, which is near today and will be wrong on a later day: write {{%s}}, or a date at least 10 years away when the value must not move",
 		strings.TrimSpace(shown), datevar.Suggest(form, diff))
 }
-
-// namesDay says whether the text holds the day as a whole date.
-func namesDay(text, day string) bool {
-	for i := 0; ; {
-		j := strings.Index(text[i:], day)
-		if j < 0 {
-			return false
-		}
-		start, end := i+j, i+j+len(day)
-		if (start == 0 || !isDigit(text[start-1])) && (end == len(text) || !isDigit(text[end])) {
-			return true
-		}
-		i = start + 1
-	}
-}
-
-func isDigit(b byte) bool { return b >= '0' && b <= '9' }
 
 // dates refuses a typed date that is near today in the query values, the JSON body, the expected
 // values, and the with values of a draft scenario (D7), unless its ticket file names the day (D8).
