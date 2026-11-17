@@ -45,6 +45,9 @@ func webRecord(s *scrubber, w domain.WebRecord) domain.WebRecord {
 		}
 		w.Blocked = blocked
 	}
+	if w.SignIn != nil {
+		w.SignIn = &domain.WebSignIn{Account: s.text(w.SignIn.Account), User: s.text(w.SignIn.User)}
+	}
 	return w
 }
 

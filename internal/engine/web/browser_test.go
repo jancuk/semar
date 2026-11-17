@@ -79,6 +79,7 @@ type rig struct {
 	policy *effects.Policy
 	seen   *seenRequests
 	step   int
+	as     string // the account of the next steps; "" is default
 }
 
 type seenRequests struct {
@@ -109,6 +110,9 @@ type rigOptions struct {
 	chrome  string
 	secrets map[string]string
 	handler func(mux *http.ServeMux)
+	// accounts is the web sign-in of each account, by the name of the account.
+	accounts      map[string]config.WebSignIn
+	actionTimeout time.Duration
 }
 
 func newRig(t *testing.T, o rigOptions) *rig {
@@ -166,6 +170,7 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	eng := web.New(web.Options{
 		Policy: policy, Recorder: rec, Files: run, Services: map[string]string{"app": srv.URL},
 		Secrets: env, Home: home, Environment: "test", Chrome: o.chrome, Run: "r-1",
+		Accounts: o.accounts, ActionTimeout: o.actionTimeout,
 	})
 	t.Cleanup(eng.Close)
 	return &rig{t: t, eng: eng, run: run, store: store, srv: srv, home: home, policy: policy, seen: seen}
@@ -192,6 +197,8 @@ func (r *rig) try(w domain.WebAction, locs map[string]domain.Locator, watch ...w
 		Locators: locs,
 		Watch:    watch,
 		Why:      "the step " + string(w.Do),
+
+		AuthProfile: r.as,
 	})
 }
 

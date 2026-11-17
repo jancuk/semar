@@ -48,6 +48,8 @@ func webResult(a domain.Action) string {
 		return "refused: " + a.Refused
 	case a.Err != "":
 		return "error: " + a.Err
+	case a.Web != nil && a.Web.SignIn != nil:
+		return "done, signed in as " + a.Web.SignIn.Account
 	}
 	return "done"
 }

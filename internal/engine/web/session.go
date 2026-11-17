@@ -43,10 +43,8 @@ const watchJS = `(function(){
   window.addEventListener('load', bump);
 })();`
 
-func (e *Engine) session(account string) (*session, error) {
-	if account == "" {
-		account = "default"
-	}
+func (e *Engine) session(name string) (*session, error) {
+	account := accountName(name)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {

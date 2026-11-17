@@ -26,3 +26,12 @@ func TestFromWebAction(t *testing.T) {
 		t.Errorf("refused = %+v", got)
 	}
 }
+
+func TestAnOpenThatSignedInSaysAsWhom(t *testing.T) {
+	open := domain.Action{Surface: domain.SurfaceWeb, Op: "open", Web: &domain.WebRecord{
+		Op: "open", URL: "http://x.test/desk", SignIn: &domain.WebSignIn{Account: "support", User: "ana@example.com"},
+	}}
+	if got := activity.FromAction(open, effects.Read, "p"); got.Result != "done, signed in as support" {
+		t.Errorf("result = %q", got.Result)
+	}
+}

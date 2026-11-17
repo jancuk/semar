@@ -25,6 +25,7 @@ func TestWebRecordHoldsNoSecret(t *testing.T) {
 			Elements: map[string]domain.ElementState{"pw": {Found: true, Count: 1, Text: secret, Locator: loc}},
 			Repair:   []domain.Candidate{{Element: "pw", Locator: *loc, Why: "same name " + secret}},
 			Blocked:  []string{secret + ".evil.test"},
+			SignIn:   &domain.WebSignIn{Account: "ana", User: "ana-" + secret},
 		},
 	}
 	out := r.Action(a)

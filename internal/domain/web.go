@@ -332,4 +332,12 @@ type WebRecord struct {
 	Repair []Candidate `json:"repair,omitempty"`
 	// Blocked lists the hosts that the browser refused to reach during the action.
 	Blocked []string `json:"blocked,omitempty"`
+	// SignIn is set when the engine signed in to the page that an open reached.
+	SignIn *WebSignIn `json:"signIn,omitempty"`
+}
+
+// WebSignIn says who the engine signed in as. It holds the user and never the password.
+type WebSignIn struct {
+	Account string `json:"account"`
+	User    string `json:"user"`
 }

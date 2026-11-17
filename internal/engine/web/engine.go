@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jancuk/semar/internal/check"
+	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/api"
@@ -45,6 +46,9 @@ type Options struct {
 	Files    Files
 	Services map[string]string // service name to base URL
 	Secrets  secret.Resolver
+	// Accounts is the web sign-in of each account that has one, by the name of the account. An open
+	// of a step of such an account signs in when the page shows a sign-in form.
+	Accounts map[string]config.WebSignIn
 	// Home is the Semar home, which holds the profiles of the browser. Environment names the
 	// environment that the profiles belong to.
 	Home        string
@@ -280,6 +284,9 @@ func (e *Engine) run(ctx context.Context, s *session, c Call, open *url.URL, val
 	case domain.WebOpen:
 		opErr = s.navigate(tabCtx, open.String())
 		dispatched = true
+		if who, ok := e.o.Accounts[accountName(c.AuthProfile)]; ok && opErr == nil {
+			opErr = e.signInAfterOpen(tabCtx, s, accountName(c.AuthProfile), who, open, &a)
+		}
 	case domain.WebWait:
 		if w.Element != "" {
 			res, wrd, err := waitFor(tabCtx, c.Locators, w.Element, waitLimit)
