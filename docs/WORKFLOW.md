@@ -120,7 +120,7 @@ Code validates every claim it can: cited lines, listed paths, quoted ticket sent
 
 ### 4. Confirm intent
 
-People answer only what is new: an expected result that came from the code alone, a proposed "must never" rule, or a baseline. They read the scenario as Gherkin, `semar confirm` shows it in that form with the cite of each result, and they answer in the merge request or the ticket. No later phase waits for them. A scenario with an open question is tested anyway and stays `inconclusive` until the answer arrives.
+People answer only what is new: an expected result that came from the code alone, a proposed "must never" rule, or a baseline. They read the scenario as Gherkin, `semar review` shows it in that form with the cite of each result, and they answer in the merge request or the ticket. No later phase waits for them. A scenario with an open question is tested anyway and stays `inconclusive` until the answer arrives.
 
 ### 5. Entry check
 

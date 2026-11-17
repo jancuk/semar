@@ -290,7 +290,7 @@ func TestJourneyRunExitCodes(t *testing.T) {
 			want: "checkout failed invariant 1 is false: 1000, 1001, 1000"},
 		{name: "a build changes", app: sampleapp.Options{Defects: defects(sampleapp.BuildChanges)}, code: cli.ExitUndecided, want: "checkout stale a build changed during the journey: orders 9f3c2ab then c0ffee1; first failing leg place"},
 		{name: "the expected results are not confirmed", prepare: func(t *testing.T, r *repo) { r.requireConfirmation(t) }, code: cli.ExitUndecided,
-			want: "checkout blocked first failing leg place: an expected result is not confirmed"},
+			want: "checkout needs review first failing leg place: an expected result is not confirmed"},
 		{name: "a build cannot be read", prepare: func(t *testing.T, r *repo) {
 			r.rewriteConfig(t, func(s string) string {
 				return strings.Replace(s, "/version\n          commit: $.commit\nauthProfiles", "/nothing\n          commit: $.commit\nauthProfiles", 1)
@@ -313,8 +313,8 @@ func TestJourneyRunNeedsAnExpectedResultConfirmedBeforeItSendsAnything(t *testin
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	r.editJourney(t, "checkout", func(s string) string { return strings.Replace(s, "source: person", "source: diff", 1) })
 	res := r.must(t, cli.ExitUndecided, "journey", "run", "checkout")
-	contains(t, "stdout", squash(res.stdout), "checkout blocked first failing leg place: an expected result is not confirmed: run semar confirm --journey checkout",
-		"place inconclusive", "pay not_run", "settled not_run")
+	contains(t, "stdout", squash(res.stdout), "checkout needs review first failing leg place: an expected result is not confirmed: run semar review checkout",
+		"place needs review", "pay not_run", "settled not_run")
 	if n := r.reached(""); n != 0 {
 		t.Errorf("%d requests were sent for a journey whose expected results nobody confirmed", n)
 	}
@@ -322,7 +322,7 @@ func TestJourneyRunNeedsAnExpectedResultConfirmedBeforeItSendsAnything(t *testin
 	if len(run.Journeys) != 1 || run.Journeys[0].Outcome != domain.JourneyBlocked || run.Journeys[0].FirstFailing != "place" || len(run.Results) != 3 {
 		t.Fatalf("run.json: %+v", run.Journeys)
 	}
-	if got := run.Journeys[0].Reasons[0].Text; got != "leg place ended inconclusive: an expected result is not confirmed: run semar confirm --journey checkout" {
+	if got := run.Journeys[0].Reasons[0].Text; got != "leg place ended inconclusive: an expected result is not confirmed: run semar review checkout" {
 		t.Errorf("the journey reason is %q", got)
 	}
 	for _, rr := range run.Results {
@@ -374,29 +374,29 @@ func (r *repo) confirmationFiles(t *testing.T, scenario string) []string {
 	return files
 }
 
-func TestConfirmJourneyStoresOnePerLeg(t *testing.T) {
+func TestReviewJourneyStoresOnePerLeg(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	r.requireConfirmation(t)
 	r.opts.Terminal = func() bool { return false }
 
 	// Without --yes and without a terminal, nothing is stored.
-	refused := r.must(t, cli.ExitUndecided, "confirm", "--journey", "checkout")
-	contains(t, "stdout", refused.stdout, "Leg place of journey checkout (scenario checkout.place) has 1 expected results that a person must confirm:",
-		"Leg pay of journey checkout (scenario checkout.pay)", "Leg settled of journey checkout (scenario checkout.settled)", "(source diff)")
-	contains(t, "stderr", refused.stderr, "nothing was confirmed")
+	refused := r.must(t, cli.ExitUndecided, "review", "checkout")
+	contains(t, "stdout", refused.stdout, "journey checkout (3 legs)")
+	contains(t, "stderr", refused.stderr, "nothing was approved")
 	for _, id := range checkoutLegs {
 		if n := len(r.confirmationFiles(t, id)); n != 0 {
 			t.Errorf("%s has %d confirmations after a refusal", id, n)
 		}
 	}
 
-	res := r.must(t, cli.ExitOK, "confirm", "--journey", "checkout", "--yes")
-	contains(t, "stdout", res.stdout, "local, unverified identity")
+	res := r.must(t, cli.ExitOK, "review", "checkout", "--yes")
+	contains(t, "stdout", res.stdout, "journey checkout, 3 legs with expected results to confirm", "Leg place of journey checkout (scenario checkout.place)",
+		"Leg pay of journey checkout (scenario checkout.pay)", "Leg settled of journey checkout (scenario checkout.settled)", "(source diff)",
+		"approved journey checkout as tester (local, unverified identity)")
 	for _, id := range checkoutLegs {
 		if n := len(r.confirmationFiles(t, id)); n != 1 {
 			t.Errorf("%s has %d confirmation files, want 1", id, n)
 		}
-		contains(t, "stdout", res.stdout, "confirmed scenario "+id+" for expectation hash ")
 	}
 
 	run := r.must(t, cli.ExitOK, "journey", "run", "checkout")
@@ -408,16 +408,13 @@ func TestConfirmJourneyStoresOnePerLeg(t *testing.T) {
 	contains(t, "stdout", squash(again.stdout), "first failing leg pay")
 }
 
-func TestConfirmJourneyUsage(t *testing.T) {
+func TestReviewJourneyUsage(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	for name, tc := range map[string]struct {
 		args []string
 		want string
 	}{
-		"unknown":         {[]string{"confirm", "--journey", "nope", "--yes"}, "journey nope was not found"},
-		"with --all":      {[]string{"confirm", "--journey", "checkout", "--all"}, "and not several of them"},
-		"with a fixture":  {[]string{"confirm", "--journey", "checkout", "--fixture", "x"}, "and not both"},
-		"with a scenario": {[]string{"confirm", "--journey", "checkout", "SHOP-482-01"}, "and not several of them"},
+		"unknown": {[]string{"review", "nope", "--yes"}, "nope is not a scenario, a ticket, a fixture, a journey, or the app of a screens file"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			res := r.must(t, cli.ExitError, tc.args...)
@@ -425,20 +422,20 @@ func TestConfirmJourneyUsage(t *testing.T) {
 		})
 	}
 	// The example has no expected result that needs a person.
-	res := r.must(t, cli.ExitOK, "confirm", "--journey", "checkout", "--yes")
+	res := r.must(t, cli.ExitOK, "review", "checkout", "--yes")
 	contains(t, "stdout", res.stdout, "no expected result of journey checkout needs a confirmation")
 }
 
-func TestConfirmJourneyNeedsAnEnvironmentWhenThereAreSeveral(t *testing.T) {
+func TestReviewJourneyNeedsAnEnvironmentWhenThereAreSeveral(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	r.requireConfirmation(t)
 	r.rewriteConfig(t, func(s string) string {
 		const uat = "  uat:\n    kind: test\n    hosts: [\"127.0.0.1:9\"]\n    methods: [GET]\n    effects: {mode: read_only}\n    services:\n      - name: orders\n        baseUrl: http://127.0.0.1:9\n"
 		return strings.Replace(s, "authProfiles:\n", uat+"authProfiles:\n", 1)
 	})
-	res := r.must(t, cli.ExitError, "confirm", "--journey", "checkout", "--yes")
+	res := r.must(t, cli.ExitError, "review", "checkout", "--yes")
 	contains(t, "stderr", res.stderr, "choose an environment: local, uat")
-	r.must(t, cli.ExitOK, "confirm", "--journey", "checkout", "--yes", "--env", "local")
+	r.must(t, cli.ExitOK, "review", "checkout", "--yes", "--env", "local")
 }
 
 func TestLedgerReadsJourneyOutcome(t *testing.T) {
@@ -447,7 +444,7 @@ func TestLedgerReadsJourneyOutcome(t *testing.T) {
 		entry("SHOP-482/flow", "An order is placed, paid, and shown as paid", "journeys: [checkout]"),
 		entry("SHOP-482/gone", "A journey that no file defines", "journeys: [vanished]")))
 
-	before := r.must(t, cli.ExitUndecided, "ledger")
+	before := r.must(t, cli.ExitUndecided, "status")
 	contains(t, "the ledger", before.stdout, "journey checkout has no result: run it", "journey vanished was deleted: no scenario or journey covers this")
 
 	run := r.must(t, cli.ExitOK, "journey", "run", "checkout")
@@ -457,36 +454,36 @@ func TestLedgerReadsJourneyOutcome(t *testing.T) {
 	}
 	contains(t, "the summary", run.stdout, "1 use case: 1 verified")
 
-	res := r.must(t, cli.ExitUndecided, "ledger", "--env", "local")
-	contains(t, "the ledger", res.stdout, "2 use cases: 1 verified, 1 blocked", "Verified (1)", "SHOP-482/flow")
+	res := r.must(t, cli.ExitUndecided, "status", "--env", "local")
+	contains(t, "the ledger", squash(res.stdout), "2 use cases", "verified 1", "blocked 1 SHOP-482/gone")
 
 	// A failed journey makes the use case failed, whatever the build.
 	r2 := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{Defects: defects(sampleapp.PaymentAmountWrong)})
 	r2.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/flow", "An order is placed", "journeys: [checkout]")))
 	r2.must(t, cli.ExitFailed, "journey", "run", "checkout")
-	failed := r2.must(t, cli.ExitFailed, "ledger")
-	contains(t, "the ledger", failed.stdout, "Failed (1)", "journey checkout failed in r-test-0001: invariant 1 is false")
+	failed := r2.must(t, cli.ExitFailed, "status")
+	contains(t, "the ledger", squash(failed.stdout), "failing 1", "journey checkout failed in r-test-0001: invariant 1 is false")
 }
 
 func TestLedgerCountsAStaleJourney(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/flow", "An order is placed", "journeys: [checkout]")))
 	r.must(t, cli.ExitOK, "journey", "run", "checkout")
-	r.must(t, cli.ExitOK, "ledger", "--env", "local")
+	r.must(t, cli.ExitOK, "status", "--env", "local")
 
 	// A newer result on another commit: the environment has moved on since.
 	pay := r.commitOf(t, r.paymentsURL, "tok-pay")
 	old := manifestOf(domain.BuildRef{Service: "orders", Commit: "0ld0ld0"}, domain.BuildRef{Service: "payments", Commit: pay})
 	r.storedRun(t, "r-test-9999", old.Services, domain.JourneyResult{Journey: "checkout", Manifest: old, ManifestEnd: &old, Outcome: domain.JourneyPassed,
 		Legs: []domain.LegResult{}, Invariants: []domain.InvariantResult{}, Reasons: []domain.Reason{}})
-	res := r.must(t, cli.ExitUndecided, "ledger", "--env", "local")
-	contains(t, "the ledger", res.stdout, "journey checkout ran on orders 0ld0ld0, and the environment runs 9f3c2ab: rerun on the current build")
+	res := r.must(t, cli.ExitUndecided, "status", "--env", "local")
+	contains(t, "the ledger", squash(res.stdout), "journey checkout ran on orders 0ld0ld0, and the environment runs 9f3c2ab: rerun on the current build")
 }
 
 func TestJourneyRunOfAnInvalidFileShowsItSafely(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	r.writeRel(t, ".semar/journeys/evil.yaml", "apiVersion: semar/v1\nkind: Journey\nid: evil\n\"x\\e[31mred\\u202eblue\": 1\n")
-	for _, args := range [][]string{{"journey", "run", "evil"}, {"journey", "run", "--all"}, {"confirm", "--journey", "evil", "--yes"}} {
+	for _, args := range [][]string{{"journey", "run", "evil"}, {"journey", "run", "--all"}, {"review", "evil", "--yes"}} {
 		res := r.semar(t, t.Context(), args...)
 		if strings.ContainsAny(res.stdout+res.stderr, "\x1b\u202e") {
 			t.Errorf("semar %s printed a control character:\n%q", strings.Join(args, " "), res.stderr)

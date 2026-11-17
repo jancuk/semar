@@ -136,7 +136,7 @@ func TestWebStepsOfAnUnapprovedScreensFileEndInconclusive(t *testing.T) {
 	if res.Outcome != domain.OutcomeInconclusive {
 		t.Fatalf("outcome = %s: %+v", res.Outcome, res.Reasons)
 	}
-	if !hasReason(res, "the screens of kanban are not approved: semar confirm --screens kanban") {
+	if !hasReason(res, "the screens of kanban are not approved: semar review kanban") {
 		t.Errorf("reasons = %+v", res.Reasons)
 	}
 	if len(fw.calls) != 0 {

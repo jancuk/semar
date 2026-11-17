@@ -539,7 +539,7 @@ func givenReport() report.Data {
 				As: "order", Fixture: "order.paid", Version: "1.0.0", Hash: hash("b"), Via: "find", Cleanup: "not_needed",
 			}}},
 			{Scenario: "SHOP-482-07", Outcome: domain.OutcomeBlocked,
-				Reasons: []domain.Reason{{Rule: domain.OutcomeBlocked, Text: "fixture order.paid is not approved: run semar confirm --fixture order.paid"}},
+				Reasons: []domain.Reason{{Rule: domain.OutcomeBlocked, Text: "fixture order.paid is not approved: run semar review order.paid"}},
 				Fixtures: []domain.FixtureRecord{{
 					As: "order", Fixture: "order.paid", Version: "1.0.0", Hash: hash("c"), Via: "none", Cleanup: "not_needed",
 				}}},
@@ -621,7 +621,7 @@ func TestReportOpensWithCoverageLine(t *testing.T) {
 	if lines[0] != "# Semar report run-20261114-0001" || lines[1] != "" || lines[2] != coverageLine {
 		t.Errorf("the report does not open with the title and the summary line:\n%s", strings.Join(lines[:4], "\n"))
 	}
-	if lines[3] != "Details: `semar ledger --ticket SHOP-482 --ticket refunds`" {
+	if lines[3] != "Details: `semar status --ticket SHOP-482 --ticket refunds`" {
 		t.Errorf("the line after the summary is %q", lines[3])
 	}
 	if n := strings.Count(out, "use cases"); n != 1 {
@@ -640,7 +640,7 @@ func TestReportWithoutCoverageIsTheOldReport(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(data), "use case") || strings.Contains(string(data), "semar ledger") {
+		if strings.Contains(string(data), "use case") || strings.Contains(string(data), "semar status") {
 			t.Errorf("%s mentions the coverage", name)
 		}
 	}
@@ -656,7 +656,7 @@ func TestReportCoverageStaysOneLine(t *testing.T) {
 			t.Errorf("report contains %q:\n%s", bad, out)
 		}
 	}
-	if !strings.Contains(out, "Details: `semar ledger --ticket SHOP-480`") {
+	if !strings.Contains(out, "Details: `semar status --ticket SHOP-480`") {
 		t.Errorf("a safe ticket was dropped:\n%s", out)
 	}
 }

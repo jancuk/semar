@@ -24,6 +24,7 @@ const (
 // Commit is one commit of a log.
 type Commit struct {
 	ID, Subject, Body, Author string
+	AuthorEmail               string
 	At                        time.Time
 	Parents                   []string
 	Files                     []string
@@ -231,9 +232,9 @@ func (g *Git) Log(ctx context.Context, from, to string) ([]Commit, error) {
 	if err := checkName("commit", to); err != nil {
 		return nil, err
 	}
-	const fields = 6
+	const fields = 7
 	out, err := g.run(ctx, maxOutputBytes, "log", "-z", "--topo-order", "--reverse", "--no-color", "--no-show-signature",
-		"--format=%H%x00%P%x00%an%x00%at%x00%s%x00%b", "--end-of-options", from+".."+to)
+		"--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%s%x00%b", "--end-of-options", from+".."+to)
 	if err != nil {
 		return nil, fmt.Errorf("log %s..%s: %w", from, to, err)
 	}
@@ -246,17 +247,18 @@ func (g *Git) Log(ctx context.Context, from, to string) ([]Commit, error) {
 	}
 	var commits []Commit
 	for i := 0; i < len(tokens); i += fields {
-		sec, err := strconv.ParseInt(strings.TrimSpace(tokens[i+3]), 10, 64)
+		sec, err := strconv.ParseInt(strings.TrimSpace(tokens[i+4]), 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("log %s..%s: commit date: %w", from, to, err)
 		}
 		c := Commit{
-			ID:      strings.TrimSpace(tokens[i]),
-			Parents: strings.Fields(tokens[i+1]),
-			Author:  tokens[i+2],
-			At:      time.Unix(sec, 0).UTC(),
-			Subject: tokens[i+4],
-			Body:    strings.TrimRight(tokens[i+5], "\n"),
+			ID:          strings.TrimSpace(tokens[i]),
+			Parents:     strings.Fields(tokens[i+1]),
+			Author:      tokens[i+2],
+			AuthorEmail: tokens[i+3],
+			At:          time.Unix(sec, 0).UTC(),
+			Subject:     tokens[i+5],
+			Body:        strings.TrimRight(tokens[i+6], "\n"),
 		}
 		if len(c.Parents) < 2 {
 			files, err := g.commitFiles(ctx, c.ID)
@@ -529,4 +531,50 @@ func (b *capBuffer) Write(p []byte) (int, error) {
 		b.cancel()
 	}
 	return len(p), nil
+}
+
+// CurrentBranch returns the name of the checked-out branch, or "" for a detached HEAD.
+func (g *Git) CurrentBranch(ctx context.Context) (string, error) {
+	out, err := g.run(ctx, maxOutputBytes, "symbolic-ref", "--short", "--quiet", "HEAD")
+	if err != nil {
+		var ge *gitError
+		if errors.As(err, &ge) && ge.code == 1 {
+			return "", nil
+		}
+		return "", fmt.Errorf("read the current branch: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// DefaultBranch returns the branch that the remote's HEAD names in this clone, as it was when the
+// clone last learned it, or "" when the clone has none. It never talks to the remote.
+func (g *Git) DefaultBranch(ctx context.Context, remote string) (string, error) {
+	if err := checkName("remote", remote); err != nil {
+		return "", err
+	}
+	out, err := g.run(ctx, maxOutputBytes, "symbolic-ref", "--short", "--quiet", "refs/remotes/"+remote+"/HEAD")
+	if err != nil {
+		var ge *gitError
+		if errors.As(err, &ge) && ge.code == 1 {
+			return "", nil
+		}
+		return "", fmt.Errorf("read the default branch of %s: %w", remote, err)
+	}
+	return strings.TrimPrefix(strings.TrimSpace(string(out)), remote+"/"), nil
+}
+
+// Config returns the value of a git setting as the person's git reads it, or "" when it is not set.
+func (g *Git) Config(ctx context.Context, key string) (string, error) {
+	if err := checkName("setting", key); err != nil {
+		return "", err
+	}
+	out, err := g.run(ctx, maxOutputBytes, "config", "--get", "--", key)
+	if err != nil {
+		var ge *gitError
+		if errors.As(err, &ge) && ge.code == 1 {
+			return "", nil
+		}
+		return "", fmt.Errorf("read git setting %s: %w", key, err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }

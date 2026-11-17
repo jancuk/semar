@@ -116,7 +116,7 @@ func TestJourneyEndToEndPassed(t *testing.T) {
 	if n := r.pay.Requests("POST", "/v1/payments"); n != 1 {
 		t.Errorf("%d payments were made", n)
 	}
-	writes := r.must(t, cli.ExitOK, "activity", "latest", "--writes")
+	writes := r.must(t, cli.ExitOK, "show", "--activity", "--writes")
 	contains(t, "the writes", writes.stdout, "POST /v1/orders", "POST /v1/payments")
 
 	// The two-leg journey passes too, and the list shows both.
@@ -214,7 +214,7 @@ func TestJourneyEndToEndConfirmationOfTheExpectedResults(t *testing.T) {
 
 	// No one confirmed the expected result of leg place, so the journey is blocked and sends nothing.
 	res := r.must(t, cli.ExitUndecided, "journey", "run", "checkout")
-	contains(t, "the summary", squash(res.stdout), "checkout blocked first failing leg place:")
+	contains(t, "the summary", squash(res.stdout), "checkout needs review first failing leg place:")
 	j := singleJourney(t, r)
 	if j.Outcome != domain.JourneyBlocked || j.FirstFailing != "place" || !strings.HasPrefix(j.Reasons[0].Text, "leg place ended inconclusive") {
 		t.Errorf("journey = %+v", j)
@@ -223,8 +223,8 @@ func TestJourneyEndToEndConfirmationOfTheExpectedResults(t *testing.T) {
 		t.Errorf("%d requests were sent", n)
 	}
 
-	confirmed := r.must(t, cli.ExitOK, "confirm", "--journey", "checkout", "--yes")
-	contains(t, "the confirmation", confirmed.stdout, "Leg place of journey checkout (scenario checkout.place)", "confirmed scenario checkout.place", "local, unverified identity")
+	confirmed := r.must(t, cli.ExitOK, "review", "checkout", "--yes")
+	contains(t, "the confirmation", confirmed.stdout, "Leg place of journey checkout (scenario checkout.place)", "approved journey checkout", "local, unverified identity")
 	if strings.Contains(confirmed.stdout, "checkout.pay") {
 		t.Errorf("a leg whose expected result is the person's own was listed:\n%s", confirmed.stdout)
 	}
@@ -296,7 +296,7 @@ func TestJourneyEndToEndGivenFixture(t *testing.T) {
 
 	// A fixture that nobody approved blocks the journey, and nothing reaches /v1.
 	blocked := r.must(t, cli.ExitUndecided, "journey", "run", "seen-paid")
-	contains(t, "the summary", squash(blocked.stdout), "seen-paid blocked fixture order.paid is not approved: run semar confirm --fixture order.paid")
+	contains(t, "the summary", squash(blocked.stdout), "seen-paid needs review fixture order.paid is not approved: run semar review order.paid")
 	if n := r.reached("/v1"); n != 0 {
 		t.Errorf("%d requests reached the services before the fixture was approved", n)
 	}

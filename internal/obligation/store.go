@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jancuk/semar/internal/atomicfile"
+	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/idcheck"
 )
 
@@ -35,6 +36,7 @@ const (
 
 	kindDeferral = "deferral"
 	kindManual   = "manual"
+	kindLink     = "link"
 )
 
 // Deferral is a person's decision to leave an obligation untested until a day.
@@ -66,6 +68,17 @@ type ManualResult struct {
 type ManualBuild struct {
 	Service string `json:"service"`
 	Commit  string `json:"commit"`
+}
+
+// Link says that a scenario does the manual check of an obligation. A person made the link: Semar
+// never joins a scenario to a manual check on its own.
+type Link struct {
+	Schema     int               `json:"schema"`
+	Obligation string            `json:"obligation"`
+	Scenario   domain.ScenarioID `json:"scenario"`
+	User       string            `json:"user"`
+	Identity   string            `json:"identity"`
+	At         time.Time         `json:"at"`
 }
 
 // Store keeps deferrals and manual results at <root>/store/obligations/<group>/<name>/<kind>/.
@@ -149,6 +162,39 @@ func (s *Store) Record(m ManualResult) error {
 	m.Schema = recordSchema
 	return s.put(m.Obligation, kindManual, m.User, m.At, m)
 }
+
+// Link stores the decision of a person that a scenario does the manual check of an obligation.
+func (s *Store) Link(l Link) error {
+	if err := checkLink(l); err != nil {
+		return fmt.Errorf("store link: %w", err)
+	}
+	if l.Identity == "" {
+		l.Identity = LocalIdentity
+	}
+	l.Schema = recordSchema
+	return s.put(l.Obligation, kindLink, l.User, l.At, l)
+}
+
+func checkLink(l Link) error {
+	switch {
+	case strings.TrimSpace(l.User) == "":
+		return errors.New("the user is required")
+	case l.At.IsZero():
+		return errors.New("at is required")
+	}
+	return idcheck.Scenario(string(l.Scenario))
+}
+
+// Links returns the newest valid link of each obligation, with the problems of the records that it
+// left out, as Deferrals does.
+func (s *Store) Links(now time.Time) (map[string]Link, []string, error) {
+	return readAll[Link](s, kindLink, now, func(l Link) recordHead {
+		return recordHead{l.Obligation, l.User, l.At, l.Schema, checkLink(l)}
+	})
+}
+
+// Root is the folder that holds store/.
+func (s *Store) Root() string { return s.root }
 
 // checkDeferral is what a deferral needs, when it is written and when it is read: a name, a
 // reason, a day to end it, and no more than maxDeferDays after the day it was made.

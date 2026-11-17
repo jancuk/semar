@@ -56,8 +56,8 @@ var agentFiles = []string{"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".mcp.jso
 func newPlanCommand(o options) *cobra.Command {
 	var f planFlags
 	cmd := &cobra.Command{
-		Use:   "plan --diff <link or range>",
-		Short: "Draft scenarios and scripts for the change between two branches",
+		Use:   "plan [--diff <link or range>]",
+		Short: "Draft scenarios and scripts for the change of this branch, or of --diff",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			f.withSetupSet = cmd.Flags().Changed("with-setup")
@@ -67,6 +67,7 @@ func newPlanCommand(o options) *cobra.Command {
 		},
 	}
 	addDiffFlags(cmd, &f.diff)
+	cmd.Flags().StringVar(&f.diff.base, "base", "", "with no --diff, the branch that the change of this branch is measured against (default: change.base, else the default branch of origin, else main)")
 	cmd.Flags().StringVar(&f.model, "model", "", "the model of the planner (default: the provider's model)")
 	cmd.Flags().StringVar(&f.reasoning, "reasoning", "", "the reasoning level of the planner, such as high (default: the provider's reasoning, else its own default)")
 	cmd.Flags().StringVar(&f.provider, "provider", "", "the provider that plans (default: see semar providers)")
@@ -131,7 +132,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		return fmt.Errorf("tickets.pattern: %w", err)
 	}
 
-	g, cs, err := readChange(ctx, stderr, f.dir, f.diff, ticket)
+	g, cs, err := readPlanChange(ctx, stderr, f.dir, f.diff, cfg, ticket)
 	if err != nil {
 		return err
 	}
@@ -615,7 +616,7 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, p
 		fmt.Fprintln(w, modelUse)
 	}
 	if len(out.Scenarios) > 0 {
-		fmt.Fprintf(w, "next:\n  %s\n  semar confirm --all\n  %s\n", run, run)
+		fmt.Fprintf(w, "next:\n  %s\n  semar review\n  %s\n", run, run)
 		fmt.Fprintln(w, "The first run shows whether the drafted requests fit the service, and the second gives the result.")
 	}
 }

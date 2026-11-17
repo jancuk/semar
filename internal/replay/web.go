@@ -102,7 +102,7 @@ func (r *Runner) prepareWeb(sc domain.Scenario, s domain.Script, run *replayed) 
 			return nil, false
 		case !approved:
 			run.notes = append(run.notes, domain.Reason{Rule: domain.OutcomeInconclusive, Step: first,
-				Text: fmt.Sprintf("the screens of %s are not approved: semar confirm --screens %s", app, app)})
+				Text: fmt.Sprintf("the screens of %s are not approved: semar review %s", app, app)})
 			return nil, false
 		}
 	}

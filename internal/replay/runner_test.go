@@ -971,7 +971,7 @@ func TestFixtureBlockedSendsNoStep(t *testing.T) {
 	r.withFixtures(t, false)
 	sc := r.givenScenario(t, "/v1/orders/{{order.id}}")
 	results, _, _ := r.run(t, sc)
-	expect(t, results[0], domain.OutcomeBlocked, "fixture order.new is not approved: run semar confirm --fixture order.new")
+	expect(t, results[0], domain.OutcomeBlocked, "fixture order.new is not approved: run semar review order.new")
 	if n := r.app.Requests("", "/v1/orders"); n != 0 {
 		t.Errorf("%d requests were sent", n)
 	}

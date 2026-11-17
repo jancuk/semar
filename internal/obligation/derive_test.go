@@ -467,6 +467,13 @@ func TestManualTieToBuilds(t *testing.T) {
 			if e.ManualTie != tt.tie {
 				t.Errorf("tie %v, want %v", e.ManualTie, tt.tie)
 			}
+			if tt.tie == obligation.TieCurrent {
+				if e.State != obligation.Verified {
+					t.Errorf("state %s, want verified: the pass is on the build that runs now", e.State)
+				}
+				mustReason(t, e, "checked by tester")
+				return
+			}
 			mustReason(t, e, "passed, checked by a person")
 			if tt.reason != "" && !hasReason(e, tt.reason) {
 				t.Errorf("reasons %q lack %q", e.Reasons, tt.reason)
@@ -503,6 +510,106 @@ func TestSummaryCountsManualOnCurrentBuilds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := obligation.SummaryLine(tt.es); got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func manualOn(result string, builds ...obligation.ManualBuild) map[string]obligation.ManualResult {
+	return map[string]obligation.ManualResult{"g/a": {Obligation: "g/a", Result: result, User: "tester", At: now, Builds: builds}}
+}
+
+func TestAManualPassOnTheCurrentBuildVerifies(t *testing.T) {
+	onNow := obligation.ManualBuild{Service: "orders", Commit: "9f3c2ab0000"}
+	tests := []struct {
+		name   string
+		manual map[string]obligation.ManualResult
+		want   obligation.State
+	}{
+		{"a pass on the build that runs now", manualOn("passed", onNow), obligation.Verified},
+		{"a pass on another build", manualOn("passed", obligation.ManualBuild{Service: "orders", Commit: "0ther"}), obligation.NeedsAPerson},
+		{"a pass tied to no build", manualOn("passed"), obligation.NeedsAPerson},
+		{"a failure on the build that runs now", manualOn("failed", onNow), obligation.NeedsAPerson},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := one(t, ob("g/a", manualReason), results(), nil, tt.manual)
+			if e.State != tt.want {
+				t.Fatalf("state %s (%q), want %s", e.State, e.Reasons, tt.want)
+			}
+			if tt.want == obligation.Verified {
+				mustReason(t, e, "checked by tester")
+			}
+		})
+	}
+}
+
+func TestAManualPassWithTheBuildsNotReadIsNotVerified(t *testing.T) {
+	r := results()
+	r.Current = nil
+	m := manualOn("passed", obligation.ManualBuild{Service: "orders", Commit: "9f3c2ab0000"})
+	if e := one(t, ob("g/a", manualReason), r, nil, m); e.State != obligation.NeedsAPerson {
+		t.Errorf("state %s, want needs_a_person: nothing says the build is current", e.State)
+	}
+}
+
+func TestALinkedScenarioDoesTheManualCheck(t *testing.T) {
+	withCover := func(o *obligation.Obligation) { manualReason(o); o.Covers = []domain.ScenarioID{"A-1"} }
+	link := func(id domain.ScenarioID) obligation.Results {
+		r := results(res("A-1", "passed", ""))
+		r.Links = map[string]obligation.Link{"g/a": {Obligation: "g/a", Scenario: id, User: "tester", At: now}}
+		return r
+	}
+	t.Run("the state comes from the scenario", func(t *testing.T) {
+		e := one(t, ob("g/a", withCover), link("A-1"), nil, nil)
+		if e.State != obligation.Verified {
+			t.Fatalf("state %s (%q), want verified", e.State, e.Reasons)
+		}
+		if e.Link == nil || e.Link.User != "tester" || e.Link.Scenario != "A-1" {
+			t.Errorf("link %+v, want the link of tester to A-1", e.Link)
+		}
+	})
+	t.Run("a failing scenario fails the use case", func(t *testing.T) {
+		r := results(res("A-1", "failed", "boom"))
+		r.Links = map[string]obligation.Link{"g/a": {Obligation: "g/a", Scenario: "A-1", User: "tester", At: now}}
+		if e := one(t, ob("g/a", withCover), r, nil, nil); e.State != obligation.Failed {
+			t.Errorf("state %s, want failed", e.State)
+		}
+	})
+	t.Run("a link to a scenario that left covers does not count", func(t *testing.T) {
+		e := one(t, ob("g/a", withCover), link("A-9"), nil, nil)
+		if e.State != obligation.NeedsAPerson || e.Link != nil {
+			t.Errorf("state %s link %+v, want needs_a_person with no link", e.State, e.Link)
+		}
+	})
+	t.Run("a cover with no link leaves the manual check", func(t *testing.T) {
+		if e := one(t, ob("g/a", withCover), results(res("A-1", "passed", "")), nil, nil); e.State != obligation.NeedsAPerson {
+			t.Errorf("state %s, want needs_a_person", e.State)
+		}
+	})
+}
+
+func TestWhatAnOpenUseCaseWaitsFor(t *testing.T) {
+	review := res("A-rev", "inconclusive", "an expected result is not confirmed")
+	review.Word = "needs review"
+	changed := res("A-chg", "passed", "")
+	changed.ScenarioChanged = true
+	tests := []struct {
+		name                string
+		r                   obligation.Results
+		id                  domain.ScenarioID
+		review, stale, none bool
+	}{
+		{"an approval is missing", results(review), "A-rev", true, false, false},
+		{"the scenario changed", results(changed), "A-chg", false, true, false},
+		{"it ran on another build", results(obligation.Cover{Scenario: "A-old", Found: true, Outcome: "passed", Run: "r-1", Builds: []domain.BuildRef{{Service: "orders", Commit: "abc", ConfigHash: "cfg1"}}}), "A-old", false, true, false},
+		{"it never ran", results(obligation.Cover{Scenario: "A-new"}), "A-new", false, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := one(t, ob("g/a", covers(tt.id)), tt.r, nil, nil)
+			if e.State != obligation.Blocked || e.Review != tt.review || e.Stale != tt.stale || e.NotRun != tt.none {
+				t.Errorf("state %s review %v stale %v notRun %v, want review %v stale %v notRun %v", e.State, e.Review, e.Stale, e.NotRun, tt.review, tt.stale, tt.none)
 			}
 		})
 	}

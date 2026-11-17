@@ -103,7 +103,7 @@ func TestBuild(t *testing.T) {
 				}
 			})
 		}
-		if c := by[fx.c2]; c.Subject != "PAY-7: audit rows" || c.Body != "Also part of SHOP-1." || c.Author != "Ada Author" || c.At.IsZero() {
+		if c := by[fx.c2]; c.Subject != "PAY-7: audit rows" || c.Body != "Also part of SHOP-1." || c.Author != "Ada Author" || c.AuthorEmail != "ada@example.com" || c.At.IsZero() {
 			t.Fatalf("commit fields: %+v", c)
 		}
 	})

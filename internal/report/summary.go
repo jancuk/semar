@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/words"
 )
 
 var knownOutcomes = []domain.Outcome{
@@ -89,33 +90,7 @@ func countLine(results []domain.ScenarioResult) string {
 // line when there is one, and one line for each build that was declared rather than read from
 // the service.
 func Summary(w io.Writer, run domain.Run, coverage string) error {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	if len(run.Journeys) > 0 {
-		// A journey run prints each leg under its journey, in place of the loose legs.
-		for _, line := range journeyLines(run.Journeys) {
-			if _, err := fmt.Fprintln(tw, line); err != nil {
-				return err
-			}
-		}
-	} else {
-		for _, r := range ordered(run.Results) {
-			line := plain(string(r.Scenario)) + "\t" + plain(string(r.Outcome))
-			switch {
-			case len(r.Reasons) > 0:
-				head, more := cut(r.Reasons[0].Text, maxShown)
-				line += "\t" + plain(head)
-				if more > 0 {
-					line += cutMark(more)
-				}
-			case r.Outcome != domain.OutcomePassed:
-				line += "\tno reason recorded"
-			}
-			if _, err := fmt.Fprintln(tw, line); err != nil {
-				return err
-			}
-		}
-	}
-	if err := tw.Flush(); err != nil {
+	if err := Lines(w, run); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(w, countLine(run.Results)); err != nil {
@@ -126,6 +101,45 @@ func Summary(w io.Writer, run domain.Run, coverage string) error {
 			return err
 		}
 	}
+	return DeclaredBuilds(w, run)
+}
+
+// Lines writes one line for each scenario of the run, or for each journey and its legs: the ID, the
+// word for the result, why, and the command that comes next.
+func Lines(w io.Writer, run domain.Run) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	if len(run.Journeys) > 0 {
+		// A journey run prints each leg under its journey, in place of the loose legs.
+		for _, line := range journeyLines(run.Journeys) {
+			if _, err := fmt.Fprintln(tw, line); err != nil {
+				return err
+			}
+		}
+	} else {
+		for _, r := range ordered(run.Results) {
+			word := resultWord(string(r.Outcome), r.Reasons)
+			line := plain(string(r.Scenario)) + "\t" + plain(word)
+			switch {
+			case len(r.Reasons) > 0:
+				head, more := cut(r.Reasons[0].Text, maxShown)
+				line += "\t" + plain(head)
+				if more > 0 {
+					line += cutMark(more)
+				}
+			case r.Outcome != domain.OutcomePassed:
+				line += "\tno reason recorded"
+			}
+			line += nextMark(line, word, string(r.Scenario))
+			if _, err := fmt.Fprintln(tw, line); err != nil {
+				return err
+			}
+		}
+	}
+	return tw.Flush()
+}
+
+// DeclaredBuilds names each build that a person declared, because nothing read it from the service.
+func DeclaredBuilds(w io.Writer, run domain.Run) error {
 	for _, b := range run.BuildsStart {
 		if b.Declared {
 			if _, err := fmt.Fprintf(w, "build: %s\n", plain(declaredBuild(b))); err != nil {
@@ -134,6 +148,23 @@ func Summary(w io.Writer, run domain.Run, coverage string) error {
 		}
 	}
 	return nil
+}
+
+// resultWord is the word that a person reads for a stored outcome (Plan 26, D7).
+func resultWord(outcome string, reasons []domain.Reason) string {
+	texts := make([]string, len(reasons))
+	for i, r := range reasons {
+		texts[i] = r.Text
+	}
+	return words.Of(outcome, texts)
+}
+
+// nextMark ends a line with the command that follows its word, or with nothing.
+func nextMark(line, word, subject string) string {
+	if next := words.Next(word, plain(subject)); next != "" && !strings.Contains(line, next) {
+		return " → " + next
+	}
+	return ""
 }
 
 // plain keeps text on one line and drops control and format characters, so a service cannot

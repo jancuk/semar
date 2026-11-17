@@ -176,7 +176,7 @@ func TestSummaryJourneyOfAChangedBuildNamesTheBuildAndTheLeg(t *testing.T) {
 	if err := report.Summary(&b, run, ""); err != nil {
 		t.Fatal(err)
 	}
-	want := "checkout   stale  a build changed during the journey: orders 9f3c2ab then c0ffee1; first failing leg settled\n"
+	want := "checkout   stale  a build changed during the journey: orders 9f3c2ab then c0ffee1; first failing leg settled → semar run\n"
 	if !strings.Contains(b.String(), want) {
 		t.Errorf("summary:\n%s\nwant a line %q", b.String(), want)
 	}

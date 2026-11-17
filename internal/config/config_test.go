@@ -521,3 +521,24 @@ func TestUnknownKeyAndTypeMismatchInPlainWords(t *testing.T) {
 		t.Fatalf("type mismatch: %v", err)
 	}
 }
+
+func TestChangeBase(t *testing.T) {
+	const head = "version: 1\nenvironments:\n  e:\n    kind: test\n    hosts: [h]\n    methods: [GET]\n    effects: {mode: read_only}\n"
+	cfg, err := loadText(t, head+"change:\n  base: release/1.2\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Change.Base != "release/1.2" {
+		t.Errorf("change.base = %q, want release/1.2", cfg.Change.Base)
+	}
+	cfg, err = loadText(t, head)
+	if err != nil || cfg.Change.Base != "" {
+		t.Errorf("no change section: base %q, error %v; want an empty base", cfg.Change.Base, err)
+	}
+	for _, bad := range []string{"-x", "a b", "a..b", "a:b"} {
+		_, err := loadText(t, head+"change:\n  base: \""+bad+"\"\n")
+		if err == nil || !strings.Contains(err.Error(), "change.base") {
+			t.Errorf("base %q: error %v, want one that names change.base", bad, err)
+		}
+	}
+}

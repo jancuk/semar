@@ -193,7 +193,7 @@ func (r *Resolver) prepare(e *entry) []string {
 		}
 	}
 	if !approved {
-		return []string{fmt.Sprintf("fixture %s is not approved: run semar confirm --fixture %s", f.ID, f.ID)}
+		return []string{fmt.Sprintf("fixture %s is not approved: run semar review %s", f.ID, f.ID)}
 	}
 	if r.d.Health != nil && !e.check {
 		rec, found, err := r.d.Health.Latest(r.d.Environment, f.ID)

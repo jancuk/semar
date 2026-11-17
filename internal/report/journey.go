@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/words"
 )
 
 type journeyLegView struct{ Leg, Outcome, As, Reason string }
@@ -14,6 +15,7 @@ type invariantView struct{ Number, State, Values, Detail string }
 
 type journeyView struct {
 	ID, Title, Outcome, First string
+	Next                      string
 	Reasons                   []string
 	Manifest, Hash            string
 	ManifestEnd               string
@@ -48,11 +50,12 @@ func journeyViews(d Data) []journeyView {
 		v := journeyView{
 			ID:        shown(string(j.Journey)),
 			Title:     shown(d.JourneyTitles[j.Journey]),
-			Outcome:   shown(string(j.Outcome)),
+			Outcome:   shown(resultWord(string(j.Outcome), j.Reasons)),
 			First:     shown(string(j.FirstFailing)),
 			Manifest:  manifestText(j.Manifest),
 			Hash:      shown(string(j.Manifest.Hash[:min(len(j.Manifest.Hash), 12)])),
 			Reproduce: journeyCommand(j.Journey, d.Run.Environment),
+			Next:      words.Next(resultWord(string(j.Outcome), j.Reasons), string(j.Journey)),
 		}
 		for _, r := range j.Reasons {
 			v.Reasons = append(v.Reasons, shown(r.Text))
@@ -145,7 +148,8 @@ func journeyStillExists(journeys []domain.JourneyResult) []string {
 func journeyLines(journeys []domain.JourneyResult) []string {
 	var lines []string
 	for _, j := range journeys {
-		line := plain(string(j.Journey)) + "\t" + plain(string(j.Outcome))
+		word := resultWord(string(j.Outcome), j.Reasons)
+		line := plain(string(j.Journey)) + "\t" + plain(word)
 		if text := journeyHead(j); text != "" {
 			head, more := cut(text, maxShown)
 			line += "\t" + plain(head)
@@ -153,9 +157,10 @@ func journeyLines(journeys []domain.JourneyResult) []string {
 				line += cutMark(more)
 			}
 		}
+		line += nextMark(line, word, string(j.Journey))
 		lines = append(lines, line)
 		for _, l := range j.Legs {
-			line := "  " + plain(string(l.Leg)) + "\t" + plain(string(l.Outcome))
+			line := "  " + plain(string(l.Leg)) + "\t" + plain(resultWord(string(l.Outcome), l.Reasons))
 			if len(l.As) > 0 {
 				line += " as " + plain(strings.Join(l.As, ", "))
 			}

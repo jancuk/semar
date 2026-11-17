@@ -90,7 +90,7 @@ func Build(ctx context.Context, repo Repo, o Options) (domain.ChangeSet, error) 
 		}
 		merge := len(c.Parents) > 1
 		cc := domain.ChangeCommit{
-			ID: c.ID, Subject: c.Subject, Body: c.Body, Author: c.Author, At: c.At,
+			ID: c.ID, Subject: c.Subject, Body: c.Body, Author: c.Author, AuthorEmail: c.AuthorEmail, At: c.At,
 			Merge: merge, Tickets: keys,
 		}
 		if !merge {

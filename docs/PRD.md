@@ -570,7 +570,7 @@ Delivery sequence: **M1** is an API pilot, **M1.1** adds shared team operation, 
 | FR-167 | Semar writes one activity entry per action: the time, the actor, the ticket, the scenario and step, the action (visit, read, create, update, delete, click, type, query, and so on), the target, the record touched, the result, and the agent's reason | M1 |
 | FR-168 | The recorder writes the entry. The agent supplies only its reason, which is labelled as written by AI | M1 |
 | FR-169 | Semar lists every record that a run created, changed, or deleted on UAT, with the scenario that did it and whether it was cleaned up | M1 |
-| FR-170 | `semar activity` prints the log, can show writes only, and can follow a run in progress | M1 |
+| FR-170 | `semar show --activity` prints the log of a run, can show writes only, and can follow a run in progress. `semar log` lists the runs | M1 |
 | FR-171 | The report shows the activity per scenario. The Jira comment gives the counts and a link | M1. M1.1 for the comment |
 | FR-172 | Every API request carries a Semar user agent and the run ID in a header, so that a developer can find the run in the service's own logs | M1 |
 | FR-173 | Every write belongs to a scenario step, an exploration, or a security probe, and the entry says which | M1 |
@@ -863,7 +863,7 @@ Design: [TRD, Standards and interchange](TRD.md#standards-and-interchange). Deci
 
 ### Dashboard
 
-Design: [TRD, Dashboard views](TRD.md#dashboard-views). Decision D65. The local dashboard exists and serves model settings. None of the views below is built: `semar fixture list`, `semar journey list`, and `semar ledger` show the same facts on the command line. Each view below arrives with the feature that it shows. The dashboard holds no data of record. Git is the source of truth, and the dashboard is a view and an approval interface.
+Design: [TRD, Dashboard views](TRD.md#dashboard-views). Decision D65. The local dashboard exists and serves model settings. None of the views below is built: `semar fixture list`, `semar journey list`, and `semar status` show the same facts on the command line. Each view below arrives with the feature that it shows. The dashboard holds no data of record. Git is the source of truth, and the dashboard is a view and an approval interface.
 
 | ID | Requirement | Milestone |
 | --- | --- | --- |

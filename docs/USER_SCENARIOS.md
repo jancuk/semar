@@ -194,7 +194,7 @@ Semar only reads from the UAT databases and from Elasticsearch. It changes data 
 Every action of the agent is in the activity log, written by Semar and not by the agent:
 
 ```text
-$ semar activity r-20261114-0042 --ticket SHOP-482
+$ semar show --activity r-20261114-0042 --ticket SHOP-482
 
  #  Time      Pass      Scenario     Action   Target                               Result                    Why (written by AI)
  1  10.06.02  setup     SHOP-482-01  sign in  support-agent                        signed in
@@ -214,7 +214,7 @@ An expected result that came only from the code needs a person who did not write
 
 | Mode | Where the questions appear | How the person answers |
 | --- | --- | --- |
-| M1, local | In the terminal and in the report | `semar confirm`, which shows each question in turn |
+| M1, local | In the terminal and in the report | `semar review`, which shows each question in turn |
 | M1.1 | As a comment on a small merge request that holds the new scenario files | A reply such as `/semar yes 1 2` and `/semar no 3`, or an approval of that merge request |
 
 A question looks like this:

@@ -88,6 +88,6 @@ func TestPlanWritesAGapObligationForACriterionThatStaysUnaccounted(t *testing.T)
 		t.Fatal(err)
 	}
 	contains(t, "the obligations", string(ob), "id: SHOP-482/criterion-1", "source: criterion", `cite: "docs/tickets/SHOP-482.md:4"`, "gap: criterion not accounted for by the planner")
-	led := p.semar(t, t.Context(), "ledger")
+	led := p.semar(t, t.Context(), "status")
 	contains(t, "the ledger", led.stdout, "SHOP-482/criterion-1")
 }

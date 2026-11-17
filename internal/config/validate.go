@@ -238,6 +238,9 @@ func validatePlan(c Config, add func(string, ...any)) {
 			}
 		}
 	}
+	if b := c.Change.Base; b != "" && (strings.HasPrefix(b, "-") || strings.ContainsAny(b, " ~^:?*[\\\x00") || strings.Contains(b, "..") || strings.HasSuffix(b, "/")) {
+		add("change.base: %q is not a branch name", b)
+	}
 	if _, err := regexp.Compile(c.Tickets.Pattern); err != nil {
 		add("tickets.pattern: %v", err)
 	}

@@ -197,7 +197,7 @@ func (r *repo) scriptFile() string { return r.path("scripts", scenarioID+".yaml"
 func (r *repo) addScriptAndConfirm(t *testing.T) {
 	t.Helper()
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
-	r.must(t, cli.ExitOK, "confirm", scenarioID, "--yes")
+	r.must(t, cli.ExitOK, "review", scenarioID, "--yes")
 }
 
 func (r *repo) runDirs(t *testing.T) []string {
@@ -311,10 +311,10 @@ func TestRunEndToEnd(t *testing.T) {
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
 
 	first := r.must(t, cli.ExitUndecided, "run", "--scenario", scenarioID)
-	contains(t, "the first summary", first.stdout, "inconclusive", "not confirmed")
+	contains(t, "the first summary", first.stdout, "needs review", "not confirmed")
 
-	confirmed := r.must(t, cli.ExitOK, "confirm", scenarioID, "--yes")
-	contains(t, "the confirmation", confirmed.stdout, "refund-too-much", "diff", "local, unverified identity")
+	confirmed := r.must(t, cli.ExitOK, "review", scenarioID, "--yes")
+	contains(t, "the confirmation", confirmed.stdout, "REFUND_EXCEEDS_TOTAL", "(source diff)", "local, unverified identity")
 
 	second := r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 	contains(t, "the second summary", second.stdout, "passed", "report.md")
@@ -333,7 +333,7 @@ func TestRunEndToEnd(t *testing.T) {
 		t.Errorf("%d exchange files, want 3", len(exchanges))
 	}
 
-	writes := r.must(t, cli.ExitOK, "activity", "latest", "--writes")
+	writes := r.must(t, cli.ExitOK, "show", "--activity", "--writes")
 	lines := strings.Split(strings.TrimSpace(writes.stdout), "\n")
 	if len(lines) != 3 { // the header and two writes
 		t.Fatalf("activity --writes printed:\n%s", writes.stdout)
@@ -436,7 +436,7 @@ func TestInterruptedRunIsVisible(t *testing.T) { // Review Focus 4
 	}
 	contains(t, "report.md", string(report), "This run did not finish")
 
-	act := r.must(t, cli.ExitOK, "activity", "latest")
+	act := r.must(t, cli.ExitOK, "show", "--activity")
 	contains(t, "activity", act.stdout, "the run did not finish (it was interrupted or stopped by an error)", "/refunds")
 	if n := refunds.Load(); n != 1 {
 		t.Errorf("the refund was sent %d times, want 1", n)
@@ -506,7 +506,7 @@ func TestScriptAddRefusesAScriptThatDoesNotFit(t *testing.T) {
 	}
 }
 
-func TestConfirmWithoutYes(t *testing.T) {
+func TestReviewWithoutYes(t *testing.T) {
 	cases := []struct {
 		name     string
 		terminal bool
@@ -514,18 +514,22 @@ func TestConfirmWithoutYes(t *testing.T) {
 		want     int
 		stored   bool
 	}{
-		{"no terminal", false, "yes\n", cli.ExitUndecided, false},
+		{"no terminal", false, "y\n", cli.ExitUndecided, false},
 		{"answer no", true, "n\n", cli.ExitUndecided, false},
 		{"no answer", true, "", cli.ExitUndecided, false},
-		{"answer yes", true, "yes\n", cli.ExitOK, true},
+		{"answer yes", true, "y\n", cli.ExitOK, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRepo(t, repoOptions{offline: true})
 			r.opts.Stdin = strings.NewReader(tc.answer)
 			r.opts.Terminal = func() bool { return tc.terminal }
-			res := r.must(t, tc.want, "confirm", scenarioID)
-			contains(t, "stdout", res.stdout, "refund-too-much", "diff")
+			res := r.must(t, tc.want, "review", scenarioID)
+			if tc.terminal {
+				contains(t, "stdout", res.stdout, "Refund above the order total is rejected", "(source diff)")
+			} else {
+				contains(t, "stdout", res.stdout, "scenario "+scenarioID)
+			}
 			if got := exists(t, r.path(".semar", "store", "confirmations")); got != tc.stored {
 				t.Errorf("stored = %v, want %v", got, tc.stored)
 			}
@@ -552,7 +556,7 @@ func TestRunAgainstAServiceThatIsNotThere(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
 	res := r.must(t, cli.ExitUndecided, "run", "--all")
-	contains(t, "stdout", res.stdout, "blocked", "the build of orders could not be read")
+	contains(t, "stdout", res.stdout, "the build of orders could not be read")
 }
 
 func TestDuplicatedScenarioID(t *testing.T) {
@@ -569,7 +573,7 @@ func TestDuplicatedScenarioID(t *testing.T) {
 	if err := os.WriteFile(copied, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"run", "--scenario", scenarioID}, {"run", "--all"}, {"confirm", scenarioID, "--yes"}} {
+	for _, args := range [][]string{{"run", "--scenario", scenarioID}, {"run", "--all"}, {"review", scenarioID, "--yes"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			res := r.must(t, cli.ExitError, args...)
 			contains(t, "stderr", res.stderr, original, copied)
@@ -579,7 +583,7 @@ func TestDuplicatedScenarioID(t *testing.T) {
 
 func TestActivityFilters(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.must(t, cli.ExitError, "activity", "latest")
+	r.must(t, cli.ExitError, "show", "--activity")
 	r.addScriptAndConfirm(t)
 	r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 
@@ -596,7 +600,7 @@ func TestActivityFilters(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			res := r.must(t, cli.ExitOK, append([]string{"activity", "latest"}, tc.args...)...)
+			res := r.must(t, cli.ExitOK, append([]string{"show", "--activity"}, tc.args...)...)
 			lines := strings.Split(strings.TrimSpace(res.stdout), "\n")
 			if len(lines)-1 != tc.rows {
 				t.Fatalf("%d rows, want %d:\n%s", len(lines)-1, tc.rows, res.stdout)
@@ -606,7 +610,7 @@ func TestActivityFilters(t *testing.T) {
 			}
 		})
 	}
-	for _, args := range [][]string{{"activity", "latest", "--pass", "nope"}, {"activity", "r-nope"}, {"activity", "../runs"}} {
+	for _, args := range [][]string{{"show", "--activity", "--pass", "nope"}, {"show", "r-nope", "--activity"}, {"show", "../runs", "--activity"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			r.must(t, cli.ExitError, args...)
 		})
@@ -693,7 +697,7 @@ func TestASessionValueWrittenInThePlaceIsRedacted(t *testing.T) {
 	r.assertNoSecret(t, []string{literal, "Bearer " + literal}, "semar.yaml")
 }
 
-func TestConfirmListsTheWholeOperandAndNothingHostile(t *testing.T) {
+func TestReviewListsTheWholeOperandAndNothingHostile(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
 	scenarioFile := r.path(".semar", "scenarios", "SHOP-482", scenarioID+".feature")
 	head, tail := strings.Repeat("A", 150), strings.Repeat("C", 150)
@@ -709,8 +713,8 @@ func TestConfirmListsTheWholeOperandAndNothingHostile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res := r.must(t, cli.ExitOK, "confirm", scenarioID, "--yes")
-	contains(t, "the listing", res.stdout, head+`\x1b[31mB`+"\t"+tail)
+	res := r.must(t, cli.ExitOK, "review", scenarioID, "--yes")
+	contains(t, "the listing", res.stdout, head+`\x1b[31mB`+`\t`+tail)
 	for _, hostile := range []string{"\x1b", "\u202e", "\u200b"} {
 		if strings.Contains(res.stdout, hostile) {
 			t.Errorf("the listing holds the character %+q", hostile)
@@ -718,13 +722,13 @@ func TestConfirmListsTheWholeOperandAndNothingHostile(t *testing.T) {
 	}
 }
 
-func TestConfirmRefusesAnEmptyName(t *testing.T) {
+func TestReviewRefusesAnEmptyName(t *testing.T) {
 	for _, name := range []string{"", "  "} {
 		t.Run(fmt.Sprintf("%q", name), func(t *testing.T) {
 			r := newRepo(t, repoOptions{offline: true})
 			r.opts.User = func() (string, error) { return name, nil }
-			res := r.must(t, cli.ExitError, "confirm", scenarioID, "--yes")
-			contains(t, "stderr", res.stderr, "the confirmer has no name; set git config user.name")
+			res := r.must(t, cli.ExitError, "review", scenarioID, "--yes")
+			contains(t, "stderr", res.stderr, "the approver has no name; set git config user.name")
 			if exists(t, r.path(".semar", "store")) {
 				t.Error("something was stored")
 			}
@@ -741,7 +745,7 @@ func TestScenarioFilesOtherThanRegularFeaturesAreNotSkipped(t *testing.T) {
 		if err := os.Symlink(filepath.Join(dir(r), scenarioID+".feature"), link); err != nil {
 			t.Skipf("no symlinks here: %v", err)
 		}
-		for _, args := range [][]string{{"run", "--all"}, {"confirm", scenarioID, "--yes"}} {
+		for _, args := range [][]string{{"run", "--all"}, {"review", scenarioID, "--yes"}} {
 			res := r.must(t, cli.ExitError, args...)
 			contains(t, "stderr", res.stderr, link)
 		}
@@ -754,7 +758,7 @@ func TestScenarioFilesOtherThanRegularFeaturesAreNotSkipped(t *testing.T) {
 			if err := os.WriteFile(old, []byte("apiVersion: semar/v1\nkind: Scenario\nid: OLD-1\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			for _, args := range [][]string{{"run", "--all"}, {"run", "--scenario", scenarioID}, {"confirm", scenarioID, "--yes"}} {
+			for _, args := range [][]string{{"run", "--all"}, {"run", "--scenario", scenarioID}, {"review", scenarioID, "--yes"}} {
 				res := r.must(t, cli.ExitError, args...)
 				contains(t, "stderr", res.stderr, "scenario files are Gherkin now: run semar scenarios convert", old)
 			}
@@ -771,7 +775,7 @@ func TestCommandsStopWhenTheirContextIsDone(t *testing.T) {
 	cancel()
 
 	t.Run("activity", func(t *testing.T) {
-		res := r.semar(t, ctx, "activity", "latest")
+		res := r.semar(t, ctx, "show", "--activity")
 		if res.code != cli.ExitError {
 			t.Errorf("exit %d, want %d; stdout %q", res.code, cli.ExitError, res.stdout)
 		}

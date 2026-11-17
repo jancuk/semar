@@ -396,7 +396,7 @@ The subject of a path check starts with `$`, so a path with spaces is allowed: S
 
 The hash of the expected results covers what it always covered: the intent, the auth profile, each step's ID, setup flag, hint, `as`, and expected results, and `given`. The Feature line, the title, and the wording of a step are left out, so rewording them lapses no confirmation.
 
-Who confirmed the scenario is not written in the file. Semar reads the confirmation from the code host or the evidence store at run time, so the agent and the author cannot write it. `semar confirm` prints the file as it is, with the source and the cite of each expected result in the comment under it, and then the results that need a person.
+Who confirmed the scenario is not written in the file. Semar reads the confirmation from the code host or the evidence store at run time, so the agent and the author cannot write it. `semar review` prints the file as it is, with the source and the cite of each expected result in the comment under it, and then the results that need a person.
 
 **Converting older files.** Scenario files were YAML until [Plan 24](implementation/24-gherkin-scenarios.md). Semar reads `.feature` files only, and a `.yaml` or `.yml` file under `.semar/scenarios` is an error that says "scenario files are Gherkin now: run semar scenarios convert". The command converts every such file in place, deletes the YAML file, and refuses to overwrite a `.feature` file.
 
@@ -674,7 +674,7 @@ No stage waits for a person. A scenario with an unconfirmed expected result is t
 | --- | --- | --- | --- | --- |
 | 1 | Plan | `semar plan` | Yes | Test plan with targets, scenario files, and recommendations |
 | 1a | Trial run, built (Plan 16) | part of `semar plan`. `--no-trial` or `plan.trial: false` turns it off | No. Its problems go back to the planner | A trial result beside each read-only step in `plan.md`. See [Trial run](#trial-run) |
-| 2 | Confirm | Merge request approval, or `semar confirm` | No | Confirmation record |
+| 2 | Confirm | Merge request approval, or `semar review` | No | Confirmation record |
 | 3 | Gate | `semar gate` | No | Build per service, or `blocked` |
 | 4 | Sign in | part of `semar run`, and `semar login` for a first sign-in by a person | No | Session per auth profile. See [Signing in](#signing-in) |
 | 5 | Author | `semar author` | Yes | Script per scenario |
@@ -688,7 +688,7 @@ No stage waits for a person. A scenario with an unconfirmed expected result is t
 | - | Security | part of `semar verify`, or `semar explore --security` | Yes | Security findings, confirmed by code where code can check |
 | - | Regression | `semar regression run` | No | Evidence and an outcome for every scenario in the suite |
 | - | Journey, built for API legs and web legs (Plans 18 and 22) | `semar journey run` | No. A UI leg that needs an agent to author it is planned. A web leg is repaired with no model | An outcome per journey on one target manifest. See [Journeys](#journeys) |
-| - | Ledger, built (Plan 19) | `semar ledger`, and the use case line in the report of `semar run`. `semar publish` is not built | No | A state per obligation, and the manual checklist. See [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger) |
+| - | Ledger, built (Plan 19) | `semar status`, and the use case line in the report of `semar run`. `semar publish` is not built | No | A state per obligation, and the manual checklist. See [Test obligations and the coverage ledger](#test-obligations-and-the-coverage-ledger) |
 
 ### Where the planned parts run
 
@@ -700,7 +700,7 @@ The parts added on 2026-11-17 slot into the stages above without renumbering the
 4. **Author and Run.** Built (Plan 17), in Run. Before the first step of a scenario, code resolves each `given` entry: lease, then `find`, then `create` when `find` gives nothing, then `until`. These actions are recorded in the `setup` pass. After the last step, also after a failure, code runs `cleanup` in the `cleanup` pass and releases the leases. Author is not built.
 5. **Observe and Verdict.** As today. A fixture that could not give its state ends the scenario `blocked`.
 6. **Journey.** Built for API legs (Plan 18) and web legs (Plan 22). A journey runs alone with `semar journey run`. It does not run after the scenarios of the same `semar run`. Code forms the target manifest, runs the legs in `needs` order, checks the invariants, and reads the manifest again at the end.
-7. **Ledger.** Built (Plan 19). After the verdicts, code derives each obligation's state from the outcomes of the scenarios and journeys that cover it. `semar ledger` prints the states and the manual checklist, and the report of `semar run` opens with one line. `semar publish` is not built.
+7. **Ledger.** Built (Plan 19). After the verdicts, code derives each obligation's state from the outcomes of the scenarios and journeys that cover it. `semar status` prints the states and the manual checklist, and the report of `semar run` opens with one line. `semar publish` is not built.
 
 ### Plan
 
@@ -1173,7 +1173,7 @@ obligations:
 
 An entry has `covers` (scenario IDs), `journeys` (journey IDs), a `gap` (a declared reason with no cover), or a `manual` reason. A `gap` for a case not drafted or for an uncovered file gives `blocked` with that reason. The key `state` is refused: a state is computed by code and cannot be written.
 
-A deferral and a manual result are not in these files. A person records them with `semar ledger defer` and `semar ledger record`, and Semar stores each as a file in the evidence store under `.semar/store/obligations/`, with the person's name and a "local, unverified identity", as it does for a confirmation. A code-host identity is not built.
+A deferral and a manual result are not in these files. A person records them with `semar defer` and `semar check`, and Semar stores each as a file in the evidence store under `.semar/store/obligations/`, with the person's name and a "local, unverified identity", as it does for a confirmation. A code-host identity is not built.
 
 ### Rules
 
@@ -1197,13 +1197,13 @@ Rules 1, 4, 6, and 7 are built. Rules 2, 3, 5, and 8 are built in part or not bu
 
 ### How code derives a state
 
-The first matching rule gives the state. Only results on the builds that UAT runs now count, as for readiness. `semar ledger --env <name>` reads those builds and counts a result on another build as `stale`. Without `--env` it says that the builds were not read. In the report of `semar run`, the builds of that run are the current builds.
+The first matching rule gives the state. Only results on the builds that UAT runs now count, as for readiness. `semar status <name>` reads those builds and counts a result on another build as `stale`. With no environment named, and one in `semar.yaml`, it reads that one. With several and none named, it says that the builds were not read. In the report of `semar run`, the builds of that run are the current builds.
 
 | Order | State | Condition |
 | --- | --- | --- |
 | 1 | `failed` | A covering scenario or journey is `failed`. A failure shows even under a deferral or a manual reason |
 | 2 | `deferred` | A deferral exists and has not expired |
-| 3 | `needs_a_person` | The obligation has a `manual` reason. The manual result, when one exists, is shown beside the state |
+| 3 | `needs_a_person` | The obligation has a `manual` reason, and no scenario was linked to it with `semar check <id> --by <scenario>`. The manual result, when one exists, is shown beside the state. A `passed` result that names the builds that the environment runs now makes the state `verified`, with `checked by <user>` (Plan 26, D13) |
 | 4 | `verified` | At least one scenario or journey covers it, and every covering scenario and journey is `passed`. A `passed` scenario already has confirmed expectations and evidence |
 | 5 | `blocked` | Anything else. The reasons name each covering item that is not `passed`, with its outcome and its reason, or say that nothing covers it |
 
@@ -1211,9 +1211,15 @@ A pass counts only while the scenario file has the expected results that the run
 
 The five states have no word for "tested, but not decided". A covering scenario that is `inconclusive`, `stale`, or `not_run` therefore gives `blocked`, and the reason names the missing piece: a confirmation, a run on the current build, or a missing engine. The report shows the scenario outcome beside it.
 
-The report of `semar run` opens with one line, for example `42 use cases: 35 verified, 2 failed, 3 blocked, 2 need a person`, and a second line that names `semar ledger --ticket <key>`. The run counts every obligation whose ticket or `covers` touch a scenario of the run. A run that did not finish prints no line.
+The report of `semar run` is the markdown file of the run. It opens with one line, for example `42 use cases: 35 verified, 2 failed, 3 blocked, 2 need a person`, and a second line that names `semar status --ticket <key>`. The run counts every obligation whose ticket or `covers` touch a scenario of the run. A run that did not finish prints no line.
 
 A journey that an obligation names under `journeys` counts like a scenario: its outcome comes from the stored results of `semar journey run`.
+
+### The groups of `semar status`
+
+`semar status` puts each use case of the change in exactly one group, so the groups add up to the total (Plan 26, D12). `failed` is `failing`. A `blocked` use case with no cover, or that lost its last test with `semar rm`, is `no test`. A `blocked` use case with a cover that needs an approval is `needs review`. One whose pass is on another build, or of a scenario that changed, is `stale`. Any other `blocked` use case stays `blocked`. `needs_a_person` is `for a person`, and a manual `failed` result puts it under `failing`. `deferred` and `verified` keep their names. A ticket of the change that has no use case is shown as `not planned`, outside the groups, and it makes the exit code 2.
+
+The last line is `Ship: yes` when the exit code is 0, and `Ship: no` with the reasons otherwise. A use case whose every approval came from an author of a commit of the change is marked, and the mark changes no state and no code. A `retired` list on an obligation names the scenarios that `semar rm` took away, with the reason, the user, and the day.
 
 ### Manual checklist
 
@@ -1227,10 +1233,10 @@ Manual checks for SHOP-482 (1)
      3. Decide which one is right, and change the other, or the scenario.
    Expected: The document and the code agree
    Cite: docs/refunds.md:14 (checked when the plan was made)
-   Record:   semar ledger record SHOP-482/difference-1 passed|failed --notes "<what you saw>"
+   Record:   semar check SHOP-482/difference-1 pass|fail --note "<what you saw>"
 ```
 
-`semar ledger --checklist` prints it. `semar ledger --run <id>` prints it after the table for the results of one run.
+`semar status --checklist` prints it. `semar status --run <id>` prints it after the table for the results of one run.
 
 ### Failure modes
 
@@ -1239,9 +1245,9 @@ Manual checks for SHOP-482 (1)
 | A cited text does not exist in its source | Not checked for the sources `testcase`, `criterion`, and `defect`: the checklist says "not checked by code". The cite of a document difference was checked when the plan was made |
 | A covering scenario was deleted | `blocked`, "no scenario or journey covers this" |
 | A covering scenario is `stale` | `blocked`, "rerun on the current build" |
-| A person records `failed` for a manual check | The state stays `needs_a_person`, the line reads "failed, checked by a person", and `semar ledger` exits 1. Readiness is not built |
+| A person records `failed` for a manual check | The state stays `needs_a_person`, `semar status` shows it under `failing` with "failed, checked by a person", and exits 1. Readiness is not built |
 | A deferral expired | The deferral is ignored, the reason says it expired, and the state is derived again |
-| A file under `.semar/obligations/` has a problem | `semar ledger` stops with exit 3 and lists each problem. No state is derived from a file that cannot be trusted |
+| A file under `.semar/obligations/` has a problem | `semar status` stops with exit 3 and lists each problem. No state is derived from a file that cannot be trusted |
 
 ### What is not verified
 
@@ -1258,7 +1264,7 @@ Built in [Plan 16](implementation/16-trial-run.md). Before it, `semar plan` sent
 1. Code signs in with the auth profile of the plan, and with the auth profile of each service that a fixture of the plan calls, as the sign-in stage does. The trial uses one auth profile for the scenarios, so a scenario that needs another account is tried as that profile, and a 403 may be the reason.
 2. For each scenario, code resolves the `find` steps of its fixtures. A fixture's `create` is never sent.
 3. Code sends each step that a read-only copy of the environment's effects policy classes as a read: `GET` or `HEAD`, or a request listed under `effects.reads`, and not under `effects.deny`. The trial uses that copy whatever `effects.mode` the environment has. A step that matches `effects.once` is not tried. A step whose variables cannot be resolved, for example an ID that only a write would give, is "not tried".
-4. Each request is recorded as an `Action` in a new `trial` pass, in a run of its own with the purpose `trial` and no scenario result, redacted like any other. `semar activity <run>` lists it. The existing rule that evidence counts only in its own pass keeps a trial action out of every verdict.
+4. Each request is recorded as an `Action` in a new `trial` pass, in a run of its own with the purpose `trial` and no scenario result, redacted like any other. `semar show <run> --activity` lists it. The existing rule that evidence counts only in its own pass keeps a trial action out of every verdict.
 5. A trial sends at most 50 requests, each with a 10 second timeout, and stops after 2 minutes in all.
 
 The change is usually not deployed at merge request time, so the trial meets the build that the environment runs now. The plan records that build beside the trial results.
@@ -1374,7 +1380,7 @@ Each service in a fixture step uses its own auth profile, set on the service in 
 | 9 | A fixture may use another fixture under its own `given`, to a depth of 3. A cycle is an error that names the files |
 | 10 | Fixtures that several services share are defined once in the registry, not generated in each repository. See [Packs and the registry](#packs-and-the-registry) |
 
-Rules 1 to 8 are built. Rules 9 and 10 are not built. A `given` inside a fixture is refused in Plan 17, because nesting adds cycle checks and a cleanup order across fixtures, and the two-service flow of the example needs none of it. The registry is not built, so a fixture lives in the repository only. A person approves a fixture with `semar confirm --fixture <id>`. The approval names the fixture's version and a hash of every field except `apiVersion` and `kind`, and it is stored under `.semar/store/approvals/fixtures/`.
+Rules 1 to 8 are built. Rules 9 and 10 are not built. A `given` inside a fixture is refused in Plan 17, because nesting adds cycle checks and a cleanup order across fixtures, and the two-service flow of the example needs none of it. The registry is not built, so a fixture lives in the repository only. A person approves a fixture with `semar review <id>`. The approval names the fixture's version and a hash of every field except `apiVersion` and `kind`, and it is stored under `.semar/store/approvals/fixtures/`.
 
 ### How a fixture resolves
 
@@ -1497,7 +1503,7 @@ The built format (Plan 18) differs from this example in these ways:
 * `given` is on the journey only. A leg's `given` is refused. A leg's session comes from its service's `authProfile`, else the journey's `authProfile`.
 * A leg ID matches `^[a-z][a-z0-9_]*$`, so a hyphen is refused, because `{{<leg>.<output>}}` cannot hold one.
 * A journey has at most 12 legs, 20 steps per leg, and 8 invariants.
-* A leg's expected results are confirmed with the existing confirmation store, under the leg's scenario ID `<journey>.<leg>`: `semar confirm --journey <id>`. A journey whose expected results nobody confirmed is `blocked`, and nothing is sent for it.
+* A leg's expected results are confirmed with the existing confirmation store, under the leg's scenario ID `<journey>.<leg>`: `semar review <id>`. A journey whose expected results nobody confirmed is `blocked`, and nothing is sent for it.
 
 ### Rules
 
@@ -2254,7 +2260,7 @@ screens:
     card:        { role: button, name: "{{title}}" }
 ```
 
-A web step of a journey leg has one action, `do: open | click | fill | press | drag | wait`, and names the `screen` and the `element`. A check or a capture names an `element` of that screen. A person approves the file with `semar confirm --screens shop`. When a locator does not find its element, `semar screens repair <run id>` proposes up to three locators from the accessibility tree, with no model, and `--apply` rewrites one element. The file then needs an approval again. The Plan 22 text has the details and the decisions.
+A web step of a journey leg has one action, `do: open | click | fill | press | drag | wait`, and names the `screen` and the `element`. A check or a capture names an `element` of that screen. A person approves the file with `semar review shop`. When a locator does not find its element, `semar screens repair <run id>` proposes up to three locators from the accessibility tree, with no model, and `--apply` rewrites one element. The file then needs an approval again. The Plan 22 text has the details and the decisions.
 
 ### Rules
 
@@ -2592,7 +2598,7 @@ deleted  address 5512        explore
 
 | Place | What it shows |
 | --- | --- |
-| `semar activity <run>` | The timeline in a terminal. `--writes` shows creates, updates, and deletes only. `--ticket`, `--scenario`, and `--pass` narrow it. `--follow` shows a run in progress |
+| `semar show <run> --activity` | The timeline in a terminal. `--writes` shows creates, updates, and deletes only. `--ticket`, `--scenario`, and `--pass` narrow it. `--follow` shows a run in progress |
 | The report | A timeline per scenario, collapsed, and the data ledger |
 | The Jira comment | One line with the counts and a link, for example "58 actions, 9 writes" |
 | `activity.jsonl` in the evidence store | One JSON line per entry. `run.json` lists the file and its hash |
@@ -2764,7 +2770,7 @@ signoffs/<run-id>/<role>-<user>.json
 * **Scenarios drafted after the merge.** Semar opens one small merge request per `semar verify` call that holds the new scenario files and carries the plan comment. People confirm there.
 * **Integrity.** `run.json` lists a SHA-256 hash for every evidence file. The merge request comment carries the hash of `run.json`. Protect the branch against force-push in the code host.
 * **Concurrency.** Each run writes its own directory, so two pushes never conflict in content. On a rejected push, Semar fetches, rebases, and pushes again.
-* **Confirmation.** Semar reads approvals from the code host for the merge request that last changed the scenario file. An approver who is not the author counts. `semar confirm` writes a confirmation file for scenarios drafted after the merge. The file name carries the code-host user that the token belongs to, and the file lists the sources it confirmed.
+* **Confirmation.** Semar reads approvals from the code host for the merge request that last changed the scenario file. An approver who is not the author counts. `semar review` writes a confirmation file for scenarios drafted after the merge. The file name carries the code-host user that the token belongs to, and the file lists the sources it confirmed.
 * **Acceptance and sign-off.** `semar accept` and `semar signoff` each write a small JSON file and post a comment. Each file names the run, the builds, and the hash of every scenario. Semar never edits these files. A sign-off lapses by computation. It names its builds, and it stops applying as soon as the build or the recorded configuration on UAT differs from them, whether or not a newer run exists. `semar status`, `semar rollup`, and a release reply check this each time.
 * **Roll-up.** `semar rollup` reads `run.json` files from the evidence branch of each configured repository and prints a table or writes an HTML page. It needs no server.
 
@@ -3046,7 +3052,7 @@ A team that wants a person to confirm `ticket` expectations too sets `trust.conf
 
 The agent can submit four sources only: `ticket`, `testcase`, `diff`, and `baseline`. Plan validation rejects any other.
 
-* `person` is set by code, when a signed-in person adds or edits an expected result in the merge request or with `semar confirm --edit`. The record names that person.
+* `person` is set by code, when a signed-in person adds or edits an expected result in the merge request or with `semar review --edit`. The record names that person.
 * `invariant` never appears in a scenario file. See [Verdict rules](#verdict-rules).
 
 A quote proves that the sentence exists in the ticket. It does not prove that the check means the same thing: "must be rejected" does not say 422. The plan prints each quote beside its check, and the approval of the merge request that carries the scenario file covers both.
@@ -3414,7 +3420,7 @@ Planned, not built. The local dashboard exists: `semar dashboard` serves model s
 Rules:
 
 1. Git stays the source of truth. Every view is computed from files.
-2. An approval in the dashboard writes the same record that `semar confirm` writes, under the code-host identity that the person's token belongs to. The dashboard keeps no approval of its own.
+2. An approval in the dashboard writes the same record that `semar review` writes, under the code-host identity that the person's token belongs to. The dashboard keeps no approval of its own.
 3. The dashboard listens on the loopback address only, as today.
 
 A team edition on a shared server is a later stage. It is where single sign-on, role-based access, an audit log, run history across teams, secret-manager integration, masking of personal data in evidence, and data residency belong. The core stays Apache-2.0, and the formats and the engine are never made commercial. This is consistent with PRD decision D4 and the staged managed cloud in [Milestones](#milestones).
@@ -3431,7 +3437,7 @@ A team edition on a shared server is a later stage. It is where single sign-on, 
 | `semar login <auth profile>` | Open the profile's own Chrome window, or the emulator's account settings, for a person to sign in once |
 | `semar logout <auth profile>` | Delete the stored session of a profile |
 | `semar plan --mr <id>` | Draft scenarios for a merge request, or for a local branch with `--branch` |
-| `semar confirm <scenario>` | Confirm a scenario's expected results as the signed-in code-host user |
+| `semar review <scenario>` | Confirm a scenario's expected results as the signed-in code-host user |
 | `semar gate --mr <id>` | Check that the merged commit is deployed |
 | `semar author --mr <id>` | Write scripts for scenarios that have none |
 | `semar run --mr <id>` | Replay scripts, observe, and compute verdicts |
@@ -3454,7 +3460,7 @@ A team edition on a shared server is a later stage. It is where single sign-on, 
 | `semar kb search <text>` | Search the knowledge sources from a terminal |
 | `semar kb sync` | Fill the knowledge cache ahead of a pipeline job |
 | `semar kb notes` | List memory notes that wait for approval |
-| `semar activity <run>` | Print the activity log. `--writes`, `--ticket`, `--scenario`, and `--pass` narrow it. `--follow` shows a run in progress |
+| `semar show <run> --activity` | Print the activity log. `--writes`, `--ticket`, `--scenario`, and `--pass` narrow it. `--follow` shows a run in progress |
 | `semar bundle <scenario>` | Write everything about one scenario of a run into one folder |
 | `semar ui` | Serve a read-only page on 127.0.0.1 with runs, evidence, and the live activity log |
 | `semar export junit <run>` | Write the results as JUnit XML |
@@ -3466,15 +3472,15 @@ A team edition on a shared server is a later stage. It is where single sign-on, 
 | `semar sample --release <name>` | Pick passed scenarios at random for a person to check |
 | `semar import gherkin <file>` | Turn the scenarios of a feature file into Semar scenarios |
 | `semar plan --no-trial` | Built (Plan 16). Plan without the [trial run](#trial-run) |
-| `semar confirm --fixture <id>` | Built (Plan 17). Approve a fixture as it is now. `semar confirm --journey <id>` confirms the expected results of every leg of a journey (Plan 18) |
+| `semar review <id>` | Built (Plan 17). Approve a fixture as it is now. `semar review <id>` confirms the expected results of every leg of a journey (Plan 18) |
 | `semar fixture list [--env <name>]` | Built (Plan 17). List the fixtures of the repository with the version, owner, approval, the health on an environment, and the scenarios that use each |
 | `semar fixture check (<id>... \| --all) --env <name>` | Built (Plan 17). Run the health check of fixtures: `find`, `create`, and `cleanup` on a test environment. It sends writes under the effects policy |
 | `semar fixture import postman\|har <file>` | Planned. Write a draft fixture for a person to review |
 | `semar journey list [--env <name>]` | Built (Plan 18). List journeys with criticality, owner, legs, and the last stored result. With `--env`, mark a result `stale` when a build differs |
 | `semar journey run (<id>... \| --critical \| --all)` | Built (Plan 18). Run journeys one leg at a time, and write a report. `--env` and `--build` as for `semar run` |
-| `semar ledger [--ticket <key>] [--env <name>] [--run <id>] [--checklist]` | Built (Plan 19). Print the state of each obligation, or the manual checklist |
-| `semar ledger defer <obligation> --reason <text> --until <date>` | Built (Plan 19). Record a deferral under the user's name. The identity is local and not verified. A code-host identity is not built |
-| `semar ledger record <obligation> passed\|failed --notes <text>` | Built (Plan 19). Record the result of a manual check |
+| `semar status [--ticket <key>] [--env <name>] [--run <id>] [--checklist]` | Built (Plan 19). Print the state of each obligation, or the manual checklist |
+| `semar defer <obligation> --reason <text> --until <date>` | Built (Plan 19). Record a deferral under the user's name. The identity is local and not verified. A code-host identity is not built |
+| `semar check <obligation> pass\|fail --note <text>` | Built (Plan 19). Record the result of a manual check |
 | `semar pack add <name>@<version>` | Planned. Pin a pack and write its lock entry |
 | `semar pack update [<name>]` | Planned. Move a pin and write a new lock entry |
 | `semar engine add`, `semar engine list` | Planned. Register an engine in the person's home, and list engines with their tools and approval state |
@@ -3646,7 +3652,7 @@ Tests for the parts added on 2026-11-17. The tests of the ledger, fixtures, tria
 | M0 | Relevant spikes below; baseline of the team's actual verification effort, including developer work and skipped checks | Contracts and pilot criteria are recorded without assuming a QA team exists |
 | M1 | The daemon, `semar mcp`, the Claude Code plugin, the `api`, `observe`, and `db` engines, the recorder, replay, verdict, `claude` and `codex` drivers, the ticket gate with Jira read, the `semar`, `jira`, and `files` knowledge sources with `kb_search`, the feature map, Plan with earlier testing, the impact map, and recommendations, Gate, sign-in, Author, Explore, `regression run` and `regression coverage`, local report, `init`, `doctor`, `egress` | One real ticket runs from plan to a local report on UAT, in both the interactive and the unattended way. A local regression run replays the scenarios that ticket left behind. The sample-app suite passes |
 | M1.1 | Code host adapter, evidence branch, `publish` with the Jira result comment, the `testrail` source and TestRail results, the MCP gateway, memory notes, decisions in the merge request, `sync`, `status`, pipeline templates, promotion on sign-off, `regression bootstrap` with bulk confirmation, the regression comparison report, Postman import, `rollup`, `acp` driver. Added on 2026-11-17 and built (Plans 16 to 20): the trial run, local fixtures with leases on one machine and fixture health, the obligations and the ledger with the manual checklist, API-only journeys, and the CTRF, JUnit XML, and SARIF exports. Planned and not built: the Arazzo format and the Postman and HAR imports of fixtures | A ticket goes from an opened merge request to a signed-off report and a Jira comment with no person starting a command, and the nightly regression run publishes its report. Built: the report of a run opens with the use case line when obligations exist, and an API journey runs on the sample app on one manifest. Not built: the ticket report that publishes it |
-| M2 | Built (Plan 22): the `web` engine, in process on chromedp, with a Chrome profile of Semar's own and `semar login`, `surface: web` legs of journeys and web scenarios on one replay runner, screen objects that a person approves with `semar confirm --screens`, elements as the subject of checks and captures, one screenshot per web action, host blocking and the `traceparent` header inside the browser, and deterministic repair of a broken locator with `semar screens repair`. Not built: `web_run` with the pilot, the engine gateway and the engine registry, packs and the registry, the published schemas and the conformance suite, an agent that authors web steps, and the object-storage evidence store | One real web ticket runs from plan to a published report. Built: a journey with a web leg passes on one manifest, and a broken locator ends the leg `inconclusive` with a repair proposal. Not built: another tool's loader passes the conformance suite |
+| M2 | Built (Plan 22): the `web` engine, in process on chromedp, with a Chrome profile of Semar's own and `semar login`, `surface: web` legs of journeys and web scenarios on one replay runner, screen objects that a person approves with `semar review --screens`, elements as the subject of checks and captures, one screenshot per web action, host blocking and the `traceparent` header inside the browser, and deterministic repair of a broken locator with `semar screens repair`. Not built: `web_run` with the pilot, the engine gateway and the engine registry, packs and the registry, the published schemas and the conformance suite, an agent that authors web steps, and the object-storage evidence store | One real web ticket runs from plan to a published report. Built: a journey with a web leg passes on one manifest, and a broken locator ends the leg `inconclusive` with a repair proposal. Not built: another tool's loader passes the conformance suite |
 | M3 | Native Android adapter, app/device identity, evidence artifacts, and connected API/web/Android journeys; completes the initial platform scope. Planned on 2026-11-17: Android legs of journeys, in the format of [Journeys](#journeys) | Required checks run across each applicable surface on one target manifest and connected fixture; a QA engineer, a developer, or a product manager can review the evidence |
 | M4 | Native iOS adapter and separately validated runner/device capabilities; extend the existing Android support. Planned on 2026-11-17: signed evidence bundles, and the open question of whether iOS can come earlier through an engine that S7 finds | iOS journeys pass the same evidence/permission contracts without borrowing Android results |
 | Shadow | Compare with the team's existing checks from M1 onward; developers, leads, or product owners perform independent checks when QA is absent | Reliability and total human effort are measured; absent/skipped prior testing is disclosed rather than treated as zero-cost equivalent quality |

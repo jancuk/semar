@@ -110,7 +110,7 @@ func newTrialRepo(t *testing.T) *trialRepo {
 	p.rewriteConfig(t, strings.NewReplacer("127.0.0.1:9", ou.Host, "127.0.0.1:7", pu.Host).Replace)
 	tr.planRepo = p
 
-	p.must(t, cli.ExitOK, "confirm", "--fixture", "order.paid", "--yes")
+	p.must(t, cli.ExitOK, "review", "order.paid", "--yes")
 	p.seedPaidOrder(t)
 	return tr
 }
@@ -212,7 +212,7 @@ func TestTrialEndToEnd(t *testing.T) {
 	if trialRun.ID == "" || len(trialRun.Results) != 0 || len(trialRun.BuildsStart) != 1 {
 		t.Fatalf("trial run = %+v", trialRun)
 	}
-	acts := r.must(t, cli.ExitOK, "activity", string(trialRun.ID), "--pass", "trial")
+	acts := r.must(t, cli.ExitOK, "show", string(trialRun.ID), "--activity", "--pass", "trial")
 	contains(t, "the activity", acts.stdout, "GET /v1/orders", "GET /v1/order/o-1", "GET /v1/orders/o-1/summary")
 	if strings.Contains(acts.stdout, "POST") {
 		t.Errorf("the activity of the trial lists a write:\n%s", acts.stdout)

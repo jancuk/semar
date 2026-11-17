@@ -369,3 +369,45 @@ func relPath(dir, p string) (string, error) {
 	}
 	return path.Clean(filepath.ToSlash(rel)), nil
 }
+
+// RemoveScripts removes every stored script of a scenario, whatever its hash, and says how many it
+// removed. A scenario with none is not an error. The directory is reached through a root, so a link
+// that the repository commits under store/scripts cannot lead the removal elsewhere.
+func (s *Store) RemoveScripts(id domain.ScenarioID) (int, error) {
+	if err := idcheck.Check("scenario ID", string(id)); err != nil {
+		return 0, fmt.Errorf("remove scripts: %w", err)
+	}
+	rel := filepath.Join("store", "scripts", string(id))
+	root, err := os.OpenRoot(s.root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("remove scripts of %s: %w", id, err)
+	}
+	defer root.Close()
+	if err := atomicfile.CheckDirIn(root, rel); err != nil {
+		return 0, fmt.Errorf("remove scripts of %s: %w", id, err)
+	}
+	dir, err := root.Open(rel)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("remove scripts of %s: %w", id, err)
+	}
+	entries, err := dir.ReadDir(-1)
+	_ = dir.Close()
+	if err != nil {
+		return 0, fmt.Errorf("remove scripts of %s: %w", id, err)
+	}
+	for _, e := range entries {
+		if err := root.Remove(filepath.Join(rel, e.Name())); err != nil {
+			return 0, fmt.Errorf("remove scripts of %s: %w", id, err)
+		}
+	}
+	if err := root.Remove(rel); err != nil {
+		return len(entries), fmt.Errorf("remove scripts of %s: %w", id, err)
+	}
+	return len(entries), nil
+}

@@ -96,13 +96,13 @@ func (r *repo) edit(t *testing.T, rel string, change func(string) string) {
 func TestWebScenarioNeedsApprovedScreensThenPasses(t *testing.T) {
 	r := webRepo(t)
 	res := r.must(t, cli.ExitUndecided, "run", "--scenario", "WEB-1")
-	contains(t, "stdout", res.stdout, "inconclusive")
+	contains(t, "stdout", res.stdout, "needs review")
 	report := r.lastReport(t)
-	contains(t, "the report", report, "the screens of shop are not approved: semar confirm --screens shop")
+	contains(t, "the report", report, "the screens of shop are not approved: semar review shop")
 
-	shown := r.must(t, cli.ExitOK, "confirm", "--screens", "shop", "--yes")
-	contains(t, "the screens", shown.stdout, "Cart", "place-order: { role: button, name: \"Place order\" }", "never approved before", "approved the screens of shop")
-	again := r.must(t, cli.ExitOK, "confirm", "--screens", "shop", "--yes")
+	shown := r.must(t, cli.ExitOK, "review", "shop", "--yes")
+	contains(t, "the screens", shown.stdout, "Cart: 2 elements", "never approved before", "approved the screens of shop")
+	again := r.must(t, cli.ExitOK, "review", "shop", "--yes")
 	contains(t, "second approval", again.stdout, "already approved")
 
 	res = r.must(t, cli.ExitOK, "run", "--scenario", "WEB-1")
@@ -117,12 +117,12 @@ func TestWebScenarioNeedsApprovedScreensThenPasses(t *testing.T) {
 
 func TestChangedScreensNeedApprovalAgain(t *testing.T) {
 	r := webRepo(t)
-	r.must(t, cli.ExitOK, "confirm", "--screens", "shop", "--yes")
+	r.must(t, cli.ExitOK, "review", "shop", "--yes")
 	r.must(t, cli.ExitOK, "run", "--scenario", "WEB-1")
 	r.edit(t, ".semar/screens/shop.yaml", func(s string) string { return strings.Replace(s, "name: Place order", "name: Pay", 1) })
 	r.must(t, cli.ExitUndecided, "run", "--scenario", "WEB-1")
 	contains(t, "the report", r.lastReport(t), "the screens of shop are not approved")
-	shown := r.must(t, cli.ExitOK, "confirm", "--screens", "shop", "--yes")
+	shown := r.must(t, cli.ExitOK, "review", "shop", "--yes")
 	contains(t, "the change", shown.stdout, "changed Cart.place-order: the element changed: check it is the same thing")
 	// The element is not on the page any more, so the leg is inconclusive and never failed.
 	r.must(t, cli.ExitUndecided, "run", "--scenario", "WEB-1")
@@ -134,7 +134,7 @@ func TestScreensRepairProposesAndApplies(t *testing.T) {
 	r.edit(t, ".semar/screens/shop.yaml", func(s string) string {
 		return "# the shop screens\n" + strings.Replace(s, "role: button, name: Place order", "role: link, name: Place order", 1)
 	})
-	r.must(t, cli.ExitOK, "confirm", "--screens", "shop", "--yes")
+	r.must(t, cli.ExitOK, "review", "shop", "--yes")
 	r.must(t, cli.ExitUndecided, "run", "--scenario", "WEB-1")
 
 	res := r.must(t, cli.ExitOK, "screens", "repair", "latest")
@@ -153,7 +153,7 @@ func TestScreensRepairProposesAndApplies(t *testing.T) {
 	r.must(t, cli.ExitError, "screens", "repair", "latest", "--apply", "nonsense")
 
 	res = r.must(t, cli.ExitOK, "screens", "repair", "latest", "--apply", "Cart.place-order=1")
-	contains(t, "the repair", res.stdout, "now: { role: button, name: \"Place order\" }", "semar confirm --screens shop")
+	contains(t, "the repair", res.stdout, "now: { role: button, name: \"Place order\" }", "semar review shop")
 	data, err := os.ReadFile(r.path(".semar", "screens", "shop.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -171,23 +171,23 @@ func TestScreensRepairProposesAndApplies(t *testing.T) {
 
 	// Its hash is the one of the file that the first run was refused for, and the file is new to the approvals.
 	r.must(t, cli.ExitUndecided, "run", "--scenario", "WEB-1")
-	shown := r.must(t, cli.ExitOK, "confirm", "--screens", "shop", "--yes")
+	shown := r.must(t, cli.ExitOK, "review", "shop", "--yes")
 	contains(t, "the change", shown.stdout, "changed Cart.place-order: the element changed: check it is the same thing")
 	r.must(t, cli.ExitOK, "run", "--scenario", "WEB-1")
 }
 
 func TestScreensRepairOfARunWithNoMiss(t *testing.T) {
 	r := webRepo(t)
-	r.must(t, cli.ExitOK, "confirm", "--screens", "shop", "--yes")
+	r.must(t, cli.ExitOK, "review", "shop", "--yes")
 	r.must(t, cli.ExitOK, "run", "--scenario", "WEB-1")
 	res := r.must(t, cli.ExitOK, "screens", "repair", "latest")
 	contains(t, "the answer", res.stdout, "nothing to repair")
 }
 
-func TestConfirmScreensRefusesAMissingFile(t *testing.T) {
+func TestReviewRefusesAScreensAppThatHasNoFile(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
-	res := r.must(t, cli.ExitError, "confirm", "--screens", "nope", "--yes")
-	contains(t, "the error", res.stderr, ".semar/screens/nope.yaml")
+	res := r.must(t, cli.ExitError, "review", "nope", "--yes")
+	contains(t, "the error", res.stderr, "nope is not a scenario, a ticket, a fixture, a journey, or the app of a screens file")
 }
 
 func TestLoginWithoutChromeSaysSo(t *testing.T) {
@@ -220,7 +220,7 @@ func TestNoChromeBlocksAWebScenario(t *testing.T) {
 		return strings.Replace(s, "    effects:", "    web: {chrome: /does/not/exist}\n    effects:", 1)
 	})
 	r.must(t, cli.ExitOK, "script", "add", r.path("scripts", "WEB-1.yaml"))
-	r.must(t, cli.ExitOK, "confirm", "--screens", "shop", "--yes")
+	r.must(t, cli.ExitOK, "review", "shop", "--yes")
 	r.must(t, cli.ExitUndecided, "run", "--scenario", "WEB-1")
 	contains(t, "the report", r.lastReport(t), "blocked", "Chrome was not found")
 }

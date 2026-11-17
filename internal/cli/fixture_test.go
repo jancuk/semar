@@ -122,7 +122,7 @@ func (r *repo) lastReport(t *testing.T) string {
 
 func (r *repo) approveFixture(t *testing.T) domain.Hash {
 	t.Helper()
-	r.must(t, cli.ExitOK, "confirm", "--fixture", "order.paid", "--yes")
+	r.must(t, cli.ExitOK, "review", "order.paid", "--yes")
 	h, err := cli.FixtureHashOf(r.dir, "order.paid")
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +212,7 @@ func TestFixtureCheckRecordsHealth(t *testing.T) {
 	if got := r.orderStatus(t, "o-1"); got != sampleapp.StatusCancelled {
 		t.Errorf("the check left order o-1 %s", got)
 	}
-	acts := r.must(t, cli.ExitOK, "activity", "latest")
+	acts := r.must(t, cli.ExitOK, "show", "--activity")
 	contains(t, "the activity", acts.stdout, "fixture order.paid (as check): find step 1", "fixture order.paid (as check): cleanup step 1")
 	r.assertNoSecret(t, []string{token, "tok-pay"})
 
@@ -223,7 +223,7 @@ func TestFixtureCheckRecordsHealth(t *testing.T) {
 func TestFixtureCheckNeedsApprovalAndSendsNothingWithout(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	res := r.must(t, cli.ExitUndecided, "fixture", "check", "order.paid", "--env", "local", "--auth-profile", "support-agent")
-	contains(t, "the check", res.stdout, "order.paid 1.0.0: not fully checked: fixture order.paid is not approved: run semar confirm --fixture order.paid", "1 not fully checked")
+	contains(t, "the check", res.stdout, "order.paid 1.0.0: not fully checked: fixture order.paid is not approved: run semar review order.paid", "1 not fully checked")
 	if n := r.reached("/v1"); n != 0 {
 		t.Errorf("%d requests reached the services for a fixture nobody approved", n)
 	}
@@ -336,7 +336,7 @@ func fixturePlan(t *testing.T, approve bool) (result, string) {
 	// The file name does not match its ID, and its create step calls a service that no environment has.
 	p.write(t, ".semar/fixtures/order-paid.yaml", orderPaidFixture)
 	if approve {
-		p.must(t, cli.ExitOK, "confirm", "--fixture", "order.created", "--yes")
+		p.must(t, cli.ExitOK, "review", "order.created", "--yes")
 	}
 	made := p.recordJobs()
 	res := p.must(t, cli.ExitOK, "plan", "--diff", "main..release")

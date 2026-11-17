@@ -27,8 +27,11 @@ type Record struct {
 	Scenario   domain.ScenarioID `json:"scenario"`
 	ExpectHash domain.Hash       `json:"expectHash"`
 	User       string            `json:"user"`
-	Identity   string            `json:"identity"` // "local, unverified identity" in this plan. FR-11
-	At         time.Time         `json:"at"`
+	// Email is the user.email of git when the person confirmed, or empty when it was not set. It
+	// only lets a report say who confirmed, and it is no proof of who that was.
+	Email    string    `json:"email,omitempty"`
+	Identity string    `json:"identity"` // "local, unverified identity" in this plan. FR-11
+	At       time.Time `json:"at"`
 	// Sources are the sources of the expectations the person saw, sorted and without duplicates.
 	// A record without any (one from an older build) confirms nothing.
 	Sources []domain.Source `json:"sources"`
@@ -173,6 +176,60 @@ func (l *Local) Get(id domain.ScenarioID, h domain.Hash) (Record, bool, error) {
 	}
 	best.Sources = slices.Compact(slices.Sorted(slices.Values(sources)))
 	return best, found, nil
+}
+
+// Confirmations returns every confirmation of the scenario and hash, in the order of the file names.
+func (l *Local) Confirmations(id domain.ScenarioID, h domain.Hash) ([]Record, error) {
+	dir, err := rel(id, h)
+	if err != nil {
+		return nil, fmt.Errorf("load confirmation: %w", err)
+	}
+	return readDir(l, dir, func(root *os.Root, name string) (Record, error) { return read(root, name) })
+}
+
+// Root is the folder that holds store/.
+func (l *Local) Root() string { return l.root }
+
+// readDir reads every .json record of a directory of the store, in file name order. A directory
+// that is not there holds none. A link, a file that is not regular, and a record that cannot be
+// read are errors, as in the readers of one record.
+func readDir[T any](l *Local, dir string, one func(root *os.Root, name string) (T, error)) ([]T, error) {
+	root, err := os.OpenRoot(l.root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load approvals: %w", err)
+	}
+	defer root.Close()
+	if err := atomicfile.CheckDirIn(root, dir); err != nil {
+		return nil, fmt.Errorf("load approvals: %w", err)
+	}
+	d, err := root.Open(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read approvals in %s: %w", filepath.Join(l.root, dir), err)
+	}
+	entries, err := d.ReadDir(-1)
+	_ = d.Close()
+	if err != nil {
+		return nil, fmt.Errorf("read approvals in %s: %w", filepath.Join(l.root, dir), err)
+	}
+	slices.SortFunc(entries, func(a, b fs.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
+	var out []T
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		r, err := one(root, filepath.Join(dir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, nil
 }
 
 // read decodes one confirmation. The file checks are shared with the other record kinds.

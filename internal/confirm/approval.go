@@ -22,6 +22,7 @@ type FixtureApproval struct {
 	Version  string           `json:"version"`
 	Hash     domain.Hash      `json:"hash"`
 	User     string           `json:"user"`
+	Email    string           `json:"email,omitempty"`
 	Identity string           `json:"identity"` // "local, unverified identity"
 	At       time.Time        `json:"at"`
 }
@@ -116,6 +117,15 @@ func (l *Local) FixtureApproved(id domain.FixtureID, h domain.Hash) (bool, error
 		found = true
 	}
 	return found, nil
+}
+
+// FixtureApprovals returns every approval of the fixture at this hash, in the order of the file names.
+func (l *Local) FixtureApprovals(id domain.FixtureID, h domain.Hash) ([]FixtureApproval, error) {
+	dir, err := fixtureRel(id, h)
+	if err != nil {
+		return nil, fmt.Errorf("load fixture approval: %w", err)
+	}
+	return readDir(l, dir, readFixtureApproval)
 }
 
 func readFixtureApproval(root *os.Root, name string) (FixtureApproval, error) {

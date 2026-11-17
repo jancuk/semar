@@ -257,7 +257,7 @@ func TestPlanFromADiffEndToEnd(t *testing.T) {
 	contains(t, "stdout", res.stdout,
 		"SHOP-482 (behaviour): 1 scenario", "SHOP-483 (behaviour): 1 scenario", "not drafted: 1",
 		"plan: "+p.path(".semar", "plans", p.head(t)[:12], "plan.md"),
-		"next:\n  semar run --all --build "+p.head(t)[:12]+"\n  semar confirm --all\n  semar run --all --build "+p.head(t)[:12]+"\n",
+		"next:\n  semar run --all --build "+p.head(t)[:12]+"\n  semar review\n  semar run --all --build "+p.head(t)[:12]+"\n",
 		"The first run shows whether the drafted requests fit the service, and the second gives the result.")
 	contains(t, "stderr", res.stderr, "wrote "+p.path(".semar", "semar.yaml"), "export "+planTokenEnv, "several minutes")
 	if n := jobs.Load(); n != 1 {
@@ -329,9 +329,9 @@ authProfiles:
 	p.assertNoTempCopy(t)
 
 	first := p.must(t, cli.ExitUndecided, "run", "--all")
-	contains(t, "the first run", first.stdout, "inconclusive", "not confirmed")
-	confirmed := p.must(t, cli.ExitOK, "confirm", "--all", "--yes")
-	contains(t, "confirm --all", confirmed.stdout, "confirmed scenario SHOP-482-01", "confirmed scenario SHOP-483-01")
+	contains(t, "the first run", first.stdout, "needs review", "not confirmed")
+	confirmed := p.must(t, cli.ExitOK, "review", "--yes")
+	contains(t, "confirm --all", confirmed.stdout, "approved SHOP-482-01", "approved SHOP-483-01")
 	// A run passes only with a recorded build, and the file of semar init has no build probe.
 	unprobed := p.must(t, cli.ExitUndecided, "run", "--all")
 	contains(t, "a run with no build probe", unprobed.stdout, "no build was recorded")
@@ -395,7 +395,7 @@ func TestPlanWithABuildProbeFromInit(t *testing.T) {
 	if b := cfg.Environments["uat"].Services[0].Build; b == nil || *b != want {
 		t.Fatalf("build probe = %+v, want %+v", b, want)
 	}
-	p.must(t, cli.ExitOK, "confirm", "--all", "--yes")
+	p.must(t, cli.ExitOK, "review", "--yes")
 	res := p.must(t, cli.ExitOK, "run", "--all")
 	contains(t, "the run", res.stdout, "passed")
 	if strings.Contains(res.stdout, "declared") {
@@ -419,7 +419,7 @@ func TestPlanFindsTheSeededDefect(t *testing.T) {
 	p := newPlanRepo(t, sampleapp.Options{Defects: map[sampleapp.Defect]bool{sampleapp.RefundOverTotal: true}})
 	p.configure(t, goodDraft)
 	p.must(t, cli.ExitOK, "plan", "--diff", "main..release")
-	p.must(t, cli.ExitOK, "confirm", "--all", "--yes")
+	p.must(t, cli.ExitOK, "review", "--yes")
 	res := p.must(t, cli.ExitFailed, "run", "--all", "--build", p.head(t)[:12])
 	contains(t, "the run", res.stdout, "failed")
 }
@@ -738,21 +738,20 @@ func TestInitWritesABuildProbe(t *testing.T) {
 	}
 }
 
-func TestConfirmAllRefusesAScenarioID(t *testing.T) {
+func TestReviewRefusesWhatItCannotApprove(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
-	res := r.must(t, cli.ExitError, "confirm", "--all", scenarioID, "--yes")
-	contains(t, "stderr", res.stderr, "--all, and not both")
-	r.must(t, cli.ExitError, "confirm", "--yes")
+	res := r.must(t, cli.ExitError, "review", "nowhere", "--yes")
+	contains(t, "stderr", res.stderr, "nowhere is not a scenario, a ticket, a fixture, a journey, or the app of a screens file")
 	if exists(t, r.path(".semar", "store", "confirmations")) {
 		t.Error("a confirmation was stored")
 	}
 	r.opts.User = func() (string, error) { return " ", nil }
-	res = r.must(t, cli.ExitError, "confirm", "--all", "--yes")
-	contains(t, "stderr", res.stderr, "the confirmer has no name")
+	res = r.must(t, cli.ExitError, "review", "--yes")
+	contains(t, "stderr", res.stderr, "the approver has no name")
 	r.opts.User = func() (string, error) { return "tester", nil }
-	r.must(t, cli.ExitUndecided, "confirm", "--all")
-	res = r.must(t, cli.ExitOK, "confirm", "--all", "--yes")
-	contains(t, "stdout", res.stdout, "Scenario "+scenarioID+" has", "confirmed scenario "+scenarioID)
+	r.must(t, cli.ExitUndecided, "review")
+	res = r.must(t, cli.ExitOK, "review", "--yes")
+	contains(t, "stdout", res.stdout, "Test "+scenarioID, "approved "+scenarioID)
 }
 
 // Review focus 4: a second plan of the same diff knows the scenarios of the first.
