@@ -21,6 +21,7 @@ import (
 	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/evidence"
+	"github.com/jancuk/semar/internal/scenario"
 )
 
 // localIdentity says that nothing checked who the user is. FR-11
@@ -92,6 +93,8 @@ type unconfirmed struct {
 	label   string // how the heading names it; "scenario <id>" when empty
 	lines   []string
 	sources []domain.Source
+	file    string // the scenario file, from the repository, when the scenario has one
+	gherkin string // the scenario as Gherkin text with its sources and cites, shown above the list
 }
 
 // needsConfirmation lists the expected results of a scenario that a person must confirm. A step
@@ -124,6 +127,43 @@ func needsConfirmation(dir string, sc domain.Scenario, trust []domain.Source) un
 		}
 	}
 	return u
+}
+
+// scenarioText is the Gherkin text of a scenario for the person who confirms it, and the file it came from.
+// It is the file as it is, because that is what the person reads and edits. When the file cannot be read,
+// the scenario is written out from what Semar read, so that the person still sees Gherkin.
+func scenarioText(dir string, sc domain.Scenario) (file, text string) {
+	if files, err := scenarioFiles(dir); err == nil && len(files[sc.ID]) == 1 {
+		if rel, err := filepath.Rel(dir, files[sc.ID][0]); err == nil && filepath.IsLocal(rel) {
+			if data, ok := readCited(dir, rel); ok {
+				return filepath.ToSlash(rel), terminalSafe(data)
+			}
+		}
+	}
+	data, err := scenario.Render(sc, "")
+	if err != nil {
+		return "", ""
+	}
+	return "scenario " + string(sc.ID), terminalSafe(string(data))
+}
+
+// readCited reads at most maxCitedFile bytes of a file below dir, through a root.
+func readCited(dir, rel string) (string, bool) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return "", false
+	}
+	defer root.Close()
+	f, err := root.Open(rel)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxCitedFile+1))
+	if err != nil || len(data) > maxCitedFile {
+		return "", false
+	}
+	return string(data), true
 }
 
 const maxCitedText = 300
@@ -196,6 +236,7 @@ func confirmScenarios(ctx context.Context, stdout, stderr io.Writer, o options, 
 	var todo []unconfirmed
 	for _, sc := range scs {
 		if u := needsConfirmation(f.dir, sc, cfg.Policy.Trust.Confirm); len(u.lines) > 0 {
+			u.file, u.gherkin = scenarioText(f.dir, sc)
 			todo = append(todo, u)
 		}
 	}
@@ -214,6 +255,13 @@ func confirmScenarios(ctx context.Context, stdout, stderr io.Writer, o options, 
 // hash of each. The scenarios of a journey's legs go through it as well, so one flow confirms both.
 func storeConfirmations(ctx context.Context, stdout, stderr io.Writer, o options, f confirmFlags, todo []unconfirmed) error {
 	for _, u := range todo {
+		if u.gherkin != "" {
+			fmt.Fprintf(stdout, "%s as Gherkin, with the source and cite of each expected result under it:\n\n", u.file)
+			for _, line := range strings.Split(strings.TrimRight(u.gherkin, "\n"), "\n") {
+				fmt.Fprintf(stdout, "    %s\n", line)
+			}
+			fmt.Fprintln(stdout)
+		}
 		label := u.label
 		if label == "" {
 			label = "Scenario " + string(u.sc.ID)
