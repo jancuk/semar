@@ -14,6 +14,7 @@ var kindRules = []struct {
 	{"migration", []string{"migrations/**", "**/migrations/**"}},
 	{"config", []string{
 		"**/*.yaml", "**/*.yml", "**/*.json", "**/*.toml",
+		"**/.semar/**",
 		"deployments/**", ".github/**", ".circleci/**",
 		"**/bitbucket-pipelines.*", "**/.gitlab-ci.*", "**/Jenkinsfile*", "**/azure-pipelines.*", "**/Dockerfile*",
 	}},

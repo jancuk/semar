@@ -27,6 +27,8 @@ func TestKind(t *testing.T) {
 		{"db/migrations/002_add.sql", "migration"},
 		{"db/migrations/seed.json", "migration"},
 		{"config/app.yaml", "config"},
+		{".semar/scenarios/SHOP-482/SHOP-482-01.feature", "config"},
+		{"service/.semar/scenarios/SHOP-482/SHOP-482-01.feature", "config"},
 		{"app.yml", "config"},
 		{"package.json", "config"},
 		{"Cargo.toml", "config"},
