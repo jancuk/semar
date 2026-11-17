@@ -55,7 +55,14 @@ func login(ctx context.Context, o LoginOptions, afterOpen func(tab context.Conte
 		go afterOpen(tab)
 	}
 
-	every := o.Poll
+	return waitWindowClosed(ctx, tab, o.Poll)
+}
+
+// waitWindowClosed returns when the person has closed the last window of the browser, or quit it.
+// It gives ctx.Err() when ctx ends first, after it has asked the browser to quit. A window is
+// looked for every poll, which is half a second when poll is zero.
+func waitWindowClosed(ctx context.Context, tab context.Context, poll time.Duration) error {
+	every := poll
 	if every <= 0 {
 		every = 500 * time.Millisecond
 	}
