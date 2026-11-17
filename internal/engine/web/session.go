@@ -144,10 +144,15 @@ func capturePNG(ctx context.Context) ([]byte, error) {
 // tree of the page has changed for a short time, or until max has passed. A page that never settles
 // is read as it is: a check then reads what a person would see.
 func (s *session) settle(ctx context.Context, limit time.Duration) {
+	settleUntil(ctx, limit, s.guard.idle)
+}
+
+// settleUntil is settle with the way to ask how long the requests have been still.
+func settleUntil(ctx context.Context, limit time.Duration, idle func(time.Time) (time.Duration, int)) {
 	deadline := time.Now().Add(limit)
 	for ctx.Err() == nil {
-		netQuiet, open := s.guard.idle(time.Now())
-		ready, domQuiet := s.pageState(ctx)
+		netQuiet, open := idle(time.Now())
+		ready, domQuiet := pageState(ctx)
 		if ready && open == 0 && netQuiet >= quiet && domQuiet >= quiet {
 			return
 		}
@@ -163,7 +168,7 @@ func (s *session) settle(ctx context.Context, limit time.Duration) {
 
 // pageState says whether the document is complete, and how long ago its tree last changed. A page
 // that cannot be asked, for instance in the middle of a navigation, is not ready.
-func (s *session) pageState(ctx context.Context) (ready bool, domQuiet time.Duration) {
+func pageState(ctx context.Context) (ready bool, domQuiet time.Duration) {
 	res, err := chromedp.Call(ctx, runtime.Evaluate, runtime.EvaluateParams{
 		Expression:    `JSON.stringify([document.readyState === 'complete' ? 1 : 0, window.__semarLast === undefined ? 1e6 : performance.now() - window.__semarLast])`,
 		ReturnByValue: ptr(true),

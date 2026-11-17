@@ -10,7 +10,7 @@ import (
 
 // webEngine makes the browser engine of a run. It starts no Chrome until the first web step needs it,
 // so a run with no web step costs nothing. Without a Semar home, a web step ends with that reason.
-func (rg *envRig) webEngine(o options, envName string, env config.Environment, headed bool) *web.Engine {
+func (rg *envRig) webEngine(o options, cfg config.Config, envName string, env config.Environment, headed bool) *web.Engine {
 	home, _ := o.home()
 	return web.New(web.Options{
 		Policy:      rg.policy,
@@ -18,6 +18,7 @@ func (rg *envRig) webEngine(o options, envName string, env config.Environment, h
 		Files:       rg.run,
 		Services:    rg.services,
 		Secrets:     rg.secrets,
+		Accounts:    webSignIns(cfg),
 		Home:        home,
 		Environment: envName,
 		Chrome:      env.Web.Chrome,
@@ -43,4 +44,15 @@ func (s screenSource) Approved(app string, h domain.Hash) (bool, error) {
 		return true, nil
 	}
 	return s.approvals.ScreensApproved(app, h)
+}
+
+// webSignIns is the web sign-in of each account that has one.
+func webSignIns(cfg config.Config) map[string]config.WebSignIn {
+	out := map[string]config.WebSignIn{}
+	for name, p := range cfg.AuthProfiles {
+		if p.Web != nil {
+			out[name] = *p.Web
+		}
+	}
+	return out
 }

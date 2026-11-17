@@ -285,7 +285,11 @@ func (e *Engine) run(ctx context.Context, s *session, c Call, open *url.URL, val
 		opErr = s.navigate(tabCtx, open.String())
 		dispatched = true
 		if who, ok := e.o.Accounts[accountName(c.AuthProfile)]; ok && opErr == nil {
-			opErr = e.signInAfterOpen(tabCtx, s, accountName(c.AuthProfile), who, open, &a)
+			g := signer{tab: sessionTab{s, e.o.Settle}, secrets: e.o.Secrets, limit: e.o.ActionTimeout / 3}
+			var signed bool
+			if signed, opErr = g.afterOpen(tabCtx, accountName(c.AuthProfile), who, open); signed {
+				a.Web.SignIn = &domain.WebSignIn{Account: accountName(c.AuthProfile), User: who.User}
+			}
 		}
 	case domain.WebWait:
 		if w.Element != "" {

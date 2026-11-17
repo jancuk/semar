@@ -245,7 +245,7 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 		}
 		deps.Fixtures = fx
 	}
-	eng := rg.webEngine(o, envName, env, headed)
+	eng := rg.webEngine(o, cfg, envName, env, headed)
 	deps.Web, deps.Screens = eng, screenSource{repo: repo, approvals: confirm.NewLocal(rg.store.Root()), trusted: trustedScreens(ctx)}
 	return &replayRig{envRig: rg, runner: replay.New(deps), web: eng}, nil
 }

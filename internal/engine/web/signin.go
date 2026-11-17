@@ -13,7 +13,7 @@ import (
 	"github.com/chromedp/chromedp"
 
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/secret"
 )
 
 // signInForm is a sign-in form of a page: the field of the user, the field of the password, and how
@@ -136,37 +136,61 @@ const (
 	signInUnfinished
 )
 
-// signInAfterOpen signs in to the form that the page of an open shows, when it shows one, and stores
-// who signed in on the action. A sign-in that does not finish is an error, which no scenario reads as
-// a failure of the product.
-func (e *Engine) signInAfterOpen(ctx context.Context, s *session, account string, who config.WebSignIn, opened *url.URL, a *domain.Action) error {
-	s.settle(ctx, e.o.Settle)
-	state, alert, err := e.signIn(ctx, s, account, who)
+// signInTab is a tab that Semar signs in to: the engine's session and the window of a recording
+// both are one.
+type signInTab interface {
+	// settle waits until the page looks still.
+	settle(ctx context.Context)
+	location(ctx context.Context) (string, error)
+	navigate(ctx context.Context, url string) error
+}
+
+// signer signs in to the tab with the account that a step or a recording names.
+type signer struct {
+	tab     signInTab
+	secrets secret.Resolver
+	// limit is the most that the wait for the form to go may take. It is a part of the time of an
+	// action, so that the page can still be read and photographed when the sign-in does not finish.
+	limit time.Duration
+}
+
+// afterOpen signs in to the form that the page shows, when it shows one, and then opens the address
+// of the step again if the sign-in sent the tab elsewhere, as an application that shows its home page
+// after a sign-in does. It says whether it signed in. A sign-in that does not finish is an error,
+// which no scenario reads as a failure of the product.
+func (g signer) afterOpen(ctx context.Context, account string, who config.WebSignIn, opened *url.URL) (bool, error) {
+	g.tab.settle(ctx)
+	state, alert, err := g.signIn(ctx, account, who)
 	switch {
 	case err != nil:
-		return err
+		return false, err
 	case state == signInUnfinished:
-		return errors.New(unfinishedText(account, who, alert))
-	case state == signedIn:
-		a.Web.SignIn = &domain.WebSignIn{Account: account, User: who.User}
-		return e.backToAddress(ctx, s, opened)
+		return false, errors.New(unfinishedText(account, who, alert))
+	case state == noSignInForm:
+		return false, nil
 	}
-	return nil
+	g.tab.settle(ctx)
+	if loc, err := g.tab.location(ctx); err == nil {
+		if now, err := url.Parse(loc); err == nil && sameAddress(now, opened) {
+			return true, nil
+		}
+	}
+	return true, g.tab.navigate(ctx, opened.String())
 }
 
 // signIn fills the form of the page, sends it, and waits until the form is gone. The alert is what the
 // page says when the form is still there.
-func (e *Engine) signIn(ctx context.Context, s *session, account string, who config.WebSignIn) (state signInState, alert string, err error) {
+func (g signer) signIn(ctx context.Context, account string, who config.WebSignIn) (state signInState, alert string, err error) {
 	rd := newReader(ctx, nil)
 	defer rd.release()
 	form, found, err := rd.signInForm()
 	if err != nil || !found {
 		return noSignInForm, "", err
 	}
-	if e.o.Secrets == nil {
-		return noSignInForm, "", errors.New("the sign-in password could not be read: the engine has no secret source")
+	if g.secrets == nil {
+		return noSignInForm, "", errors.New("the sign-in password could not be read: there is no secret source")
 	}
-	password, err := e.o.Secrets.Resolve(ctx, who.Password)
+	password, err := g.secrets.Resolve(ctx, who.Password)
 	if err != nil {
 		return noSignInForm, "", fmt.Errorf("the sign-in password of %s could not be read: %w", account, err)
 	}
@@ -181,11 +205,9 @@ func (e *Engine) signIn(ctx context.Context, s *session, account string, who con
 	}
 	rd.release()
 
-	// A third of the time of an action is the most that a sign-in may take, so that the page can still
-	// be read and photographed when it does not finish.
-	wait, cancel := context.WithTimeout(ctx, e.o.ActionTimeout/3)
+	wait, cancel := context.WithTimeout(ctx, g.limit)
 	defer cancel()
-	s.settle(wait, e.o.Settle)
+	g.tab.settle(wait)
 	if formGoneBefore(wait) {
 		return signedIn, "", nil
 	}
@@ -212,30 +234,39 @@ func formGoneBefore(ctx context.Context) bool {
 	}
 }
 
-// backToAddress opens the address of the step again when the sign-in sent the tab elsewhere, as an
-// application that shows its home page after a sign-in does.
-func (e *Engine) backToAddress(ctx context.Context, s *session, opened *url.URL) error {
-	s.settle(ctx, e.o.Settle)
-	loc, err := s.location(ctx)
-	if err != nil {
-		return nil
-	}
-	if now, err := url.Parse(loc); err == nil && sameAddress(now, opened) {
-		return nil
-	}
-	return s.navigate(ctx, opened.String())
-}
-
 func sameAddress(a, b *url.URL) bool {
 	x, y := *a, *b
 	x.Fragment, y.Fragment = "", ""
 	return x.String() == y.String()
 }
 
+// unfinishedText is one short line: a report cuts a reason at 200 characters, so the alert, which
+// is the page's own words and the longest part, comes last.
 func unfinishedText(account string, who config.WebSignIn, alert string) string {
-	text := "signing in as " + account + " did not finish: the sign-in form is still on the page"
+	text := "signing in as " + account + " did not finish: the sign-in form is still on the page. Check web.user and " + who.PasswordEnv() + "."
 	if alert != "" {
-		text += fmt.Sprintf(" and the page says %q", alert)
+		text += fmt.Sprintf(" The page says %q", clipTo(alert, maxAlertShown))
 	}
-	return text + "; check authProfiles." + account + ".web.user and the variable " + who.PasswordEnv() + " of its password"
+	return text
 }
+
+const maxAlertShown = 60
+
+func clipTo(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "..."
+	}
+	return s
+}
+
+// sessionTab is the tab of an engine session.
+type sessionTab struct {
+	s     *session
+	limit time.Duration
+}
+
+func (t sessionTab) settle(ctx context.Context) { t.s.settle(ctx, t.limit) }
+func (t sessionTab) location(ctx context.Context) (string, error) {
+	return t.s.location(ctx)
+}
+func (t sessionTab) navigate(ctx context.Context, url string) error { return t.s.navigate(ctx, url) }

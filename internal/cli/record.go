@@ -26,6 +26,7 @@ import (
 	"github.com/jancuk/semar/internal/scenario"
 	"github.com/jancuk/semar/internal/screens"
 	"github.com/jancuk/semar/internal/script"
+	"github.com/jancuk/semar/internal/secret"
 )
 
 type recordTestFlags struct {
@@ -185,15 +186,22 @@ func recordTest(ctx context.Context, cmd *cobra.Command, o options, f recordTest
 		return err
 	}
 	hooks := recordingOf(ctx)
-	rec, err := web.StartRecorder(ctx, web.RecorderOptions{
+	ro := web.RecorderOptions{
 		Chrome: env.Web.Chrome, Home: home, Environment: envName, Account: account, Hidden: hooks.hidden,
-	})
+	}
+	if who := cfg.AuthProfiles[account].Web; who != nil {
+		ro.SignIn = &web.RecorderSignIn{Account: account, Who: *who, Secrets: secret.NewEnv(o.LookupEnv)}
+	}
+	rec, err := web.StartRecorder(ctx, ro)
 	if err != nil {
 		return err
 	}
 	defer rec.Finish()
 	if err := rec.Open(first); err != nil {
-		return err
+		return fmt.Errorf("nothing was recorded: %w", err)
+	}
+	if who, ok := rec.SignedIn(); ok {
+		fmt.Fprintf(out, "Signed in as %s.\n", who)
 	}
 	fmt.Fprintf(out, "A Chrome window is open at %s\n  Do the flow. Hold Option and click what must be true. Close the window to finish.\n", first)
 	if hooks.drive != nil {

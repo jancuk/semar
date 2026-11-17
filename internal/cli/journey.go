@@ -434,7 +434,7 @@ func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir strin
 		Engine: rg.engine, Builds: rg.builds, Confirm: confirmations, Trust: cfg.Policy.Trust.Confirm, Run: rg.id,
 		Accounts: slices.Sorted(maps.Keys(cfg.AuthProfiles)),
 	}
-	eng := rg.webEngine(o, envName, env, headed)
+	eng := rg.webEngine(o, cfg, envName, env, headed)
 	defer eng.Close()
 	announce()
 	deps.Web, deps.Screens = eng, screenSource{repo: dir, approvals: confirmations}

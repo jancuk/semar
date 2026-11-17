@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +15,9 @@ import (
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 
+	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/record"
+	"github.com/jancuk/semar/internal/secret"
 )
 
 // recorderJS is added to every page of the window before the page's own scripts run. It sends what a
@@ -38,6 +41,19 @@ type RecorderOptions struct {
 	Hidden      bool
 	// Poll is how often Wait looks for the window. The default is half a second.
 	Poll time.Duration
+	// SignIn makes Open sign in to the first page, and start to record after that: what the window
+	// does to sign in is no part of the recording. Nil starts to record at once.
+	SignIn *RecorderSignIn
+}
+
+// RecorderSignIn is the account that the window signs in with. Settle and ActionTimeout bound the wait
+// for a page to look still and the whole sign-in, as they do for the engine.
+type RecorderSignIn struct {
+	Account       string
+	Who           config.WebSignIn
+	Secrets       secret.Resolver
+	Settle        time.Duration
+	ActionTimeout time.Duration
 }
 
 // Recorder is a Chrome window on Semar's own profile that reports what a person does in it. The
@@ -54,6 +70,7 @@ type Recorder struct {
 	requested time.Time // when a page last asked for a navigation: a click or a form did
 	closeOnce sync.Once
 	gone      bool // Wait has returned: the window is closed, or the browser is gone
+	signedIn  bool
 }
 
 // StartRecorder starts Chrome on the profile of the account and puts the recorder in every page of
@@ -90,10 +107,22 @@ func (r *Recorder) start() error {
 	if _, err := chromedp.Call(r.tab, page.Enable, page.EnableParams{}); err != nil {
 		return err
 	}
+	if r.o.SignIn == nil {
+		return r.arm()
+	}
+	_, err := chromedp.Call(r.tab, page.AddScriptToEvaluateOnNewDocument, page.AddScriptToEvaluateOnNewDocumentParams{Source: watchJS})
+	return err
+}
+
+// arm puts the recorder in every page of the window, and in the page that is open now.
+func (r *Recorder) arm() error {
 	if _, err := chromedp.Call(r.tab, runtime.AddBinding, runtime.AddBindingParams{Name: bindingName}); err != nil {
 		return err
 	}
-	_, err := chromedp.Call(r.tab, page.AddScriptToEvaluateOnNewDocument, page.AddScriptToEvaluateOnNewDocumentParams{Source: recorderJS})
+	if _, err := chromedp.Call(r.tab, page.AddScriptToEvaluateOnNewDocument, page.AddScriptToEvaluateOnNewDocumentParams{Source: recorderJS}); err != nil {
+		return err
+	}
+	_, err := chromedp.Call(r.tab, runtime.Evaluate, runtime.EvaluateParams{Expression: recorderJS})
 	return err
 }
 
@@ -101,12 +130,84 @@ func (r *Recorder) start() error {
 func (r *Recorder) Context() context.Context { return r.tab }
 
 // Open goes to an address as a person does who types it in the address bar: the move is a step.
+// With SignIn, Open then signs in to the page when it shows a sign-in form, and the recording starts
+// at that address, signed in.
 func (r *Recorder) Open(rawURL string) error {
-	_, err := chromedp.Call(r.tab, page.Navigate, page.NavigateParams{URL: rawURL, TransitionType: page.TransitionTypeTyped})
+	if err := r.navigate(r.tab, rawURL); err != nil {
+		return err
+	}
+	if r.o.SignIn == nil {
+		return nil
+	}
+	return r.signInAndArm(rawURL)
+}
+
+func (r *Recorder) navigate(ctx context.Context, rawURL string) error {
+	_, err := chromedp.Call(ctx, page.Navigate, page.NavigateParams{URL: rawURL, TransitionType: page.TransitionTypeTyped})
 	if err != nil {
 		return fmt.Errorf("the page could not be opened: %w", err)
 	}
 	return nil
+}
+
+func (r *Recorder) signInAndArm(rawURL string) error {
+	o := r.o.SignIn
+	opened, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("the page address does not parse: %w", err)
+	}
+	limit := o.ActionTimeout
+	if limit <= 0 {
+		limit = defaultActionTimeout
+	}
+	settle := o.Settle
+	if settle <= 0 {
+		settle = defaultSettle
+	}
+	ctx, cancel := context.WithTimeout(r.tab, limit)
+	defer cancel()
+	g := signer{tab: recorderTab{r, settle}, secrets: o.Secrets, limit: limit / 3}
+	signed, err := g.afterOpen(ctx, o.Account, o.Who, opened)
+	if err != nil {
+		return err
+	}
+	if err := r.arm(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.signedIn = signed
+	r.events = []record.Event{{Kind: record.KindOpen, Page: record.Page{URL: rawURL}}}
+	r.mu.Unlock()
+	return nil
+}
+
+// SignedIn is the account that Open signed in as, and false when the page showed no sign-in form.
+func (r *Recorder) SignedIn() (account string, ok bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.signedIn {
+		return "", false
+	}
+	return r.o.SignIn.Account, true
+}
+
+// recorderTab is the tab of the window, for the sign-in. The window has no guard that counts requests,
+// so a page looks still when it is complete and its tree has not changed for a short time.
+type recorderTab struct {
+	r     *Recorder
+	limit time.Duration
+}
+
+func (t recorderTab) settle(ctx context.Context) {
+	settleUntil(ctx, t.limit, func(time.Time) (time.Duration, int) { return time.Hour, 0 })
+}
+
+func (t recorderTab) location(ctx context.Context) (string, error) {
+	return chromedp.Run(ctx, chromedp.Location())
+}
+
+func (t recorderTab) navigate(ctx context.Context, rawURL string) error {
+	return t.r.navigate(ctx, rawURL)
 }
 
 // CloseWindow closes every page of the window, as a person does with its close button. A test that
