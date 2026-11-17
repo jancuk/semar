@@ -15,6 +15,7 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/fixture"
+	"github.com/jancuk/semar/internal/screens"
 )
 
 // fixtureLines is what a person reads before approving a fixture: the header and then everything
@@ -186,6 +187,91 @@ func approveFixtures(ctx context.Context, stdout, stderr io.Writer, o options, f
 			return err
 		}
 		fmt.Fprintf(stdout, "approved fixture %s %s for hash %s as %s (%s)\n", p.fx.ID, p.fx.Version, p.h, name, localIdentity)
+	}
+	return nil
+}
+
+// approveScreens shows every element of each named screens file with its locator, and what changed
+// since the file that was approved before. It asks once and stores one approval for the hash of each.
+func approveScreens(ctx context.Context, stdout, stderr io.Writer, o options, f confirmFlags) error {
+	type pending struct {
+		scr    domain.Screens
+		h      domain.Hash
+		before *confirm.ScreensApproval
+	}
+	approvals := confirm.NewLocal(semarDir(f.dir))
+	var todo []pending
+	seen := map[string]bool{}
+	for _, app := range f.screens {
+		if seen[app] {
+			continue
+		}
+		seen[app] = true
+		scr, err := screens.Load(f.dir, app)
+		if err != nil {
+			return err
+		}
+		h := domain.ScreensHash(scr)
+		if h == "" {
+			return fmt.Errorf("the screens of %s cannot be hashed, so they cannot be approved", app)
+		}
+		done, err := approvals.ScreensApproved(app, h)
+		if err != nil {
+			return err
+		}
+		if done {
+			fmt.Fprintf(stdout, "the screens of %s are already approved for hash %s\n", app, h)
+			continue
+		}
+		p := pending{scr: scr, h: h}
+		if prev, ok, err := approvals.LatestScreens(app); err != nil {
+			return err
+		} else if ok {
+			p.before = &prev
+		}
+		todo = append(todo, p)
+	}
+	if len(todo) == 0 {
+		return nil
+	}
+	for _, p := range todo {
+		for _, line := range screensLines(p.scr, p.h, p.before) {
+			fmt.Fprintln(stdout, oneLine(terminalSafe(line)))
+		}
+	}
+	if !f.yes {
+		if !o.Terminal() {
+			fmt.Fprintln(stderr, "semar: nothing was approved: the input is not a terminal, so pass --yes to approve")
+			return exitError{ExitUndecided}
+		}
+		question := "Approve them? [y/N] "
+		if len(todo) == 1 {
+			question = "Approve it? [y/N] "
+		}
+		fmt.Fprint(stdout, question)
+		if a := strings.ToLower(strings.TrimSpace(readAnswer(ctx, o.Stdin))); a != "y" && a != "yes" {
+			fmt.Fprintln(stdout, "nothing was approved")
+			return exitError{ExitUndecided}
+		}
+	}
+	name, err := o.User()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(name) == "" {
+		return errors.New("the approver has no name; set git config user.name")
+	}
+	store, err := evidence.Open(semarDir(f.dir))
+	if err != nil {
+		return err
+	}
+	approvals = confirm.NewLocal(store.Root())
+	for _, p := range todo {
+		rec := confirm.ScreensApproval{App: p.scr.App, Hash: p.h, User: name, Identity: localIdentity, At: o.Clock().UTC(), Locators: p.scr.Screens}
+		if err := approvals.PutScreens(rec); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "approved the screens of %s for hash %s as %s (%s)\n", p.scr.App, p.h, name, localIdentity)
 	}
 	return nil
 }

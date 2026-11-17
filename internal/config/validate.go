@@ -144,6 +144,9 @@ func validateEnvironment(name string, e Environment, profiles map[string]AuthPro
 			add("%s.authProfile: auth profile %s is not defined under authProfiles", sp, s.AuthProfile)
 		}
 	}
+	if c := e.Web.Chrome; c != "" && !filepath.IsAbs(c) {
+		add("%s.web.chrome must be an absolute path, got %q", p, c)
+	}
 	validateData(p+".data", e.Data, add)
 }
 

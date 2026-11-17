@@ -41,8 +41,15 @@ type Environment struct {
 	Methods  []string  `yaml:"methods"`
 	Effects  Effects   `yaml:"effects"`
 	Services []Service `yaml:"services"`
+	// Web is how the browser of the web engine starts in this environment.
+	Web Web `yaml:"web"`
 	// Data is the set of values that tests need, keyed by a dotted name such as customers.default.
 	Data map[string]string `yaml:"data"`
+}
+
+// Web's Chrome is the path of the Chrome program. Empty finds one on the machine.
+type Web struct {
+	Chrome string `yaml:"chrome"`
 }
 
 type Effects struct {

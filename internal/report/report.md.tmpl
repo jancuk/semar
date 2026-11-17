@@ -100,3 +100,12 @@ Nothing was written in the environment.
 - {{ . }}
 {{ end -}}
 {{ end -}}
+{{ if .Browser }}
+## Browser steps
+
+A browser action can change data. The list above holds the writes of the API only.
+
+{{ range .Browser -}}
+- {{ .Scenario }}, step {{ .Step }}: {{ if .Why }}{{ .Why }} ({{ .Target }}){{ else }}{{ .Target }}{{ end }}: {{ .Result }}{{ if .Screenshot }}. [Screenshot]({{ .Screenshot }}){{ end }}
+{{ end -}}
+{{ end -}}

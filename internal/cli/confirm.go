@@ -33,15 +33,20 @@ type confirmFlags struct {
 	env      string
 	fixtures []string
 	journeys []string
+	screens  []string
 }
 
 func newConfirmCommand(o options) *cobra.Command {
 	var f confirmFlags
 	cmd := &cobra.Command{
-		Use:   "confirm (<scenario id> | --all | --fixture <id>... | --journey <id>...)",
-		Short: "Confirm the expected results of scenarios or journeys, or approve fixtures, that need a person",
+		Use:   "confirm (<scenario id> | --all | --fixture <id>... | --journey <id>... | --screens <app>...)",
+		Short: "Confirm the expected results of scenarios or journeys, or approve fixtures or screens, that need a person",
 		Args: func(cmd *cobra.Command, args []string) error {
 			switch {
+			case len(f.screens) > 0 && (len(f.fixtures) > 0 || len(f.journeys) > 0 || f.all || len(args) > 0):
+				return errors.New("pass --screens alone: it cannot go with --fixture, --journey, --all, or a scenario ID")
+			case len(f.screens) > 0:
+				return nil
 			case cmd.Flags().Changed("env") && len(f.journeys) == 0:
 				return errors.New("--env is for --journey only: a scenario and a fixture are confirmed for every environment")
 			case len(f.fixtures) > 0 && len(f.journeys) > 0:
@@ -61,6 +66,8 @@ func newConfirmCommand(o options) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
+			case len(f.screens) > 0:
+				return approveScreens(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
 			case len(f.fixtures) > 0:
 				return approveFixtures(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
 			case len(f.journeys) > 0:
@@ -71,6 +78,7 @@ func newConfirmCommand(o options) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "confirm or approve without asking")
 	cmd.Flags().StringArrayVar(&f.fixtures, "fixture", nil, "approve the fixture with this ID, as it is now in .semar/fixtures (repeatable)")
+	cmd.Flags().StringArrayVar(&f.screens, "screens", nil, "approve the screens file of this app, as it is now in .semar/screens (repeatable)")
 	cmd.Flags().StringArrayVar(&f.journeys, "journey", nil, "confirm the expected results of every leg of the journey with this ID (repeatable)")
 	cmd.Flags().StringVar(&f.env, "env", "", "with --journey, the environment whose auth profiles the legs use; needed when there are several")
 	cmd.Flags().BoolVar(&f.all, "all", false, "confirm every scenario in .semar/scenarios that needs a confirmation")

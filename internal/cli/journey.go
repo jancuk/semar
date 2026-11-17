@@ -275,6 +275,7 @@ type journeyRunFlags struct {
 	env      string
 	builds   []string
 	dir      string
+	headed   bool
 }
 
 func newJourneyRunCommand(o options) *cobra.Command {
@@ -306,6 +307,7 @@ func newJourneyRunCommand(o options) *cobra.Command {
 	cmd.Flags().BoolVar(&f.all, "all", false, "run every valid journey in .semar/journeys")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to run against; needed when there are several, and always for a production environment")
 	cmd.Flags().StringArrayVar(&f.builds, "build", nil, "the commit that a service with no build probe runs, as <commit> or <service>=<commit>; repeat for more")
+	cmd.Flags().BoolVar(&f.headed, "headed", false, "show the browser window of a web leg")
 	addDirFlag(cmd, &f.dir)
 	return cmd
 }
@@ -404,6 +406,9 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 		Engine: rg.engine, Builds: rg.builds, Confirm: confirmations, Trust: cfg.Policy.Trust.Confirm, Run: rg.id,
 		Accounts: slices.Sorted(maps.Keys(cfg.AuthProfiles)),
 	}
+	eng := rg.webEngine(o, envName, env, f.headed)
+	defer eng.Close()
+	deps.Web, deps.Screens = eng, screenSource{repo: f.dir, approvals: confirmations}
 	jdeps := journey.Deps{Builds: rg.builds, Services: map[string]string{}, Clock: o.Clock, Sleep: o.Sleep, Accounts: deps.Accounts}
 	for _, s := range env.Services {
 		jdeps.Services[s.Name] = s.AuthProfile

@@ -21,6 +21,7 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/api"
+	"github.com/jancuk/semar/internal/engine/web"
 	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/recorder"
@@ -38,6 +39,7 @@ type runFlags struct {
 	env       string
 	builds    []string
 	dir       string
+	headed    bool
 }
 
 func newRunCommand(o options) *cobra.Command {
@@ -54,6 +56,7 @@ func newRunCommand(o options) *cobra.Command {
 	cmd.Flags().BoolVar(&f.all, "all", false, "run every scenario in .semar/scenarios")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to run against; needed when there are several, and always for a production environment")
 	cmd.Flags().StringArrayVar(&f.builds, "build", nil, "the commit that a service with no build probe runs, as <commit> or <service>=<commit>; repeat for more")
+	cmd.Flags().BoolVar(&f.headed, "headed", false, "show the browser window of a web step")
 	addDirFlag(cmd, &f.dir)
 	return cmd
 }
@@ -91,10 +94,11 @@ func runScenarios(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 		return err
 	}
 	fmt.Fprintf(stderr, "semar: running against %s (%s, %s)\n", envName, env.Kind, effectsWords(env.Effects.Mode))
-	r, err := newReplay(ctx, o, f.dir, cfg, envName, env, declared, scenarios, cat)
+	r, err := newReplay(ctx, o, f.dir, cfg, envName, env, declared, scenarios, cat, f.headed)
 	if err != nil {
 		return err
 	}
+	defer r.web.Close()
 	record := domain.Run{ID: r.id, Environment: envName, EnvironmentKind: env.Kind, StartedAt: o.Clock()}
 	results, start, end, runErr := r.runner.Run(ctx, scenarios)
 	interrupted := ctx.Err() != nil
@@ -222,24 +226,28 @@ func allServices(cfg config.Config) []string {
 // envRig is what a run against one environment needs before it sends anything: the evidence run,
 // the effects policy, the recorder, and the engine that every request goes through.
 type envRig struct {
-	id     domain.RunID
-	store  *evidence.Store
-	run    *evidence.Run
-	policy *effects.Policy
-	engine *api.Engine
-	builds build.Prober
-	probed []string // services that have a build to read
+	secrets  *secret.Env
+	recorder *recorder.Recorder
+	services map[string]string
+	id       domain.RunID
+	store    *evidence.Store
+	run      *evidence.Run
+	policy   *effects.Policy
+	engine   *api.Engine
+	builds   build.Prober
+	probed   []string // services that have a build to read
 }
 
 type replayRig struct {
 	*envRig
 	runner *replay.Runner
+	web    *web.Engine
 }
 
 // newReplay builds every dependency of one run. The secrets come before anything
 // is created or sent, so a missing secret leaves no trace. The redactor follows
 // the store, which holds its key. cat is nil when no scenario names a fixture.
-func newReplay(ctx context.Context, o options, repo string, cfg config.Config, envName string, env config.Environment, declared map[string]string, scenarios []domain.Scenario, cat *fixture.Catalogue) (*replayRig, error) {
+func newReplay(ctx context.Context, o options, repo string, cfg config.Config, envName string, env config.Environment, declared map[string]string, scenarios []domain.Scenario, cat *fixture.Catalogue, headed bool) (*replayRig, error) {
 	rg, err := newEnvRig(ctx, o, repo, cfg, env, declared, sessionNeeds(cfg, env, scenarios, cat))
 	if err != nil {
 		return nil, err
@@ -262,7 +270,9 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 		}
 		deps.Fixtures = fx
 	}
-	return &replayRig{envRig: rg, runner: replay.New(deps)}, nil
+	eng := rg.webEngine(o, envName, env, headed)
+	deps.Web, deps.Screens = eng, screenSource{repo: repo, approvals: confirm.NewLocal(rg.store.Root())}
+	return &replayRig{envRig: rg, runner: replay.New(deps), web: eng}, nil
 }
 
 // newEnvRig loads the sessions of the profiles named in needs, which maps a profile to whoever
@@ -328,6 +338,7 @@ func newEnvRig(ctx context.Context, o options, repo string, cfg config.Config, e
 		Clock:   o.Clock,
 	})
 	return &envRig{
+		secrets: secrets, recorder: rec, services: services,
 		id: id, store: store, run: run, policy: policy, engine: engine, probed: probed,
 		builds: build.NewDeclared(declared, build.NewHTTP(env.Services, nil)),
 	}, nil

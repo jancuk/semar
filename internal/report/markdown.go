@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"regexp"
 	"slices"
 	"strings"
 	"text/template"
@@ -55,7 +56,13 @@ type ledgerView struct {
 	Verb, Object, Scenario, Step, Status string
 }
 
+// browserStep is one action of the browser: the step's action text beside the operation and the target.
+type browserStep struct {
+	Scenario, Step, Why, Target, Result, Screenshot string
+}
+
 type markdownView struct {
+	Browser                            []browserStep
 	RunID, Environment, Started, Ended string
 	EnvironmentKind                    string
 	BuildsStart, BuildsEnd, Counts     string
@@ -130,6 +137,7 @@ func buildView(d Data) markdownView {
 	for _, row := range activity.Ledger(d.Activity) {
 		v.Ledger = append(v.Ledger, ledgerViewOf(row))
 	}
+	v.Browser = browserSteps(d.Activity)
 	return v
 }
 
@@ -241,4 +249,29 @@ func utc(t time.Time) string {
 		return "not recorded"
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+// screenshotPath is where the engine puts a screenshot. The activity log is read back from disk, so a
+// path is linked only when it has this form.
+var screenshotPath = regexp.MustCompile(`^screenshots/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.png$`)
+
+func browserSteps(acts []domain.Activity) []browserStep {
+	var out []browserStep
+	for _, e := range acts {
+		if e.Surface != domain.SurfaceWeb {
+			continue
+		}
+		b := browserStep{
+			Scenario: shown(string(e.Use.Scenario)),
+			Step:     shown(string(e.Use.Step)),
+			Why:      shown(e.Why),
+			Target:   shown(e.Target),
+			Result:   shown(e.Result),
+		}
+		if screenshotPath.MatchString(e.Screenshot) {
+			b.Screenshot = e.Screenshot
+		}
+		out = append(out, b)
+	}
+	return out
 }
