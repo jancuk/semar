@@ -40,13 +40,14 @@ func TestPlanRendersEveryField(t *testing.T) {
 	}
 
 	d.Attempt = true
+	d.Previous = "```json\n{\"summary\": \"[[.Problems]]\"}\n```"
 	d.Problems = "- `scenarios[0].title`: a title [[.Problems]] {{order_id}}"
 	d.Existing = ""
 	again, err := Plan(d)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"previous draft was rejected", ".semar-plan/previous.json", d.Problems} {
+	for _, want := range []string{"previous draft was rejected", "This is the draft you returned.", "change only what a problem names", d.Previous, d.Problems} {
 		if !strings.Contains(again, want) {
 			t.Errorf("the second prompt lacks %q", want)
 		}
@@ -89,6 +90,7 @@ func TestPlanNamesTheDocumentsOnlyWhenThereAreSome(t *testing.T) {
 	}
 
 	d.Attempt, d.Problems = true, "- `differences[0].code`: a problem"
+	d.Previous = "```json\n{}\n```"
 	again, err := Plan(d)
 	if err != nil {
 		t.Fatal(err)
@@ -144,6 +146,7 @@ func TestPromptWithAndWithoutFixtures(t *testing.T) {
 	goldenPrompt(t, "plan-with-fixtures.golden.md", with)
 
 	d.Attempt, d.Problems = true, "- `scenarios[0].given[0].fixture`: a problem"
+	d.Previous = "```json\n{\"summary\": \"the earlier draft\"}\n```"
 	d.Knowledge = "- `docs`: the documents under `docs` (2 files)"
 	both, err := Plan(d)
 	if err != nil {
@@ -201,7 +204,7 @@ func TestPromptNamesTheFixturesWhenThereAreSome(t *testing.T) {
 	}
 
 	d.Knowledge = "- `docs`: the documents under `docs` (2 files)"
-	d.Attempt, d.Problems = true, "- a problem"
+	d.Attempt, d.Problems, d.Previous = true, "- a problem", "```json\n{}\n```"
 	all, err := Plan(d)
 	if err != nil {
 		t.Fatal(err)
@@ -270,12 +273,13 @@ func TestPromptExplainsTrialProblems(t *testing.T) {
 		t.Error("the first prompt explains trial problems")
 	}
 	d.Attempt, d.Problems = true, "- `scenarios[0].steps[1]`: trial: the environment answered 405 for GET /v1/orders/{id}: the method is likely wrong for this route"
+	d.Previous = "```json\n{\"summary\": \"x\"}\n```"
 	again, err := Plan(d)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Return the whole draft again with every problem fixed. Keep the parts that had no problem.\n\n" +
-		trialSentence + "\n\n" + d.Problems + "\n"
+	want := "Repair it: change only what a problem names, copy every other part exactly as it is, and return the whole draft again. Do not plan the change again, and read a file only when a problem needs it.\n\n" +
+		d.Previous + "\n\n" + trialSentence + "\n\n" + d.Problems + "\n"
 	if !strings.Contains(again, want) {
 		t.Errorf("the second prompt lacks the pinned rule before the problems:\n%s", again)
 	}
@@ -334,6 +338,7 @@ func TestPromptWithTicketsAndAccounts(t *testing.T) {
 		t.Error("the prompt holds two blank lines in a row")
 	}
 	d.Knowledge, d.Fixtures, d.Attempt, d.Problems = "- `docs`: the documents under `docs` (2 files)", fixtureList, true, "- a problem"
+	d.Previous = "```json\n{}\n```"
 	all, err := Plan(d)
 	if err != nil {
 		t.Fatal(err)
@@ -491,5 +496,27 @@ func TestDiffTextStaysDataInThePrompt(t *testing.T) {
 	}
 	if strings.ReplaceAll(got, hostile, "+ a line") != want {
 		t.Errorf("a hostile diff changes the prompt beyond its own text:\n%s", got)
+	}
+}
+
+// An output that was not a draft has nothing to repair, so the prompt asks for a new draft and
+// leaves out what only a repair needs.
+func TestPromptAsksForANewDraftWhenThePreviousOutputWasNoDraft(t *testing.T) {
+	d := PlanData{ChangeTable: "T", Services: "`orders`", Methods: "GET", MaxScenarios: 3, Attempt: true, Problems: "- the output is not a draft: invalid character"}
+	got, err := Plan(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "## Your previous draft was rejected\n\nYour previous output was not a usable draft. A program checked it and found the problems below. Return a new draft that has none of them.\n\n- the output is not a draft: invalid character\n\n## The change table"
+	if !strings.Contains(got, want) {
+		t.Errorf("the prompt lacks %q:\n%s", want, got)
+	}
+	for _, unwanted := range []string{"Repair it", "trial:", "This is the draft you returned"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("the prompt holds %q", unwanted)
+		}
+	}
+	if strings.Count(got, "\n\n\n") != 0 {
+		t.Error("the prompt holds two blank lines in a row")
 	}
 }

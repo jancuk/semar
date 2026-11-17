@@ -88,30 +88,125 @@ func TestRunCorrectsADraftOnTheSecondAttempt(t *testing.T) {
 	if len(jobs) != 2 {
 		t.Fatalf("%d jobs, want 2", len(jobs))
 	}
-	for _, j := range jobs {
+	for i, j := range jobs {
+		// plan.maxTurns is 9, below RepairMaxTurns, so it still applies to the repair.
 		if j.Workdir != in.SourceDir || j.Model != "some-model" || j.MaxTurns != 9 || j.Timeout != 2*time.Minute || string(j.Schema) != string(Schema()) {
-			t.Errorf("job = %+v", j)
+			t.Errorf("job %d = %+v", i+1, j)
 		}
 	}
 	if strings.Contains(jobs[0].Prompt, "previous draft was rejected") {
 		t.Error("the first prompt says a draft was rejected")
 	}
-	for _, want := range []string{"previous draft was rejected", "`scenarios[0].steps[1].method`", `method "DELETE" is not allowed`} {
+	for _, want := range []string{"previous draft was rejected", "change only what a problem names", "`scenarios[0].steps[1].method`", `method "DELETE" is not allowed`, string(bad)} {
 		if !strings.Contains(jobs[1].Prompt, want) {
 			t.Errorf("the second prompt lacks %q", want)
 		}
 	}
-	prev := filepath.Join(in.SourceDir, PlanDir, "previous.json")
-	data, err := os.ReadFile(prev)
-	if err != nil {
+	if strings.Contains(jobs[1].Prompt, "previous.json") {
+		t.Error("the second prompt sends the planner to a file for the previous draft")
+	}
+	if _, err := os.Stat(filepath.Join(in.SourceDir, PlanDir, "previous.json")); err == nil {
+		t.Error("a file holds the previous draft: the prompt carries it")
+	}
+}
+
+// A repair has the draft and its problems in the prompt, so it runs with fewer turns than a plan.
+func TestRunRepairsWithAShorterTurnLimit(t *testing.T) {
+	bad := withProblem(t, func(d *Draft) { d.Scenarios[0].Steps[1].Method = "DELETE" })
+	cases := []struct {
+		name      string
+		maxTurns  int
+		wantFirst int
+		wantRetry int
+	}{
+		{"the default limit", 60, 60, RepairMaxTurns},
+		{"a limit under the repair limit", 8, 8, 8},
+		{"a limit at the repair limit", RepairMaxTurns, RepairMaxTurns, RepairMaxTurns},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &scripted{results: []provider.Result{{Output: bad}, {Output: []byte(goodDraft)}}}
+			in := input(t)
+			in.Limits.MaxTurns = tc.maxTurns
+			if _, err := Run(t.Context(), s, in); err != nil {
+				t.Fatal(err)
+			}
+			if got := []int{s.jobs[0].MaxTurns, s.jobs[1].MaxTurns}; got[0] != tc.wantFirst || got[1] != tc.wantRetry {
+				t.Errorf("turn limits = %v, want %d then %d", got, tc.wantFirst, tc.wantRetry)
+			}
+		})
+	}
+}
+
+// Every attempt after a decodable rejected draft is a repair of the latest draft, and an output
+// that is no draft is planned again with the whole limit.
+func TestRunRepairsTheLatestDraftAndPlansAgainAfterNoDraft(t *testing.T) {
+	first := withProblem(t, func(d *Draft) { d.Scenarios[0].Steps[1].Method = "DELETE" })
+	second := withProblem(t, func(d *Draft) { d.Tickets = nil })
+	s := &scripted{results: []provider.Result{{Output: first}, {Output: second}, {Output: []byte(`{"summary": 7}`)}}}
+	in := input(t)
+	in.Limits.MaxTurns = 60
+	_, err := Run(t.Context(), s, in)
+	var rej *Rejected
+	if !errors.As(err, &rej) {
+		t.Fatalf("err = %v, want *Rejected", err)
+	}
+	if len(s.jobs) != MaxAttempts {
+		t.Fatalf("%d jobs", len(s.jobs))
+	}
+	if s.jobs[1].MaxTurns != RepairMaxTurns || !strings.Contains(s.jobs[1].Prompt, string(first)) {
+		t.Errorf("the first repair: %d turns, prompt holds the first draft %v", s.jobs[1].MaxTurns, strings.Contains(s.jobs[1].Prompt, string(first)))
+	}
+	if s.jobs[2].MaxTurns != RepairMaxTurns || !strings.Contains(s.jobs[2].Prompt, string(second)) || strings.Contains(s.jobs[2].Prompt, string(first)) {
+		t.Errorf("the second repair must hold the second draft only: %d turns", s.jobs[2].MaxTurns)
+	}
+
+	s = &scripted{results: []provider.Result{{Output: []byte(`{"summary": 7}`)}, {Output: []byte(goodDraft)}}}
+	if _, err := Run(t.Context(), s, in); err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != string(bad) {
-		t.Errorf("previous.json holds %s, want the rejected draft", data)
+	if s.jobs[1].MaxTurns != 60 || !strings.Contains(s.jobs[1].Prompt, "not a usable draft") || strings.Contains(s.jobs[1].Prompt, `{"summary": 7}`) {
+		t.Errorf("a plan after an output that is no draft: %d turns, prompt %q", s.jobs[1].MaxTurns, s.jobs[1].Prompt[:200])
 	}
-	if info, err := os.Stat(prev); err != nil || info.Mode().Perm() != 0o600 {
-		t.Errorf("previous.json mode %v, %v; want 0600", info.Mode().Perm(), err)
+}
+
+// A repair that the harness cannot finish does not throw away a draft that passed, and does not
+// hide a failure when none did.
+func TestRunKeepsAnEarlierPassingDraftWhenARepairFails(t *testing.T) {
+	stop := &provider.Error{Class: provider.ValidationError, Detail: "the harness reached the turn limit"}
+
+	in := criteriaInput(t)
+	in.Limits.MaxTurns = 60
+	s := &failAfter{scripted: scripted{results: []provider.Result{{Output: mustJSON(t, citingSeven(t))}}}, err: stop}
+	out, err := Run(t.Context(), s, in)
+	if err != nil {
+		t.Fatalf("err = %v, want the draft that passed", err)
 	}
+	if len(s.jobs) != 2 || s.jobs[1].MaxTurns != RepairMaxTurns || out.UsedAttempt != 1 || out.Attempts != 2 || len(out.Unaccounted) != 3 {
+		t.Errorf("%d jobs, repair turns %d, used attempt %d of %d, %d unaccounted", len(s.jobs), s.jobs[1].MaxTurns, out.UsedAttempt, out.Attempts, len(out.Unaccounted))
+	}
+
+	missing := withProblem(t, func(d *Draft) { d.Tickets = nil })
+	s = &failAfter{scripted: scripted{results: []provider.Result{{Output: missing}}}, err: stop}
+	_, err = Run(t.Context(), s, input(t))
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Detail != stop.Detail || len(s.jobs) != 2 {
+		t.Fatalf("err = %v after %d jobs, want the provider error of the repair", err, len(s.jobs))
+	}
+}
+
+// failAfter returns the results in order and then err.
+type failAfter struct {
+	scripted
+	err error
+}
+
+func (f *failAfter) Run(ctx context.Context, job provider.Job) (provider.Result, error) {
+	if len(f.results) == 0 {
+		f.jobs = append(f.jobs, job)
+		return provider.Result{}, f.err
+	}
+	return f.scripted.Run(ctx, job)
 }
 
 func TestRunStopsAfterThreeRejectedDrafts(t *testing.T) {

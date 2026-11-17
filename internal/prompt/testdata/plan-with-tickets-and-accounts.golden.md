@@ -58,7 +58,11 @@ A step acts as the default account unless it names another. These accounts are i
 
 ## Your previous draft was rejected
 
-`.semar-plan/previous.json` is the draft you returned. A program checked it and found the problems below. Return the whole draft again with every problem fixed. Keep the parts that had no problem.
+This is the draft you returned. A program checked it and found the problems below. Repair it: change only what a problem names, copy every other part exactly as it is, and return the whole draft again. Do not plan the change again, and read a file only when a problem needs it.
+
+```json
+{}
+```
 
 A problem that starts with `trial:` comes from one request that a program sent to the environment. It tells you that a path, a method, a parameter, or a capture is likely wrong. It never tells you what to expect: keep every expected result as the code says, even when the environment answered something else.
 

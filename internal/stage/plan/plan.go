@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"path/filepath"
 	"slices"
 	"strings"
 
-	"github.com/jancuk/semar/internal/atomicfile"
 	"github.com/jancuk/semar/internal/changeset"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/prompt"
@@ -18,6 +16,11 @@ import (
 
 // MaxAttempts bounds the drafts one plan asks for (A4).
 const MaxAttempts = 3
+
+// RepairMaxTurns is the turn limit of an attempt that repairs a draft. The repair has the draft and
+// its problems in the prompt and changes only what the problems name, so it needs a fraction of the
+// turns of a plan. A smaller plan.maxTurns still applies.
+const RepairMaxTurns = 12
 
 const (
 	maxProblemsShown = 60
@@ -83,8 +86,10 @@ func (r *Rejected) Error() string {
 }
 
 // Run asks the planner for a draft and validates it. Problems go back to the planner with its
-// previous draft in a file of the source copy, for at most MaxAttempts drafts. A provider
-// failure ends the run at once.
+// previous draft in the prompt, to be repaired in a job of at most RepairMaxTurns turns, for at
+// most MaxAttempts drafts. An output that is not a draft cannot be repaired, so the next attempt
+// plans again with the full turn limit. A provider failure ends the run at once, unless an
+// earlier draft passed validation: that draft is kept.
 func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 	var table strings.Builder
 	if err := changeset.Table(&table, in.Change); err != nil {
@@ -112,6 +117,7 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 	var total provider.Result
 	var problems []Problem
 	var previous []byte
+	var repairable bool // the previous output is a draft
 	var passed *accepted
 	frozen := newFrozen()
 	returned := 0
@@ -127,12 +133,15 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 		}
 	}
 	for attempt := 1; attempt <= MaxAttempts; attempt++ {
+		turns := in.Limits.MaxTurns
 		if attempt > 1 {
-			if err := atomicfile.Write(filepath.Join(in.SourceDir, PlanDir, "previous.json"), previous); err != nil {
-				return Output{}, fmt.Errorf("plan: keep the previous draft: %w", err)
-			}
 			data.Attempt = true
 			data.Problems = problemList(problems)
+			data.Previous = ""
+			if repairable {
+				data.Previous = fenced("json", string(previous))
+				turns = min(turns, RepairMaxTurns)
+			}
 		}
 		text, err := prompt.Plan(data)
 		if err != nil {
@@ -150,17 +159,21 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 			Schema:    Schema(),
 			Model:     in.Model,
 			Reasoning: in.Reasoning,
-			MaxTurns:  in.Limits.MaxTurns,
+			MaxTurns:  turns,
 			Timeout:   in.Limits.Timeout,
 			Progress:  report,
 		})
 		sum(&total, res)
+		if err != nil && passed != nil && ctx.Err() == nil {
+			return finish(passed, attempt), nil
+		}
 		if err != nil {
 			return Output{Result: total, Attempts: attempt, PlannerID: p.ID(), PlannerKind: p.Kind()}, fmt.Errorf("plan, attempt %d: %w", attempt, err)
 		}
 		previous = res.Output
 
 		d, err := DecodeDraft(res.Output)
+		repairable = err == nil
 		if err != nil {
 			problems = []Problem{{Message: "the output is not a draft: " + err.Error()}}
 			refused = append(refused, RefusedDraft{Attempt: attempt, Problems: problems})

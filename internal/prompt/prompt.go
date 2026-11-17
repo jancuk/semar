@@ -19,6 +19,7 @@ var planVersion, planTemplate = mustParse("plan.md", planSource)
 type PlanData struct {
 	Attempt      bool   // false on the first attempt
 	Problems     string // a Markdown list of what the previous draft got wrong
+	Previous     string // the previous draft as a fenced block, to repair; empty when the previous output was not a draft
 	ChangeTable  string
 	LeftOut      string // a Markdown list of the files that the copy of the source lacks; empty when there is none
 	Diff         string // the difference as a fenced block; empty when none of it is shown
