@@ -11,8 +11,8 @@ import (
 var update = flag.Bool("update", false, "rewrite the golden files")
 
 func TestPlanVersion(t *testing.T) {
-	if got := PlanVersion(); got != "8" {
-		t.Errorf("PlanVersion() = %q, want 8", got)
+	if got := PlanVersion(); got != "9" {
+		t.Errorf("PlanVersion() = %q, want 9", got)
 	}
 }
 
