@@ -9,6 +9,7 @@ import (
 	"io"
 	"maps"
 	"math/big"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -172,6 +173,7 @@ func (fp FixturePacket) Convert(a FixtureAnswer, in Input) (domain.Fixture, []Pr
 	}
 	fx.Create = fp.steps(a.Create, "create", in, &ps)
 	fx.Cleanup = fp.steps(a.Cleanup, "cleanup", in, &ps)
+	fp.checkAccounts(fx, &ps)
 	if len(ps.list) > 0 {
 		return domain.Fixture{}, ps.list
 	}
@@ -190,6 +192,36 @@ func (fp FixturePacket) Convert(a FixtureAnswer, in Input) (domain.Fixture, []Pr
 		return domain.Fixture{}, ps.list
 	}
 	return fx, nil
+}
+
+// checkAccounts refuses an answer whose description names an account that no step acts as: the
+// fixture would make the data as the default account, and a scenario that needs it to belong to
+// another account would fail on a correct build.
+func (fp FixturePacket) checkAccounts(fx domain.Fixture, ps *problems) {
+	acting := fx.Accounts()
+	for _, name := range fp.accountsNamed() {
+		if !slices.Contains(acting, name) {
+			ps.add("create", "the description names the account %s, and no step acts as %s: set as on each step that %s sends", name, name, name)
+		}
+	}
+}
+
+// accountsNamed are the accounts other than the default that the description of the fixture names as
+// a word, in any case. A hyphen, a digit, and an underscore belong to the word, so support does not
+// name support-agent.
+func (fp FixturePacket) accountsNamed() []string {
+	var out []string
+	for _, a := range fp.Accounts {
+		if a.Name == fp.Account || a.Name == "" {
+			continue
+		}
+		word := regexp.MustCompile(`(?i)(?:^|[^a-z0-9_-])` + regexp.QuoteMeta(a.Name) + `(?:$|[^a-z0-9_-])`)
+		if word.MatchString(fp.Need.State) {
+			out = append(out, a.Name)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 func (fp FixturePacket) steps(list []FixtureAnswerStep, phase string, in Input, ps *problems) []domain.FixtureStep {
