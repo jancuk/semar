@@ -5,14 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/jancuk/semar/internal/check"
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
@@ -507,7 +505,7 @@ func scenarioItems(dir string, uses []obligation.Located, todo []unconfirmed, fi
 			kind: "scenario", id: strings.Join(ids, ", "),
 			summary: "scenario " + strings.Join(ids, ", "),
 			show: func(w io.Writer, n, total int) {
-				showScenarioGroup(w, dir, n, total, use, us, fixtureState)
+				showScenarioItem(w, dir, n, total, use, us, fixtureState)
 			},
 			details: func(w io.Writer) {
 				for _, u := range us {
@@ -547,67 +545,6 @@ func putConfirmation(store *confirm.Local, a approver, u unconfirmed) error {
 		At:         a.at,
 		Sources:    slices.Compact(slices.Sorted(slices.Values(u.sources))),
 	})
-}
-
-var numbering = regexp.MustCompile(`^[0-9]+\.\s+`)
-
-// criterionOf is the text of the requirement that a use case stands for: the cited line of the
-// ticket without its number, or else the title of the use case.
-func criterionOf(dir string, use *obligation.Located) string {
-	if use == nil {
-		return ""
-	}
-	if file, n, ok := citedLine(use.Cite); ok {
-		if text, ok := citedLineText(dir, file, n); ok {
-			return strings.TrimSpace(numbering.ReplaceAllString(strings.TrimSpace(text), ""))
-		}
-	}
-	return terminalSafe(oneLine(use.Title))
-}
-
-func showScenarioGroup(w io.Writer, dir string, n, total int, use *obligation.Located, us []unconfirmed, fixtureState func(domain.FixtureID) string) {
-	head := fmt.Sprintf("%d of %d · ", n, total)
-	switch {
-	case use == nil:
-		head += "scenario " + string(us[0].sc.ID)
-	case use.Cite != "":
-		head += fmt.Sprintf("%s (%s)", terminalSafe(oneLine(ticketKey(*use))), terminalSafe(oneLine(use.Cite)))
-	default:
-		head += terminalSafe(oneLine(use.ID))
-	}
-	fmt.Fprintf(w, "\n%s\n", head)
-	switch text := criterionOf(dir, use); {
-	case text != "":
-		fmt.Fprintf(w, "  %q\n", text)
-	case use == nil:
-		fmt.Fprintf(w, "  %q\n", terminalSafe(oneLine(us[0].sc.Title)))
-	}
-	for _, u := range us {
-		sc := u.sc
-		fmt.Fprintf(w, "\n  Test %s · %s · %s · as %s\n", sc.ID, terminalSafe(oneLine(sc.Title)), surfaceWord(sc.Surface), accountOf(sc))
-		for _, g := range sc.Given {
-			line := "the fixture " + string(g.Fixture)
-			if g.As != "" {
-				line += " as " + g.As
-			}
-			fmt.Fprintf(w, "    Given %s\n", terminalSafe(oneLine(line)))
-		}
-		for _, st := range sc.Steps {
-			fmt.Fprintf(w, "    When  %s\n", terminalSafe(oneLine(st.Action)))
-			prefix := "Then "
-			for _, e := range st.Expect {
-				line := check.DescribeFull(e.Check)
-				if confirm.NeedsExpectation(e, nil) || e.By == "model" || e.Source == domain.SourceDiff || e.Source == domain.SourceBaseline {
-					line += " (source " + string(e.Source) + ")"
-				}
-				fmt.Fprintf(w, "    %s %s\n", prefix, terminalSafe(oneLine(line)))
-				prefix = "     "
-			}
-		}
-		for _, id := range fixturesOf(sc) {
-			fmt.Fprintf(w, "    Uses the fixture %s (%s)\n", id, fixtureState(id))
-		}
-	}
 }
 
 func fixturesOf(sc domain.Scenario) []domain.FixtureID {

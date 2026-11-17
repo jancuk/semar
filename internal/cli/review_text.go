@@ -26,6 +26,7 @@ type unconfirmed struct {
 	sc      domain.Scenario
 	label   string // how the heading names it; "scenario <id>" when empty
 	lines   []string
+	needs   []domain.Expectation // the expected results that lines describe, in the same order
 	sources []domain.Source
 	file    string // the scenario file, from the repository, when the scenario has one
 	gherkin string // the scenario as Gherkin text with its sources and cites, shown above the list
@@ -58,6 +59,7 @@ func needsConfirmation(dir string, sc domain.Scenario, trust []domain.Source) un
 			}
 			u.lines = append(u.lines, line)
 			u.sources = append(u.sources, e.Source)
+			u.needs = append(u.needs, e)
 		}
 	}
 	return u

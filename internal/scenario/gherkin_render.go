@@ -235,17 +235,7 @@ func (r *renderer) given(path string, g domain.Given, first bool) (domain.Given,
 	if !first {
 		key = "And"
 	}
-	line := fmt.Sprintf("the fixture %s as %s", g.Fixture, g.As)
-	switch g.Lease {
-	case "":
-	case domain.LeaseExclusive:
-		line += " with an exclusive lease"
-	default:
-		r.fail(path+".lease", "lease must be exclusive or empty")
-	}
-	r.word(path+".fixture", string(g.Fixture))
-	r.word(path+".as", g.As)
-	b.WriteString(indent + key + " " + line + "\n")
+	b.WriteString(indent + key + " " + r.givenLine(path, g) + "\n")
 	if len(g.With) > 0 {
 		want.With = maps.Clone(g.With)
 		keys := slices.Sorted(maps.Keys(g.With))
@@ -262,6 +252,21 @@ func (r *renderer) given(path string, g domain.Given, first bool) (domain.Given,
 		}
 	}
 	return want, b.String()
+}
+
+// givenLine is the sentence of a fixture line, with its lease.
+func (r *renderer) givenLine(path string, g domain.Given) string {
+	line := fmt.Sprintf("the fixture %s as %s", g.Fixture, g.As)
+	switch g.Lease {
+	case "":
+	case domain.LeaseExclusive:
+		line += " with an exclusive lease"
+	default:
+		r.fail(path+".lease", "lease must be exclusive or empty")
+	}
+	r.word(path+".fixture", string(g.Fixture))
+	r.word(path+".as", g.As)
+	return line
 }
 
 func (r *renderer) cell(path, text string) {
@@ -309,14 +314,13 @@ func (r *renderer) step(path string, st domain.Step, prev stepKind) (domain.Step
 	if st.Action == "" {
 		r.fail(path+".action", "is required: a step is a sentence")
 	}
-	text := st.Action
 	if st.As != "" {
 		r.word(path+".as", st.As)
 		if strings.Contains(st.As, ",") {
 			r.fail(path+".as", "must not hold a comma")
 		}
-		text = "as " + st.As + ", " + text
 	}
+	text := stepText(st)
 	b.WriteString(indent + word + " " + text + "\n")
 	b.WriteString(indent + "# step: " + string(st.ID))
 	if st.Hint != nil {
@@ -347,6 +351,14 @@ func (r *renderer) step(path string, st domain.Step, prev stepKind) (domain.Step
 		b.WriteString(indent + "# " + r.source(p, ex) + "\n")
 	}
 	return want, b.String(), last
+}
+
+// stepText is the sentence of a step: its action, led by the account that it acts as.
+func stepText(st domain.Step) string {
+	if st.As != "" {
+		return "as " + st.As + ", " + st.Action
+	}
+	return st.Action
 }
 
 func (r *renderer) source(path string, ex domain.Expectation) string {
