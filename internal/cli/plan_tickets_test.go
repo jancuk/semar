@@ -98,7 +98,7 @@ func TestPlanDraftsTheTicketCriterionAndMarksItExpectedToFail(t *testing.T) {
 		"This scenario is expected to fail on this build: the code does not meet docs/tickets/SHOP-482.md:3.\n",
 		"Source: ticket. Cite: docs/tickets/SHOP-482.md:3",
 		"Manual checks for a person:\n\n1. The refusal shows a red banner. Cite: docs/tickets/SHOP-482.md:5 the app shows a red banner\n",
-		"Prompt version: 9")
+		"Prompt version: 10")
 	if strings.Count(string(md), "expected to fail on this build") != 1 {
 		t.Error("plan.md marks a scenario that has no unmet criterion")
 	}

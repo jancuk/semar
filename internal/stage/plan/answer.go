@@ -299,14 +299,42 @@ func pathItems(op PacketOperation) any {
 	return namedValue(names)
 }
 
+// queryItems has one branch for each parameter whose document gives it a date format, so that its
+// value says which variable to write, and one for all the others.
 func queryItems(op PacketOperation) any {
 	var names []string
+	var branches []any
 	for _, pa := range op.Params {
-		if pa.In == "query" {
+		switch hint := dateHint(pa.Format); {
+		case pa.In != "query":
+		case hint != "":
+			branches = append(branches, object(map[string]any{
+				"name":  enum("string", pa.Name),
+				"value": text("The value." + hint),
+			}))
+		default:
 			names = append(names, pa.Name)
 		}
 	}
-	return namedValue(names)
+	if len(branches) == 0 {
+		return namedValue(names)
+	}
+	if len(names) > 0 {
+		branches = append(branches, namedValue(names))
+	}
+	return anyOf(branches)
+}
+
+// dateHint tells the model which variable to write for a value that the document formats as a date
+// or a moment, so that the test is right on every day and not on the day of the plan.
+func dateHint(format string) string {
+	switch format {
+	case "date":
+		return " A day: write {{date.today}}, or {{date.plus7d}} or {{date.minus3d}} for another day, and never type a date."
+	case "date-time":
+		return " A moment: write {{datetime.now}}, or {{datetime.plus2h}}, {{datetime.minus30m}}, or {{datetime.plus7d}} (the unit is d, h, or m), and never type a date."
+	}
+	return ""
 }
 
 // bodyItems has one branch for each declared field, so that the value has the field's type.
@@ -345,7 +373,7 @@ func valueSchema(f openapi.Field) map[string]any {
 	if f.Nullable {
 		desc += " It may be null."
 	}
-	return jsonValue(desc)
+	return jsonValue(desc + dateHint(f.Format))
 }
 
 // captureItem lets a capture read a field that a success response declares. A document that

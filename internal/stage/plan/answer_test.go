@@ -435,3 +435,44 @@ func TestAManualCheckNamesItsSurface(t *testing.T) {
 		t.Errorf("the schema has no closed surface:\n%s", got)
 	}
 }
+
+func TestAnswerSchemaNamesTheVariableOfADate(t *testing.T) {
+	_, p := firstPacket(t)
+	p.Operations = []PacketOperation{{
+		Key: "listOrders", Method: "GET", Route: "/orders", BodyKnown: true,
+		Params: []openapi.Param{
+			{Name: "from", In: "query", Type: "string", Format: "date"},
+			{Name: "status", In: "query", Type: "string"},
+		},
+		Body: []openapi.Field{
+			{Name: "dueAt", Type: "string", Format: "date-time"},
+			{Name: "day", Type: "string", Format: "date"},
+			{Name: "note", Type: "string"},
+		},
+	}}
+	var root map[string]any
+	if err := json.Unmarshal(p.AnswerSchema(), &root); err != nil {
+		t.Fatal(err)
+	}
+	described := map[string]string{}
+	walkSchema(root, func(n map[string]any) {
+		props, _ := n["properties"].(map[string]any)
+		for _, key := range []string{"field", "name"} {
+			if vs := enumValues(props[key]); len(vs) == 1 {
+				value, _ := props["value"].(map[string]any)
+				described[vs[0]], _ = value["description"].(string)
+			}
+		}
+	})
+	for name, want := range map[string]string{"from": "{{date.today}}", "day": "{{date.plus7d}}", "dueAt": "{{datetime.plus2h}}"} {
+		if d := described[name]; !strings.Contains(d, want) || !strings.Contains(d, "never type") {
+			t.Errorf("%s = %q, want a hint that names %s", name, d, want)
+		}
+	}
+	if d := described["note"]; strings.Contains(d, "{{") {
+		t.Errorf("a field without a date format gets no hint: %q", d)
+	}
+	if _, ok := described["status"]; ok && strings.Contains(described["status"], "{{") {
+		t.Errorf("a parameter without a date format gets no hint: %q", described["status"])
+	}
+}

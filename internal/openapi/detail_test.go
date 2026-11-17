@@ -211,3 +211,35 @@ func TestDetailIsBoundedForARepetitiveDocument(t *testing.T) {
 		t.Fatalf("the routes must stay: %+v", doc.Operations)
 	}
 }
+
+func TestParseReadsTheFormatOfAParameterAndAField(t *testing.T) {
+	const doc = `openapi: 3.0.3
+paths:
+  /v1/orders:
+    get:
+      parameters:
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - {name: owner, in: query, schema: {type: string, format: uuid}}
+        - {name: page, in: query, schema: {type: integer}}
+      responses: {"200": {description: ok}}
+    post:
+      requestBody:
+        content: {application/json: {schema: {type: object, properties: {dueAt: {type: string, format: date-time}, day: {type: string, format: date}, note: {type: string}}}}}
+      responses: {"201": {description: ok}}
+`
+	d, err := openapi.Parse([]byte(doc), "shop.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	format := map[string]string{}
+	for _, p := range opOf(t, d, "GET", "/v1/orders").Params {
+		format[p.Name] = p.Format
+	}
+	for _, f := range opOf(t, d, "POST", "/v1/orders").Body {
+		format[f.Name] = f.Format
+	}
+	want := map[string]string{"from": "date", "owner": "uuid", "page": "", "dueAt": "date-time", "day": "date", "note": ""}
+	if !reflect.DeepEqual(format, want) {
+		t.Errorf("formats = %v, want %v", format, want)
+	}
+}

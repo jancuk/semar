@@ -11,8 +11,8 @@ import (
 var update = flag.Bool("update", false, "rewrite the golden files")
 
 func TestPlanVersion(t *testing.T) {
-	if got := PlanVersion(); got != "9" {
-		t.Errorf("PlanVersion() = %q, want 9", got)
+	if got := PlanVersion(); got != "10" {
+		t.Errorf("PlanVersion() = %q, want 10", got)
 	}
 }
 
@@ -28,7 +28,7 @@ func TestPlanRendersEveryField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"CHANGE-TABLE", "`orders`", "GET, POST", "At most 7 scenarios", "SHOP-1-01", "{{name}}"} {
+	for _, want := range []string{"CHANGE-TABLE", "`orders`", "GET, POST", "At most 7 scenarios", "SHOP-1-01", "{{name}}", "{{date.plus7d}}"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("the first prompt lacks %q", want)
 		}
