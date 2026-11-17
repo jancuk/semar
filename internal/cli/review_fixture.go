@@ -1,14 +1,13 @@
 package cli
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/sends"
 )
 
 // fixtureLines is what a person reads before approving a fixture: the header and then everything
@@ -51,22 +50,11 @@ func fixtureStepLine(phase string, n int, st domain.FixtureStep) string {
 		b.WriteString(" as " + st.As)
 	}
 	fmt.Fprintf(&b, ": %s %s %s", r.Method, r.Service, r.Path)
-	pairs := func(label string, m map[string]string) {
-		if len(m) == 0 {
-			return
-		}
-		b.WriteString(" " + label)
-		for _, k := range slices.Sorted(maps.Keys(m)) {
-			fmt.Fprintf(&b, " %s=%s", k, m[k])
-		}
-	}
-	pairs("query", r.Query)
-	pairs("headers", r.Headers)
-	if r.JSON != nil {
-		b.WriteString(" json " + compactJSON(r.JSON))
+	for _, part := range sends.Details(r) {
+		b.WriteString(" " + part)
 	}
 	if u := st.Until; u != nil {
-		fmt.Fprintf(&b, " until %s equals %s within %s", u.JSONPath, compactJSON(u.Equals), u.Timeout)
+		fmt.Fprintf(&b, " until %s equals %s within %s", u.JSONPath, sends.CompactJSON(u.Equals), u.Timeout)
 		if u.Every > 0 {
 			fmt.Fprintf(&b, " every %s", u.Every)
 		}
@@ -89,14 +77,4 @@ func fixtureStepLine(phase string, n int, st domain.FixtureStep) string {
 // another that looks like a step.
 func oneLine(s string) string {
 	return strings.NewReplacer("\n", `\n`, "\t", `\t`).Replace(s)
-}
-
-func compactJSON(v any) string {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		return fmt.Sprintf("(%v)", err)
-	}
-	return strings.TrimSpace(buf.String())
 }
