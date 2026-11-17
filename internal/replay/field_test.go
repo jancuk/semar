@@ -137,6 +137,20 @@ func TestOperandVariableComparesWithTheCapture(t *testing.T) {
 	expect(t, results[0], domain.OutcomePassed, "")
 }
 
+func TestOperandMayHoldADateVariable(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	sc, s := variant(t, func(sc *domain.Scenario, _ *domain.Script) {
+		sc.Steps[2].Expect = append(sc.Steps[2].Expect, domain.Expectation{
+			Check:  domain.Check{JSONPath: "$.data.id", NotEquals: "{{date.plus7d}}"},
+			Source: domain.SourceTicket, Cite: "SHOP-482: the order keeps its ID",
+		})
+	})
+	r.putScript(t, s)
+	r.confirmAll(t, sc)
+	results, _, _ := r.run(t, sc)
+	expect(t, results[0], domain.OutcomePassed, "")
+}
+
 func TestOperandVariableShowsTheFilledValueInAFailure(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	sc, s := variant(t, operandScenario("not-{{order_id}}"))

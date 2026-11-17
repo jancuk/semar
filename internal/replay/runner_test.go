@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	runID = "r-1"
+	runID = "r-20261118T071502Z-0001"
 	token = "tok-alice"
 )
 
@@ -1078,7 +1078,7 @@ func TestRunIDVariable(t *testing.T) {
 	r.confirmAll(t, sc)
 	results, _, _ := r.run(t, sc)
 	expect(t, results[0], domain.OutcomePassed, "")
-	if a := r.storedAction(t, sc.ID, "create-order"); !strings.Contains(string(a.Request.Body), `"ref":"semar-r-1"`) {
+	if a := r.storedAction(t, sc.ID, "create-order"); !strings.Contains(string(a.Request.Body), `"ref":"semar-`+runID+`"`) {
 		t.Errorf("body = %s", a.Request.Body)
 	}
 }

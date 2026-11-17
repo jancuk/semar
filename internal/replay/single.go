@@ -36,8 +36,8 @@ type Replayed struct {
 	Last      *api.Call // the call of the last step sent, for a wait
 }
 
-// reservedHeads are not preset variables: run.id is the Runner's, and the other two are refused in a script.
-var reservedHeads = []string{"run", "secret", "data"}
+// reservedHeads are not preset variables: run.id is the Runner's, the date variables are computed from it, and secret and data are refused in a script.
+var reservedHeads = []string{"run", "secret", "data", "date", "datetime", "local"}
 
 var presetName = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_]*)\.([A-Za-z0-9_]+)$`)
 

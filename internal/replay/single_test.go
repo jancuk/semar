@@ -117,7 +117,7 @@ func TestRunOneRunIDIsTheRunners(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	place, s := placeLeg()
 	r.runOne(t, replay.Single{Scenario: place, Script: s, Vars: map[string]string{"run.id": "other"}})
-	if a := r.storedAction(t, place.ID, "create"); !strings.Contains(string(a.Request.Body), `"ref":"semar-r-1"`) {
+	if a := r.storedAction(t, place.ID, "create"); !strings.Contains(string(a.Request.Body), `"ref":"semar-`+runID+`"`) {
 		t.Errorf("body = %s", a.Request.Body)
 	}
 }

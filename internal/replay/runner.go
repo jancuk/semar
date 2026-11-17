@@ -497,10 +497,7 @@ func evalExpectation(c domain.Check, a domain.Action, vars, shown map[string]str
 		return check.Eval(c, a)
 	}
 	template := check.Describe(c)
-	lookup := func(from map[string]string) func(string) (string, bool) {
-		return func(name string) (string, bool) { v, ok := from[name]; return v, ok }
-	}
-	filled, missing := domain.FillOperands(c, lookup(vars))
+	filled, missing := domain.FillOperands(c, script.Lookup(vars))
 	if len(missing) > 0 {
 		return check.Result{
 			State:    domain.CheckNotEvaluated,
@@ -509,7 +506,7 @@ func evalExpectation(c domain.Check, a domain.Action, vars, shown map[string]str
 		}
 	}
 	res := check.Eval(filled, a)
-	display, _ := domain.FillOperands(c, lookup(shown))
+	display, _ := domain.FillOperands(c, script.Lookup(shown))
 	res.Expected = check.Describe(display) + " (written as " + template + ")"
 	return res
 }

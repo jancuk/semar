@@ -7,7 +7,9 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/jancuk/semar/internal/datevar"
 	"github.com/jancuk/semar/internal/domain"
 )
 
@@ -42,6 +44,32 @@ func Render(req domain.APIRequest, vars map[string]string) (domain.APIRequest, e
 	return out, nil
 }
 
+// Resolve gives the value of the variable name: what vars holds, else a date variable computed from
+// the time inside run.id and the zone of the machine. found is false for a name that is neither, and
+// err is set for a date variable of a run whose ID holds no time.
+func Resolve(vars map[string]string, name string) (val string, found bool, err error) {
+	if v, ok := vars[name]; ok {
+		return v, true, nil
+	}
+	if !datevar.Is(name) {
+		return "", false, nil
+	}
+	at, err := domain.RunID(vars["run.id"]).Time()
+	if err != nil {
+		return "", false, fmt.Errorf("unknown variable %s: %w", name, err)
+	}
+	val, _ = datevar.Text(name, at, time.Local)
+	return val, true, nil
+}
+
+// Lookup is Resolve as the lookup of expected values: a name with no value is not found.
+func Lookup(vars map[string]string) func(name string) (string, bool) {
+	return func(name string) (string, bool) {
+		v, found, _ := Resolve(vars, name)
+		return v, found
+	}
+}
+
 func substitute(tpl string, vars map[string]string, check func(name, val string) error) (string, error) {
 	if err := checkPlaceholders(tpl); err != nil {
 		return "", err
@@ -49,9 +77,13 @@ func substitute(tpl string, vars map[string]string, check func(name, val string)
 	var err error
 	out := variablePattern.ReplaceAllStringFunc(tpl, func(m string) string {
 		name := variablePattern.FindStringSubmatch(m)[1]
-		val, ok := vars[name]
+		if err != nil {
+			return ""
+		}
+		val, ok, rerr := Resolve(vars, name)
 		switch {
-		case err != nil:
+		case rerr != nil:
+			err = rerr
 		case !ok:
 			err = fmt.Errorf("unknown variable %s", name)
 		case check != nil:

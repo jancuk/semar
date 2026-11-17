@@ -10,6 +10,7 @@ import (
 
 	"github.com/theory/jsonpath"
 
+	"github.com/jancuk/semar/internal/datevar"
 	"github.com/jancuk/semar/internal/domain"
 )
 
@@ -190,7 +191,7 @@ func RequestProblems(r domain.APIRequest, known func(name string) bool) []string
 	out := requestProblems(r)
 	for _, t := range templates(r) {
 		for _, m := range variablePattern.FindAllStringSubmatch(t.text, -1) {
-			if !known(m[1]) {
+			if !known(m[1]) && !datevar.Is(m[1]) {
 				out = append(out, fmt.Sprintf("%s: {{%s}} is not a known variable", t.where, m[1]))
 			}
 		}
@@ -241,7 +242,7 @@ func variableCheck(sc domain.Scenario, captured map[string]bool, outputs map[str
 		}
 	}
 	return func(name string) string {
-		if name == "run.id" || captured[name] {
+		if name == "run.id" || captured[name] || datevar.Is(name) {
 			return ""
 		}
 		head, rest, dotted := strings.Cut(name, ".")
