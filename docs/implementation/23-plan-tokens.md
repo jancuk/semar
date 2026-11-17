@@ -19,3 +19,34 @@ Two things made the cost. The first is a fixed charge on every turn: with the pe
 | D3 | A rejected draft is repaired, not planned again. The next attempt has the previous draft as JSON and the list of problems in its prompt, and is told to change only what the problems name and to copy the rest as it is. It runs with at most `RepairMaxTurns` (12) turns, or `plan.maxTurns` when that is lower. This holds for every problem that sends a draft back: a problem of validation, a criterion that nothing cites, and a problem that the trial found. The repair no longer reads `.semar-plan/previous.json`, so the file is no longer written. An output that is not a draft has nothing to repair, so the next attempt plans again with the whole turn limit and a prompt that says the output was no draft. The attempt limit stays `MaxAttempts` (3): a repair that is rejected is repaired in turn. When a repair fails in the harness, for example at its turn limit, after an earlier draft passed validation, that draft is kept and the plan is written with its gaps. With no passing draft the failure ends the run at once, as before | A repair job starts with the draft and its problems, so it need not explore the change again, and the old attempt spent a whole new exploration on a few problems. The latest plan needed two attempts. A turn limit that cannot be met would otherwise throw away two paid jobs, and keeping a draft that passed is what the last attempt already does (Plan 21, D9) |
 | D4 | `semar plan` ends with one line, `model use: <n> attempts, <n> turns, <n> input (<n> cached), <n> output, $<cost>`, summed over every attempt, on standard output when the plan is written and on standard error with the prefix `semar: ` when it fails after a job ran. The cached part and the cost appear only when the provider reports them. With the opt-in on, a second line says that the setup adds tokens to every turn. The usage log gets the same totals as before | A person cannot lower what they cannot see. The numbers are the ones of the usage record, so the line and the dashboard agree |
 | D5 | The default model, the reasoning level, and `plan.maxTurns` do not change. Only the repair attempt has a lower limit | The change is meant to cost less at the same quality. A weaker model or a lower turn limit would change the quality, so it is the person's decision and not part of this plan |
+
+## Trust
+
+| Risk | Answer |
+| --- | --- |
+| A repository turns the setup back on | The opt-in is read from the person's own `providers.yaml` and from the command line only. A `plan.withSetup` key in `semar.yaml` is refused as an unknown key, and a provider that `semar.yaml` declares gets no setup unless the person asks |
+| The diff in the prompt carries an instruction | It sits in a fenced block that its own text cannot end, under a sentence that calls it data, and it reaches the template only as a value, like a ticket file or a fixture description |
+| The diff shows Semar's own configuration | The files of `.semar` are never shown, whatever the budget (R19) |
+| A repair hides a failure | A repair that the harness cannot finish ends the run as before, unless an earlier draft passed validation. That draft is written, and its criteria that nothing cites stay obligations with a gap |
+
+## Measured
+
+The same release of a small mock service, planned once with the build of the commit before this plan (`66699b1`) and once with the build of this plan (`235f464`, the last commit that changed code), with the same provider, model, and reasoning level (Claude Code, `sonnet`, `medium`), and the person's `setup: {mcp: true, skills: true}` in both, so that "before" is what a plan cost. Each build had its own `SEMAR_HOME` with a copy of `providers.yaml` only, so the usage log of the person was not touched. The trial was off in both, `--no-trial`, so that neither needed the environment. The base was the commit that the release branch last merged from `main`, and the head was the release head, because `main` already held the whole release. The working tree had no scenario, obligation, or plan of an earlier run, so the prompt had no list of existing scenarios.
+
+```sh
+export SEMAR_HOME=/tmp/semar-home-before   # providers.yaml only
+/tmp/semar-before plan --diff base-main..release --provider claude --no-trial
+export SEMAR_HOME=/tmp/semar-home-after
+/tmp/semar-after  plan --diff base-main..release --provider claude --no-trial
+```
+
+| Run | Attempts | Turns | Input tokens | Cache read | Cache write | Output tokens | Cost |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| before, run 1 | 2 | 20 | 1,895,845 | 1,313,865 | 581,956 | 37,283 | $2.83 |
+| before, run 2 | 2 | 12 | 723,842 | 484,942 | 238,888 | 19,881 | $1.20 |
+| after, run 1 | 2 | 6 | 134,388 | 48,275 | 86,107 | 17,148 | $0.52 |
+| after, run 2 | 2 | 7 | 183,107 | 98,292 | 84,807 | 18,936 | $0.54 |
+
+Input tokens fell by 93% in the first pair and by 75% in the second. The mean of the two runs fell from 1,309,844 to 158,748, 88%, and the cost from $2.02 to $0.53. All four runs needed a second attempt. In all four, the plan accounted for all 16 acceptance criteria of the two tickets, and the criterion that a move to a list of another board is refused with 422 and a named error code was an expectation with `"source": "ticket"` in every plan.
+
+What is left of the cost is the prompt. A job without the setup starts at 6,050 input tokens, and the prompt of this release adds the change table, up to 48 KiB of the 216 KiB diff, the tickets, and the API operations, so a turn costs about 22 to 26 thousand input tokens, and a plan runs for 6 to 7 turns. The before runs averaged 95 thousand input tokens a turn in the first run and 60 thousand in the second, and ran 12 to 20 turns.
