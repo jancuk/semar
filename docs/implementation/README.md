@@ -1,6 +1,6 @@
 # Semar implementation guide
 
-* **Status:** Draft 1. Plans 01, 12 to 22, 24, and 25 are implemented. The other plans are specifications.
+* **Status:** Draft 1. Plans 01, 12 to 22, 24, 25, and 28 are implemented. The other plans are specifications.
 * **Date:** 2026-11-14
 * **Spec:** [product requirements](../PRD.md), [technical requirements](../TRD.md), [test workflow](../WORKFLOW.md), [user scenarios](../USER_SCENARIOS.md)
 
@@ -312,7 +312,7 @@ Checked on the Go module proxy on 2026-11-14. Pin the exact version in `go.mod`.
 | 25 | [Planning with small models](25-small-models.md) (implemented) | `semar plan --pipeline criteria` plans one acceptance criterion at a time with a job that has no tools: code builds a packet of the criterion, its operations with their fields, the diff of the ticket's files, the fixtures, and the accounts, the answer is a closed schema, code checks it and says what is wrong in plain words, one correction goes to the same model, and a failing answer goes to the next model of `--ladder`. The draft, the files, and the ledger are the same as for `single`, which stays the default | Plans 12, 17, 21, 23, and 24 | FR-353 to 355 and PRD decision D70 |
 | 26 | [The daily loop](26-daily-loop.md) (planned) | The everyday commands are `init`, `run`, `review`, `status`, `check`, `log`, `show`, and `rm`. `semar run` runs the tests of the change and the critical journeys, `semar review` is the one place for what needs a person, and `semar status` gives the state of a release with the next command. `confirm`, `ledger`, and `activity` are removed | Plans 12, 17, 18, 19, 21, 22, and 24 | None yet |
 | 27 | [A first run with no hand-written files](27-first-run.md) (planned) | `semar init` asks for what it cannot find, and in a repository that is set up it checks the machine. A plan drafts the fixtures that its criteria need, plans with small models by default, and stops at a cost limit | Plans 13, 14, 16, 17, 23, and 25 | None yet |
-| 28 | [Record a web test](28-record-a-web-test.md) (planned) | `semar record` opens Chrome on Semar's profile, records what a person does and what the person points at as a check, and writes the screens, the script, and the scenario | Plans 17, 22, and 24 | None yet |
+| 28 | [Record a web test](28-record-a-web-test.md) (implemented) | `semar record` opens Chrome on Semar's profile, records what a person does and what the person points at as a check, and writes the screens, the script, and the scenario | Plans 17, 22, and 24 | FR-356 to 359 |
 | 11 | [Configuration over code](11-configuration.md) | Cases, fragments, data sets, named checks, company rules, declared probes, passes, schemas, and `semar validate`. Every use case is a YAML edit | Plan 04. Parts need Plans 05 and 06 | FR-246 to 260 |
 
 Plans 01 to 04 are the first usable version: one API ticket from a plan to a report. Plans 05, 06, 07, and 11 do not depend on each other, apart from the tasks that Plan 11 names. They can be built in parallel after Plan 04, and Plan 06 can start after Plan 02. Tasks 1 to 5 and 11 to 13 of Plan 11 are worth doing early, because they are what a first user touches.
