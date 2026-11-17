@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"os/user"
@@ -38,6 +39,7 @@ type options struct {
 	Environ   func() []string // the person's environment, for a harness that runs with their setup
 	Home      string          // where providers.yaml and usage.jsonl live; "" is $SEMAR_HOME or ~/.config/semar
 	Keychain  keychain.Store  // nil is the keychain of the operating system
+	HTTP      *http.Client    // the client of the build probe that init looks for; nil is a client that follows no redirect
 
 	StderrTerminal func() bool // whether standard error is a terminal that takes a status line
 	Tick           ticker      // the ticks of the progress line; nil is a real ticker

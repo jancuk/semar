@@ -107,6 +107,18 @@ func newInitCommand(o options) *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s already has these settings; nothing was written\n", configFileName)
 				return nil
 			}
+			if f.buildURL == "" && f.buildCommit == "" {
+				if probe, ok := findBuildProbe(cmd.Context(), o.HTTP, f.baseURL); ok {
+					f.buildURL = probe
+					fmt.Fprintf(cmd.OutOrStdout(), "Found   the build probe at %s\n", probe)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "No build probe was found at %s. %s. Until then, name the build with semar run --build <commit>.\n",
+						strings.TrimRight(f.baseURL, "/")+versionPath, probeNotFoundTo)
+				}
+				if data, err = buildInitConfig(dir, f); err != nil {
+					return err
+				}
+			}
 			path, err := writeInitConfig(dir, data)
 			if err != nil {
 				return err

@@ -3,11 +3,14 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/knowledge"
@@ -168,4 +171,54 @@ func printAskedDone(w io.Writer, f initFlags, lookup func(string) (string, bool)
 		fmt.Fprintln(w, m)
 	}
 	fmt.Fprintln(w, "Next: semar run")
+}
+
+const (
+	versionPath     = "/version"
+	probeTimeout    = 5 * time.Second
+	maxProbeBody    = 64 << 10
+	probeNotFoundTo = "To name one, add build: {probe: http, url: <address>, commit: <JSONPath of the commit>} to the service in " + configFileName
+)
+
+// findBuildProbe looks for the build probe of a service the way a team usually builds one: GET to
+// /version on the address of the service, answered with JSON that holds the commit at $.commit.
+// It sends that one request, with no credential, and follows no redirect, so it reaches only the
+// host of the service. It returns the address when it found a probe.
+func findBuildProbe(ctx context.Context, client *http.Client, baseURL string) (string, bool) {
+	if client == nil {
+		client = &http.Client{Timeout: probeTimeout}
+	}
+	c := *client
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	target := strings.TrimRight(baseURL, "/") + versionPath
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return "", false
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "semar/"+Version)
+	resp, err := c.Do(req)
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxProbeBody))
+	if err != nil {
+		return "", false
+	}
+	var doc struct {
+		Commit any `json:"commit"`
+	}
+	if json.Unmarshal(body, &doc) != nil {
+		return "", false
+	}
+	if s, ok := doc.Commit.(string); !ok || strings.TrimSpace(s) == "" {
+		return "", false
+	}
+	return target, true
 }
