@@ -243,3 +243,58 @@ func TestRecorderSendsClicksFieldsKeysAndAddresses(t *testing.T) {
 		t.Errorf("the second address: %s", describeEvents(got))
 	}
 }
+
+const dragPage = `<!doctype html><html><head><title>Board</title></head><body>
+<div id="todo" role="list" aria-label="Todo">
+  <div class="card" role="listitem" draggable="true">Buy milk</div>
+  <div class="card" role="listitem" draggable="true">Buy eggs</div>
+</div>
+<div id="doing" role="list" aria-label="Doing"><p class="hint">Drop here</p></div>
+<div id="track" style="width:300px;height:30px;background:#ddd;position:relative">
+  <div id="handle" style="width:30px;height:30px;background:#36c;position:absolute;left:0"></div>
+  <div id="end" style="width:30px;height:30px;background:#c63;position:absolute;right:0"></div>
+</div>
+<p id="status">idle</p>
+<script>
+const doing = document.getElementById('doing'), status = document.getElementById('status');
+let dragged = null;
+document.addEventListener('dragstart', e => { dragged = e.target; e.dataTransfer.setData('text/plain', e.target.textContent); });
+doing.addEventListener('dragover', e => e.preventDefault());
+doing.addEventListener('drop', e => { e.preventDefault(); doing.appendChild(dragged); status.textContent = 'moved ' + dragged.textContent; });
+const handle = document.getElementById('handle');
+let holding = false;
+handle.addEventListener('mousedown', () => { holding = true; });
+document.addEventListener('mouseup', () => { holding = false; });
+document.addEventListener('click', () => { status.textContent = 'clicked'; });
+</script></body></html>`
+
+func TestRecorderSendsADragAndNoClickAfterIt(t *testing.T) {
+	r := newRecRig(t, map[string]string{"/board": dragPage})
+	r.open("/board")
+	r.events(1)
+
+	// A card of the browser's own drag and drop.
+	r.drag(".card", "#doing")
+	got := r.events(1)
+	if got[0].Kind != record.KindDrag || got[0].Target == nil || got[0].To == nil {
+		t.Fatalf("the card: %s", describeEvents(got))
+	}
+	if got[0].Target.Hint != "Buy milk" || got[0].To.Locator.CSS != "#doing" {
+		t.Errorf("the card is %q and the list is %+v", got[0].Target.Hint, got[0].To.Locator)
+	}
+	r.quiet()
+
+	// A handle that the page moves with the mouse. The click that follows the release is not a step.
+	r.drag("#handle", "#end")
+	got = r.events(1)
+	if got[0].Kind != record.KindDrag || got[0].Target.Locator.CSS != "#handle" || got[0].To.Locator.CSS != "#end" {
+		t.Fatalf("the handle: %s", describeEvents(got))
+	}
+	r.quiet()
+
+	// Pressing and letting go on the same element is a click.
+	r.click("#end")
+	if got = r.events(1); got[0].Kind != record.KindClick {
+		t.Errorf("a click: %s", describeEvents(got))
+	}
+}

@@ -72,10 +72,62 @@
   on('change', e => { if (isTrusted(e) && pending === e.target) flush(); });
   on('pagehide', flush);
 
+  // A drag is the button pressed on one element and let go on another, with the pointer moved in
+  // between. The browser's own drag and drop sends dragstart and then dragover, and no mouseup.
+  const MOVED = 6;
+  let down = null;
+  let moved = false;
+  let nativeFrom = null;
+  let nativeOver = null;
+  let afterDrag = false;
+  let nativeStarted = false;
+
+  function sendDrag(from, to) {
+    if (!from || !to || from === to || from.contains(to) || to.contains(from)) return;
+    flush();
+    send({ kind: 'drag', target: describe(from), to: describe(to) });
+  }
+
+  on('mousedown', e => {
+    if (!isTrusted(e) || e.button !== 0) return;
+    down = { el: meaningful(e.target), x: e.clientX, y: e.clientY };
+    moved = false;
+    afterDrag = false;
+    nativeStarted = false;
+  });
+  on('mousemove', e => {
+    if (down && !moved && Math.hypot(e.clientX - down.x, e.clientY - down.y) > MOVED) moved = true;
+  });
+  on('mouseup', e => {
+    if (!isTrusted(e) || !down) return;
+    const from = down.el;
+    down = null;
+    if (!moved) return;
+    afterDrag = true;
+    if (!nativeStarted) sendDrag(from, meaningful(e.target));
+  });
+  on('dragstart', e => {
+    if (!isTrusted(e)) return;
+    nativeFrom = meaningful(e.target);
+    nativeOver = null;
+    nativeStarted = true;
+    afterDrag = true;
+  });
+  on('dragover', e => { if (nativeFrom) nativeOver = meaningful(e.target); });
+  function endNative() {
+    const from = nativeFrom;
+    const over = nativeOver;
+    nativeFrom = nativeOver = null;
+    if (from) sendDrag(from, over);
+  }
+  on('drop', endNative);
+  on('dragend', endNative);
+
   let lastClick = { el: null, at: 0 };
   let lastEnter = 0;
   on('click', e => {
     if (!isTrusted(e)) return;
+    if (afterDrag) { afterDrag = false; return; }
     const el = meaningful(e.target);
     const now = Date.now();
     if (lastClick.el === el && now - lastClick.at < 80) return;
