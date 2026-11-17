@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jancuk/semar/internal/atomicfile"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/obligation"
@@ -24,6 +26,7 @@ type statusFlags struct {
 	base      string
 	all       bool
 	checklist bool
+	html      string
 	dir       string
 }
 
@@ -54,6 +57,7 @@ func newStatusCommand(o options) *cobra.Command {
 	cmd.Flags().StringVar(&f.base, "base", "", "the branch that the change is measured against (default: change.base, else the default branch of origin, else main)")
 	cmd.Flags().BoolVar(&f.all, "all", false, "show every use case, not only those of the change")
 	cmd.Flags().BoolVar(&f.checklist, "checklist", false, "print the manual checklist instead of the table")
+	cmd.Flags().StringVar(&f.html, "html", "", "also write the status as one HTML file that needs no network, for a person with no command line")
 	addDirFlag(cmd, &f.dir)
 	return cmd
 }
@@ -141,6 +145,16 @@ func showStatus(ctx context.Context, stdout, stderr io.Writer, o options, f stat
 	}
 
 	rep := status.Build(in)
+	if f.html != "" {
+		var page bytes.Buffer
+		if err := status.HTML(&page, rep); err != nil {
+			return err
+		}
+		if err := atomicfile.Write(f.html, page.Bytes()); err != nil {
+			return fmt.Errorf("write %s: %w", f.html, err)
+		}
+		fmt.Fprintf(stderr, "semar: wrote %s\n", f.html)
+	}
 	if f.checklist {
 		if err := printChecklist(stdout, in.Entries); err != nil {
 			return err

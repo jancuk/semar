@@ -196,3 +196,74 @@ func TestTheNoteOfAnApprovalByAnAuthor(t *testing.T) {
 		t.Errorf("text lacks the mark:\n%s", got)
 	}
 }
+
+func htmlInput() status.Input {
+	return status.Input{
+		Branch: "feature/refund-limit", Base: "main", Environment: "uat",
+		Builds:     []domain.BuildRef{{Service: "orders", Commit: "4f2a91c0000"}},
+		BuildsRead: true,
+		Tickets:    []string{"SHOP-482"},
+		Entries: []obligation.Entry{
+			entry("SHOP-482/1", obligation.Verified, func(e *obligation.Entry) {
+				e.Covers = []obligation.Cover{{Scenario: "SHOP-482-01", Found: true, Outcome: "passed", Run: "r-20261117T101502Z-ab12"}}
+			}),
+			entry("SHOP-482/2", obligation.Failed, func(e *obligation.Entry) {
+				e.Obligation.Title = `A refund <b>above</b> the paid amount & more`
+				e.Covers = []obligation.Cover{{Scenario: "SHOP-482-02", Found: true, Outcome: "failed", Run: "r-20261117T101502Z-ab12"}}
+				e.Reasons = []string{"SHOP-482-02 failed in r-20261117T101502Z-ab12: expected status 422, observed status 200"}
+			}),
+			entry("SHOP-482/manual-1", obligation.NeedsAPerson, func(e *obligation.Entry) {
+				e.Obligation.Manual = &obligation.Manual{Kind: "judgement", Text: "Check the refund receipt on a phone",
+					Steps: []string{"Open the receipt", "Read the refund line"}, Expected: "The refund is shown", WrittenBy: "person"}
+				e.Reasons = []string{"Check the refund receipt on a phone"}
+			}),
+		},
+	}
+}
+
+func TestHTMLHoldsTheSameContentAsOneFileWithNoOutsideResource(t *testing.T) {
+	var b bytes.Buffer
+	if err := status.HTML(&b, status.Build(htmlInput())); err != nil {
+		t.Fatal(err)
+	}
+	page := b.String()
+	for _, want := range []string{
+		"On feature/refund-limit against main · uat · orders at 4f2a91c",
+		"3 use cases of SHOP-482",
+		"Ship: no. 1 failing, 1 open.",
+		"verified", "failing", "for a person",
+		"SHOP-482/1", "SHOP-482/2", "SHOP-482/manual-1",
+		"expected status 422, observed status 200",
+		"r-20261117T101502Z-ab12",
+		"Open the receipt", "Read the refund line", "The refund is shown",
+		"semar check SHOP-482/manual-1 pass",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the page lacks %q", want)
+		}
+	}
+	for _, outside := range []string{"http://", "https://", "<script", "<link", "@import", "url(", "src="} {
+		if strings.Contains(page, outside) {
+			t.Errorf("the page holds %q, so it needs the network or runs code", outside)
+		}
+	}
+	if strings.Contains(page, "<b>above</b>") || !strings.Contains(page, "&lt;b&gt;above&lt;/b&gt; the paid amount &amp; more") {
+		t.Errorf("text from a file is not escaped:\n%s", page)
+	}
+	if !strings.HasPrefix(page, "<!doctype html>") || !strings.Contains(page, `<meta charset="utf-8">`) || !strings.Contains(page, "<title>") {
+		t.Errorf("the page is not a complete document:\n%.200s", page)
+	}
+}
+
+func TestHTMLIsAStableFunctionOfItsInput(t *testing.T) {
+	var a, b bytes.Buffer
+	if err := status.HTML(&a, status.Build(htmlInput())); err != nil {
+		t.Fatal(err)
+	}
+	if err := status.HTML(&b, status.Build(htmlInput())); err != nil {
+		t.Fatal(err)
+	}
+	if a.String() != b.String() {
+		t.Error("two renderings of one input differ")
+	}
+}

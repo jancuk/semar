@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -84,4 +85,26 @@ func TestStatusOfAChangeWithNoTicketSaysSo(t *testing.T) {
 	res := r.must(t, cli.ExitUndecided, "status")
 	contains(t, "stdout", res.stdout, "no ticket", "--all")
 	r.must(t, cli.ExitUndecided, "status", "--all")
+}
+
+func TestStatusWritesOneHTMLFileThatNeedsNoNetwork(t *testing.T) {
+	r := shopBranch(t)
+	r.ledgerFile(t, obligations("SHOP-482",
+		entry("SHOP-482/a", "Refund limit", `gap: "not drafted"`),
+		entry("SHOP-482/p", "Receipt on a phone", manualEntryFields)))
+	file := r.path("out.html")
+	res := r.must(t, cli.ExitUndecided, "status", "--html", file)
+	contains(t, "stderr", res.stderr, "wrote "+file)
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	contains(t, "the page", page, "On feature/refund-limit against main", "SHOP-482/a", "SHOP-482/p", "Read the document.", "Ship: no.", "SHOP-490")
+	for _, outside := range []string{"http://", "https://", "<script", "<link", "src="} {
+		if strings.Contains(page, outside) {
+			t.Errorf("the page holds %q", outside)
+		}
+	}
+	contains(t, "the text", res.stdout, "Ship: no.")
 }
