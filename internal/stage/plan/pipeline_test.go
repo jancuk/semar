@@ -401,3 +401,37 @@ func TestRunCriteriaSendsTrialProblemsBackToTheCriterionThatOwnsTheScenario(t *t
 		t.Errorf("scenarios = %d", len(out.Scenarios))
 	}
 }
+
+func TestRunCriteriaTreatsAJobWithNoAnswerAsAProblemOfTheAnswer(t *testing.T) {
+	in := shopInput(t)
+	a := shopAnswers()
+	good := a.fake("p")
+	var first atomic.Bool
+	f := fake.NewFunc("p", func(j provider.Job) (provider.Result, error) {
+		if strings.Contains(j.Prompt, ticket482+":9\n") && first.CompareAndSwap(false, true) {
+			return provider.Result{InputTokens: 50}, &provider.Error{Class: provider.ValidationError, Detail: "the harness reached the turn limit"}
+		}
+		return good.Run(context.Background(), j)
+	})
+	in.Ladder = ladder(Rung{Planner: f, Model: "haiku"})
+	out, err := RunCriteria(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := out.Pipeline; st.Corrections != 1 || st.Unanswered != 0 {
+		t.Fatalf("stats = %+v", st)
+	}
+	if got := messages(out.Outcomes[0].Returned); !strings.Contains(got, "the job returned no answer in the schema: the harness reached the turn limit") {
+		t.Errorf("returned = %q", got)
+	}
+
+	// A refusal of the schema is the same for every job, so it ends the run.
+	in2 := shopInput(t)
+	refuse := fake.NewFunc("p", func(provider.Job) (provider.Result, error) {
+		return provider.Result{}, &provider.Error{Class: provider.ValidationError, Detail: "the harness refused the output schema: too deep"}
+	})
+	in2.Ladder = ladder(Rung{Planner: refuse, Model: "haiku"})
+	if _, err := RunCriteria(context.Background(), in2); err == nil {
+		t.Error("a refused schema did not end the run")
+	}
+}

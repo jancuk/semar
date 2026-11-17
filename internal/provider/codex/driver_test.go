@@ -411,6 +411,7 @@ func TestRunFailureClasses(t *testing.T) {
 		{"no answer", "no_answer.jsonl", 0, "", provider.ValidationError, "the answer is not one JSON object"},
 		{"prose answer", "answer_prose.jsonl", 0, "", provider.ValidationError, "the answer is not one JSON object"},
 		{"two objects", "answer_two_objects.jsonl", 0, "", provider.ValidationError, "the answer is not one JSON object"},
+		{"text after the object", "answer_trailing_text.jsonl", 0, "", provider.ValidationError, "the answer is not one JSON object"},
 		{"crash with no JSON", "", 3, "boom: out of memory", provider.ProviderError, "exit code 3: boom: out of memory"},
 		{"not JSON on success", "", 0, "", provider.ProviderError, "not JSON"},
 	}
@@ -882,5 +883,31 @@ func TestNoToolsJobTurnsTheCommandToolsOff(t *testing.T) {
 				t.Errorf("noTools=%v: --disable %s present = %v", noTools, f, !noTools)
 			}
 		}
+	}
+}
+
+func TestRunSchemaInPromptPassesNoSchemaFile(t *testing.T) {
+	b := newBinary(t, "success.jsonl", 0, "")
+	j := job(t)
+	j.SchemaInPrompt = true
+	if _, err := newDriver(t, config.Provider{}, b.path).Run(context.Background(), j); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(argsOf(t, b), "--output-schema") {
+		t.Fatal("a schema that the caller wants in the prompt was enforced")
+	}
+	if stdin := read(t, b.stdin); !strings.HasPrefix(stdin, "plan this change\n\n") || !strings.Contains(stdin, schema) {
+		t.Fatalf("stdin = %q", stdin)
+	}
+}
+
+func TestRunDropsAClosingBraceTooMany(t *testing.T) {
+	b := newBinary(t, "answer_extra_brace.jsonl", 0, "")
+	res, err := newDriver(t, config.Provider{}, b.path).Run(context.Background(), job(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(res.Output) != `{"method":"GET","steps":[{"id":"a"}]}` {
+		t.Fatalf("output = %s", res.Output)
 	}
 }

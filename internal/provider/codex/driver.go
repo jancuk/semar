@@ -185,7 +185,7 @@ func (d *Driver) Run(ctx context.Context, job provider.Job) (provider.Result, er
 
 	prompt := job.Prompt
 	schemaFile := ""
-	if strictSchema(job.Schema) {
+	if !job.SchemaInPrompt && strictSchema(job.Schema) {
 		f, cleanup, err := writeSchema(job.Schema, workdir)
 		if err != nil {
 			return provider.Result{}, err

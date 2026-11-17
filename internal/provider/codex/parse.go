@@ -3,9 +3,7 @@ package codex
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"slices"
 	"strings"
@@ -182,7 +180,9 @@ func toolName(itemType, server, tool string) string {
 }
 
 // answerObject accepts one JSON object, alone or in one code fence, which a model sometimes
-// adds when the schema is in the prompt.
+// adds when the schema is in the prompt. A model also sometimes ends a long object with a closing
+// brace too many, so closing braces and brackets after the object are dropped. Any other text after
+// it is refused.
 func answerObject(text string) (json.RawMessage, bool) {
 	s := strings.TrimSpace(text)
 	if rest, ok := strings.CutPrefix(s, "```"); ok {
@@ -200,10 +200,11 @@ func answerObject(text string) (json.RawMessage, bool) {
 	if dec.Decode(&obj) != nil || obj == nil {
 		return nil, false
 	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+	end := int(dec.InputOffset())
+	if strings.Trim(s[end:], "}] \t\r\n") != "" {
 		return nil, false
 	}
-	return json.RawMessage(s), true
+	return json.RawMessage(s[:end]), true
 }
 
 // classify maps the message of a failed turn. The message is often the API's own error object

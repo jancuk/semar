@@ -48,6 +48,11 @@ type Job struct {
 	MaxTurns  int
 	Timeout   time.Duration
 	Progress  func(Progress) // nil for no reports
+	// SchemaInPrompt asks a harness to give the schema to the model as text, and to check the output
+	// afterwards, instead of enforcing it while the model writes. Codex enforces a schema through
+	// strict structured output, which narrowed the choices of a small model on a large schema until it
+	// answered "not drafted" to every question. A harness that cannot do this ignores it.
+	SchemaInPrompt bool
 	// NoTools gives the job no tool at all: it cannot read a file, search, or run a command, and
 	// answers from its prompt. Workdir still names a directory, which the job never reads.
 	NoTools bool

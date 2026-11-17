@@ -264,11 +264,29 @@ func (rs *runState) output(outcomes []CriterionOutcome) Output {
 	}
 }
 
-// call runs one job at a rung and adds it to the totals. A provider error is returned.
-func (rs *runState) call(ctx context.Context, rung int, p Packet, previous []byte, problems []Problem) ([]byte, error) {
+// noAnswer says whether a provider error is a job that ran and returned no answer in the schema: the
+// harness reached its turn limit, or its output was not one object. That is a failure of the model and
+// not of the provider, so it is a problem of the answer like any other. A refusal of the schema, or a
+// failure to start, is not, and ends the run.
+func noAnswer(err error) (string, bool) {
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Class != provider.ValidationError {
+		return "", false
+	}
+	for _, ok := range []string{"turn limit", "holds no object", "not one JSON object"} {
+		if strings.Contains(perr.Detail, ok) {
+			return perr.Detail, true
+		}
+	}
+	return "", false
+}
+
+// call runs one job at a rung and adds it to the totals. A provider error is returned. A job that
+// returned no answer in the schema gives no output and the reason in soft.
+func (rs *runState) call(ctx context.Context, rung int, p Packet, previous []byte, problems []Problem) (raw []byte, soft string, err error) {
 	text, err := p.Prompt(previous, problems)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	r := rs.in.Ladder[rung]
 	dir := rs.in.JobDir
@@ -278,7 +296,7 @@ func (rs *runState) call(ctx context.Context, rung int, p Packet, previous []byt
 	started := time.Now()
 	res, err := r.Planner.Run(ctx, provider.Job{
 		Prompt: text, Workdir: dir, Schema: p.AnswerSchema(), Model: r.Model, Reasoning: r.Reasoning,
-		MaxTurns: CriterionMaxTurns, Timeout: rs.in.Limits.Timeout, NoTools: true,
+		MaxTurns: CriterionMaxTurns, Timeout: rs.in.Limits.Timeout, NoTools: true, SchemaInPrompt: true,
 	})
 	rs.mu.Lock()
 	sum(&rs.total, res)
@@ -291,7 +309,10 @@ func (rs *runState) call(ctx context.Context, rung int, p Packet, previous []byt
 		rs.corr++
 	}
 	rs.mu.Unlock()
-	return res.Output, err
+	if detail, ok := noAnswer(err); ok {
+		return nil, detail, nil
+	}
+	return res.Output, "", err
 }
 
 // sumUse adds the tokens of a call to a rung's totals and keeps the model that it reported.
@@ -305,7 +326,10 @@ func sumUse(total *provider.Result, res provider.Result) {
 
 // check reads an output and runs the checks of the packet. An output that is no answer is a
 // problem like any other.
-func (rs *runState) check(p Packet, raw []byte) (CriterionResult, []Problem) {
+func (rs *runState) check(p Packet, raw []byte, soft string) (CriterionResult, []Problem) {
+	if soft != "" {
+		return CriterionResult{}, []Problem{{Message: "the job returned no answer in the schema: " + soft}}
+	}
 	a, err := DecodeAnswer(raw)
 	if err != nil {
 		return CriterionResult{}, []Problem{{Message: "the output is not an answer in the schema: " + err.Error()}}
@@ -325,17 +349,18 @@ func (rs *runState) answer(ctx context.Context, p Packet) (CriterionOutcome, err
 		fromCache := false
 		if stored, ok := rs.cache[p.Hash()]; ok && rung == 0 {
 			raw, fromCache = stored.Output, true
-			if res, ps = rs.check(p, raw); len(ps) == 0 {
+			if res, ps = rs.check(p, raw, ""); len(ps) == 0 {
 				o.Result, o.Answered, o.Reused, o.Rung, o.Output = res, true, true, rung, raw
 				return o, nil
 			}
 		}
 		if !fromCache {
 			var err error
-			if raw, err = rs.call(ctx, rung, p, nil, nil); err != nil {
+			var soft string
+			if raw, soft, err = rs.call(ctx, rung, p, nil, nil); err != nil {
 				return o, err
 			}
-			if res, ps = rs.check(p, raw); len(ps) == 0 {
+			if res, ps = rs.check(p, raw, soft); len(ps) == 0 {
 				o.Result, o.Answered, o.Rung, o.Output = res, true, rung, raw
 				return o, nil
 			}
@@ -343,10 +368,11 @@ func (rs *runState) answer(ctx context.Context, p Packet) (CriterionOutcome, err
 		o.Corrections++
 		o.Returned = append(o.Returned, ps...)
 		var err error
-		if raw, err = rs.call(ctx, rung, p, raw, ps); err != nil {
+		var soft string
+		if raw, soft, err = rs.call(ctx, rung, p, raw, ps); err != nil {
 			return o, err
 		}
-		if res, ps = rs.check(p, raw); len(ps) == 0 {
+		if res, ps = rs.check(p, raw, soft); len(ps) == 0 {
 			o.Result, o.Answered, o.Rung, o.Output = res, true, rung, raw
 			return o, nil
 		}
@@ -486,11 +512,11 @@ func (rs *runState) trial(ctx context.Context, b built) (built, *Trial, int, []R
 	for idx, ps := range byOutcome {
 		g.Go(func() error {
 			o := b.Outcomes[idx]
-			raw, err := rs.call(gctx, o.Rung, o.Packet, o.Output, ps)
+			raw, soft, err := rs.call(gctx, o.Rung, o.Packet, o.Output, ps)
 			if err != nil {
 				return fmt.Errorf("criterion %s: %w", o.Packet.Cite, err)
 			}
-			res, found := rs.check(o.Packet, raw)
+			res, found := rs.check(o.Packet, raw, soft)
 			if len(found) > 0 || res.Scenario == nil {
 				return nil
 			}
