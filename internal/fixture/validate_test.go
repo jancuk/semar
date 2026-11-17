@@ -62,12 +62,15 @@ func TestValidateRules(t *testing.T) {
 				f.Params["p"+strings.Repeat("a", i+1)] = domain.Param{}
 			}
 		}, path: "params", want: "17 parameters; at most 16"},
-		{rule: "F6", name: "default with a parameter", edit: func(f *domain.Fixture) { f.Params["a"] = domain.Param{Default: str("{{customer}}")} }, path: "params.a.default", want: "a default is a literal, a literal with {{run.id}}, or one {{data.<key>}}"},
+		{rule: "F6", name: "default with a parameter", edit: func(f *domain.Fixture) { f.Params["a"] = domain.Param{Default: str("{{customer}}")} }, path: "params.a.default", want: "a default is a literal, a literal with {{run.id}} or a date variable, or one {{data.<key>}}"},
 		{rule: "F6", name: "default with text around data", edit: func(f *domain.Fixture) { f.Params["a"] = domain.Param{Default: str("x-{{data.k}}")} }, path: "params.a.default", want: "a default is a literal"},
 		{rule: "F6", name: "default with two data keys", edit: func(f *domain.Fixture) { f.Params["a"] = domain.Param{Default: str("{{data.k}}{{data.j}}")} }, path: "params.a.default", want: "a default is a literal"},
 		{rule: "F6", name: "default with a secret", edit: func(f *domain.Fixture) { f.Params["a"] = domain.Param{Default: str("{{secret.TOKEN}}")} }, path: "params.a.default", want: "a default is a literal"},
 		{rule: "F6", name: "default with a bad data key", edit: func(f *domain.Fixture) { f.Params["a"] = domain.Param{Default: str("{{data.Customers}}")} }, path: "params.a.default", want: "data key Customers must match"},
 		{rule: "F6", name: "default with run id", edit: func(f *domain.Fixture) { f.Params["a"] = domain.Param{Default: str("semar-{{run.id}}")} }},
+		{rule: "F6", name: "default with a date variable", edit: func(f *domain.Fixture) { f.Params["a"] = domain.Param{Default: str("due-{{date.plus7d}}")} }},
+		{rule: "F6", name: "default with a date variable and run id", edit: func(f *domain.Fixture) { f.Params["a"] = domain.Param{Default: str("{{local.now}}-{{run.id}}")} }},
+		{rule: "F6", name: "default with a name that is not a date variable", edit: func(f *domain.Fixture) { f.Params["a"] = domain.Param{Default: str("{{date.tomorrow}}")} }, path: "params.a.default", want: "a default is a literal"},
 		{rule: "F6", name: "default with a malformed variable", edit: func(f *domain.Fixture) { f.Params["a"] = domain.Param{Default: str("{{run.id")} }, path: "params.a.default", want: "malformed variable"},
 		{rule: "F6", name: "no default", edit: func(f *domain.Fixture) { f.Params["a"] = domain.Param{} }},
 
@@ -120,6 +123,8 @@ func TestValidateRules(t *testing.T) {
 			f.Create[0].Request.Query = map[string]string{"c": "{{data.customers.default}}"}
 		}, path: "create[0].request.query c", want: "{{data.customers.default}} cannot be used in a request: put it in the default of a parameter"},
 		{rule: "F11", name: "run id", edit: func(f *domain.Fixture) { f.Create[0].Request.Query = map[string]string{"c": "{{run.id}}"} }},
+		{rule: "F11", name: "date variable", edit: func(f *domain.Fixture) { f.Create[0].Request.Query = map[string]string{"d": "{{date.minus7d}}"} }},
+		{rule: "F11", name: "date name that is not a variable", edit: func(f *domain.Fixture) { f.Create[0].Request.Query = map[string]string{"d": "{{date.soon}}"} }, path: "create[0].request.query d", want: "{{date.soon}} is not a parameter"},
 		{rule: "F11", name: "dotted name that is not a variable", edit: func(f *domain.Fixture) { f.Create[0].Request.Query = map[string]string{"c": "{{order.id}}"} }, path: "create[0].request.query c", want: "{{order.id}} is not a parameter"},
 
 		{rule: "F12", name: "capture name", edit: func(f *domain.Fixture) { f.Create[0].Captures[0].Name = "1id" }, path: "create[0].captures[0]", want: "capture name 1id must match ^[A-Za-z][A-Za-z0-9_]*$"},

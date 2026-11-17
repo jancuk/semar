@@ -13,6 +13,7 @@ import (
 
 	"github.com/theory/jsonpath"
 
+	"github.com/jancuk/semar/internal/datevar"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/script"
@@ -179,14 +180,14 @@ func (v *validator) params() {
 }
 
 // defaultProblem is why a parameter default is not allowed. A default is a literal, a literal with
-// {{run.id}}, or exactly one {{data.<key>}}.
+// {{run.id}} or a date variable, or exactly one {{data.<key>}}.
 func defaultProblem(d string) string {
 	if strings.Contains(variablePattern.ReplaceAllString(d, ""), "{{") {
 		return fmt.Sprintf("malformed variable in %q", d)
 	}
 	var others []string
 	for _, m := range variablePattern.FindAllStringSubmatch(d, -1) {
-		if m[1] != "run.id" {
+		if m[1] != "run.id" && !datevar.Is(m[1]) {
 			others = append(others, m[1])
 		}
 	}
@@ -199,7 +200,7 @@ func defaultProblem(d string) string {
 		}
 		return ""
 	}
-	return "a default is a literal, a literal with {{run.id}}, or one {{data.<key>}}"
+	return "a default is a literal, a literal with {{run.id}} or a date variable, or one {{data.<key>}}"
 }
 
 func (v *validator) shape() {

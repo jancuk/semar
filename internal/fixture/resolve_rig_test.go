@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	testRun   = "r-1"
+	testRun   = "r-20261118T071502Z-0001"
 	testEnv   = "uat"
 	testOwner = "SHOP-482-05"
 )

@@ -81,7 +81,7 @@ func TestCreateWhenFindEmpty(t *testing.T) {
 			t.Errorf("action %s has use %+v", a.ID, a.Use)
 		}
 	}
-	if !strings.Contains(string(actions[1].Request.Body), `"ref":"semar-r-1"`) {
+	if !strings.Contains(string(actions[1].Request.Body), `"ref":"semar-`+testRun+`"`) {
 		t.Errorf("create body %s does not carry the run ID", actions[1].Request.Body)
 	}
 	rec := records[0]
@@ -355,6 +355,36 @@ func TestMissingParameterAndData(t *testing.T) {
 	if q := r.sink.all()[0].Request.URL; !strings.Contains(q, "customer=c-9") {
 		t.Errorf("find was sent to %s", q)
 	}
+}
+
+func TestParametersMayHoldDateVariables(t *testing.T) {
+	old := time.Local
+	time.Local = time.FixedZone("UTC+7", 7*3600)
+	t.Cleanup(func() { time.Local = old })
+
+	r := newRig(t, rigOptions{})
+	res := r.resolve(request(domain.Given{Fixture: "order.paid", As: "order", With: map[string]string{"customer": "due-{{date.plus7d}}"}}))
+	if len(res.Blocked) > 0 {
+		t.Fatalf("Blocked = %q", res.Blocked)
+	}
+	if q := r.sink.all()[0].Request.URL; !strings.Contains(q, "customer=due-2026-11-25") {
+		t.Errorf("find was sent to %s", q)
+	}
+
+	withDefault := example(t)
+	withDefault.Params = map[string]domain.Param{"customer": {Default: new("{{date.today}}")}}
+	r = newRig(t, rigOptions{fixtures: []domain.Fixture{withDefault}})
+	res = r.resolve(request(orderGiven))
+	if len(res.Blocked) > 0 {
+		t.Fatalf("Blocked = %q", res.Blocked)
+	}
+	if q := r.sink.all()[0].Request.URL; !strings.Contains(q, "customer=2026-11-18") {
+		t.Errorf("find was sent to %s", q)
+	}
+
+	r = newRig(t, rigOptions{})
+	wantBlocked(t, r.resolve(request(domain.Given{Fixture: "order.paid", As: "order", With: map[string]string{"customer": "{{date.tomorrow}}"}})),
+		"fixture order.paid: parameter customer: {{date.tomorrow}} is not run.id, a date variable, or data.<key>")
 }
 
 func TestNotApproved(t *testing.T) {

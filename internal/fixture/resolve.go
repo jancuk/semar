@@ -230,14 +230,15 @@ func (r *Resolver) inEnvironment(msg string) string {
 	return strings.ReplaceAll(msg, "of this environment", "of "+r.d.Environment)
 }
 
-// params fills each parameter from with, else its default. {{run.id}} and {{data.<key>}} are
-// replaced in both. The result also holds run.id, so a request may use it directly.
+// params fills each parameter from with, else its default. {{run.id}}, a date variable, and
+// {{data.<key>}} are replaced in both. The result also holds run.id, so a request may use it directly.
 func (r *Resolver) params(f domain.Fixture, g domain.Given) (map[string]string, string) {
 	for _, k := range slices.Sorted(maps.Keys(g.With)) {
 		if _, ok := f.Params[k]; !ok {
 			return nil, fmt.Sprintf("fixture %s: with sets %s, which is not a parameter of the fixture", f.ID, k)
 		}
 	}
+	runVars := map[string]string{"run.id": string(r.d.Run)}
 	out := map[string]string{"run.id": string(r.d.Run)}
 	for _, name := range slices.Sorted(maps.Keys(f.Params)) {
 		raw, ok := g.With[name]
@@ -250,11 +251,8 @@ func (r *Resolver) params(f domain.Fixture, g domain.Given) (map[string]string, 
 		}
 		var problem string
 		v := variablePattern.ReplaceAllStringFunc(raw, func(m string) string {
-			name := variablePattern.FindStringSubmatch(m)[1]
-			if name == "run.id" {
-				return string(r.d.Run)
-			}
-			if key, ok := strings.CutPrefix(name, "data."); ok {
+			ref := variablePattern.FindStringSubmatch(m)[1]
+			if key, ok := strings.CutPrefix(ref, "data."); ok {
 				if val, ok := r.d.Data[key]; ok {
 					return val
 				}
@@ -263,10 +261,19 @@ func (r *Resolver) params(f domain.Fixture, g domain.Given) (map[string]string, 
 				}
 				return m
 			}
-			if problem == "" {
-				problem = fmt.Sprintf("fixture %s: parameter %s: {{%s}} is not run.id or data.<key>", f.ID, name, name)
+			val, found, err := script.Resolve(runVars, ref)
+			switch {
+			case err != nil:
+				if problem == "" {
+					problem = fmt.Sprintf("fixture %s: parameter %s: %v", f.ID, name, err)
+				}
+			case !found && problem == "":
+				problem = fmt.Sprintf("fixture %s: parameter %s: {{%s}} is not run.id, a date variable, or data.<key>", f.ID, name, ref)
 			}
-			return m
+			if !found {
+				return m
+			}
+			return val
 		})
 		if problem != "" {
 			return nil, problem
