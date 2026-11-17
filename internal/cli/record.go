@@ -479,11 +479,11 @@ type replayed struct {
 // replayScenario runs the scenario that was just written, with no window, as semar run does, with the
 // screens of its app treated as approved for this one run, and, when trustExpectations is set, the
 // expectations of the scenario treated as confirmed for it.
-func replayScenario(ctx context.Context, o options, dir, envName, app, id string, trustExpectations bool) replayed {
+func replayScenario(ctx context.Context, o options, dir, envName, app, id string, builds []string, trustExpectations bool) replayed {
 	var r replayed
 	var stderr bytes.Buffer
 	flags := runFlags{
-		scenarios: []string{id}, env: envName, dir: dir,
+		scenarios: []string{id}, env: envName, dir: dir, builds: builds,
 		done: func(run domain.Run, path string) {
 			if len(run.Results) == 1 {
 				r.result, r.report = &run.Results[0], path
@@ -502,7 +502,7 @@ func replayScenario(ctx context.Context, o options, dir, envName, app, id string
 // replayOnce runs the scenario that was just written and says how it ended. A scenario that does not
 // replay stays written, so that the person can fix a step or record again.
 func replayOnce(ctx context.Context, out io.Writer, o options, f recordTestFlags, envName, app, id string) {
-	r := replayScenario(ctx, o, f.dir, envName, app, id, false)
+	r := replayScenario(ctx, o, f.dir, envName, app, id, nil, false)
 	var exit exitError
 	switch {
 	case r.result == nil && r.err != nil && !errors.As(r.err, &exit):

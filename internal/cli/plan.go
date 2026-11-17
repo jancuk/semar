@@ -38,6 +38,7 @@ type planFlags struct {
 	withSetup    bool
 	withSetupSet bool
 	noTrial      bool
+	noWeb        bool
 	pipeline     string
 	ladder       string
 	maxCost      float64
@@ -80,6 +81,7 @@ func newPlanCommand(o options) *cobra.Command {
 	cmd.Flags().StringVar(&f.ladder, "ladder", "", "with --pipeline criteria, the models from the cheapest up, each as <provider id>:<model>, such as claude:haiku,claude:sonnet,claude:opus (default: plan.ladder of your providers file, else the provider and model of the plan)")
 	cmd.Flags().Float64Var(&f.maxCost, "max-cost", 0, "the most this plan may spend, in dollars, as the providers report it: when the sum reaches it, no new job starts, the jobs that run finish, and the plan is written with what was answered, with exit code 2 (default: plan.maxCost of your providers file, else no limit)")
 	cmd.Flags().BoolVar(&f.noTrial, "no-trial", false, "do not send the read-only steps of the draft to the environment before the plan is written, for this run")
+	cmd.Flags().BoolVar(&f.noWeb, "no-web", false, "do not explore the web criteria in a browser: each stays a manual check, for this run")
 	cmd.Flags().IntVar(&f.maxScenarios, "max-scenarios", 0, "the most scenarios to draft (default: plan.maxScenarios)")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to plan for; needed when there are several. With --base-url, the name of the new environment (default uat, or production with --kind production)")
 	cmd.Flags().StringVar(&f.authProfile, "auth-profile", "", "the auth profile of the scenarios; needed when there are several and none is named default")
@@ -290,6 +292,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if criteria {
 		fxRig = planFixtureTrial(o, f, cfg, envName, env, in.AuthProfile)
 		in.FixtureTrial = fxRig
+		in.Web, in.WebOff = planWeb(ctx, o, f, cfg, envName, env, in.AuthProfile, cs.HeadCommit)
 		fmt.Fprintln(stderr, criteriaStartLine(ladder, rungConfigs, cs.Head))
 	} else {
 		fmt.Fprintln(stderr, startLine(pc, cs.Head, model, pc.Reasoning))
@@ -330,8 +333,12 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		}
 		return planFailed(ctx, stderr, err)
 	}
+	if out.WebOff != "" && slices.ContainsFunc(out.Draft.ManualChecks, func(m plan.ManualCheckDraft) bool { return m.Surface == plan.SurfaceWeb }) {
+		fmt.Fprintf(stderr, "semar: web criteria are not explored: %s; each stays a manual check\n", terminalSafe(out.WebOff))
+	}
 	planFile, err := writePlan(f.dir, in, out, known)
 	if err != nil {
+		removeWebTests(stderr, out.WebTests)
 		record("failed:not_written", "")
 		return err
 	}
@@ -342,7 +349,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 			plan.Dollars(in.MaxCost), stoppedWords(out))
 		return exitError{ExitUndecided}
 	}
-	if len(out.Scenarios) == 0 {
+	if len(out.Scenarios) == 0 && len(out.WebTests) == 0 {
 		return exitError{ExitUndecided}
 	}
 	return nil
@@ -639,10 +646,14 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, p
 	for _, sc := range out.Scenarios {
 		count[sc.Ticket]++
 	}
+	for _, wt := range out.WebTests {
+		count[wt.Scenario.Ticket]++
+	}
 	for _, t := range out.Draft.Tickets {
 		fmt.Fprintf(w, "%s (%s): %s\n", terminalSafe(t.Key), terminalSafe(t.Kind), plural(count[t.Key], "scenario"))
 	}
 	fmt.Fprintf(w, "not drafted: %d\n", len(out.Draft.NotDrafted))
+	printWebPart(w, out)
 	for _, d := range out.FixtureDrafts {
 		if d.Drafted {
 			fmt.Fprintf(w, "fixture drafted: %s. %s Not approved: semar review %s\n", terminalSafe(d.Need.ID), terminalSafe(plan.FixtureRunWords(d)), terminalSafe(d.Need.ID))
@@ -673,7 +684,7 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, p
 	if modelUse != "" {
 		fmt.Fprintln(w, modelUse)
 	}
-	if len(out.Scenarios) > 0 {
+	if len(out.Scenarios) > 0 || len(out.WebTests) > 0 {
 		fmt.Fprintf(w, "next:\n  semar review %s   read what the plan drafted, a fixture before the scenarios that use it, and approve it\n", terminalSafe(firstToReview(out)))
 		fmt.Fprintf(w, "  %s   run the approved scenarios against the service\n  semar status   where things stand\n", run)
 	}
@@ -724,6 +735,9 @@ func firstToReview(out plan.Output) string {
 		if d.Drafted {
 			return d.Need.ID
 		}
+	}
+	if len(out.Scenarios) == 0 {
+		return string(out.WebTests[0].Scenario.ID)
 	}
 	return string(out.Scenarios[0].ID)
 }

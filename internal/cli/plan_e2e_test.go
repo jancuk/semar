@@ -3,6 +3,7 @@ package cli_test
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -132,7 +133,11 @@ func newPlanRepo(t *testing.T, app sampleapp.Options) *planRepo {
 	t.Setenv(planTokenEnv, token)
 
 	a := sampleapp.New(app)
-	srv := httptest.NewServer(a)
+	// The page of the refund is served next to the API, for a plan that writes a web test.
+	pages := http.NewServeMux()
+	pages.HandleFunc("/refund", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, refundShop(false)) })
+	pages.Handle("/", a)
+	srv := httptest.NewServer(pages)
 	t.Cleanup(srv.Close)
 	u, err := url.Parse(srv.URL)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -51,6 +52,29 @@ type StoredAnswer struct {
 	Output json.RawMessage `json:"output"`
 }
 
+// WebResult is how the exploring of one web criterion ended. Exactly one of Test and Manual is set. Rung
+// is the rung that wrote the test, or the last that tried.
+type WebResult struct {
+	Test    *WebTest
+	Manual  string
+	Rung    int
+	Turns   int
+	Actions int
+}
+
+// WebStats is what the web part of a plan did.
+type WebStats struct {
+	Explored    int // criteria that a flow was started for
+	Written     int // tests written
+	Manual      int // criteria left for a person
+	Escalated   int // criteria that a higher model was asked for
+	Turns       int // turns played, over every try
+	Calls       int // calls to a model, corrections included
+	Corrections int
+	FailsNow    int // checks of written tests that the page does not meet
+	Took        time.Duration
+}
+
 // ModelCount is how many criteria a model answered.
 type ModelCount struct {
 	Model   string
@@ -83,6 +107,10 @@ type PipelineStats struct {
 	FixtureJobs, FixturesDrafted int
 	// NotPlanned are the criteria that no job answered because the cost limit was reached.
 	NotPlanned int
+	// Web and WebUses are the web part: the flows of the web criteria, and the calls of their turns for
+	// each rung. Their calls are in Calls and in the total of the plan as well.
+	Web     WebStats
+	WebUses []ModelUse
 }
 
 // modelOf is the label of the model of a rung, "" when there is none.
@@ -98,17 +126,21 @@ type CriterionOutcome struct {
 	Packet      Packet
 	Result      CriterionResult
 	Answered    bool
-	Rung        int       // the rung that answered, or the last that tried
-	Corrections int       // calls that repaired an answer of this criterion
-	Reused      bool      // the answer is a stored answer of an earlier plan
-	NotPlanned  bool      // the cost limit was reached before a job for it started
-	Problems    []Problem // the problems of the last answer, when no model answered
-	Returned    []Problem // the problems that went back to a model, over every correction
-	Output      []byte    // the accepted output; the last output when there is none
+	Rung        int        // the rung that answered, or the last that tried
+	Corrections int        // calls that repaired an answer of this criterion
+	Reused      bool       // the answer is a stored answer of an earlier plan
+	NotPlanned  bool       // the cost limit was reached before a job for it started
+	Problems    []Problem  // the problems of the last answer, when no model answered
+	Web         *WebResult // set when the criterion was a web check that a flow explored
+	Returned    []Problem  // the problems that went back to a model, over every correction
+	Output      []byte     // the accepted output; the last output when there is none
 }
 
 func newRunState(in Input) *runState {
 	rs := &runState{in: in, uses: make([]ModelUse, len(in.Ladder)), webUses: make([]ModelUse, len(in.Ladder)), cache: map[string]StoredAnswer{}}
+	if rs.in.Existing = maps.Clone(in.Existing); rs.in.Existing == nil {
+		rs.in.Existing = map[string][]domain.Scenario{}
+	}
 	for i, r := range in.Ladder {
 		rs.uses[i] = ModelUse{PlannerID: r.Planner.ID(), Kind: r.Planner.Kind(), Model: r.Label(), Asked: r.Model, Reasoning: r.Reasoning}
 		rs.webUses[i] = rs.uses[i]
@@ -129,6 +161,7 @@ type runState struct {
 	// webUses are the calls of the turns of web flows, for each rung. They are in total and calls too.
 	webUses []ModelUse
 	webCorr int
+	web     WebStats
 	calls   int
 	corr    int
 	done    int
@@ -205,8 +238,13 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 		in.Fixtures = rs.in.Fixtures
 	}
 
+	if err := rs.exploreWeb(ctx, outcomes); err != nil {
+		return rs.failed(), err
+	}
+
 	b, ps := rs.build(outcomes)
 	if len(ps) > 0 {
+		rs.undoWeb(outcomes)
 		out := rs.failed()
 		return out, &Rejected{Problems: ps, Attempts: 1}
 	}
@@ -216,6 +254,7 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 	if in.Trial != nil && len(b.Scenarios) > 0 {
 		var err error
 		if b, tr, returned, refused, err = rs.trial(ctx, b); err != nil {
+			rs.undoWeb(outcomes)
 			return rs.failed(), err
 		}
 	}
@@ -235,6 +274,12 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 		}
 	}
 	out.Draft, out.Scenarios, out.Scripts = b.Draft, b.Scenarios, b.Scripts
+	out.WebOff = in.WebOff
+	for _, o := range b.Outcomes {
+		if o.Web != nil && o.Web.Test != nil {
+			out.WebTests = append(out.WebTests, *o.Web.Test)
+		}
+	}
 	out.Notes = compare(in, b.Scenarios, b.Scripts)
 	out.Trial, out.TrialReturned, out.Refused = tr, returned, refused
 	out.Unaccounted = Unaccounted(b.Draft, in.Tickets)
@@ -317,7 +362,8 @@ func (rs *runState) failed() Output {
 func (rs *runState) output(outcomes []CriterionOutcome) Output {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	st := &PipelineStats{Criteria: len(outcomes), Calls: rs.calls, Corrections: rs.corr}
+	st := &PipelineStats{Criteria: len(outcomes), Calls: rs.calls, Corrections: rs.corr, Web: rs.web}
+	st.Web.Corrections = rs.webCorr
 	for _, r := range rs.in.Ladder {
 		st.Labels = append(st.Labels, r.Label())
 	}
@@ -346,6 +392,14 @@ func (rs *runState) output(outcomes []CriterionOutcome) Output {
 		}
 		st.Uses = append(st.Uses, u)
 		st.ByModel = append(st.ByModel, ModelCount{Model: u.Model, Answers: counts[i]})
+	}
+	for i, u := range rs.webUses {
+		if u.Calls == 0 {
+			continue
+		}
+		st.WebUses = append(st.WebUses, u)
+		st.Web.Calls += u.Calls
+		_ = i
 	}
 	total := rs.total
 	total.Model = ""
@@ -539,6 +593,15 @@ func assemble(in Input, outcomes []CriterionOutcome) (Draft, []int) {
 			d.NotDrafted = append(d.NotDrafted, *o.Result.NotDrafted)
 		}
 	}
+	for _, o := range outcomes {
+		if o.Web != nil && o.Web.Test != nil {
+			t := o.Web.Test
+			d.WebTests = append(d.WebTests, WebTestDraft{
+				Ticket: t.Scenario.Ticket, ID: string(t.Scenario.ID), Title: t.Scenario.Title, Cite: t.Cite,
+				Replay: t.Replay, ScenarioPath: t.ScenarioPath, FailsNow: t.FailsNow,
+			})
+		}
+	}
 	for _, o := range dropped {
 		d.NotDrafted = append(d.NotDrafted, NotDrafted{
 			Ticket: o.Packet.Ticket, What: o.Result.Scenario.Title,
@@ -555,6 +618,9 @@ func assemble(in Input, outcomes []CriterionOutcome) (Draft, []int) {
 	}
 	scenarios, manual, nd := len(d.Scenarios), len(d.ManualChecks), len(d.NotDrafted)
 	d.Summary = fmt.Sprintf("Planned one acceptance criterion at a time: %d scenarios, %d manual checks, and %d criteria or scenarios not drafted.", scenarios, manual, nd)
+	if n := len(d.WebTests); n > 0 {
+		d.Summary = fmt.Sprintf("Planned one acceptance criterion at a time: %d scenarios, %s, %d manual checks, and %d criteria or scenarios not drafted.", scenarios, counted(n, "web test"), manual, nd)
+	}
 	return d, owners
 }
 
@@ -568,6 +634,7 @@ func notPlanned(in Input) string {
 func criteriaTicket(in Input, d Draft, key string, criteria int) TicketDraft {
 	t := TicketDraft{Key: key, Kind: "none", Risk: "standard", Behaviour: ticketTitle(in, key)}
 	covered := slices.ContainsFunc(d.Scenarios, func(s ScenarioDraft) bool { return s.Ticket == key }) ||
+		slices.ContainsFunc(d.WebTests, func(w WebTestDraft) bool { return w.Ticket == key }) ||
 		slices.ContainsFunc(d.ManualChecks, func(m ManualCheckDraft) bool { return m.Ticket == key }) ||
 		slices.ContainsFunc(d.NotDrafted, func(n NotDrafted) bool { return n.Ticket == key })
 	switch {

@@ -29,7 +29,7 @@ type Record struct {
 	Model            string           `json:"model"`
 	Reasoning        string           `json:"reasoning,omitempty"`
 	Command          string           `json:"command"`            // "plan"
-	Pipeline         string           `json:"pipeline,omitempty"` // "criteria" for a model that the criteria pipeline called
+	Pipeline         string           `json:"pipeline,omitempty"` // "criteria" for a model that the criteria pipeline called, "web" for one that played a turn of a web flow
 	Asked            string           `json:"asked,omitempty"`    // the model as the ladder names it, such as haiku
 	Ref              string           `json:"ref,omitempty"`      // the plan ID
 	Outcome          string           `json:"outcome"`            // "ok", "rejected", or "failed:<class>"

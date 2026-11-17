@@ -46,5 +46,5 @@ func NewWebExplorer(o Options, dir, service, as string) (plan.WebExplorer, error
 	if err != nil {
 		return nil, err
 	}
-	return newWebExplorer(o, dir, cfg, envName, env, svc, as)
+	return newWebExplorer(o, dir, cfg, envName, env, svc, as, "")
 }

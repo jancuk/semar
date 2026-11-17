@@ -12,6 +12,10 @@ import (
 // each model that it called.
 const PipelineCriteria = "criteria"
 
+// PipelineWeb is the Pipeline of a record of the turns that a plan played in web flows, one for each
+// model. No estimate counts them.
+const PipelineWeb = "web"
+
 // Estimate is what planning some criteria would cost, from the jobs that earlier plans recorded.
 type Estimate struct {
 	Provider string

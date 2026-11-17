@@ -87,3 +87,22 @@ func TestEstimateCostMatchesTheModelThatWasAskedForOrReported(t *testing.T) {
 		t.Errorf("the reported name should match: %+v", e)
 	}
 }
+
+// A turn of a web flow is a job of the plan, but it is not a job for a criterion: the estimate of a plan
+// before it runs counts the criteria, and the number of web criteria is not known before the first jobs.
+func TestTheEstimateDoesNotCountTheTurnsOfWebFlows(t *testing.T) {
+	home := t.TempDir()
+	web := criteriaRecord("claude", "claude", "haiku", "claude-haiku-4-5", 30, 3.0)
+	web.Pipeline = PipelineWeb
+	writeAll(t, home, criteriaRecord("claude", "claude", "haiku", "claude-haiku-4-5", 10, 0.10), web)
+	e, err := EstimateCost(home, "claude", "haiku", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.Known || e.Jobs != 10 || e.USD < 0.0999 || e.USD > 0.1001 {
+		t.Errorf("estimate = %+v: the web turns are in it", e)
+	}
+	if PipelineWeb != "web" {
+		t.Errorf("PipelineWeb = %q", PipelineWeb)
+	}
+}

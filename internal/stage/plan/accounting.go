@@ -40,6 +40,11 @@ func Accounting(d Draft, tickets []knowledge.Ticket, ids []domain.ScenarioID) []
 					}
 				}
 			}
+			for _, w := range d.WebTests {
+				if w.Ticket == c.Ticket && cites(w.Cite, c) {
+					add("web test: " + oneLine(w.ID, 80))
+				}
+			}
 			for _, m := range d.ManualChecks {
 				if m.Ticket == c.Ticket && cites(m.Cite, c) {
 					add("manual check: " + oneLine(m.Title, 80))

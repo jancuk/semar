@@ -84,6 +84,15 @@ func (o options) recordPipelineUsage(stderr io.Writer, insts []provider.Instance
 		rec.Pipeline, rec.Asked = usage.PipelineCriteria, u.Asked
 		o.appendUsage(stderr, rec)
 	}
+	for _, u := range out.Pipeline.WebUses {
+		i := slices.IndexFunc(insts, func(in provider.Instance) bool { return in.ID() == u.PlannerID })
+		if i < 0 {
+			continue
+		}
+		rec := o.usageRecord(insts[i], u.Model, u.Reasoning, plan.Output{Result: u.Result, Attempts: u.Calls}, outcome, ref, u.Took)
+		rec.Pipeline, rec.Asked = usage.PipelineWeb, u.Asked
+		o.appendUsage(stderr, rec)
+	}
 }
 
 // useLine is the model use line of a plan, whichever pipeline made it.
@@ -121,6 +130,9 @@ func pipelineUseLine(out plan.Output) string {
 		parts = append(parts, jobs, plural(st.Corrections, "correction"))
 		if st.FixtureJobs > 0 {
 			parts = append(parts, plural(st.FixturesDrafted, "fixture")+" drafted")
+		}
+		if st.Web.Calls > 0 {
+			parts = append(parts, plural(st.Web.Calls, "web turn"))
 		}
 	}
 	input := tokenCount(r.InputTokens) + " input"

@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"mime"
+	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
@@ -34,11 +37,14 @@ type webExplorer struct {
 	account, authProfile string
 	app                  string
 	first                string // the page that every flow starts at
+	// builds declare the commit that each service with no build probe runs, for the replay of a test:
+	// the plan does not judge a build, so it declares the head of the change.
+	builds []string
 }
 
 // newWebExplorer settles who a flow signs in as, where it starts, and which screens file it adds to. as
 // is the account of the plan, and the account of the service when it is empty.
-func newWebExplorer(o options, dir string, cfg config.Config, envName string, env config.Environment, svc config.Service, as string) (*webExplorer, error) {
+func newWebExplorer(o options, dir string, cfg config.Config, envName string, env config.Environment, svc config.Service, as, head string) (*webExplorer, error) {
 	account, authProfile, err := recordAccount(cfg, svc, as)
 	if err != nil {
 		return nil, err
@@ -51,9 +57,17 @@ func newWebExplorer(o options, dir string, cfg config.Config, envName string, en
 	if err != nil {
 		return nil, err
 	}
+	var builds []string
+	if head != "" {
+		for _, s := range env.Services {
+			if s.Build == nil {
+				builds = append(builds, s.Name+"="+head)
+			}
+		}
+	}
 	return &webExplorer{
 		o: o, dir: dir, cfg: cfg, envName: envName, env: env, svc: svc, home: home,
-		account: account, authProfile: authProfile, app: svc.Name, first: first,
+		account: account, authProfile: authProfile, app: svc.Name, first: first, builds: builds,
 	}, nil
 }
 
@@ -131,13 +145,14 @@ func (w *webExplorer) write(ctx context.Context, req plan.WebRequest, end plan.F
 	if err := checkDraft(draft); err != nil {
 		return manual("%s", strings.TrimPrefix(err.Error(), "nothing was written: ")), nil
 	}
-	written, err := persistDraft(w.dir, draft, w.app, req.Ticket, nil)
+	written, err := persistDraft(w.dir, draft, w.app, valueOr(req.Subject, req.Ticket), nil)
 	if err != nil {
 		return plan.WebOutcome{}, err
 	}
-	r := replayScenario(ctx, w.o, w.dir, w.envName, w.app, string(req.ID), true)
+	remove := func() error { return w.remove(written, req.ID) }
+	r := replayScenario(ctx, w.o, w.dir, w.envName, w.app, string(req.ID), w.builds, true)
 	if ctx.Err() != nil {
-		w.remove(written, req.ID)
+		_ = remove()
 		return plan.WebOutcome{}, ctx.Err()
 	}
 	want := domain.OutcomePassed
@@ -154,12 +169,12 @@ func (w *webExplorer) write(ctx context.Context, req plan.WebRequest, end plan.F
 		} else if r.err != nil {
 			why = "it could not run: " + terminalSafe(oneLine(r.err.Error()))
 		}
-		w.remove(written, req.ID)
+		_ = remove()
 		return manual("the replay of the written test did not end as the recording predicts, %s was expected and %s, so the test was removed", want, why), nil
 	}
 	t := &plan.WebTest{
 		Scenario: draft.Scenario, ScenarioPath: written.ScenarioPath, ScreensPath: written.ScreensPath,
-		Replay: string(r.result.Outcome), Cite: req.Cite,
+		Replay: string(r.result.Outcome), Cite: req.Cite, Remove: remove,
 	}
 	for _, f := range draft.FailsNow {
 		t.FailsNow = append(t.FailsNow, plan.FailsNow{Element: f.Element, Expect: f.Expect, Shown: f.Shown, Cite: f.Cite})
@@ -168,11 +183,13 @@ func (w *webExplorer) write(ctx context.Context, req plan.WebRequest, end plan.F
 }
 
 // remove puts the repository back as it was before the test was written.
-func (w *webExplorer) remove(written record.Written, id domain.ScenarioID) {
-	_ = written.Undo()
-	if store, err := evidence.Open(semarDir(w.dir)); err == nil {
-		_, _ = store.RemoveScripts(id)
+func (w *webExplorer) remove(written record.Written, id domain.ScenarioID) error {
+	err := written.Undo()
+	store, serr := evidence.Open(semarDir(w.dir))
+	if serr == nil {
+		_, serr = store.RemoveScripts(id)
 	}
+	return errors.Join(err, serr)
 }
 
 // flowFixtures are the fixtures that one flow made. The browser makes them when the model names them in
@@ -277,3 +294,121 @@ func (b *flowBrowser) Given(ctx context.Context, given []plan.AnswerGiven) ([]pl
 }
 
 func sortedKeys(m map[string]string) []string { return slices.Sorted(maps.Keys(m)) }
+
+// planWeb decides whether a plan explores its web criteria, and builds the explorer. A recording clicks
+// and types, so the rules of where semar record runs hold here too: a test environment that allows test
+// data, and a Chrome. A service has a web page when its start page answers text/html. When there is no
+// explorer, the second value says why in one line, and each web criterion stays a manual check.
+func planWeb(ctx context.Context, o options, f planFlags, cfg config.Config, envName string, env config.Environment, profile, head string) (plan.WebExplorer, string) {
+	switch {
+	case f.noWeb:
+		return nil, "turned off with --no-web"
+	case env.Kind == config.KindProduction:
+		return nil, envName + " is a production environment, and a flow clicks and types"
+	}
+	policy, err := effects.New(env)
+	switch {
+	case err != nil:
+		return nil, oneLine(err.Error())
+	case policy.ReadOnly():
+		return nil, envName + " allows only reads, and a flow clicks and types"
+	}
+	if _, err := web.FindChrome(env.Web.Chrome); err != nil {
+		if text, ok := web.ChromeNotFoundText(err); ok {
+			return nil, oneLine(text)
+		}
+		return nil, oneLine(err.Error())
+	}
+	env = withServiceAuth(cfg, env)
+	var tried []string
+	for _, svc := range env.Services {
+		page, err := firstPage(svc.BaseURL, svc.WebStart(), nil)
+		if err != nil {
+			tried = append(tried, err.Error())
+			continue
+		}
+		if !answersHTML(ctx, o.HTTP, page) {
+			tried = append(tried, "GET "+page+" did not answer text/html")
+			continue
+		}
+		x, err := newWebExplorer(o, f.dir, cfg, envName, env, svc, profile, head)
+		if err != nil {
+			return nil, oneLine(err.Error())
+		}
+		return x, ""
+	}
+	if len(tried) == 0 {
+		return nil, "the environment has no service"
+	}
+	return nil, "no service has a web page: " + strings.Join(tried, "; ")
+}
+
+// answersHTML is one GET of a page, which reads nothing of its body.
+func answersHTML(ctx context.Context, client *http.Client, page string) bool {
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, page, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Accept", "text/html")
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	kind, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	return err == nil && kind == "text/html" && resp.StatusCode < 500
+}
+
+// printWebPart is the web part of a plan in a few lines: what was explored, written, and left for a
+// person with the reason, the turns, and the cost.
+func printWebPart(w io.Writer, out plan.Output) {
+	if out.Pipeline == nil || out.Pipeline.Web.Explored == 0 {
+		return
+	}
+	st := out.Pipeline.Web
+	criteria := "criteria"
+	if st.Explored == 1 {
+		criteria = "criterion"
+	}
+	written := plural(st.Written, "test") + " written"
+	if st.FailsNow == 1 {
+		written += " (1 fails on this build)"
+	} else if st.FailsNow > 1 {
+		written += fmt.Sprintf(" (%d fail on this build)", st.FailsNow)
+	}
+	var cost float64
+	for _, u := range out.Pipeline.WebUses {
+		cost += u.Result.CostUSD
+	}
+	line := fmt.Sprintf("web: %d %s explored, %s, %d left for a person, %s", st.Explored, criteria, written, st.Manual, plural(st.Turns, "turn"))
+	if cost > 0 {
+		line += fmt.Sprintf(", $%.2f", cost)
+	}
+	fmt.Fprintln(w, line)
+	for _, o := range out.Outcomes {
+		if o.Web != nil && o.Web.Test == nil {
+			fmt.Fprintf(w, "web: left for a person: %s: %s\n", terminalSafe(o.Packet.Cite), terminalSafe(oneLine(o.Web.Manual)))
+		}
+	}
+	for _, t := range out.WebTests {
+		for _, f := range t.FailsNow {
+			fmt.Fprintf(w, "web: %s fails now: %s should show %q and the page shows %q\n", t.Scenario.ID, terminalSafe(f.Element), terminalSafe(f.Expect), terminalSafe(f.Shown))
+		}
+	}
+}
+
+// removeWebTests takes the web tests of a plan that was not written back out of the repository, the
+// newest first, because each one put the screens file back as it was before its own write.
+func removeWebTests(stderr io.Writer, tests []plan.WebTest) {
+	for _, t := range slices.Backward(tests) {
+		if t.Remove == nil {
+			continue
+		}
+		if err := t.Remove(); err != nil {
+			fmt.Fprintf(stderr, "semar: the web test %s could not be removed: %s; remove %s by hand\n", t.Scenario.ID, terminalSafe(oneLine(err.Error())), terminalSafe(t.ScenarioPath))
+		}
+	}
+}

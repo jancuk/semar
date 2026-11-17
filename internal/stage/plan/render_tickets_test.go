@@ -39,7 +39,7 @@ func TestRenderGoldenWithTickets(t *testing.T) {
 		" as outsider: ",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("plan.md lacks %q", want)
+			t.Errorf("plan.md lacks %q:\n%s", want, got)
 		}
 	}
 	if strings.Contains(got, "<b>") || strings.Contains(got, "*card*") {
@@ -173,5 +173,50 @@ func TestThePlanNamesTheSurfaceOfAManualCheck(t *testing.T) {
 	got := render(t, in, goldenOutput(t, in, d))
 	if strings.Count(got, "   - Surface: mobile\n") != 1 || strings.Contains(got, "Surface: \n") || strings.Count(got, "Surface:") != 1 {
 		t.Errorf("plan.md does not name the surface of the first check only:\n%s", got)
+	}
+}
+
+func TestThePlanListsTheWebTestsAndWhatTheWebPartDid(t *testing.T) {
+	in := shopInput(t)
+	w := newWebPlanner(webTurn1, webTurn2, webTurn3)
+	w.crit.byLine[":10"] = manualAnswer
+	in.Ladder = ladder(Rung{Planner: w.fake("p"), Model: "haiku"})
+	in.JobDir = t.TempDir()
+	in.Web = &failingExplorer{fakeExplorer: &fakeExplorer{shown: "Nothing"}}
+	out, err := RunCriteria(t.Context(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := render(t, in, out)
+	for _, want := range []string{
+		"Web tests that a model wrote, replayed once, and not approved: read each one with semar review:",
+		"1. SHOP-482-01: A board is saved. Cite: " + ticket482 + ":10 ",
+		`Fails now: e3 should show "Saved", and the page shows "Nothing".`,
+		"- Web: 2 criteria explored in a browser, 2 tests written (2 checks fail on this build), 0 left for a person, 6 turns with 6 calls,",
+		"- Web model haiku (haiku, provider p)",
+		"- Web criterion " + ticket482 + ":11: test SHOP-482-02 written by haiku in 3 turns",
+		"web 1\n",
+		"| " + ticket482 + ":11 | web test | haiku | 0 |",
+		"web test: SHOP-482-01",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("plan.md lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Manual checks for a person") {
+		t.Error("a criterion with a web test is also listed as a manual check")
+	}
+
+	in.Web = nil
+	in.WebOff = "turned off with --no-web"
+	w = newWebPlanner(webTurn1)
+	in.Ladder = ladder(Rung{Planner: w.fake("p"), Model: "haiku"})
+	out, err = RunCriteria(t.Context(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = render(t, in, out)
+	if !strings.Contains(got, "- Web: no criterion was explored in a browser: turned off with --no-web. Each web criterion stays a manual check") {
+		t.Errorf("plan.md does not say why nothing was explored:\n%s", got)
 	}
 }

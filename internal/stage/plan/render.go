@@ -5,7 +5,9 @@ import (
 	"io"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/jancuk/semar/internal/changeset"
@@ -79,6 +81,7 @@ func Render(w io.Writer, in Input, out Output) error {
 		if drafted == 0 {
 			b.WriteString("\nNo scenario was drafted for this ticket.\n")
 		}
+		writeWebTests(&b, d.WebTests, t.Key)
 		writeManualChecks(&b, d.ManualChecks, t.Key)
 		writeCriteria(&b, accounting, t.Key)
 		if out.Pipeline != nil {
@@ -334,6 +337,27 @@ func unmetCriteria(sc domain.Scenario, differences []Difference) []string {
 	return out
 }
 
+// writeWebTests lists the web tests that flows wrote for a ticket, with the checks that the page did not
+// meet when the flow read it.
+func writeWebTests(b *strings.Builder, tests []WebTestDraft, ticket string) {
+	var mine []WebTestDraft
+	for _, w := range tests {
+		if w.Ticket == ticket {
+			mine = append(mine, w)
+		}
+	}
+	if len(mine) == 0 {
+		return
+	}
+	b.WriteString("\nWeb tests that a model wrote, replayed once, and not approved: read each one with semar review:\n")
+	for i, w := range mine {
+		fmt.Fprintf(b, "\n%d. %s: %s. Cite: %s. Replay: %s.\n", i+1, shown(w.ID, maxValueShown), shown(strings.TrimRight(strings.TrimSpace(w.Title), "."), maxTextShown), shown(w.Cite, maxTextShown), shown(w.Replay, maxValueShown))
+		for _, f := range w.FailsNow {
+			fmt.Fprintf(b, "   - Fails now: %s should show %s, and the page shows %s.\n", shown(f.Element, maxValueShown), strconv.Quote(shown(f.Expect, maxValueShown)), strconv.Quote(shown(f.Shown, maxValueShown)))
+		}
+	}
+}
+
 // writeManualChecks lists the checks that only a person can make, under their ticket.
 func writeManualChecks(b *strings.Builder, checks []ManualCheckDraft, ticket string) {
 	var mine []ManualCheckDraft
@@ -484,7 +508,8 @@ func writePipeline(b *strings.Builder, out Output) {
 			counted(st.FixturesDrafted, "fixture"), st.FixtureJobs)
 	}
 	fmt.Fprintf(b, "- Tokens: %d input, %d output\n", r.InputTokens, r.OutputTokens)
-	fmt.Fprintf(b, "- Prompt version: criterion %s, fixture %s\n", shown(prompt.CriterionVersion(), maxValueShown), shown(prompt.FixtureVersion(), maxValueShown))
+	writeWebPart(b, out)
+	fmt.Fprintf(b, "- Prompt version: criterion %s, fixture %s, web %s\n", shown(prompt.CriterionVersion(), maxValueShown), shown(prompt.FixtureVersion(), maxValueShown), shown(prompt.WebVersion(), maxValueShown))
 	if len(out.Outcomes) == 0 {
 		return
 	}
@@ -494,6 +519,8 @@ func writePipeline(b *strings.Builder, out Output) {
 		switch {
 		case o.Result.Scenario != nil:
 			kind = "scenario"
+		case o.Web != nil && o.Web.Test != nil:
+			kind = "web test"
 		case o.Result.Manual != nil:
 			kind = "manual check"
 		case o.Result.NotDrafted != nil:
@@ -510,6 +537,45 @@ func writePipeline(b *strings.Builder, out Output) {
 		fmt.Fprintf(b, "| %s | %s | %s | %d |\n", shown(o.Packet.Cite, maxValueShown), kind, shown(model, maxValueShown), o.Corrections)
 	}
 	writeReturned(b, out.Outcomes)
+}
+
+// writeWebPart says what the web part of the plan did: the flows, their models, and for each web
+// criterion the test that was written or why a person must do the check.
+func writeWebPart(b *strings.Builder, out Output) {
+	w := out.Pipeline.Web
+	if w.Explored == 0 {
+		if out.WebOff != "" {
+			fmt.Fprintf(b, "- Web: no criterion was explored in a browser: %s. Each web criterion stays a manual check\n", strings.TrimRight(shown(out.WebOff, maxTextShown), "."))
+		}
+		return
+	}
+	criteria := "criteria"
+	if w.Explored == 1 {
+		criteria = "criterion"
+	}
+	line := fmt.Sprintf("- Web: %d %s explored in a browser, %s written", w.Explored, criteria, counted(w.Written, "test"))
+	if w.FailsNow == 1 {
+		line += " (1 check fails on this build)"
+	} else if w.FailsNow > 1 {
+		line += fmt.Sprintf(" (%d checks fail on this build)", w.FailsNow)
+	}
+	fmt.Fprintf(b, "%s, %d left for a person, %s with %s, %d escalated to a higher model, in %s\n",
+		line, w.Manual, counted(w.Turns, "turn"), counted(w.Calls, "call"), w.Escalated, w.Took.Round(time.Second))
+	for _, u := range out.Pipeline.WebUses {
+		fmt.Fprintf(b, "- Web model %s (%s, provider %s): %d calls, %d input tokens, %d output tokens\n",
+			shown(u.Model, maxValueShown), shown(valueOr(u.Result.Model, "reported no model name"), maxValueShown), shown(u.PlannerID, maxValueShown), u.Calls, u.Result.InputTokens, u.Result.OutputTokens)
+	}
+	for _, o := range out.Outcomes {
+		if o.Web == nil {
+			continue
+		}
+		if o.Web.Test != nil {
+			fmt.Fprintf(b, "- Web criterion %s: test %s written by %s in %s\n", shown(o.Packet.Cite, maxValueShown), shown(string(o.Web.Test.Scenario.ID), maxValueShown),
+				shown(valueOr(out.Pipeline.modelOf(o.Web.Rung), "a model"), maxValueShown), counted(o.Web.Turns, "turn"))
+			continue
+		}
+		fmt.Fprintf(b, "- Web criterion %s: left for a person, because %s\n", shown(o.Packet.Cite, maxValueShown), shown(o.Web.Manual, maxTextShown))
+	}
 }
 
 const maxReturnedShown = 40

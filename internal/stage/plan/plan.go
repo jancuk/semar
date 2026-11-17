@@ -74,6 +74,10 @@ type Output struct {
 	Pipeline *PipelineStats
 	Outcomes []CriterionOutcome
 	Answers  []StoredAnswer
+	// WebTests are the tests that flows wrote for web criteria. They are already on disk, replayed once, and
+	// the plan lists them and links their use cases. WebOff is why no web criterion was explored, or "".
+	WebTests []WebTest
+	WebOff   string
 	// FixtureNeeds are the distinct fixtures that the answers named and no catalogue entry gives.
 	FixtureNeeds []FixtureNeed
 	// FixtureDrafts are the fixtures that the plan drafted for them, or tried to, in the same order.

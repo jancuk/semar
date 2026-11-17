@@ -27,6 +27,21 @@ type Draft struct {
 	// ManualChecks are criteria of a ticket that only a person can check. Each becomes an
 	// obligation that needs a person.
 	ManualChecks []ManualCheckDraft `json:"manualChecks,omitempty"`
+	// WebTests are the tests that flows wrote and replayed for web criteria. A criterion with a web test
+	// has no manual check. Only the criteria pipeline sets them.
+	WebTests []WebTestDraft `json:"webTests,omitempty"`
+}
+
+// WebTestDraft is a web test that a flow wrote, as the plan lists it. Cite is the cite of the criterion it
+// proves. FailsNow lists the checks that the page did not meet when the flow read it.
+type WebTestDraft struct {
+	Ticket       string     `json:"ticket"`
+	ID           string     `json:"id"`
+	Title        string     `json:"title"`
+	Cite         string     `json:"cite"`
+	Replay       string     `json:"replay"`
+	ScenarioPath string     `json:"scenarioPath,omitempty"`
+	FailsNow     []FailsNow `json:"failsNow,omitempty"`
 }
 
 // ManualCheckDraft is a check that a person makes on a screen or a device. Cite starts with

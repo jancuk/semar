@@ -345,6 +345,11 @@ func obligationsOf(root *os.Root, in plan.Input, out plan.Output) (files []planF
 	for _, m := range d.ManualChecks {
 		tickets[m.Ticket] = true
 	}
+	scenarios := slices.Clone(out.Scenarios)
+	for _, wt := range out.WebTests {
+		tickets[wt.Scenario.Ticket] = true
+		scenarios = append(scenarios, wt.Scenario)
+	}
 	existing := map[string]obligation.File{}
 	old := map[string][]byte{}
 	for _, key := range slices.Sorted(maps.Keys(tickets)) {
@@ -381,7 +386,7 @@ func obligationsOf(root *os.Root, in plan.Input, out plan.Output) (files []planF
 		existing[key], old[rel] = f, data
 	}
 
-	made, err := obligation.FromPlanWith(in.Change, d, out.Scenarios, out.Unaccounted, existing)
+	made, err := obligation.FromPlanWith(in.Change, d, scenarios, out.Unaccounted, existing)
 	if err != nil {
 		return nil, nil, fmt.Errorf("make the obligations: %w; nothing was written", err)
 	}
