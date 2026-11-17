@@ -29,6 +29,7 @@ The first column is the decision as the plan stated it. The third column is what
 | D10 | `plan.maxCost` in the person's own `providers.yaml`, and `--max-cost <dollars>` on `semar plan`, bound what one plan may spend. When the sum that the providers reported reaches it, no new job starts, the jobs that run finish, and the plan is written with what was answered. The criteria that were not reached are "not planned: the cost limit of $X was reached", and the exit code is 2. A provider that reports no cost is not bound, and the plan says so at the start. In the single pipeline the limit is checked between jobs, because one job cannot be cut | Built. The sum is compared before each job, a correction and a fixture job included. A job that is already running finishes, so the plan can pass the limit by the jobs of one batch: four run at once. A criterion that was not reached is a `notDrafted` entry with the cite, so the ledger keeps it as a gap, and a later plan reuses the answers that exist. A criterion that had an answer with problems and no room for the correction is not planned too. Only Claude Code reports a cost: Codex and the API kinds report tokens, and the start line names them. In the single pipeline a plan that has a passing draft keeps it and exits with 2, and a plan with none ends with the error "the cost limit of $X was reached after N attempts" and writes nothing |
 | D11 | A repository's `semar.yaml` cannot set `plan.maxCost` or the ladder | Built by the strict reading of the file, as for `plan.withSetup`: the key is an unknown key, and the plan stops with a message that names it |
 | D12 | The offer of `semar run` to plan (Plan 26, D6) shows an estimate: the mean cost of a criterion in the usage log of the provider and model that would plan, times the number of criteria. With no record it says that there is no estimate yet | Built as `usage.EstimateCost` (see the Contract). The unit is a job of the criteria pipeline. The usage log gets two fields on the records of that pipeline, `pipeline` and `asked`, so that a record of a single plan, which is one huge job, never counts, and a model matches by the name the ladder gives it (`haiku`) or by the name that the provider reported. A provider that has records and reports no cost gets "no estimate: <provider> reports no cost" |
+| D13 | A step of a fixture can act as an account, and the fixture job chooses it. A fixture step has `as`, the name of an auth profile, on `find`, `create`, `until`, and `cleanup` steps. The step is sent with that profile, as a scenario step is, and with no `as` it is sent as before. The fixture hash covers it. The packet of the job lists the accounts with their descriptions, and its closed schema has `as` on each step as an enum of them. Code writes `as` into the file only when the account is not the default one. When the description of the needed fixture names an account as a word and no step of the answer acts as it, the answer has a problem that goes back to the model | Built, after a live run in which a draft said "a board owned by the carol account", every request ran as the default account, the trial said `ok`, and the scenario that used the fixture failed on a correct build with `expected status 404, observed status 422`. The `as` of a step wins over the `authProfile` of its service, as the `as` of a scenario step wins over the profile of the scenario. An `as` that the configuration does not define is a problem of the file (Plan 17, F17), and the plan, `semar run`, and `semar fixture check` load the sessions of the accounts that a fixture acts as. The trial of a plan loads every account of the configuration, so that a fixture that acts as one of them can run. With fewer than two accounts the schema and the prompt leave `as` out, because there is no choice. The check matches the name of an account other than the default one as a whole word in any case, and a hyphen, a digit, and an underscore are part of the word. Its text is `the description names the account carol, and no step acts as carol: set as on each step that carol sends`. The check cannot tell the account that owns the data from an account that is only named, so a description such as "an order of carol that bob has read" is refused until bob has a step. The prompt of the fixture job is version 3 |
 
 ## Contract
 
@@ -85,6 +86,8 @@ next:
   semar status   where things stand
 ```
 
+A fixture whose steps act as other accounts says which: `3 requests as bob, carol, cleans up.` A step of `semar review` shows it as `create 1 as carol: POST orders /v1/orders`.
+
 A fixture that no model could write is `fixture not drafted: <id>: <the first problem>`, and plan.md says `- <id>: not drafted. <problem>. Needed by <cites>.`
 
 ### The cost limit
@@ -140,6 +143,8 @@ Each task was test first, and one commit.
 
 A change after the live check: the fixture job sees the operations of the documents, and a capture reads one value.
 
+11. **A fixture step that acts as an account.** D13, in four commits, each test first: `as` on a fixture step with its validation, hash, and display; the choice of the account in the fixture job; the check of the description; and the documents.
+
 ## Measured
 
 **What was run.** A small mock service of boards, lists, and cards, outside the Semar repository, with two tickets of 16 acceptance criteria (about 11 that an API call can show, and the rest on a web or an Android screen), an API document of 15 operations, and three accounts: the owner of the boards, a member of the shared board, and a person outside. The clone had no `.semar` folder and nothing copied from another branch. `semar init` ran with flags (a terminal was not there), and found the build probe at `/version`. `semar init` again said that nothing was missing. Then `semar plan` ran three times with the Claude Code provider and the default ladder, which was `haiku`, `sonnet`, with a temporary Semar home. Each run started with the files of the earlier plan removed, so no answer was reused.
@@ -162,7 +167,7 @@ Every run gave 11 or 12 scenarios, the other criteria were manual checks, and th
 
 **Gaps that stay.**
 
-* A fixture cannot act as another account. A step of a fixture is sent with the session of its service or of the scenario, and a fixture step has no `as`. A board that a second account owns cannot be a fixture, and a scenario makes it in a setup step of that account.
+* A description that names an account that only reads or joins the data, such as "an order of carol that bob has read", is refused until some step acts as bob (D13). The check cannot tell the owner of the data from an account that is only named. The model has to leave the name out or give bob a step.
 * A fixture whose run fails at a late `create` step leaves what the earlier steps made, when the failed step captured nothing. The service gets the data of the failed run, and a person removes it.
 * A scenario makes data in setup steps and never removes it. Only a fixture cleans up. The prompt now says so, and the models still chose the setup steps.
 * The plan prints `semar review` and `semar status` before Plan 26 is merged.
@@ -172,5 +177,4 @@ Every run gave 11 or 12 scenarios, the other criteria were manual checks, and th
 * A fixture with `find` or `until` steps from a model. A drafted fixture has `create` and `cleanup`.
 * A drafted journey. A journey is written by a person.
 * A limit on tokens for a provider that reports no cost.
-* A fixture step that acts as another account.
 * `--force` on `semar init`.

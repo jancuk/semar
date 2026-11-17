@@ -55,7 +55,7 @@ A team delivered a feature across a Go backend, a web app, and an Android app, a
 
 ### Journey files
 
-* `legs[].as` and `legs[].steps[].as` (optional): the name of an auth profile. A step acts as its own `as`, else the leg's, else the profile of the leg's service (Plan 18, D7). A name passes `idcheck.Check` (rule J17). A name that the configuration lacks gives the journey the outcome `blocked`, with `account <name> is not in the configuration`, before the builds are read and before any request. Each leg result lists `as`: the accounts that its steps acted as, only when there are some. A fixture step has no `as`.
+* `legs[].as` and `legs[].steps[].as` (optional): the name of an auth profile. A step acts as its own `as`, else the leg's, else the profile of the leg's service (Plan 18, D7). A name passes `idcheck.Check` (rule J17). A name that the configuration lacks gives the journey the outcome `blocked`, with `account <name> is not in the configuration`, before the builds are read and before any request. Each leg result lists `as`: the accounts that its steps acted as, only when there are some. A fixture step has its own `as` (Plan 17, rule F17).
 * The hash of a leg scenario is the one of Plan 21 D3, so a journey that does not use `as` keeps every hash and every confirmation.
 
 ### Error text of YAML files

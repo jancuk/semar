@@ -125,6 +125,9 @@ type Param struct {
 }
 
 type FixtureStep struct {
+	// As names an auth profile: the step is sent with that profile's session, as the as of a scenario
+	// step is. Empty is the account of the run. A step of find, create, until, or cleanup may set it.
+	As       string     `yaml:"as,omitempty"`
 	Request  APIRequest `yaml:"request"`
 	Captures []Capture  `yaml:"captures,omitempty"`
 	Until    *Until     `yaml:"until,omitempty"`
@@ -233,6 +236,7 @@ cleanup:
 | F14 | `until` is allowed only on a `GET` or `HEAD` step. `jsonpath` parses. `equals` is a scalar, with numbers held exactly as in a scenario check. `timeout` is set, above 0, and at most 15m. `every`, when set, is at least 100ms and at most `timeout` | `until needs a timeout`; `until is allowed only on a GET or HEAD step: repeating a write would repeat its effect` |
 | F15 | A `given` key in a fixture is refused | `a fixture cannot use another fixture in this version` |
 | F16 | A service that no environment of the configuration lists is refused when the catalogue is loaded with the configuration | `find[0].request.service: payments is not a service of any environment` |
+| F17 | `as` on a step, when set, passes `idcheck.Check`. When the catalogue is loaded with the configuration (`fixture.Accounts`), it is also an auth profile of the configuration. A fixture that is checked with no configuration has only the first check | `create[0].as: carol is not an auth profile of the configuration: use one of bob, default, or leave out as` |
 
 `fixture.CheckPolicy` adds the rules that need an environment:
 
@@ -264,7 +268,7 @@ type Service struct {
 | `environments.<env>.services[].authProfile` | Empty, or a name defined under `authProfiles` | `environments.uat.services[1].authProfile: auth profile payments-tester is not defined under authProfiles` |
 | `environments.<env>.data` | At most 100 keys. A key matches `^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$` and is at most 128 bytes. A value is at most 1024 bytes, valid UTF-8, with no control character | `environments.uat.data: key "Customers" must match ^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$` |
 
-A fixture step's session comes from its service's `authProfile`. When the service sets none, it is the scenario's `authProfile`. When neither is set, the step is sent with no session.
+A fixture step's session comes from its own `as`, when it has one. Otherwise it comes from its service's `authProfile`. When the service sets none, it is the scenario's `authProfile`. When none of the three is set, the step is sent with no session. The `as` of a step wins over the profile of its service, as the `as` of a scenario step wins over the profile of the scenario.
 
 ### `internal/scenario` and `internal/script`
 
@@ -298,8 +302,9 @@ type Catalogue struct {
 type Problem struct{ File, Path, Message string }
 
 func Parse(data []byte, name string) (domain.Fixture, error)
-func Validate(f domain.Fixture, services []string) []Problem // F2 to F16
-func Load(repo string, services []string) (Catalogue, error)  // .semar/fixtures
+func Validate(f domain.Fixture, services []string, opts ...Option) []Problem // F2 to F17
+func Load(repo string, services []string, opts ...Option) (Catalogue, error)  // .semar/fixtures
+func Accounts(names ...string) Option // the auth profiles of the configuration, for F17
 func (c Catalogue) Get(id domain.FixtureID) (domain.Fixture, bool)
 func CheckPolicy(f domain.Fixture, p *effects.Policy, envServices []string) []Problem // P1 to P4
 
@@ -600,6 +605,7 @@ A fixture prepares data that a scenario needs, such as a paid order, and a perso
 | R7 | A lease lives only under the person's Semar home |
 | R8 | A raw captured value is never stored. Records hold the redacted values of the recorded action |
 | R9 | Cleanup never changes an outcome. What it could not remove is listed under "Still exists" |
+| R10 | A step acts as the account in its `as`, and as the account of the run when it has none. The `as` is part of `FixtureHash`, so adding `as` to an approved fixture needs a new approval |
 
 ## Tasks
 
