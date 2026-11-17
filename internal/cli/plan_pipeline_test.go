@@ -109,7 +109,7 @@ func TestPlanPipelineFlagsAreChecked(t *testing.T) {
 		args []string
 		want string
 	}{
-		"a ladder for the single pipeline": {[]string{"--ladder", "planner:small"}, "--ladder needs --pipeline criteria"},
+		"a ladder for the single pipeline": {[]string{"--pipeline", "single", "--ladder", "planner:small"}, "--ladder needs --pipeline criteria"},
 		"an unknown pipeline":              {[]string{"--pipeline", "many"}, `--pipeline "many" must be single or criteria`},
 		"a ladder with a provider":         {[]string{"--pipeline", "criteria", "--ladder", "planner:small", "--provider", "planner"}, "do not pass --provider or --model"},
 		"a ladder with a model":            {[]string{"--pipeline", "criteria", "--ladder", "planner:small", "--model", "x"}, "do not pass --provider or --model"},

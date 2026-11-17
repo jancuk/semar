@@ -71,7 +71,7 @@ func newPlanCommand(o options) *cobra.Command {
 	cmd.Flags().StringVar(&f.reasoning, "reasoning", "", "the reasoning level of the planner, such as high (default: the provider's reasoning, else its own default)")
 	cmd.Flags().StringVar(&f.provider, "provider", "", "the provider that plans (default: see semar providers)")
 	cmd.Flags().BoolVar(&f.withSetup, "with-setup", false, "plan with your MCP servers and skills, which add tokens to every turn (default: plan.withSetup of your providers file, else off)")
-	cmd.Flags().StringVar(&f.pipeline, "pipeline", pipelineSingle, "how the plan is made: single, one job that reads the repository, or criteria, one job with no tools for each acceptance criterion, which suits small models")
+	cmd.Flags().StringVar(&f.pipeline, "pipeline", "", "how the plan is made: criteria, one job with no tools for each acceptance criterion, which suits small models; or single, one job that reads the repository (default: criteria when a ticket of the change has acceptance criteria, else single)")
 	cmd.Flags().StringVar(&f.ladder, "ladder", "", "with --pipeline criteria, the models from the cheapest up, each as <provider id>:<model>, such as claude:haiku,claude:sonnet,claude:opus (default: plan.ladder of your providers file, else the provider and model of the plan)")
 	cmd.Flags().BoolVar(&f.noTrial, "no-trial", false, "do not send the read-only steps of the draft to the environment before the plan is written, for this run")
 	cmd.Flags().IntVar(&f.maxScenarios, "max-scenarios", 0, "the most scenarios to draft (default: plan.maxScenarios)")
@@ -184,7 +184,37 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if err != nil {
 		return err
 	}
-	criteria := f.pipeline == pipelineCriteria
+	root, err := sourceCopyRoot(o)
+	if err != nil {
+		return fmt.Errorf("create a directory for the copy of the source: %w", err)
+	}
+	tmp, err := os.MkdirTemp(root, sourceCopyPrefix)
+	if err != nil {
+		return fmt.Errorf("create a directory for the copy of the source: %w", err)
+	}
+	defer os.RemoveAll(tmp)
+	var leftOut []vcs.Skipped
+	if in.SourceDir, in.Diff, leftOut, err = prepareSource(ctx, g, cs, tmp); err != nil {
+		return err
+	}
+	for _, s := range leftOut {
+		in.LeftOut = append(in.LeftOut, plan.LeftOut{Path: s.Path, Reason: s.Reason})
+	}
+	if len(leftOut) > 0 {
+		fmt.Fprintf(stderr, "semar: %s of %s %s left out of the copy that the planner reads; plan.md lists them\n",
+			plural(len(leftOut), "file"), shortCommit(cs.HeadCommit), map[bool]string{true: "was", false: "were"}[len(leftOut) == 1])
+	}
+	if in.Knowledge, err = findKnowledge(stderr, in.SourceDir, folderInWorkTree(f.dir), cfg.Knowledge); err != nil {
+		return err
+	}
+	in.Tickets = findTickets(stderr, in.SourceDir, in.Knowledge, cs)
+	criteria, why, err := choosePipeline(f, in.Tickets)
+	if err != nil {
+		return err
+	}
+	if why != "" {
+		fmt.Fprintln(stderr, why)
+	}
 	var pc config.Provider
 	var model string
 	var inst provider.Instance
@@ -220,19 +250,6 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		}
 	}
 
-	root, err := sourceCopyRoot(o)
-	if err != nil {
-		return fmt.Errorf("create a directory for the copy of the source: %w", err)
-	}
-	tmp, err := os.MkdirTemp(root, sourceCopyPrefix)
-	if err != nil {
-		return fmt.Errorf("create a directory for the copy of the source: %w", err)
-	}
-	defer os.RemoveAll(tmp)
-	var leftOut []vcs.Skipped
-	if in.SourceDir, in.Diff, leftOut, err = prepareSource(ctx, g, cs, tmp); err != nil {
-		return err
-	}
 	if criteria {
 		// The jobs of the criteria pipeline read nothing, so they run in a directory of their own
 		// that holds nothing: no job can see the copy of the source.
@@ -242,17 +259,6 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		}
 		in.Ladder, in.Previous = ladder, loadAnswers(f.dir)
 	}
-	for _, s := range leftOut {
-		in.LeftOut = append(in.LeftOut, plan.LeftOut{Path: s.Path, Reason: s.Reason})
-	}
-	if len(leftOut) > 0 {
-		fmt.Fprintf(stderr, "semar: %s of %s %s left out of the copy that the planner reads; plan.md lists them\n",
-			plural(len(leftOut), "file"), shortCommit(cs.HeadCommit), map[bool]string{true: "was", false: "were"}[len(leftOut) == 1])
-	}
-	if in.Knowledge, err = findKnowledge(stderr, in.SourceDir, folderInWorkTree(f.dir), cfg.Knowledge); err != nil {
-		return err
-	}
-	in.Tickets = findTickets(stderr, in.SourceDir, in.Knowledge, cs)
 
 	in.BaseAPI = baseDocuments(ctx, g, cs, in.Knowledge)
 	rig := planTrial(ctx, stderr, o, f, cfg, envName, env, &in, &catalogue)
