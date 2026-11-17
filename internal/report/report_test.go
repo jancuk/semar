@@ -539,7 +539,7 @@ func givenReport() report.Data {
 				As: "order", Fixture: "order.paid", Version: "1.0.0", Hash: hash("b"), Via: "find", Cleanup: "not_needed",
 			}}},
 			{Scenario: "SHOP-482-07", Outcome: domain.OutcomeBlocked,
-				Reasons: []domain.Reason{{Rule: domain.OutcomeBlocked, Text: "fixture order.paid is not approved: run semar confirm --fixture order.paid"}},
+				Reasons: []domain.Reason{{Rule: domain.OutcomeBlocked, Text: "fixture order.paid is not approved: run semar review order.paid"}},
 				Fixtures: []domain.FixtureRecord{{
 					As: "order", Fixture: "order.paid", Version: "1.0.0", Hash: hash("c"), Via: "none", Cleanup: "not_needed",
 				}}},

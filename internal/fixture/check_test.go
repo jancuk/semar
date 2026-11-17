@@ -103,7 +103,7 @@ func TestCheckIgnoresItsOwnLastHealthRecord(t *testing.T) {
 func TestCheckNeedsApprovalAndSendsNothingWithout(t *testing.T) {
 	r := newRig(t, rigOptions{unapproved: true})
 	res := r.check()
-	if res.Checked || !strings.Contains(res.Note, "fixture order.paid is not approved: run semar confirm --fixture order.paid") {
+	if res.Checked || !strings.Contains(res.Note, "fixture order.paid is not approved: run semar review order.paid") {
 		t.Fatalf("result = %+v", res)
 	}
 	if n := r.sent("", ""); n != 0 {

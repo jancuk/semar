@@ -96,9 +96,9 @@ func (r *repo) edit(t *testing.T, rel string, change func(string) string) {
 func TestWebScenarioNeedsApprovedScreensThenPasses(t *testing.T) {
 	r := webRepo(t)
 	res := r.must(t, cli.ExitUndecided, "run", "--scenario", "WEB-1")
-	contains(t, "stdout", res.stdout, "inconclusive")
+	contains(t, "stdout", res.stdout, "needs review")
 	report := r.lastReport(t)
-	contains(t, "the report", report, "the screens of shop are not approved: semar confirm --screens shop")
+	contains(t, "the report", report, "the screens of shop are not approved: semar review shop")
 
 	shown := r.must(t, cli.ExitOK, "confirm", "--screens", "shop", "--yes")
 	contains(t, "the screens", shown.stdout, "Cart", "place-order: { role: button, name: \"Place order\" }", "never approved before", "approved the screens of shop")
@@ -153,7 +153,7 @@ func TestScreensRepairProposesAndApplies(t *testing.T) {
 	r.must(t, cli.ExitError, "screens", "repair", "latest", "--apply", "nonsense")
 
 	res = r.must(t, cli.ExitOK, "screens", "repair", "latest", "--apply", "Cart.place-order=1")
-	contains(t, "the repair", res.stdout, "now: { role: button, name: \"Place order\" }", "semar confirm --screens shop")
+	contains(t, "the repair", res.stdout, "now: { role: button, name: \"Place order\" }", "semar review shop")
 	data, err := os.ReadFile(r.path(".semar", "screens", "shop.yaml"))
 	if err != nil {
 		t.Fatal(err)

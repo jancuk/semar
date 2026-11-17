@@ -284,7 +284,7 @@ func newJourneyRunCommand(o options) *cobra.Command {
 		Use:   "run (<id>... | --critical | --all)",
 		Short: "Run journeys against an environment, leg by leg, and write a report",
 		Long: "Run each journey one leg at a time in the order of its needs, check its invariants, and read the builds again at the end.\n" +
-			"A journey whose expected results nobody confirmed is blocked, and nothing is sent for it. Confirm them with semar confirm --journey <id>.\n" +
+			"A journey whose expected results nobody confirmed is blocked, and nothing is sent for it. Review them with semar review <id>.\n" +
 			"Exit 0 when every journey passed, 1 when one failed, and 2 otherwise, including a journey file that was skipped because it is not valid.",
 		Args: func(_ *cobra.Command, args []string) error {
 			n := len(args)
@@ -639,7 +639,7 @@ func unconfirmedWhy(store confirm.Store, trust []domain.Source, sc domain.Scenar
 	case err != nil:
 		return "the confirmations could not be read: " + err.Error()
 	case !found || slices.ContainsFunc(needed, func(s domain.Source) bool { return !slices.Contains(rec.Sources, s) }):
-		return "an expected result is not confirmed: run semar confirm --journey " + string(id)
+		return "an expected result is not confirmed: run semar review " + string(id)
 	}
 	return ""
 }

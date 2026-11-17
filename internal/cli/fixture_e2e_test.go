@@ -20,7 +20,7 @@ func TestFixtureRunEndToEnd(t *testing.T) {
 
 	// A fixture that nobody approved gives no state, and nothing reaches the services.
 	blocked := r.must(t, cli.ExitUndecided, "run", "--scenario", fixtureScenario)
-	contains(t, "the summary", blocked.stdout, fixtureScenario, "blocked", "fixture order.paid is not approved: run semar confirm --fixture order.paid")
+	contains(t, "the summary", blocked.stdout, fixtureScenario, "blocked", "fixture order.paid is not approved: run semar review order.paid")
 	if n := r.reached("/v1"); n != 0 {
 		t.Errorf("%d requests reached the services before the fixture was approved", n)
 	}
@@ -141,7 +141,7 @@ func TestFixtureRunNotApprovedIsBlockedBeforeAnyRequest(t *testing.T) {
 	}
 	md := r.lastReport(t)
 	contains(t, "report.md", md,
-		"fixture order.paid is not approved: run semar confirm --fixture order.paid",
+		"fixture order.paid is not approved: run semar review order.paid",
 		givenLine(hash, "no state was given; cleanup not needed"))
 
 	// An approval belongs to the fixture as it was: a change lapses it.

@@ -329,7 +329,7 @@ authProfiles:
 	p.assertNoTempCopy(t)
 
 	first := p.must(t, cli.ExitUndecided, "run", "--all")
-	contains(t, "the first run", first.stdout, "inconclusive", "not confirmed")
+	contains(t, "the first run", first.stdout, "needs review", "not confirmed")
 	confirmed := p.must(t, cli.ExitOK, "confirm", "--all", "--yes")
 	contains(t, "confirm --all", confirmed.stdout, "confirmed scenario SHOP-482-01", "confirmed scenario SHOP-483-01")
 	// A run passes only with a recorded build, and the file of semar init has no build probe.

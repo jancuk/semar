@@ -42,7 +42,7 @@ func newScreensRepairCommand(o options) *cobra.Command {
 		Short: "Show a proposal for each element that a run did not find, and rewrite a locator with --apply",
 		Long: "Read a stored run, and for each element that a web step did not find, print its locator beside up to three candidates that the browser found by role, by name, or by text. No model is used.\n" +
 			"With --apply <screen>.<element>=<n>, rewrite that element of the screens file with candidate n. Nothing else is touched: not a scenario, an expected result, or a step.\n" +
-			"The file then has another hash, so a person must approve it again with semar confirm --screens <app>.",
+			"The file then has another hash, so a person must approve it again with semar review <app>.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return repairScreens(cmd.Context(), cmd.OutOrStdout(), f, args[0])
@@ -151,7 +151,7 @@ func printMisses(stdout io.Writer, id domain.RunID, misses []miss) error {
 		}
 		fmt.Fprintf(stdout, "  to use one: semar screens repair %s --apply %s.%s=<n>\n", id, m.screen, m.element)
 	}
-	fmt.Fprintf(stdout, "a repair rewrites the screens file and nothing else. Approve the new file with semar confirm --screens <app>\n")
+	fmt.Fprintf(stdout, "a repair rewrites the screens file and nothing else. Approve the new file with semar review <app>\n")
 	return nil
 }
 
@@ -204,7 +204,7 @@ func applyRepairs(ctx context.Context, stdout io.Writer, f repairFlags, misses [
 		if err := atomicfile.Write(filepath.Join(f.dir, filepath.FromSlash(screens.Path(app))), data); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "the file of %s has another hash now, so approve it again: semar confirm --screens %s\n", app, app)
+		fmt.Fprintf(stdout, "the file of %s has another hash now, so approve it again: semar review %s\n", app, app)
 	}
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/jancuk/semar/internal/activity"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/idcheck"
+	"github.com/jancuk/semar/internal/words"
 )
 
 //go:embed report.md.tmpl
@@ -46,6 +47,7 @@ type checkView struct {
 
 type scenarioView struct {
 	ID, Title, Outcome string
+	Next               string
 	Reproduce          string
 	Reasons            []reasonView
 	Fixtures           []string
@@ -103,10 +105,12 @@ func buildView(d Data) markdownView {
 	v.Journeys = journeyViews(d)
 	legs := legJourneys(d.Journeys)
 	for _, r := range ordered(run.Results) {
+		word := resultWord(string(r.Outcome), r.Reasons)
 		sv := scenarioView{
 			ID:      shown(string(r.Scenario)),
 			Title:   shown(d.Scenarios[r.Scenario].Title),
-			Outcome: shown(string(r.Outcome)),
+			Outcome: shown(word),
+			Next:    words.Next(word, shown(string(r.Scenario))),
 		}
 		sv.Reproduce = "semar run --scenario " + sv.ID
 		if j, ok := legs[r.Scenario]; ok {

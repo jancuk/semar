@@ -214,7 +214,7 @@ func TestJourneyEndToEndConfirmationOfTheExpectedResults(t *testing.T) {
 
 	// No one confirmed the expected result of leg place, so the journey is blocked and sends nothing.
 	res := r.must(t, cli.ExitUndecided, "journey", "run", "checkout")
-	contains(t, "the summary", squash(res.stdout), "checkout blocked first failing leg place:")
+	contains(t, "the summary", squash(res.stdout), "checkout needs review first failing leg place:")
 	j := singleJourney(t, r)
 	if j.Outcome != domain.JourneyBlocked || j.FirstFailing != "place" || !strings.HasPrefix(j.Reasons[0].Text, "leg place ended inconclusive") {
 		t.Errorf("journey = %+v", j)
@@ -296,7 +296,7 @@ func TestJourneyEndToEndGivenFixture(t *testing.T) {
 
 	// A fixture that nobody approved blocks the journey, and nothing reaches /v1.
 	blocked := r.must(t, cli.ExitUndecided, "journey", "run", "seen-paid")
-	contains(t, "the summary", squash(blocked.stdout), "seen-paid blocked fixture order.paid is not approved: run semar confirm --fixture order.paid")
+	contains(t, "the summary", squash(blocked.stdout), "seen-paid needs review fixture order.paid is not approved: run semar review order.paid")
 	if n := r.reached("/v1"); n != 0 {
 		t.Errorf("%d requests reached the services before the fixture was approved", n)
 	}

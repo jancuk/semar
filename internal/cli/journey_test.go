@@ -290,7 +290,7 @@ func TestJourneyRunExitCodes(t *testing.T) {
 			want: "checkout failed invariant 1 is false: 1000, 1001, 1000"},
 		{name: "a build changes", app: sampleapp.Options{Defects: defects(sampleapp.BuildChanges)}, code: cli.ExitUndecided, want: "checkout stale a build changed during the journey: orders 9f3c2ab then c0ffee1; first failing leg place"},
 		{name: "the expected results are not confirmed", prepare: func(t *testing.T, r *repo) { r.requireConfirmation(t) }, code: cli.ExitUndecided,
-			want: "checkout blocked first failing leg place: an expected result is not confirmed"},
+			want: "checkout needs review first failing leg place: an expected result is not confirmed"},
 		{name: "a build cannot be read", prepare: func(t *testing.T, r *repo) {
 			r.rewriteConfig(t, func(s string) string {
 				return strings.Replace(s, "/version\n          commit: $.commit\nauthProfiles", "/nothing\n          commit: $.commit\nauthProfiles", 1)
@@ -313,8 +313,8 @@ func TestJourneyRunNeedsAnExpectedResultConfirmedBeforeItSendsAnything(t *testin
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	r.editJourney(t, "checkout", func(s string) string { return strings.Replace(s, "source: person", "source: diff", 1) })
 	res := r.must(t, cli.ExitUndecided, "journey", "run", "checkout")
-	contains(t, "stdout", squash(res.stdout), "checkout blocked first failing leg place: an expected result is not confirmed: run semar confirm --journey checkout",
-		"place inconclusive", "pay not_run", "settled not_run")
+	contains(t, "stdout", squash(res.stdout), "checkout needs review first failing leg place: an expected result is not confirmed: run semar review checkout",
+		"place needs review", "pay not_run", "settled not_run")
 	if n := r.reached(""); n != 0 {
 		t.Errorf("%d requests were sent for a journey whose expected results nobody confirmed", n)
 	}
@@ -322,7 +322,7 @@ func TestJourneyRunNeedsAnExpectedResultConfirmedBeforeItSendsAnything(t *testin
 	if len(run.Journeys) != 1 || run.Journeys[0].Outcome != domain.JourneyBlocked || run.Journeys[0].FirstFailing != "place" || len(run.Results) != 3 {
 		t.Fatalf("run.json: %+v", run.Journeys)
 	}
-	if got := run.Journeys[0].Reasons[0].Text; got != "leg place ended inconclusive: an expected result is not confirmed: run semar confirm --journey checkout" {
+	if got := run.Journeys[0].Reasons[0].Text; got != "leg place ended inconclusive: an expected result is not confirmed: run semar review checkout" {
 		t.Errorf("the journey reason is %q", got)
 	}
 	for _, rr := range run.Results {

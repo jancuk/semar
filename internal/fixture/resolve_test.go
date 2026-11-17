@@ -358,14 +358,14 @@ func TestMissingParameterAndData(t *testing.T) {
 
 func TestNotApproved(t *testing.T) {
 	r := newRig(t, rigOptions{unapproved: true})
-	wantBlocked(t, r.resolve(request(orderGiven)), "fixture order.paid is not approved: run semar confirm --fixture order.paid")
+	wantBlocked(t, r.resolve(request(orderGiven)), "fixture order.paid is not approved: run semar review order.paid")
 
 	// An approval of the fixture as it was before a change does not count.
 	r = newRig(t, rigOptions{})
 	changed := example(t)
 	changed.Description = "A paid order of 2000"
 	r.deps.Catalogue = Catalogue{Fixtures: []domain.Fixture{changed}}
-	wantBlocked(t, r.resolve(request(orderGiven)), "fixture order.paid is not approved: run semar confirm --fixture order.paid")
+	wantBlocked(t, r.resolve(request(orderGiven)), "fixture order.paid is not approved: run semar review order.paid")
 
 	wantBlocked(t, r.resolve(request(domain.Given{Fixture: "order.refunded", As: "refund"})), "fixture order.refunded (as refund) is missing")
 	if n := r.sent("", ""); n != 0 {

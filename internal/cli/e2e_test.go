@@ -311,7 +311,7 @@ func TestRunEndToEnd(t *testing.T) {
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
 
 	first := r.must(t, cli.ExitUndecided, "run", "--scenario", scenarioID)
-	contains(t, "the first summary", first.stdout, "inconclusive", "not confirmed")
+	contains(t, "the first summary", first.stdout, "needs review", "not confirmed")
 
 	confirmed := r.must(t, cli.ExitOK, "confirm", scenarioID, "--yes")
 	contains(t, "the confirmation", confirmed.stdout, "refund-too-much", "diff", "local, unverified identity")

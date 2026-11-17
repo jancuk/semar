@@ -15,7 +15,7 @@ Details: `{{ .CoverageDetail }}`
 {{ range .Journeys -}}
 ### {{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}
 
-Outcome: **{{ .Outcome }}**{{ if .First }}. First failing leg: {{ .First }}.{{ end }}
+Outcome: **{{ .Outcome }}**{{ if .First }}. First failing leg: {{ .First }}.{{ end }}{{ if .Next }} Next: `{{ .Next }}`{{ end }}
 
 {{ range .Reasons -}}
 - Reason: {{ . }}
@@ -55,7 +55,7 @@ A declared build cannot show that the service was redeployed during the run.
 {{ range .Attention -}}
 ### {{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}
 
-Outcome: **{{ .Outcome }}**
+Outcome: **{{ .Outcome }}**{{ if .Next }} Next: `{{ .Next }}`{{ end }}
 
 {{ range .Reasons -}}
 - Reason: {{ .Text }}{{ if .Step }} (step {{ .Step }}){{ end }}

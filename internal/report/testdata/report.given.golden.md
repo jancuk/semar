@@ -9,9 +9,9 @@
 
 ### SHOP-482-07 Refund before approval
 
-Outcome: **blocked**
+Outcome: **needs review** Next: `semar review SHOP-482-07`
 
-- Reason: fixture order.paid is not approved: run semar confirm --fixture order.paid
+- Reason: fixture order.paid is not approved: run semar review order.paid
 
 - Given order: order.paid 1.0.0 (hash cccccccccccc), no state was given; cleanup not needed
 

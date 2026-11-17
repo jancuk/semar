@@ -223,7 +223,7 @@ func TestFixtureCheckRecordsHealth(t *testing.T) {
 func TestFixtureCheckNeedsApprovalAndSendsNothingWithout(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	res := r.must(t, cli.ExitUndecided, "fixture", "check", "order.paid", "--env", "local", "--auth-profile", "support-agent")
-	contains(t, "the check", res.stdout, "order.paid 1.0.0: not fully checked: fixture order.paid is not approved: run semar confirm --fixture order.paid", "1 not fully checked")
+	contains(t, "the check", res.stdout, "order.paid 1.0.0: not fully checked: fixture order.paid is not approved: run semar review order.paid", "1 not fully checked")
 	if n := r.reached("/v1"); n != 0 {
 		t.Errorf("%d requests reached the services for a fixture nobody approved", n)
 	}

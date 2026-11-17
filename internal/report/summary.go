@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/words"
 )
 
 var knownOutcomes = []domain.Outcome{
@@ -99,7 +100,8 @@ func Summary(w io.Writer, run domain.Run, coverage string) error {
 		}
 	} else {
 		for _, r := range ordered(run.Results) {
-			line := plain(string(r.Scenario)) + "\t" + plain(string(r.Outcome))
+			word := resultWord(string(r.Outcome), r.Reasons)
+			line := plain(string(r.Scenario)) + "\t" + plain(word)
 			switch {
 			case len(r.Reasons) > 0:
 				head, more := cut(r.Reasons[0].Text, maxShown)
@@ -110,6 +112,7 @@ func Summary(w io.Writer, run domain.Run, coverage string) error {
 			case r.Outcome != domain.OutcomePassed:
 				line += "\tno reason recorded"
 			}
+			line += nextMark(line, word, string(r.Scenario))
 			if _, err := fmt.Fprintln(tw, line); err != nil {
 				return err
 			}
@@ -134,6 +137,23 @@ func Summary(w io.Writer, run domain.Run, coverage string) error {
 		}
 	}
 	return nil
+}
+
+// resultWord is the word that a person reads for a stored outcome (Plan 26, D7).
+func resultWord(outcome string, reasons []domain.Reason) string {
+	texts := make([]string, len(reasons))
+	for i, r := range reasons {
+		texts[i] = r.Text
+	}
+	return words.Of(outcome, texts)
+}
+
+// nextMark ends a line with the command that follows its word, or with nothing.
+func nextMark(line, word, subject string) string {
+	if next := words.Next(word, plain(subject)); next != "" && !strings.Contains(line, next) {
+		return " → " + next
+	}
+	return ""
 }
 
 // plain keeps text on one line and drops control and format characters, so a service cannot
