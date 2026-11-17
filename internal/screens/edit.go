@@ -2,17 +2,21 @@ package screens
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	yaml "go.yaml.in/yaml/v4"
 
 	"github.com/jancuk/semar/internal/domain"
 )
 
-// Replace rewrites the locator of one element in the text of a screens file and keeps the rest of
-// the file, its order and its comments. The new text is checked before it is returned.
+// Replace rewrites the locator of one element in the text of a screens file. Only the text of that
+// element changes: the rest of the file stays as it is, byte for byte, with its order, its comments,
+// and its layout. The new text is checked before it is returned.
 func Replace(data []byte, app, screen, element string, loc domain.Locator) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.NewDecoder(bytes.NewReader(data)).Decode(&doc); err != nil {
@@ -21,39 +25,142 @@ func Replace(data []byte, app, screen, element string, loc domain.Locator) ([]by
 	if len(doc.Content) == 0 {
 		return nil, fmt.Errorf("the screens file is empty")
 	}
-	root := doc.Content[0]
-	node := child(child(child(root, "screens"), screen), element)
+	node := child(child(child(doc.Content[0], "screens"), screen), element)
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("screen %s has no element %s in the screens file", screen, element)
 	}
-	// The new mapping keeps the old style, so a locator written on one line stays on one line.
-	fresh := &yaml.Node{Kind: yaml.MappingNode, Style: node.Style, HeadComment: node.HeadComment, LineComment: node.LineComment, FootComment: node.FootComment}
-	for _, f := range []struct{ key, val string }{
-		{"testId", loc.TestID}, {"role", loc.Role}, {"name", loc.Name}, {"text", loc.Text}, {"css", loc.CSS}, {"within", loc.Within},
-	} {
-		if f.val == "" {
-			continue
+	start, err := offsetOf(data, node.Line, node.Column)
+	if err != nil {
+		return nil, err
+	}
+	var from, to int
+	var text string
+	if node.Style&yaml.FlowStyle != 0 {
+		end, err := flowEnd(data, start)
+		if err != nil {
+			return nil, err
 		}
-		fresh.Content = append(fresh.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: f.key},
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: f.val, Style: quoteStyle(f.val)})
+		from, to, text = start, end, flowText(loc)
+	} else {
+		from, to, text = start, blockEnd(data, node), blockText(loc, node.Column-1)
 	}
-	*node = *fresh
-
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(&doc); err != nil {
-		return nil, err
-	}
-	if err := enc.Close(); err != nil {
-		return nil, err
-	}
-	out := buf.Bytes()
+	out := append(append(append([]byte{}, data[:from]...), text...), data[to:]...)
 	if _, err := Parse(out, Path(app), app); err != nil {
 		return nil, fmt.Errorf("the edited screens file is not valid: %w", err)
 	}
 	return out, nil
+}
+
+// pairs lists the fields of a locator that are set, in the order that a file writes them.
+func pairs(loc domain.Locator) [][2]string {
+	var out [][2]string
+	for _, f := range [][2]string{
+		{"testId", loc.TestID}, {"role", loc.Role}, {"name", loc.Name}, {"text", loc.Text}, {"css", loc.CSS}, {"within", loc.Within},
+	} {
+		if f[1] != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func scalar(v string) string {
+	if quoteStyle(v) != 0 {
+		return strconv.Quote(v)
+	}
+	return v
+}
+
+func flowText(loc domain.Locator) string {
+	var parts []string
+	for _, p := range pairs(loc) {
+		parts = append(parts, p[0]+": "+scalar(p[1]))
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
+}
+
+func blockText(loc domain.Locator, indent int) string {
+	var lines []string
+	for i, p := range pairs(loc) {
+		line := p[0] + ": " + scalar(p[1])
+		if i > 0 {
+			line = strings.Repeat(" ", indent) + line
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// offsetOf is the byte offset of a position that the parser gives as a line and a column, both from 1.
+func offsetOf(data []byte, line, column int) (int, error) {
+	off := 0
+	for l := 1; l < line; l++ {
+		i := bytes.IndexByte(data[off:], '\n')
+		if i < 0 {
+			return 0, errors.New("the position of the element is not in the file")
+		}
+		off += i + 1
+	}
+	for c := 1; c < column; c++ {
+		_, n := utf8.DecodeRune(data[off:])
+		if n == 0 {
+			return 0, errors.New("the position of the element is not in the file")
+		}
+		off += n
+	}
+	return off, nil
+}
+
+// flowEnd is the offset after the } that closes the { at start. A brace inside a quoted value does not count.
+func flowEnd(data []byte, start int) (int, error) {
+	if start >= len(data) || data[start] != '{' {
+		return 0, errors.New("the element is not written as { ... }")
+	}
+	depth := 0
+	for i := start; i < len(data); i++ {
+		switch c := data[i]; c {
+		case '{':
+			depth++
+		case '}':
+			if depth--; depth == 0 {
+				return i + 1, nil
+			}
+		case '"':
+			for i++; i < len(data) && data[i] != '"'; i++ {
+				if data[i] == '\\' {
+					i++
+				}
+			}
+		case '\'':
+			for i++; i < len(data); i++ {
+				if data[i] == '\'' {
+					if i+1 < len(data) && data[i+1] == '\'' {
+						i++
+						continue
+					}
+					break
+				}
+			}
+		}
+	}
+	return 0, errors.New("the element has no closing }")
+}
+
+// blockEnd is the offset at the end of the last line of a block mapping.
+func blockEnd(data []byte, n *yaml.Node) int {
+	last := n.Line
+	for _, c := range n.Content {
+		last = max(last, c.Line)
+	}
+	off := 0
+	for l := 1; l <= last; l++ {
+		i := bytes.IndexByte(data[off:], '\n')
+		if i < 0 {
+			return len(data)
+		}
+		off += i + 1
+	}
+	return off - 1
 }
 
 // quoteStyle double-quotes a value that a plain scalar would not carry through the parser unchanged.

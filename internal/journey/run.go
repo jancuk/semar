@@ -442,6 +442,11 @@ func (r *Runner) judge(lr *legRun, start, end []domain.BuildRef) domain.Scenario
 		BuildsStart: start, BuildsEnd: end, Blocked: lr.rep.Blocked,
 	})
 	res.Reasons = append(res.Reasons, lr.rep.Notes...)
+	// A step that was never sent has no recorded result, and that is a consequence. The reason that
+	// stopped the leg, such as a screens file that nobody approved, comes first.
+	slices.SortStableFunc(res.Reasons, func(a, b domain.Reason) int {
+		return boolInt(unsent(a)) - boolInt(unsent(b))
+	})
 	if len(lr.attempts) > 0 {
 		at := len(res.Actions)
 		if n := len(res.Actions); n > 0 {
@@ -553,4 +558,15 @@ func needed(j domain.Journey, leg domain.LegID) []domain.LegID {
 		todo = append(todo, byID[n].Needs...)
 	}
 	return out
+}
+
+func unsent(r domain.Reason) bool {
+	return r.Rule == domain.OutcomeInconclusive && strings.HasSuffix(r.Text, "has no recorded result")
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

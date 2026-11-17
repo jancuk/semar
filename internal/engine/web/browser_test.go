@@ -704,3 +704,42 @@ func TestOpenAPageRouteAndQuery(t *testing.T) {
 		t.Errorf("the page saw %q (err %q)", got, res.Action.Err)
 	}
 }
+
+func TestAMissOfTheTargetIsRecordedEvenWhenNoCheckWatchesIt(t *testing.T) {
+	needChrome(t)
+	r := newRig(t, rigOptions{})
+	r.do(open("/board"), nil)
+	res := r.do(act(domain.WebClick, "rename"), map[string]domain.Locator{"rename": {Role: "button", Name: "Rename card"}})
+	st, ok := res.Action.Web.Elements["rename"]
+	if !ok || st.Count != 0 || st.Locator == nil || st.Locator.Name != "Rename card" {
+		t.Errorf("the miss of the target is not in the record: %+v", res.Action.Web.Elements)
+	}
+	if len(res.Action.Web.Repair) == 0 || res.Action.Web.Repair[0].Element != "rename" {
+		t.Errorf("repair = %+v", res.Action.Web.Repair)
+	}
+}
+
+func TestATargetThatVanishesAfterTheClickIsNoMiss(t *testing.T) {
+	needChrome(t)
+	r := newRig(t, rigOptions{handler: func(mux *http.ServeMux) {
+		mux.HandleFunc("/once", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, `<!doctype html><button onclick="this.remove()">Once</button>`)
+		})
+	}})
+	r.do(open("/once"), nil)
+	res := r.do(act(domain.WebClick, "once"), map[string]domain.Locator{"once": {Role: "button", Name: "Once"}})
+	if res.Action.Err != "" || len(res.Action.Web.Repair) != 0 || len(res.Action.Web.Elements) != 0 {
+		t.Errorf("a button that went away after its click is reported as a miss: %+v (err %q)", res.Action.Web, res.Action.Err)
+	}
+}
+
+func TestAPresenceCheckOfAnAbsentElementIsNoMiss(t *testing.T) {
+	needChrome(t)
+	r := newRig(t, rigOptions{})
+	r.do(open("/board"), nil)
+	res := r.do(domain.WebAction{Do: domain.WebWait}, map[string]domain.Locator{"ghost": {CSS: ".ghost"}}, web.Watched{Element: "ghost", Presence: true})
+	st := res.Action.Web.Elements["ghost"]
+	if st.Count != 0 || !st.Presence || len(res.Action.Web.Repair) != 0 {
+		t.Errorf("state = %+v, repair = %+v", st, res.Action.Web.Repair)
+	}
+}

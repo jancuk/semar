@@ -195,3 +195,41 @@ func TestChangesSaysWhetherRoleAndNameStayed(t *testing.T) {
 		t.Errorf("same = %+v", got)
 	}
 }
+
+func TestReplaceChangesOnlyTheTextOfTheElement(t *testing.T) {
+	src := "# the shop screens\n" + shop
+	out, err := screens.Replace([]byte(src), "shop", "Cart", "place-order", domain.Locator{Role: "button", Name: "Pay now"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(src, "place-order: { role: button, name: Place order }", `place-order: { role: button, name: Pay now }`, 1)
+	if string(out) != want {
+		t.Errorf("the file changed beyond the element:\n%s\nwant\n%s", out, want)
+	}
+}
+
+func TestReplaceQuotesWhatNeedsIt(t *testing.T) {
+	out, err := screens.Replace([]byte(shop), "shop", "Cart", "line", domain.Locator{CSS: `li[data-x="1"]: first`, Within: "cart-list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := screens.Parse(out, "shop.yaml", "shop")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got, _ := s.Locator("Cart", "line"); got.CSS != `li[data-x="1"]: first` || got.Within != "cart-list" {
+		t.Errorf("locator = %+v", got)
+	}
+}
+
+func TestReplaceAnElementWrittenAsABlock(t *testing.T) {
+	src := "apiVersion: semar/v1\nkind: Screens\napp: shop\nscreens:\n  Cart:\n    pay:\n      role: button\n      name: Pay\n    other: { testId: o }\n"
+	out, err := screens.Replace([]byte(src), "shop", "Cart", "pay", domain.Locator{Role: "link", Name: "Pay now"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "apiVersion: semar/v1\nkind: Screens\napp: shop\nscreens:\n  Cart:\n    pay:\n      role: link\n      name: Pay now\n    other: { testId: o }\n"
+	if string(out) != want {
+		t.Errorf("got\n%s\nwant\n%s", out, want)
+	}
+}

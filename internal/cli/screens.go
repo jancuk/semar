@@ -80,7 +80,7 @@ func runMisses(store *evidence.Store, id domain.RunID, acts []domain.Activity) (
 			continue
 		}
 		for name, st := range a.Web.Elements {
-			if st.Count != 0 || st.Locator == nil {
+			if st.Count != 0 || st.Locator == nil || st.Presence {
 				continue
 			}
 			m := miss{app: a.Web.App, screen: a.Web.Screen, element: name, scenario: a.Use.Scenario, step: a.Use.Step, looked: *st.Locator}

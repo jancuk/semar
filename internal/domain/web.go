@@ -8,6 +8,7 @@ import (
 	"maps"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -217,9 +218,15 @@ func (l Locator) Strategies() []string {
 func (l Locator) String() string {
 	var parts []string
 	add := func(k, v string) {
-		if v != "" {
-			parts = append(parts, k+": "+v)
+		if v == "" {
+			return
 		}
+		if strings.IndexFunc(v, func(r rune) bool {
+			return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.')
+		}) >= 0 {
+			v = strconv.Quote(v)
+		}
+		parts = append(parts, k+": "+v)
 	}
 	add("testId", l.TestID)
 	add("role", l.Role)
@@ -295,6 +302,9 @@ type ElementState struct {
 	Count   int    `json:"count"`
 	Text    string `json:"text,omitempty"`
 	Visible bool   `json:"visible"`
+	// Presence is true when a check asked only whether the element is there, or how many are. Its
+	// absence is then an answer and no reason for a repair.
+	Presence bool `json:"presence,omitempty"`
 	// Locator is what was looked up, with the variables filled in.
 	Locator *Locator `json:"locator,omitempty"`
 }

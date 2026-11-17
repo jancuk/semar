@@ -1,6 +1,7 @@
 package activity
 
 import (
+	"net/url"
 	"strings"
 
 	"github.com/jancuk/semar/internal/domain"
@@ -21,7 +22,7 @@ func fromWebAction(a domain.Action, class effects.Class, evidencePath string) do
 	target := w.Op
 	switch {
 	case w.Op == string(domain.WebOpen):
-		target += " " + pathOf(w.URL)
+		target += " " + pathOf(w.URL) + fragmentOf(w.URL)
 	case w.Screen != "":
 		target += " " + w.Screen
 	}
@@ -49,4 +50,13 @@ func webResult(a domain.Action) string {
 		return "error: " + a.Err
 	}
 	return "done"
+}
+
+// fragmentOf is the route that an app keeps after the hash, such as #/boards/b-1. The query is left
+// out, as it is for a request.
+func fragmentOf(raw string) string {
+	if u, err := url.Parse(raw); err == nil && u.Fragment != "" {
+		return "#" + u.Fragment
+	}
+	return ""
 }

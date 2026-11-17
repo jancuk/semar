@@ -263,6 +263,7 @@ func (e *Engine) run(ctx context.Context, s *session, c Call, open *url.URL, val
 	s.guard.begin(a.TraceID)
 
 	w := c.Action
+	began := e.o.Clock()
 	rd := newReader(tabCtx, c.Locators)
 	var opErr error
 	dispatched := false
@@ -280,6 +281,18 @@ func (e *Engine) run(ctx context.Context, s *session, c Call, open *url.URL, val
 	default:
 		opErr, dispatched = e.perform(rd, c, value)
 	}
+	// An element that the action could not find is read from the page as the action saw it. After the
+	// action the page has changed: a button that was pressed may be gone, and that is no miss.
+	var miss *notFoundMiss
+	var nf notFoundError
+	if errors.As(opErr, &nf) {
+		if r, ok := rd.memo[nf.element]; ok && r.state.Count == 0 && r.state.Locator != nil {
+			miss = &notFoundMiss{element: nf.element, state: r.state}
+			if tree, err := rd.axNodes(); err == nil {
+				miss.repair = Candidates(nf.element, *r.state.Locator, tree)
+			}
+		}
+	}
 	rd.release()
 	s.settle(tabCtx, e.o.Settle)
 
@@ -288,8 +301,20 @@ func (e *Engine) run(ctx context.Context, s *session, c Call, open *url.URL, val
 	post := newReader(tabCtx, c.Locators)
 	defer post.release()
 	states, repair, readErr := e.read(post, c)
+	if miss != nil {
+		if states == nil {
+			states = map[string]domain.ElementState{}
+		}
+		if _, read := states[miss.element]; !read {
+			states[miss.element] = miss.state
+		}
+		if !slices.ContainsFunc(repair, func(c domain.Candidate) bool { return c.Element == miss.element }) {
+			repair = append(repair, miss.repair...)
+		}
+	}
 	a.Web.Elements = states
 	a.Web.Repair = repair
+	a.DurationMS = e.o.Clock().Sub(began).Milliseconds()
 	a.Web.Blocked = s.guard.blockedHosts()
 	if loc, err := s.location(tabCtx); err == nil {
 		a.Web.URL = loc
@@ -353,6 +378,13 @@ func (e *Engine) perform(rd *reader, c Call, value string) (err error, dispatche
 	return fmt.Errorf("the action %s is not known", w.Do), false
 }
 
+// notFoundMiss is an element that the action looked for and did not find, with what the page held then.
+type notFoundMiss struct {
+	element string
+	state   domain.ElementState
+	repair  []domain.Candidate
+}
+
 type notFoundError struct {
 	element string
 	count   int
@@ -413,6 +445,11 @@ func (e *Engine) read(rd *reader, c Call) (map[string]domain.ElementState, []dom
 			return states, repair, err
 		}
 		states[name] = res.state
+		if wt := watchOf(c.Watch, name); wt != nil && wt.Presence && !needsText[name] {
+			st := states[name]
+			st.Presence = true
+			states[name] = st
+		}
 		if res.state.Count == 0 && needsText[name] && res.state.Locator != nil {
 			tree, err := rd.axNodes()
 			if err != nil {
@@ -421,17 +458,28 @@ func (e *Engine) read(rd *reader, c Call) (map[string]domain.ElementState, []dom
 			repair = append(repair, Candidates(name, *res.state.Locator, tree)...)
 		}
 	}
-	// An element that only the action named stays out of the record when it was found: the target is
-	// in the record already. One that was not found stays in, with the locator that missed.
+	// An element that only the action named stays out of the record: the target is in it already, and
+	// the page has changed since the action.
 	for _, name := range w.Elements() {
-		if !slices.ContainsFunc(c.Watch, func(wt Watched) bool { return wt.Element == name }) && states[name].Found {
+		if !slices.ContainsFunc(c.Watch, func(wt Watched) bool { return wt.Element == name }) {
 			delete(states, name)
+			// Its candidates are those of a miss that the action saw, and not of what the page shows now.
+			repair = slices.DeleteFunc(repair, func(cand domain.Candidate) bool { return cand.Element == name })
 		}
 	}
 	if len(states) == 0 {
 		states = nil
 	}
 	return states, repair, nil
+}
+
+func watchOf(watch []Watched, name string) *Watched {
+	for i := range watch {
+		if watch[i].Element == name {
+			return &watch[i]
+		}
+	}
+	return nil
 }
 
 // screenshot stores one PNG of the page and gives its path below the run directory.

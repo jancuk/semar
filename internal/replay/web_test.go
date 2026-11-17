@@ -286,3 +286,35 @@ func copyWeb(sc domain.Scenario, s domain.Script, id domain.ScenarioID) (domain.
 }
 
 func ptrBool(b bool) *bool { return &b }
+
+// A click whose element was not found did nothing, so the other checks of the step read a page that
+// the step did not change. They must not fail the step (TRD rule 5).
+func TestAMissedTargetDecidesNoOtherCheck(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	sc := webScenario()
+	sc.Steps[0].Expect = nil
+	sc.Steps[1].Expect = []domain.Expectation{{Check: domain.Check{Element: "done", Equals: "ordered"}, Source: domain.SourcePerson}}
+	s := webScript(sc)
+	s.ExpectHash = domain.ExpectHash(sc)
+	s.Steps[0].Web.Path = "/"
+	s.Steps[1].Web = &domain.WebAction{Service: "orders", App: "lanes", Do: domain.WebClick, Screen: "Board", Element: "card"}
+	s.Steps[1].Captures = nil
+	fw := &fakeWeb{reply: func(c web.Call, n int) (web.Result, error) {
+		a := domain.Action{ID: domain.ActionID(fmt.Sprintf("a-%d", n)), Surface: domain.SurfaceWeb, Op: string(c.Action.Do), Use: c.Use,
+			Web: &domain.WebRecord{Op: string(c.Action.Do), Elements: map[string]domain.ElementState{}}}
+		if c.Action.Do == domain.WebClick {
+			a.Err = "an element was not found: either the product changed or the script is out of date (element card matched 0)"
+			a.Web.Elements["done"] = domain.ElementState{Found: true, Count: 1, Visible: true, Text: "waiting"}
+		}
+		return web.Result{Action: a}, nil
+	}}
+	res := r.runWeb(t, sc, s, fw, &fakeScreens{text: strings.Replace(boardScreens, "card:", "done:", 0), approved: true})
+	if res.Outcome != domain.OutcomeInconclusive {
+		t.Fatalf("outcome = %s: %+v", res.Outcome, res.Reasons)
+	}
+	for _, c := range res.Checks {
+		if c.State == domain.CheckFalse {
+			t.Errorf("a check was decided: %+v", c)
+		}
+	}
+}

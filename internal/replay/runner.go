@@ -472,6 +472,17 @@ func evaluate(step domain.Step, a domain.Action, vars, shown map[string]string) 
 		// A browser action has no response to hold an invariant.
 		ev.Invariants = check.Invariants(step, a)
 	}
+	if a.Web != nil && a.Err != "" {
+		// The action did not happen, for instance because its element was not found. The page is as it
+		// was before the step, so what it shows says nothing about what the step was to do: no check is
+		// decided, and the step ends inconclusive and never failed.
+		for _, e := range step.Expect {
+			ev.Checks = append(ev.Checks, check.Result{
+				State: domain.CheckNotEvaluated, Expected: check.Describe(e.Check), Detail: "the step did not finish: " + a.Err,
+			})
+		}
+		return ev
+	}
 	for _, e := range step.Expect {
 		ev.Checks = append(ev.Checks, evalExpectation(e.Check, a, vars, shown))
 	}
