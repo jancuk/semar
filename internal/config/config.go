@@ -25,6 +25,7 @@ type Config struct {
 	Tickets      Tickets                `yaml:"tickets"`
 	Plan         Plan                   `yaml:"plan"`
 	Knowledge    []Knowledge            `yaml:"knowledge"`
+	Change       Change                 `yaml:"change"`
 
 	providersDefaulted bool
 }
@@ -130,6 +131,12 @@ type Setup struct {
 	Deny   []string // tool names or patterns the job may never call
 }
 
+// Change says what the change of a branch is measured against. Base is the branch that a release
+// goes into. Empty is the default branch of origin, else main, else master.
+type Change struct {
+	Base string `yaml:"base"`
+}
+
 type Tickets struct {
 	Pattern string `yaml:"pattern"`
 }
@@ -157,7 +164,7 @@ const (
 
 var topLevelKeys = []string{
 	"version", "environments", "authProfiles", "redact", "policy", "replay",
-	"providers", "tickets", "plan", "knowledge",
+	"providers", "tickets", "plan", "knowledge", "change",
 }
 
 // laterPlanKeys belong to plans that are not built yet. They are accepted and ignored.
@@ -165,7 +172,7 @@ var laterPlanKeys = []string{
 	"observe", "web", "android", "access", "databases", "repos", "risk",
 	"mcpServers", "mcpTools", "publish", "regression", "security",
 	"explore", "notify", "decisions", "agents", "assign", "passes", "limits",
-	"evidence", "change",
+	"evidence",
 }
 
 func Load(repoRoot string) (Config, error) {

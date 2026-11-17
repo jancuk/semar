@@ -530,3 +530,49 @@ func (b *capBuffer) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+// CurrentBranch returns the name of the checked-out branch, or "" for a detached HEAD.
+func (g *Git) CurrentBranch(ctx context.Context) (string, error) {
+	out, err := g.run(ctx, maxOutputBytes, "symbolic-ref", "--short", "--quiet", "HEAD")
+	if err != nil {
+		var ge *gitError
+		if errors.As(err, &ge) && ge.code == 1 {
+			return "", nil
+		}
+		return "", fmt.Errorf("read the current branch: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// DefaultBranch returns the branch that the remote's HEAD names in this clone, as it was when the
+// clone last learned it, or "" when the clone has none. It never talks to the remote.
+func (g *Git) DefaultBranch(ctx context.Context, remote string) (string, error) {
+	if err := checkName("remote", remote); err != nil {
+		return "", err
+	}
+	out, err := g.run(ctx, maxOutputBytes, "symbolic-ref", "--short", "--quiet", "refs/remotes/"+remote+"/HEAD")
+	if err != nil {
+		var ge *gitError
+		if errors.As(err, &ge) && ge.code == 1 {
+			return "", nil
+		}
+		return "", fmt.Errorf("read the default branch of %s: %w", remote, err)
+	}
+	return strings.TrimPrefix(strings.TrimSpace(string(out)), remote+"/"), nil
+}
+
+// Config returns the value of a git setting as the person's git reads it, or "" when it is not set.
+func (g *Git) Config(ctx context.Context, key string) (string, error) {
+	if err := checkName("setting", key); err != nil {
+		return "", err
+	}
+	out, err := g.run(ctx, maxOutputBytes, "config", "--get", "--", key)
+	if err != nil {
+		var ge *gitError
+		if errors.As(err, &ge) && ge.code == 1 {
+			return "", nil
+		}
+		return "", fmt.Errorf("read git setting %s: %w", key, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
