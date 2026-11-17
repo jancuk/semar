@@ -79,7 +79,7 @@ func (d *Document) readDetail(data []byte, name string) {
 }
 
 // assignKeys gives each operation a name that is stable between runs: its operationId when that
-// is a plain name, else the method and the path as words, such as post_v1_cards_cardId_move. A
+// is a plain name, else the method and the path as words, such as post_v1_orders_orderId_refunds. A
 // name that two operations would share gets a number, in the order of the operations.
 func (d *Document) assignKeys() {
 	used := map[string]bool{}

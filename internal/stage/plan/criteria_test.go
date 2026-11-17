@@ -101,9 +101,9 @@ And the order stays as it was
   - When the support agent refunds part of it
   - Then the API answers 201
 
-**Given** a card on the board
-**When** it is dragged to another list
-**Then** the board shows the new order
+**Given** a customer on the account page
+**When** they open the order history
+**Then** the page shows the newest order first
 
 ## Notes
 
@@ -121,7 +121,7 @@ func TestCriteriaReadsGivenWhenThenGroups(t *testing.T) {
 	}{
 		{1, 5, 8, "Given a paid order When the owner refunds more than the total Then the API answers 422 with the code REFUND_EXCEEDS_TOTAL And the order stays as it was"},
 		{2, 10, 12, "Given a paid order When the support agent refunds part of it Then the API answers 201"},
-		{3, 14, 16, "Given a card on the board When it is dragged to another list Then the board shows the new order"},
+		{3, 14, 16, "Given a customer on the account page When they open the order history Then the page shows the newest order first"},
 	} {
 		c := got[i]
 		if c.Number != want.number || c.Line != want.line || c.End != want.end || c.Text != want.text {

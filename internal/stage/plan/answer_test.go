@@ -191,8 +191,8 @@ func TestConvertAManualCheckAndANotDraftedEntry(t *testing.T) {
 
 func TestCiteIsTheCriterionLineAndItsFirstSentence(t *testing.T) {
 	_, p := firstPacket(t)
-	p.Criterion = "A card moves. Then it stays."
-	if got := p.Why(); got != ticket482+":9 A card moves" {
+	p.Criterion = "An order is paid. Then it stays paid."
+	if got := p.Why(); got != ticket482+":9 An order is paid" {
 		t.Errorf("why = %q", got)
 	}
 }
@@ -314,7 +314,7 @@ func TestAnswerSchemaIsClosed(t *testing.T) {
 	if !slices.Contains(accounts, "bob") || !slices.Contains(accounts, "default") || !slices.Equal(fixtures, []string{"order.paid"}) {
 		t.Errorf("accounts %v, fixtures %v", accounts, fixtures)
 	}
-	if !slices.Contains(bodyFields, "amount") || !slices.Contains(bodyFields, "customer") || slices.Contains(bodyFields, "listId") {
+	if !slices.Contains(bodyFields, "amount") || !slices.Contains(bodyFields, "customer") || slices.Contains(bodyFields, "orderId") {
 		t.Errorf("body fields = %v", bodyFields)
 	}
 	if !slices.Equal(kinds, []string{KindScenario, KindManualCheck, KindNotDrafted}) {
@@ -337,12 +337,12 @@ func TestAnswerSchemaIsClosed(t *testing.T) {
 func TestAnswerSchemaFollowsTheDocument(t *testing.T) {
 	_, p := firstPacket(t)
 	p.Operations = []PacketOperation{{
-		Key: "patchCard", Method: "PATCH", Route: "/cards/{id}", BodyKnown: true,
+		Key: "patchOrder", Method: "PATCH", Route: "/orders/{id}", BodyKnown: true,
 		Params: nil,
 		Body: []openapi.Field{
-			{Name: "dueAt", Type: "string", Nullable: true},
+			{Name: "shipBy", Type: "string", Nullable: true},
 			{Name: "state", Type: "string", Enum: []string{"open", "done"}},
-			{Name: "labels", Type: "array"},
+			{Name: "tags", Type: "array"},
 		},
 	}}
 	var root map[string]any
@@ -356,13 +356,13 @@ func TestAnswerSchemaFollowsTheDocument(t *testing.T) {
 			types[vs[0]] = props["value"]
 		}
 	})
-	if got, _ := json.Marshal(types["dueAt"]); string(got) != `{"type":["string","null"]}` {
-		t.Errorf("dueAt = %s: a nullable field accepts null", got)
+	if got, _ := json.Marshal(types["shipBy"]); string(got) != `{"type":["string","null"]}` {
+		t.Errorf("shipBy = %s: a nullable field accepts null", got)
 	}
 	if got, _ := json.Marshal(types["state"]); string(got) != `{"enum":["open","done"],"type":"string"}` {
 		t.Errorf("state = %s", got)
 	}
-	if m, _ := types["labels"].(map[string]any); m["type"] != "string" {
-		t.Errorf("an array is written as JSON text: %v", types["labels"])
+	if m, _ := types["tags"].(map[string]any); m["type"] != "string" {
+		t.Errorf("an array is written as JSON text: %v", types["tags"])
 	}
 }

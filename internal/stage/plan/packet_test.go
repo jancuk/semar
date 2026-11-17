@@ -185,10 +185,10 @@ func TestRegistrationsInTheUsualRouters(t *testing.T) {
 		method string
 		hand   string
 	}{
-		"go mux":    {`mux.HandleFunc("POST /v1/cards/{id}/move", h.Move)`, "/v1/cards/{}/move", "POST", "h.Move"},
-		"express":   {`router.post('/cards/:id/move', moveCard);`, "/cards/{}/move", "", "moveCard"},
-		"decorator": {"@router.post(\"/cards/{card_id}/move\")\nasync def move_card(card_id: str):\n", "/cards/{}/move", "", "move_card"},
-		"gin":       {`r.PATCH("/v1/cards/:id", handlers.PatchCard)`, "/v1/cards/{}", "", "handlers.PatchCard"},
+		"go mux":    {`mux.HandleFunc("POST /v1/orders/{id}/cancel", h.Cancel)`, "/v1/orders/{}/cancel", "POST", "h.Cancel"},
+		"express":   {`router.post('/orders/:id/cancel', cancelOrder);`, "/orders/{}/cancel", "", "cancelOrder"},
+		"decorator": {"@router.post(\"/orders/{order_id}/cancel\")\nasync def cancel_order(order_id: str):\n", "/orders/{}/cancel", "", "cancel_order"},
+		"gin":       {`r.PATCH("/v1/orders/:id", handlers.PatchOrder)`, "/v1/orders/{}", "", "handlers.PatchOrder"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := registrationsIn(tc.text)
@@ -203,17 +203,17 @@ func TestRegistrationsInTheUsualRouters(t *testing.T) {
 }
 
 func TestRegistrationMatchesAGroupedRoute(t *testing.T) {
-	doc, err := openapi.Parse([]byte("openapi: 3.0.0\nservers: [{url: \"https://x.example.com/v1\"}]\npaths:\n  /cards/{id}/move:\n    post: {responses: {\"200\": {}}}\n"), "d")
+	doc, err := openapi.Parse([]byte("openapi: 3.0.0\nservers: [{url: \"https://x.example.com/v1\"}]\npaths:\n  /orders/{id}/cancel:\n    post: {responses: {\"200\": {}}}\n"), "d")
 	if err != nil {
 		t.Fatal(err)
 	}
 	op := doc.Operations[0]
-	for route, want := range map[string]bool{"/cards/{}/move": true, "/v1/cards/{}/move": true, "/move": false, "/cards/{}": false} {
+	for route, want := range map[string]bool{"/orders/{}/cancel": true, "/v1/orders/{}/cancel": true, "/cancel": false, "/orders/{}": false} {
 		if got := registrationMatches(registration{Route: route}, doc, op); got != want {
 			t.Errorf("%s: got %v, want %v", route, got, want)
 		}
 	}
-	if registrationMatches(registration{Route: "/cards/{}/move", Method: "GET"}, doc, op) {
+	if registrationMatches(registration{Route: "/orders/{}/cancel", Method: "GET"}, doc, op) {
 		t.Error("the method differs")
 	}
 }

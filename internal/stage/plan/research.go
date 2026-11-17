@@ -71,7 +71,7 @@ type registration struct {
 }
 
 var (
-	// A route literal: "/v1/cards/{id}", "POST /v1/cards", '/cards/:id'.
+	// A route literal: "/v1/orders/{id}", "POST /v1/orders", '/orders/:id'.
 	routeLiteral = regexp.MustCompile(`["'` + "`" + `](?:(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) +)?(/[A-Za-z0-9_\-./{}:*]*)["'` + "`" + `]`)
 	identPath    = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*`)
 	funcDecl     = regexp.MustCompile(`(?:func|def|function|fun|public|private|protected|async)\b[^(\n]*?\b([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
@@ -145,7 +145,7 @@ func registrationsIn(text string) []registration {
 	return out
 }
 
-// lastName is the part of a dotted name that a declaration uses: h.Move is declared as Move.
+// lastName is the part of a dotted name that a declaration uses: h.Cancel is declared as Cancel.
 func lastName(id string) string {
 	if i := strings.LastIndexByte(id, '.'); i >= 0 {
 		return id[i+1:]

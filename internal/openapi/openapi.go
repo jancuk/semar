@@ -77,7 +77,7 @@ type Operation struct {
 	Summary  string   // summary, "" when the operation has none
 
 	// Key names the operation: its operationId when that is a plain name, else a name made from the
-	// method and the path, such as post_v1_cards_cardId_move. It is the same on every run.
+	// method and the path, such as post_v1_orders_orderId_refunds. It is the same on every run.
 	Key          string
 	Params       []Param    // the path, query, and header parameters, those of the path item included
 	Body         []Field    // the properties of the JSON request body, when the document describes them
