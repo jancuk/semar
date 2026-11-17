@@ -5,6 +5,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -123,5 +124,47 @@ func ensureProfile(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("the browser profile %s could not be made: %w", dir, err)
 	}
-	return os.Chmod(dir, 0o700)
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	return turnOffSavedSignIns(dir)
+}
+
+// turnOffSavedSignIns stops Chrome from saving and filling in passwords and addresses on the
+// profile. A step types what its script says, and a saved sign-in typed into the same field
+// would change what the step sent. Chrome reads the file when it starts.
+func turnOffSavedSignIns(dir string) error {
+	path := filepath.Join(dir, "Default", "Preferences")
+	prefs := map[string]any{}
+	if raw, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(raw, &prefs); err != nil {
+			prefs = map[string]any{}
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("the settings of the browser profile %s could not be read: %w", dir, err)
+	}
+	prefs["credentials_enable_service"] = false
+	setIn(prefs, "profile", "password_manager_enabled", false)
+	setIn(prefs, "autofill", "profile_enabled", false)
+	setIn(prefs, "autofill", "credit_card_enabled", false)
+	raw, err := json.Marshal(prefs)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		return fmt.Errorf("the settings of the browser profile %s could not be written: %w", dir, err)
+	}
+	return nil
+}
+
+func setIn(m map[string]any, section, key string, v any) {
+	inner, ok := m[section].(map[string]any)
+	if !ok {
+		inner = map[string]any{}
+		m[section] = inner
+	}
+	inner[key] = v
 }

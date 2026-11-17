@@ -117,6 +117,7 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/board", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, boardPage) })
 	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, loginPage) })
+	mux.HandleFunc("/autofill", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, autofillPage) })
 	mux.HandleFunc("/api/slow", func(w http.ResponseWriter, r *http.Request) {
 		seen.add(r.URL.Path, r.Header.Get("traceparent"))
 		time.Sleep(300 * time.Millisecond)
@@ -379,6 +380,30 @@ func TestFillAndPressWithASecret(t *testing.T) {
 	}
 	if blob, _ := json.Marshal(res.Action); strings.Contains(string(blob), pw) {
 		t.Errorf("a stored action holds the secret: %s", blob)
+	}
+}
+
+// The field is filled by the page right after it takes focus, as a browser's saved sign-in does.
+const autofillPage = `<!doctype html><html><head><title>Sign in</title></head><body>
+<label>Email <input type="text" id="email"></label>
+<script>
+document.getElementById('email').addEventListener('focus', e => {
+  setTimeout(() => { e.target.value = 'saved@example.com'; e.target.setSelectionRange(99, 99); }, 0);
+}, { once: true });
+</script></body></html>`
+
+func TestFillReplacesWhatAFieldWasGivenWhenItTookFocus(t *testing.T) {
+	needChrome(t)
+	r := newRig(t, rigOptions{})
+	r.do(open("/autofill"), nil)
+	locs := map[string]domain.Locator{"email": {Role: "textbox", Name: "Email"}}
+	f := domain.WebAction{Do: domain.WebFill, Screen: "Login", Element: "email", Value: "ana@example.com"}
+	res := r.do(f, locs, text("email"))
+	if res.Action.Err != "" {
+		t.Fatalf("fill: %s", res.Action.Err)
+	}
+	if got := res.Action.Web.Elements["email"].Text; got != "ana@example.com" {
+		t.Errorf("the field holds %q, want only the typed text", got)
 	}
 }
 

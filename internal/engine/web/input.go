@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -98,7 +99,9 @@ func (r *reader) drag(from, to cdp.BackendNodeID) error {
 	return nil
 }
 
-// fill replaces what an element holds with the text, by typing it at the element.
+// fill replaces what an element holds with the text, by typing it at the element. A page or the
+// browser may write into a field once it takes focus, as a saved sign-in does, so the field is
+// read back after typing and typed again until it holds exactly the text.
 func (r *reader) fill(id cdp.BackendNodeID, text string) error {
 	h, err := r.handle(id)
 	if err != nil {
@@ -107,24 +110,57 @@ func (r *reader) fill(id cdp.BackendNodeID, text string) error {
 	if _, _, err := r.center(id); err != nil {
 		return err
 	}
-	res, err := chromedp.Call(r.ctx, runtime.CallFunctionOn, runtime.CallFunctionOnParams{
-		FunctionDeclaration: `function(){
+	for try := 0; try < 3; try++ {
+		if try > 0 {
+			time.Sleep(100 * time.Millisecond)
+		}
+		res, err := chromedp.Call(r.ctx, runtime.CallFunctionOn, runtime.CallFunctionOnParams{
+			FunctionDeclaration: `function(){
   this.focus();
   if (typeof this.select === 'function') { this.select(); return true; }
   if (this.isContentEditable) { const s = getSelection(), g = document.createRange(); g.selectNodeContents(this); s.removeAllRanges(); s.addRange(g); return true; }
   return false;
 }`,
-		ObjectID:      h,
-		ReturnByValue: ptr(true),
+			ObjectID:      h,
+			ReturnByValue: ptr(true),
+		})
+		if err != nil {
+			return err
+		}
+		if res.Result != nil && string(res.Result.Value) == "false" {
+			return errors.New("the element is not a field that takes text")
+		}
+		if _, err := chromedp.Call(r.ctx, input.InsertText, input.InsertTextParams{Text: text}); err != nil {
+			return err
+		}
+		same, err := r.holds(h, text)
+		if err != nil {
+			return err
+		}
+		if same {
+			return nil
+		}
+	}
+	return errors.New("the field held other text after typing: the page or a sign-in saved in the browser changed it")
+}
+
+// holds says whether a field holds exactly the text. It returns only the answer, so a secret
+// never comes back from the page.
+func (r *reader) holds(h runtime.RemoteObjectID, text string) (bool, error) {
+	arg, err := json.Marshal(text)
+	if err != nil {
+		return false, err
+	}
+	res, err := chromedp.Call(r.ctx, runtime.CallFunctionOn, runtime.CallFunctionOnParams{
+		FunctionDeclaration: `function(t){ return ('value' in this ? this.value : this.innerText) === t; }`,
+		ObjectID:            h,
+		Arguments:           []*runtime.CallArgument{{Value: arg}},
+		ReturnByValue:       ptr(true),
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
-	if res.Result != nil && string(res.Result.Value) == "false" {
-		return errors.New("the element is not a field that takes text")
-	}
-	_, err = chromedp.Call(r.ctx, input.InsertText, input.InsertTextParams{Text: text})
-	return err
+	return res.Result != nil && string(res.Result.Value) == "true", nil
 }
 
 // focus puts the keyboard on the element.
