@@ -41,11 +41,15 @@ $('ping').addEventListener('click', () => { $('status').textContent = 'pong ' + 
 show();
 </script></body></html>`
 
-func portalRepo(t *testing.T) *repo {
+func portalRepo(t *testing.T) *repo { return portalRepoWith(t, true) }
+
+// portalRepoWith serves the portal page. With web set, the account of the repository signs in to it.
+func portalRepoWith(t *testing.T, web bool) *repo {
 	t.Helper()
 	r, _ := recordRepoWith(t, repoOptions{wrap: func(next http.Handler) http.Handler {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/portal", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, portalShop) })
+		mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, portalShop) })
 		mux.HandleFunc("/portal-check", func(w http.ResponseWriter, req *http.Request) {
 			if req.URL.Query().Get("pw") == portalPassword {
 				fmt.Fprint(w, "yes")
@@ -57,6 +61,9 @@ func portalRepo(t *testing.T) *repo {
 		return mux
 	}})
 	t.Setenv(portalPassVar, portalPassword)
+	if !web {
+		return r
+	}
 	r.rewriteConfig(t, func(s string) string {
 		return strings.Replace(s, `secrets: {TOKEN: "env:SEMAR_SAMPLE_TOKEN"}`,
 			`secrets: {TOKEN: "env:SEMAR_SAMPLE_TOKEN"}`+"\n    web: {user: ana@example.com, password: \"env:"+portalPassVar+"\"}", 1)

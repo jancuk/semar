@@ -8,6 +8,9 @@ import (
 
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
+
+	"github.com/jancuk/semar/internal/config"
+	"github.com/jancuk/semar/internal/secret"
 )
 
 // LoginOptions say which profile a person signs in to, and where.
@@ -108,4 +111,37 @@ func closeBrowser(tab context.Context) {
 	if err := chromedp.Cancel(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return
 	}
+}
+
+// SignInOptions say which account signs in, to which page, and with what.
+type SignInOptions struct {
+	Chrome      string // "" finds Chrome
+	Home        string
+	Environment string
+	Account     string // "" is default
+	URL         string // the page to open: the base URL of the service
+	Who         config.WebSignIn
+	Secrets     secret.Resolver
+	// Hidden runs the browser with no window.
+	Hidden bool
+}
+
+// SignIn opens the page in a browser on the profile of the account and signs in to its form as a step
+// does, then ends the browser, so that what the application keeps in the profile is on the disk. It
+// says whether the page showed a sign-in form. A sign-in that does not finish is an error.
+func SignIn(ctx context.Context, o SignInOptions) (bool, error) {
+	account := accountName(o.Account)
+	rec, err := StartRecorder(ctx, RecorderOptions{
+		Chrome: o.Chrome, Home: o.Home, Environment: o.Environment, Account: o.Account, Hidden: o.Hidden,
+		SignIn: &RecorderSignIn{Account: account, Who: o.Who, Secrets: o.Secrets},
+	})
+	if err != nil {
+		return false, err
+	}
+	defer rec.Finish()
+	if err := rec.Open(o.URL); err != nil {
+		return false, err
+	}
+	_, signed := rec.SignedIn()
+	return signed, nil
 }

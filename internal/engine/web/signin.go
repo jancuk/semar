@@ -136,6 +136,12 @@ const (
 	signInUnfinished
 )
 
+// SignInError is a sign-in that could not be done or did not finish: the form, the user, or the
+// password is wrong or missing. A browser that failed is another error.
+type SignInError struct{ Text string }
+
+func (e SignInError) Error() string { return e.Text }
+
 // signInTab is a tab that Semar signs in to: the engine's session and the window of a recording
 // both are one.
 type signInTab interface {
@@ -165,7 +171,7 @@ func (g signer) afterOpen(ctx context.Context, account string, who config.WebSig
 	case err != nil:
 		return false, err
 	case state == signInUnfinished:
-		return false, errors.New(unfinishedText(account, who, alert))
+		return false, SignInError{unfinishedText(account, who, alert)}
 	case state == noSignInForm:
 		return false, nil
 	}
@@ -188,20 +194,20 @@ func (g signer) signIn(ctx context.Context, account string, who config.WebSignIn
 		return noSignInForm, "", err
 	}
 	if g.secrets == nil {
-		return noSignInForm, "", errors.New("the sign-in password could not be read: there is no secret source")
+		return noSignInForm, "", SignInError{"the sign-in password could not be read: there is no secret source"}
 	}
 	password, err := g.secrets.Resolve(ctx, who.Password)
 	if err != nil {
-		return noSignInForm, "", fmt.Errorf("the sign-in password of %s could not be read: %w", account, err)
+		return noSignInForm, "", SignInError{fmt.Sprintf("the sign-in password of %s could not be read: %v", account, err)}
 	}
 	if err := rd.fill(form.user, who.User); err != nil {
-		return noSignInForm, "", fmt.Errorf("the user of %s could not be typed: %w", account, err)
+		return noSignInForm, "", SignInError{fmt.Sprintf("the user of %s could not be typed: %v", account, err)}
 	}
 	if err := rd.fill(form.password, password); err != nil {
-		return noSignInForm, "", fmt.Errorf("the password of %s could not be typed: %w", account, err)
+		return noSignInForm, "", SignInError{fmt.Sprintf("the password of %s could not be typed: %v", account, err)}
 	}
 	if err := rd.send(form); err != nil {
-		return noSignInForm, "", fmt.Errorf("the sign-in form of %s could not be sent: %w", account, err)
+		return noSignInForm, "", SignInError{fmt.Sprintf("the sign-in form of %s could not be sent: %v", account, err)}
 	}
 	rd.release()
 
