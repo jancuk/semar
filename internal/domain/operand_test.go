@@ -51,3 +51,19 @@ func TestFillOperands(t *testing.T) {
 		t.Fatalf("got %v", got.Equals)
 	}
 }
+
+func TestFillOperandsMarksAValueThatIsOneWholeVariable(t *testing.T) {
+	vars := map[string]string{"position": "0"}
+	lookup := func(n string) (string, bool) { v, ok := vars[n]; return v, ok }
+	got, _ := domain.FillOperands(domain.Check{JSONPath: "$.p", Equals: "{{position}}", NotEquals: "{{position}}", Contains: "{{position}}"}, lookup)
+	if got.Equals != domain.CapturedText("0") || got.NotEquals != domain.CapturedText("0") {
+		t.Fatalf("equals %#v, notEquals %#v: want the captured text 0", got.Equals, got.NotEquals)
+	}
+	if got.Contains != "0" {
+		t.Fatalf("contains %#v: want the string 0", got.Contains)
+	}
+	got, _ = domain.FillOperands(domain.Check{JSONPath: "$.p", Equals: "n{{position}}"}, lookup)
+	if got.Equals != "n0" {
+		t.Fatalf("a variable inside a text gave %#v", got.Equals)
+	}
+}

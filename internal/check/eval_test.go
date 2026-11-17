@@ -319,3 +319,33 @@ func TestDescribeMatchesEval(t *testing.T) {
 		})
 	}
 }
+
+// A capture keeps the text of a value and not its type, so the value of a variable that is the whole
+// operand equals a number or a boolean with that text. A string that a person wrote does not.
+func TestEvalComparesACapturedTextWithAScalarOfAnyType(t *testing.T) {
+	body := `{"data":{"position":0,"done":true,"id":"o-1","price":1.50,"items":[1]}}`
+	cases := []struct {
+		name string
+		c    domain.Check
+		want domain.CheckState
+	}{
+		{"a number", domain.Check{JSONPath: "$.data.position", Equals: domain.CapturedText("0")}, domain.CheckTrue},
+		{"another number", domain.Check{JSONPath: "$.data.position", Equals: domain.CapturedText("1")}, domain.CheckFalse},
+		{"a number written another way", domain.Check{JSONPath: "$.data.price", Equals: domain.CapturedText("1.5")}, domain.CheckTrue},
+		{"a boolean", domain.Check{JSONPath: "$.data.done", Equals: domain.CapturedText("true")}, domain.CheckTrue},
+		{"a string", domain.Check{JSONPath: "$.data.id", Equals: domain.CapturedText("o-1")}, domain.CheckTrue},
+		{"not equals a number", domain.Check{JSONPath: "$.data.position", NotEquals: domain.CapturedText("0")}, domain.CheckFalse},
+		{"an array is never a captured text", domain.Check{JSONPath: "$.data.items", Equals: domain.CapturedText("[1]")}, domain.CheckFalse},
+		{"a written string is not a number", domain.Check{JSONPath: "$.data.position", Equals: "0"}, domain.CheckFalse},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := check.Eval(tc.c, ok(200, body)); got.State != tc.want {
+				t.Fatalf("state = %s, want %s (%s)", got.State, tc.want, got.Detail)
+			}
+		})
+	}
+	if got := check.Describe(domain.Check{JSONPath: "$.data.position", Equals: domain.CapturedText("0")}); got != "$.data.position equals 0" {
+		t.Fatalf("described as %q", got)
+	}
+}

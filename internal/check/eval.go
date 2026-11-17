@@ -207,6 +207,10 @@ func evalJSONPath(res *Result, c domain.Check, op string, resp *domain.HTTPRespo
 
 	switch op {
 	case "equals", "notEquals":
+		if captured, ok := operandValue(c, op).(domain.CapturedText); ok {
+			res.State = state(equalsCaptured(value, string(captured)) == (op == "equals"))
+			return
+		}
 		want, err := normalise(operandValue(c, op))
 		if err != nil {
 			notEvaluated(res, "the expected value cannot be compared: "+err.Error())
@@ -244,6 +248,23 @@ func evalJSONPath(res *Result, c domain.Check, op string, resp *domain.HTTPRespo
 	case "equalsPath":
 		evalEqualsPath(res, c, value, doc)
 	}
+}
+
+// equalsCaptured compares a value with the text of a capture, as a capture would have kept it: a
+// string as it is, a number by its amount, and a boolean by its word. An array or an object is
+// never captured.
+func equalsCaptured(value any, captured string) bool {
+	switch v := value.(type) {
+	case string:
+		return v == captured
+	case bool:
+		return strconv.FormatBool(v) == captured
+	case json.Number:
+		got, errGot := ratOf(v)
+		want, errWant := ratOf(json.Number(captured))
+		return errGot == nil && errWant == nil && got.Cmp(want) == 0
+	}
+	return false
 }
 
 func operandValue(c domain.Check, op string) any {
@@ -545,8 +566,11 @@ func nodesText(nodes jsonpath.NodeList) string {
 }
 
 func text(v any) string {
-	if s, ok := v.(string); ok {
+	switch s := v.(type) {
+	case string:
 		return s
+	case domain.CapturedText:
+		return string(s)
 	}
 	raw, err := json.Marshal(v)
 	if err != nil {

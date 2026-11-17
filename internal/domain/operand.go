@@ -48,15 +48,27 @@ func OperandMalformed(c Check) string {
 	return ""
 }
 
+// CapturedText is the value of a variable that is the whole operand of equals or notEquals. A
+// capture keeps the text of a value and not its type, so a check compares it with the text of what
+// it reads: the capture of the number 0 equals the number 0, which the string "0" never does.
+type CapturedText string
+
 // FillOperands returns a copy of c with every variable of its string operands replaced by what
 // lookup gives, and the names that lookup had no value for, which stay as written. A replaced
-// value is not scanned again.
+// value is not scanned again. An equals or a notEquals that is one variable and nothing else becomes
+// a CapturedText.
 func FillOperands(c Check, lookup func(name string) (string, bool)) (Check, []string) {
 	var missing []string
-	fill := func(v *any) {
+	fill := func(v *any, compares bool) {
 		s, ok := (*v).(string)
 		if !ok {
 			return
+		}
+		if m := operandVariable.FindStringSubmatch(s); compares && m != nil && m[0] == s {
+			if val, found := lookup(m[1]); found {
+				*v = CapturedText(val)
+				return
+			}
 		}
 		*v = operandVariable.ReplaceAllStringFunc(s, func(m string) string {
 			name := operandVariable.FindStringSubmatch(m)[1]
@@ -70,8 +82,8 @@ func FillOperands(c Check, lookup func(name string) (string, bool)) (Check, []st
 			return val
 		})
 	}
-	fill(&c.Equals)
-	fill(&c.NotEquals)
-	fill(&c.Contains)
+	fill(&c.Equals, true)
+	fill(&c.NotEquals, true)
+	fill(&c.Contains, false)
 	return c, missing
 }
