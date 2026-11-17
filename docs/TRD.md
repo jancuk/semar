@@ -974,6 +974,27 @@ A criterion with no scenario goes on the double-check list with the reason. A ti
 
 The two tables answer different questions. The code table asks whether every change was tested. The criteria table asks whether everything that was asked for was tested.
 
+### Planning one criterion at a time
+
+The planner of the sections above is one job that explores the repository with read tools, finds the routes, and writes every scenario. That needs a strong model. `semar plan --pipeline criteria` changes the shape of the job so that a small, cheap model can do it: code does the research, a job answers one closed question, code checks the answer, and only a failed answer goes to a bigger model. [Plan 25](implementation/25-small-models.md) holds the decisions and the measurements.
+
+```text
+ticket file ─► criteria ─► packet (code) ─► job, no tools ─► answer ─► check (code) ─┬─► draft
+                                                  ▲                                  │ problem
+                                                  └──── one correction, then ◄───────┘
+                                                        the next model of the ladder
+```
+
+* **Packet.** For each criterion, code builds the text and the cite of the criterion, the operations of the API document that the ticket reaches (by a route or an operationId in the diff or in the ticket, or by a router registration of a changed file whose handler the diff changes, and the operations that share a word of their path), each with its path parameters, query parameters, body fields with types, and response fields, the diff of the ticket's files within a byte budget, the fixtures with their outputs, the accounts with their descriptions, and the scenarios that exist. An operation without an operationId gets a stable name made from its method and path.
+* **Job.** One job for each criterion, with no tools, at most two turns, in an empty directory, four at a time. Claude Code runs with an empty tool list, Codex with its command tools off, and an API kind offers only the tool that returns the answer.
+* **Answer.** The schema of the answer is made from the packet. The answer is exactly one of `scenario`, `manualCheck`, and `notDrafted`. A step chooses its operation, its account, and its fixture from enums, and its path parameters, query parameters, and body fields from what the operation declares, with the type that the document gives each body value in words. A step that expects a status of 400 to 499 may send another type or leave a required field out, because that is how a validation rule is tested. A check is a structured Then line: a subject (`status`, `jsonpath`, `header`), an operator of the existing set, and a value. The answer has no method, no path, no host, and no cite. Code writes the method, the hint, and the path from the operation, and fixes the cite to the line of the criterion.
+* **Check.** Code validates each answer: the schema, that each body field, query parameter, and path parameter exists in the operation, that each required one is given, that a value has its type, that a response field of a check or a capture is declared, that a path parameter is a capture, a fixture output, or `missing-{{run.id}}`, and then the rules of the whole draft for the one scenario (titles, step IDs, variables used after they are captured, the cites). Each problem is a sentence that names the place, such as `field amountt does not exist in post_v1_orders_orderId_refunds; its fields are amount, reason`.
+* **Correction and ladder.** A failed answer goes back once to the same model with the same packet, its own answer, and the problems. If that fails, the same job runs on the next model of the ladder, fresh. A criterion that no model answers stays unaccounted, and the ledger keeps it as a gap.
+* **Merge.** Code puts the accepted answers into the same draft that the single planner returns, in ticket and line order, with the kind of each ticket decided by code, and runs the same validation, trial, and criteria accounting. A trial problem goes back to the criterion that owns the scenario, once.
+* **Reuse.** The accepted answers are written to `answers.json` in the plan directory with the hash of each packet. A later plan reuses an answer whose packet hash is the same, after the checks run again.
+
+An acceptance criterion may be a numbered line or a group of Given, When, and Then lines under the heading "Acceptance criteria". The second form is easier for a small model, and plan.md says so when a ticket has only prose.
+
 ### Change coverage
 
 Every scenario cites the hunks that motivate it. Code inverts that list: for each hunk in the change set, which scenarios cover it. A `behaviour` hunk that no scenario cites is uncovered, and the plan says so.
@@ -2263,7 +2284,7 @@ Planned, not built. Semar does not build every surface engine itself. It integra
 
 During a verification run the agent sees one MCP server, `semar`. Semar applies policy to each call, forwards it to the real engine, and records it. A call that Semar did not see cannot become evidence, so the agent has no direct path to an engine (product rule 1). In an interactive session the user's agent may have its own servers. Calls through them are not recorded, never count as evidence, and the report says so, as today.
 
-Planning is different. The planner is read-only. It has the three file tools, and it uses the person's own MCP servers and skills only when the person asks for them with `--with-setup` or `plan.withSetup` in the person's own providers file (Plan 23, D1).
+Planning is different. The planner is read-only. It has the three file tools, and it uses the person's own MCP servers and skills only when the person asks for them with `--with-setup` or `plan.withSetup` in the person's own providers file (Plan 23, D1). A job of the criteria pipeline has no tool at all, so it has nothing to switch on (Plan 25, D3).
 
 ### Registration
 

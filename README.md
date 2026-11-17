@@ -71,6 +71,7 @@ These parts are implemented in Go.
 * **Exports:** `semar export` writes a stored run as CTRF, JUnit XML, or SARIF. See [Send results to your tools](#send-results-to-your-tools).
 * **The web:** a journey leg or a scenario with the tag `@surface:web` drives Chrome on a profile of Semar's own, finds elements through screen objects that a person approves, and repairs a broken locator with no model. `semar login`, `semar confirm --screens`, and `semar screens repair`. Plan 22 describes it.
 * **Gherkin scenarios:** a scenario is a `.feature` file that product and QA read and confirm as it is, with the requests in a YAML script apart from it. `semar scenarios convert` moves older YAML scenario files over and keeps their confirmations. See [Hand-written scenarios](#hand-written-scenarios) and Plan 24.
+* **Planning with small models:** `semar plan --pipeline criteria` plans one acceptance criterion at a time. Code finds the operations, fields, diff, fixtures, and accounts that a criterion needs, a job with no tools answers in a fixed shape, code checks the answer, and a failing answer goes to the next model of `--ladder`. See [Plan with a small model](#plan-with-a-small-model).
 
 An environment is declared as `test` or `production`, and Semar acts in it only as its rules allow.
 
@@ -428,12 +429,12 @@ knowledge:
 
 `semar init` writes this entry when `docs/tickets/` exists. A `tickets` source names a folder, and it has no `service`. Semar reads `<folder>/<ticket key>.md` for each ticket of the change from the copy of the source at the head commit. A ticket with no file there is named in one line on standard error, and its expected results come from the code, as before. A file that is not a regular file is not read, and a file above 64 KiB is cut with a marker that says so.
 
-**What the planner is told.** The prompt (version 7) shows each file as data, numbered by line, inside a fence that its own text cannot end. It cannot change the schema, the rules, or a result: a person still confirms every expected result. The planner is told to:
+**What the planner is told.** The prompt shows each file as data, numbered by line, inside a fence that its own text cannot end. It cannot change the schema, the rules, or a result: a person still confirms every expected result. The planner is told to:
 
 * give each criterion that a caller of the API can observe at least one expected result with the source `ticket` and a cite of the form `<ticket file>:<line> <one sentence>`, which is written in the comment under the `Then` line as `# ticket <ticket file>:<line> <one sentence>`. Code checks that the file is the ticket file of the scenario's ticket and that the line exists. A scenario whose ticket has no file cannot use the source `ticket`, and the problem goes back to the planner;
 * expect what the criterion says where the code does not meet it, add a `differences` entry, and name the scenario after the requirement. `plan.md` marks that scenario with `This scenario is expected to fail on this build: the code does not meet docs/tickets/SHOP-482.md:14.` The mark is a prediction that a person can check in the run;
 * put a criterion that only a person can check, on a screen, on a device, or by a gesture, under `manualChecks`: the ticket, a title, 1 to 20 steps, the expected result, and the cite of the criterion;
-* account for every numbered criterion under a heading that contains "Acceptance criteria". Code reads those lines and checks that each one is cited by a scenario with the source `ticket`, by a manual check, or by a `notDrafted` entry with a `cite`. A criterion that nothing cites goes back to the planner. If it is still missing after the last draft, the plan is written and the criterion becomes an obligation `<ticket>/criterion-<n>` with the gap "criterion not accounted for by the planner", so the ledger keeps it. `plan.md` shows a table "Acceptance criteria" in each ticket's section, with what cites each one;
+* account for every criterion under a heading that contains "Acceptance criteria", a numbered line or a group of Given, When, and Then lines. Code reads those lines and checks that each one is cited by a scenario with the source `ticket`, by a manual check, or by a `notDrafted` entry with a `cite`. A criterion that nothing cites goes back to the planner. If it is still missing after the last draft, the plan is written and the criterion becomes an obligation `<ticket>/criterion-<n>` with the gap "criterion not accounted for by the planner", so the ledger keeps it. `plan.md` shows a table "Acceptance criteria" in each ticket's section, with what cites each one;
 * test a record that is not found with an ID that cannot exist, `missing-{{run.id}}`, in the path. It may not use any other made-up ID.
 
 **Manual checks.** Each manual check is listed in `plan.md` under its ticket, and becomes an obligation `<ticket>/manual-<n>` in `.semar/obligations/<ticket>.plan.yaml`, with `source: criterion` and a `manual` reason of the kind `judgement` that is written by `ai`. It derives `needs_a_person`, and `semar ledger --checklist` prints its steps and its expected result. A person records the result with `semar ledger record`.
@@ -445,6 +446,33 @@ knowledge:
 **What `plan.md` adds.** "How this plan was made" lists the problems of every draft that went back to the planner, at most 30 for each draft, escaped. When a trial sent nothing, the summary line of `semar plan` says why, for example `tried: 0 of 27 steps (every step needs a write or a fixture create, which a trial never sends)`.
 
 Code cannot check that a cited line says what the planner claims. `semar confirm` prints that line next to the result, and prints the scenario as the Gherkin file that it is, so a person compares them.
+
+### Plan with a small model
+
+The default planner is one job that reads the repository with tools and writes every scenario. That needs a strong model. `--pipeline criteria` changes the shape of the job so that a small, cheap model can do it. Code does the research, a model answers one closed question for each acceptance criterion, code checks the answer, and only an answer that fails goes to a bigger model.
+
+```bash
+semar plan --diff main..release --pipeline criteria --ladder claude:haiku,claude:sonnet,claude:opus
+```
+
+It needs the tickets and the API document in `knowledge`, as in [Tickets as requirements](#tickets-as-requirements) and [Tell the planner about your documents](#tell-the-planner-about-your-documents). For each acceptance criterion, Semar finds the operations of the API document that the ticket reaches (by a route or an operationId in the diff or the ticket, or by a router line of a changed file whose handler changed), their parameters, body fields, and response fields, the diff of the ticket's files, the fixtures, and the accounts. A job with no tools gets all of that in its prompt and answers in a fixed shape: a scenario, a manual check, or a "not drafted" entry. It picks operations, accounts, and fixtures from lists and never writes a method, a path, or the cite. Code checks the answer and says what is wrong in plain words, for example `field amountt does not exist in post_v1_orders_orderId_refunds; its fields are amount, reason`. A failing answer goes back once to the same model, and then to the next model of the ladder. The files, the obligations, and the ledger are the same as for the single planner.
+
+* **The ladder.** `--ladder` lists `<provider id>:<model>` steps from the cheapest up. `plan.ladder` in your own `providers.yaml` does the same for every plan. A repository cannot set it, because it decides which provider receives your code. With neither, the one model is that of `--provider` and `--model`. The ladder needs `--pipeline criteria`.
+* **No tools, no setup.** The jobs run in an empty directory. `--with-setup` is an error with this pipeline.
+* **The cost.** The last line says how the work went: `model use: 16 jobs (14 haiku, 2 sonnet), 3 corrections, 92k input, 21k output, $0.09`. A job is a criterion, counted under the model that answered it. `plan.md` lists the model that answered each criterion, and the problems that went back to a model.
+* **Reuse.** The answers are kept in `.semar/plans/<head commit>/answers.json`. A later plan reuses the answer to a criterion whose packet is unchanged, and checks it again.
+* **Write criteria as Given, When, and Then.** A criterion is a numbered line, or a group of lines that starts with `Given`, with `When`, `Then`, and `And` lines after it, under the heading "Acceptance criteria". A small model plans the second form more reliably, because it already says the setup, the request, and the result. `plan.md` suggests it when a ticket has only prose.
+
+```markdown
+## Acceptance criteria
+
+Given a paid order
+When a support agent refunds more than the order total
+Then the API answers 422 with the error code REFUND_EXCEEDS_TOTAL
+And the order stays as it was
+```
+
+`single` is still the default. [Plan 25](docs/implementation/25-small-models.md) has the measurements and says when to choose which.
 
 ### Hand-written scenarios
 
@@ -1116,7 +1144,7 @@ An export is refused for a run that did not finish, for a run whose stored evide
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | The test workflow from intake to release, who acts in each phase, and the exit criteria |
 | [docs/USER_SCENARIOS.md](docs/USER_SCENARIOS.md) | Walkthroughs from the user's side: setup, a failed scenario, pipeline mode, sign-in, and regression |
 | [docs/implementation/README.md](docs/implementation/README.md) | The implementation guide: engineering rules, architecture, dependencies, and the sequence of plans |
-| [Plan 16](docs/implementation/16-trial-run.md), [17](docs/implementation/17-fixtures.md), [18](docs/implementation/18-journeys.md), [19](docs/implementation/19-coverage-ledger.md), and [20](docs/implementation/20-exports.md) | The trial run, fixtures, API journeys, the use case ledger, and the exports, as built: the rules, the file formats, and the tests |
+| [Plan 16](docs/implementation/16-trial-run.md), [17](docs/implementation/17-fixtures.md), [18](docs/implementation/18-journeys.md), [19](docs/implementation/19-coverage-ledger.md), [20](docs/implementation/20-exports.md), and [25](docs/implementation/25-small-models.md) | The trial run, fixtures, API journeys, the use case ledger, the exports, and planning with small models, as built: the rules, the file formats, and the tests |
 
 ## Open questions
 
