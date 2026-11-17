@@ -28,9 +28,11 @@ type Record struct {
 	Kind             string           `json:"kind"`
 	Model            string           `json:"model"`
 	Reasoning        string           `json:"reasoning,omitempty"`
-	Command          string           `json:"command"`       // "plan"
-	Ref              string           `json:"ref,omitempty"` // the plan ID
-	Outcome          string           `json:"outcome"`       // "ok", "rejected", or "failed:<class>"
+	Command          string           `json:"command"`            // "plan"
+	Pipeline         string           `json:"pipeline,omitempty"` // "criteria" for a model that the criteria pipeline called
+	Asked            string           `json:"asked,omitempty"`    // the model as the ladder names it, such as haiku
+	Ref              string           `json:"ref,omitempty"`      // the plan ID
+	Outcome          string           `json:"outcome"`            // "ok", "rejected", or "failed:<class>"
 	Attempts         int              `json:"attempts"`
 	Turns            int              `json:"turns"`
 	InputTokens      int              `json:"inputTokens"`

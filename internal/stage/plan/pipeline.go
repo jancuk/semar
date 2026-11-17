@@ -60,9 +60,11 @@ type ModelCount struct {
 // ModelUse is what the calls to one rung used.
 type ModelUse struct {
 	PlannerID, Kind, Model, Reasoning string
-	Calls                             int
-	Took                              time.Duration
-	Result                            provider.Result
+	// Asked is the model as the ladder names it, "" for the provider's own model. Model is its label.
+	Asked  string
+	Calls  int
+	Took   time.Duration
+	Result provider.Result
 }
 
 // PipelineStats is what a plan of the criteria pipeline did.
@@ -76,6 +78,11 @@ type PipelineStats struct {
 	Unanswered  int          // criteria that no rung answered
 	Uses        []ModelUse   // one for each rung that was called, in the order of the ladder
 	Labels      []string     // the label of each rung of the ladder
+	// FixtureJobs are the fixtures that a model was asked to draft, and FixturesDrafted those that it
+	// drafted. Their calls are in Calls, Corrections, and Uses.
+	FixtureJobs, FixturesDrafted int
+	// NotPlanned are the criteria that no job answered because the cost limit was reached.
+	NotPlanned int
 }
 
 // modelOf is the label of the model of a rung, "" when there is none.
@@ -94,6 +101,7 @@ type CriterionOutcome struct {
 	Rung        int       // the rung that answered, or the last that tried
 	Corrections int       // calls that repaired an answer of this criterion
 	Reused      bool      // the answer is a stored answer of an earlier plan
+	NotPlanned  bool      // the cost limit was reached before a job for it started
 	Problems    []Problem // the problems of the last answer, when no model answered
 	Returned    []Problem // the problems that went back to a model, over every correction
 	Output      []byte    // the accepted output; the last output when there is none
@@ -108,6 +116,20 @@ type runState struct {
 	corr  int
 	done  int
 	cache map[string]StoredAnswer
+	// limited is set when the cost limit refused a job.
+	limited bool
+}
+
+// overLimit says that the cost of the jobs so far reached Input.MaxCost, and no new job may start. It
+// remembers that it refused one. A provider that reports no cost adds nothing, so it never refuses.
+func (rs *runState) overLimit() bool {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if rs.in.MaxCost > 0 && rs.total.CostUSD >= rs.in.MaxCost {
+		rs.limited = true
+		return true
+	}
+	return false
 }
 
 // RunCriteria plans one criterion at a time. Code builds a packet for each criterion of each
@@ -126,7 +148,7 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 	}
 	rs := &runState{in: in, uses: make([]ModelUse, len(in.Ladder)), cache: map[string]StoredAnswer{}}
 	for i, r := range in.Ladder {
-		rs.uses[i] = ModelUse{PlannerID: r.Planner.ID(), Kind: r.Planner.Kind(), Model: r.Label(), Reasoning: r.Reasoning}
+		rs.uses[i] = ModelUse{PlannerID: r.Planner.ID(), Kind: r.Planner.Kind(), Model: r.Label(), Asked: r.Model, Reasoning: r.Reasoning}
 	}
 	for _, a := range in.Previous { // the newest plan comes first and wins
 		if _, ok := rs.cache[a.Hash]; !ok {
@@ -155,6 +177,25 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 		return rs.failed(), err
 	}
 
+	needs := collectNeeds(outcomes)
+	var drafts []FixtureDraft
+	if len(needs) > 0 {
+		var err error
+		if drafts, err = rs.draftFixtures(ctx, needs, outcomes); err != nil {
+			return rs.failed(), err
+		}
+		rs.in.Fixtures = slices.Clone(rs.in.Fixtures)
+		for _, d := range drafts {
+			if d.Drafted {
+				rs.in.Fixtures = append(rs.in.Fixtures, entryOf(d.Fixture))
+			}
+		}
+		if err := rs.replan(ctx, outcomes, drafts); err != nil {
+			return rs.failed(), err
+		}
+		in.Fixtures = rs.in.Fixtures
+	}
+
 	b, ps := rs.build(outcomes)
 	if len(ps) > 0 {
 		out := rs.failed()
@@ -175,11 +216,50 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 	}
 
 	out := rs.output(b.Outcomes)
+	out.FixtureNeeds, out.FixtureDrafts, out.CostLimit, out.MaxCost = needs, drafts, rs.limited || out.Pipeline.NotPlanned > 0, in.MaxCost
+	for _, d := range drafts {
+		if d.Reason == "" {
+			out.Pipeline.FixtureJobs++
+		}
+		if d.Drafted {
+			out.Pipeline.FixturesDrafted++
+		}
+	}
 	out.Draft, out.Scenarios, out.Scripts = b.Draft, b.Scenarios, b.Scripts
 	out.Notes = compare(in, b.Scenarios, b.Scripts)
 	out.Trial, out.TrialReturned, out.Refused = tr, returned, refused
 	out.Unaccounted = Unaccounted(b.Draft, in.Tickets)
 	return out, nil
+}
+
+// collectNeeds lists each fixture that the answers name once, in the order of the criteria. When
+// criteria name one ID, the first state stands and the outputs are the union of theirs.
+func collectNeeds(outcomes []CriterionOutcome) []FixtureNeed {
+	var out []FixtureNeed
+	for _, o := range outcomes {
+		n := o.Result.Need
+		if !o.Answered || n == nil {
+			continue
+		}
+		i := slices.IndexFunc(out, func(f FixtureNeed) bool { return f.ID == n.ID })
+		if i < 0 {
+			out = append(out, FixtureNeed{ID: n.ID, State: n.State, Outputs: slices.Clone(n.Outputs), Cites: slices.Clone(n.Cites), Tickets: slices.Clone(n.Tickets)})
+			continue
+		}
+		f := &out[i]
+		for _, name := range n.Outputs {
+			if !slices.Contains(f.Outputs, name) && len(f.Outputs) < maxProposalNames {
+				f.Outputs = append(f.Outputs, name)
+			}
+		}
+		f.Cites = append(f.Cites, n.Cites...)
+		for _, t := range n.Tickets {
+			if !slices.Contains(f.Tickets, t) {
+				f.Tickets = append(f.Tickets, t)
+			}
+		}
+	}
+	return out
 }
 
 // built is a draft made from the outcomes, checked as a whole. Owners[i] is the outcome that gave
@@ -236,6 +316,9 @@ func (rs *runState) output(outcomes []CriterionOutcome) Output {
 	var answers []StoredAnswer
 	for _, o := range outcomes {
 		switch {
+		case !o.Answered && o.NotPlanned:
+			st.NotPlanned++
+			continue
 		case !o.Answered:
 			st.Unanswered++
 			continue
@@ -281,13 +364,18 @@ func noAnswer(err error) (string, bool) {
 	return "", false
 }
 
-// call runs one job at a rung and adds it to the totals. A provider error is returned. A job that
-// returned no answer in the schema gives no output and the reason in soft.
+// call runs one job for a packet at a rung and adds it to the totals. A provider error is returned. A
+// job that returned no answer in the schema gives no output and the reason in soft.
 func (rs *runState) call(ctx context.Context, rung int, p Packet, previous []byte, problems []Problem) (raw []byte, soft string, err error) {
 	text, err := p.Prompt(previous, problems)
 	if err != nil {
 		return nil, "", err
 	}
+	return rs.run(ctx, rung, text, p.AnswerSchema(), len(problems) > 0)
+}
+
+// run sends one job with no tools to a rung. correction says that the job repairs an answer.
+func (rs *runState) run(ctx context.Context, rung int, text string, schema json.RawMessage, correction bool) (raw []byte, soft string, err error) {
 	r := rs.in.Ladder[rung]
 	dir := rs.in.JobDir
 	if dir == "" {
@@ -295,7 +383,7 @@ func (rs *runState) call(ctx context.Context, rung int, p Packet, previous []byt
 	}
 	started := time.Now()
 	res, err := r.Planner.Run(ctx, provider.Job{
-		Prompt: text, Workdir: dir, Schema: p.AnswerSchema(), Model: r.Model, Reasoning: r.Reasoning,
+		Prompt: text, Workdir: dir, Schema: schema, Model: r.Model, Reasoning: r.Reasoning,
 		MaxTurns: CriterionMaxTurns, Timeout: rs.in.Limits.Timeout, NoTools: true, SchemaInPrompt: true,
 	})
 	rs.mu.Lock()
@@ -305,7 +393,7 @@ func (rs *runState) call(ctx context.Context, rung int, p Packet, previous []byt
 	u.Took += time.Since(started)
 	sumUse(&u.Result, res)
 	rs.calls++
-	if len(problems) > 0 {
+	if correction {
 		rs.corr++
 	}
 	rs.mu.Unlock()
@@ -357,6 +445,10 @@ func (rs *runState) answer(ctx context.Context, p Packet) (CriterionOutcome, err
 		if !fromCache {
 			var err error
 			var soft string
+			if rs.overLimit() {
+				o.NotPlanned = true
+				return o, nil
+			}
 			if raw, soft, err = rs.call(ctx, rung, p, nil, nil); err != nil {
 				return o, err
 			}
@@ -369,6 +461,10 @@ func (rs *runState) answer(ctx context.Context, p Packet) (CriterionOutcome, err
 		o.Returned = append(o.Returned, ps...)
 		var err error
 		var soft string
+		if rs.overLimit() {
+			o.NotPlanned, o.Problems, o.Output = true, ps, raw
+			return o, nil
+		}
 		if raw, soft, err = rs.call(ctx, rung, p, raw, ps); err != nil {
 			return o, err
 		}
@@ -395,6 +491,11 @@ func assemble(in Input, outcomes []CriterionOutcome) (Draft, []int) {
 	var dropped []CriterionOutcome
 	for i, o := range outcomes {
 		if !o.Answered {
+			if o.NotPlanned {
+				d.NotDrafted = append(d.NotDrafted, NotDrafted{
+					Ticket: o.Packet.Ticket, What: oneLine(o.Packet.Criterion, 160), Needs: notPlanned(in), Cite: o.Packet.Why(),
+				})
+			}
 			continue
 		}
 		switch {
@@ -435,6 +536,11 @@ func assemble(in Input, outcomes []CriterionOutcome) (Draft, []int) {
 	scenarios, manual, nd := len(d.Scenarios), len(d.ManualChecks), len(d.NotDrafted)
 	d.Summary = fmt.Sprintf("Planned one acceptance criterion at a time: %d scenarios, %d manual checks, and %d criteria or scenarios not drafted.", scenarios, manual, nd)
 	return d, owners
+}
+
+// notPlanned is why a criterion or a fixture has no answer when the cost limit stopped its job.
+func notPlanned(in Input) string {
+	return "not planned: the cost limit of " + Dollars(in.MaxCost) + " was reached"
 }
 
 // criteriaTicket says what code knows of a ticket: it changes behaviour when a criterion of it gave a

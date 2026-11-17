@@ -6,8 +6,8 @@ import (
 )
 
 func TestCriterionVersion(t *testing.T) {
-	if got := CriterionVersion(); got != "1" {
-		t.Errorf("CriterionVersion() = %q, want 1", got)
+	if got := CriterionVersion(); got != "3" {
+		t.Errorf("CriterionVersion() = %q, want 3", got)
 	}
 }
 

@@ -56,7 +56,8 @@ Choose exactly one `kind`:
 
 1. `scenario` when a caller of the API can observe what the criterion says. Write the requests and what each response must be.
 2. `manualCheck` when only a person can check it: the criterion is about a screen, a page, a button, a drag, a tap, a badge, or a message that a person reads, or it starts with `Web:` or `Android:`. Choose it even when an API serves the screen. Write 1 to 20 steps of the person and the result that they must see.
-3. `notDrafted` when the criterion needs data or a call that you do not have. Say what is missing.
+3. `needsFixture` when the scenario needs data that must exist before its first request, such as a board that a second account is a member of, or a record in a given state, and no listed fixture gives it. A fixture removes what it made when the scenario ends, and a setup step leaves its data behind, so name a fixture for such data and not a chain of setup steps. Name the fixture in `fixtureId`, such as `board.shared`: lower case words with dots. Say in `fixtureState` what is true of the data, in one sentence. List in `fixtureOutputs` the values that a step needs from it, such as `id`. Name one fixture for criteria that need the same data. A program drafts the fixture, and the criterion is planned again with it. The record that the criterion tests, such as the first card of a move, is a request of the scenario and not a fixture.
+4. `notDrafted` when the criterion needs a call that is not listed, or something that no fixture could prepare. Say what is missing.
 
 Rules for a scenario:
 

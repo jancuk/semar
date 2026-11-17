@@ -272,6 +272,9 @@ const MaxPlanTimeout = 24 * time.Hour
 
 const maxDescription = 200
 
+// DescriptionProblem says why an account's description is refused, or "".
+func DescriptionProblem(d string) string { return descriptionProblem(d) }
+
 // descriptionProblem says why an account's description is refused, or "".
 func descriptionProblem(d string) string {
 	switch {

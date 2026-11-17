@@ -38,9 +38,10 @@ type initFlags struct {
 	baseURL, env, service, authHeader, authValue, tokenEnv string
 	buildURL, buildCommit, kind                            string
 	accounts                                               []string // name=ENV, one for each extra account
+	describe                                               []string // name=text, one for each account that has a description
 }
 
-var initFlagNames = []string{"base-url", "service", "auth-header", "auth-value", "token-env", "build-url", "build-commit", "kind", "account"}
+var initFlagNames = []string{"base-url", "service", "auth-header", "auth-value", "token-env", "build-url", "build-commit", "kind", "account", "describe"}
 
 func addInitFlags(cmd *cobra.Command, f *initFlags) {
 	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "the address of the service in the environment, such as https://orders.uat.example.com")
@@ -50,6 +51,7 @@ func addInitFlags(cmd *cobra.Command, f *initFlags) {
 	cmd.Flags().StringVar(&f.tokenEnv, "token-env", defaultTokenEnv, "the environment variable that holds the token")
 	cmd.Flags().StringVar(&f.kind, "kind", config.KindTest, "the kind of the environment, test or production; production is read only and allows GET and HEAD")
 	cmd.Flags().StringArrayVar(&f.accounts, "account", nil, "another account as <name>=<ENV>: an auth profile with the same session header and the token in the environment variable ENV; repeatable")
+	cmd.Flags().StringArrayVar(&f.describe, "describe", nil, "who an account is, as <account>=<text>, one line; the planner chooses the account of a step from it; default names the default account; repeatable")
 	cmd.Flags().StringVar(&f.buildURL, "build-url", "", "an address on the host of --base-url that answers with the commit the service runs, such as https://orders.uat.example.com/version")
 	cmd.Flags().StringVar(&f.buildCommit, "build-commit", "", "the JSONPath of the commit in the answer of --build-url (default "+defaultBuildPath+")")
 }
@@ -64,23 +66,38 @@ func initFlagGiven(cmd *cobra.Command) bool {
 	return false
 }
 
-func newInitCommand() *cobra.Command {
+func newInitCommand(o options) *cobra.Command {
 	var f initFlags
 	var dir string
 	cmd := &cobra.Command{
-		Use:   "init --base-url <url>",
-		Short: "Write .semar/semar.yaml for one environment",
-		Args:  cobra.NoArgs,
+		Use:   "init",
+		Short: "Write .semar/semar.yaml for one environment, or check this machine against it",
+		Long: "On a terminal, init asks for what it cannot find and no flag gave: the address of the service, the variable that holds the token, and who each account is.\n" +
+			"Every question has a flag. With no terminal, init asks nothing and names the flags that are missing.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			given := givenInitFlags(cmd)
+			asked := false
+			if _, err := os.Lstat(configPath(dir)); err == nil && f.baseURL == "" && !initFlagGiven(cmd) {
+				return checkMachine(cmd.Context(), o, cmd.OutOrStdout(), dir)
+			}
 			if f.baseURL == "" {
-				return errors.New("--base-url is required: the address of the service in the environment")
+				if !o.Terminal() {
+					return errors.New("--base-url is required: the address of the service in the environment. " +
+						"On a terminal, semar init asks for it; here standard input is not a terminal, so it asks nothing")
+				}
+				a := newAsker(cmd.Context(), o.Stdin, cmd.OutOrStdout())
+				if err := askInit(a, dir, &f, given); err != nil {
+					return err
+				}
+				asked = true
 			}
 			data, err := buildInitConfig(dir, f)
 			if err != nil {
 				return err
 			}
 			if cfg, err := config.Load(dir); err == nil {
-				diffs, err := diffInitFlags(cfg, f.env, "", f, givenInitFlags(cmd))
+				diffs, err := diffInitFlags(cfg, f.env, "", f, given)
 				if err != nil {
 					return fmt.Errorf("%s exists: %w; to change the environment, edit it", configFileName, err)
 				}
@@ -93,9 +110,25 @@ func newInitCommand() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s already has these settings; nothing was written\n", configFileName)
 				return nil
 			}
+			if f.buildURL == "" && f.buildCommit == "" {
+				if probe, ok := findBuildProbe(cmd.Context(), o.HTTP, f.baseURL); ok {
+					f.buildURL = probe
+					fmt.Fprintf(cmd.OutOrStdout(), "Found   the build probe at %s\n", probe)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "No build probe was found at %s. %s. Until then, name the build with semar run --build <commit>.\n",
+						strings.TrimRight(f.baseURL, "/")+versionPath, probeNotFoundTo)
+				}
+				if data, err = buildInitConfig(dir, f); err != nil {
+					return err
+				}
+			}
 			path, err := writeInitConfig(dir, data)
 			if err != nil {
 				return err
+			}
+			if asked {
+				printAskedDone(cmd.OutOrStdout(), f, o.LookupEnv)
+				return nil
 			}
 			printInitDone(cmd.OutOrStdout(), path, f)
 			return nil
@@ -208,19 +241,25 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	descriptions, err := parseDescribe(f.describe, accounts)
+	if err != nil {
+		return nil, err
+	}
 
 	flow := func(n *yaml.Node) *yaml.Node { n.Style = yaml.FlowStyle; return n }
-	profiles := mapping(
-		"default", mapping(
+	profile := func(name, env string) *yaml.Node {
+		n := mapping(
 			"session", flow(mapping("header", text(f.authHeader), "value", quoted(f.authValue))),
-			"secrets", flow(mapping("TOKEN", quoted("env:"+f.tokenEnv))),
-		),
-	)
+			"secrets", flow(mapping("TOKEN", quoted("env:"+env))),
+		)
+		if d := descriptions[name]; d != "" {
+			n.Content = append([]*yaml.Node{text("description"), quoted(d)}, n.Content...)
+		}
+		return n
+	}
+	profiles := mapping("default", profile("default", f.tokenEnv))
 	for _, a := range accounts {
-		profiles.Content = append(profiles.Content, text(a.name), mapping(
-			"session", flow(mapping("header", text(f.authHeader), "value", quoted(f.authValue))),
-			"secrets", flow(mapping("TOKEN", quoted("env:"+a.env))),
-		))
+		profiles.Content = append(profiles.Content, text(a.name), profile(a.name, a.env))
 	}
 	doc := mapping(
 		"version", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: "1"},
@@ -277,6 +316,31 @@ func parseAccounts(values []string) ([]account, error) {
 			return nil, fmt.Errorf("--account: the name %s is given more than once", name)
 		}
 		out = append(out, account{name, env})
+	}
+	return out, nil
+}
+
+// parseDescribe reads the --describe values, <account>=<text>. The account is default or one of
+// the --account names, and the text is one plain line that semar.yaml accepts.
+func parseDescribe(values []string, accounts []account) (map[string]string, error) {
+	out := map[string]string{}
+	for _, v := range values {
+		name, text, ok := strings.Cut(v, "=")
+		text = strings.TrimSpace(text)
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("--describe %q must be <account>=<text>, such as default=a customer with paid orders", v)
+		case text == "":
+			return nil, fmt.Errorf("--describe %q has no text: say in one line who the account is", v)
+		case name != "default" && !slices.ContainsFunc(accounts, func(a account) bool { return a.name == name }):
+			return nil, fmt.Errorf("--describe %q: %q is not default or an account of --account", v, name)
+		case out[name] != "":
+			return nil, fmt.Errorf("--describe: the account %s is described more than once", name)
+		}
+		if problem := config.DescriptionProblem(text); problem != "" {
+			return nil, fmt.Errorf("--describe %q: the text %s", v, problem)
+		}
+		out[name] = text
 	}
 	return out, nil
 }

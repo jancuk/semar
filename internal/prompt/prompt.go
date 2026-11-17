@@ -14,9 +14,13 @@ var planSource string
 //go:embed criterion.md
 var criterionSource string
 
+//go:embed fixture.md
+var fixtureSource string
+
 // The prompt text shows {{name}} variables to the model, so the template uses other delimiters.
 var planVersion, planTemplate = mustParse("plan.md", planSource)
 var criterionVersion, criterionTemplate = mustParse("criterion.md", criterionSource)
+var fixtureVersion, fixtureTemplate = mustParse("fixture.md", fixtureSource)
 
 // PlanData fills the planner prompt. Every field is data: text from the repository or the
 // model reaches the prompt only through these values, never through the template itself.
@@ -53,6 +57,28 @@ type CriterionData struct {
 	Correction  bool   // the job repairs a previous answer
 	Previous    string // the previous answer as a fenced block
 	Problems    string // a Markdown list of what the previous answer got wrong
+}
+
+// FixtureData fills the prompt of a job that drafts one fixture. Every field is data, as in PlanData.
+type FixtureData struct {
+	Fixture    string // the ID, the state, and the outputs, as a fenced block
+	Operations string // a Markdown list of the operations that the job can call
+	Account    string // the account that every request of the fixture is sent as
+	Correction bool   // the job repairs a previous answer
+	Previous   string // the previous answer as a fenced block
+	Problems   string // a Markdown list of what the previous answer got wrong
+}
+
+// FixtureVersion is the version line of the fixture prompt.
+func FixtureVersion() string { return fixtureVersion }
+
+// Fixture renders the prompt of a job that drafts one fixture, without its version line.
+func Fixture(d FixtureData) (string, error) {
+	var b strings.Builder
+	if err := fixtureTemplate.Execute(&b, d); err != nil {
+		return "", fmt.Errorf("render the fixture prompt: %w", err)
+	}
+	return b.String(), nil
 }
 
 // CriterionVersion is the version line of the criterion prompt.

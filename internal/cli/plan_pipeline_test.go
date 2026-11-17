@@ -99,7 +99,7 @@ func TestPlanCriteriaPipelineEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	contains(t, "plan.md", string(md), "- Pipeline: criteria.", "| docs/tickets/SHOP-482.md:5 | scenario | small | 0 |", "Prompt version: criterion 1",
+	contains(t, "plan.md", string(md), "- Pipeline: criteria.", "| docs/tickets/SHOP-482.md:5 | scenario | small | 0 |", "Prompt version: criterion 3, fixture 2",
 		"| 5 | 1 | A refund above the rest of the total is refused with 422 and the error code REFUND_EXCEEDS_TOTAL. | SHOP-482-01 |",
 		"Tip: write each criterion as Given, When, and Then lines")
 }
@@ -109,7 +109,7 @@ func TestPlanPipelineFlagsAreChecked(t *testing.T) {
 		args []string
 		want string
 	}{
-		"a ladder for the single pipeline": {[]string{"--ladder", "planner:small"}, "--ladder needs --pipeline criteria"},
+		"a ladder for the single pipeline": {[]string{"--pipeline", "single", "--ladder", "planner:small"}, "--ladder needs --pipeline criteria"},
 		"an unknown pipeline":              {[]string{"--pipeline", "many"}, `--pipeline "many" must be single or criteria`},
 		"a ladder with a provider":         {[]string{"--pipeline", "criteria", "--ladder", "planner:small", "--provider", "planner"}, "do not pass --provider or --model"},
 		"a ladder with a model":            {[]string{"--pipeline", "criteria", "--ladder", "planner:small", "--model", "x"}, "do not pass --provider or --model"},

@@ -41,7 +41,7 @@ func TestPlanSendsAnUnaccountedUICriterionBackAndWritesItAsAManualCheck(t *testi
 	p.configure(t, numberedDraft(false), numberedDraft(true))
 	p.withTickets(t)
 	made := p.recordJobs()
-	p.must(t, cli.ExitOK, "plan", "--diff", "main..release")
+	p.must(t, cli.ExitOK, "plan", "--diff", "main..release", "--pipeline", "single")
 
 	if len(*made) != 1 || len((*made)[0].Jobs()) != 2 {
 		t.Fatalf("want one planner that ran twice, got %d", len(*made))
@@ -76,7 +76,7 @@ func TestPlanWritesAGapObligationForACriterionThatStaysUnaccounted(t *testing.T)
 	p.commitNumberedTicket(t)
 	p.configure(t, numberedDraft(false), numberedDraft(false), numberedDraft(false))
 	p.withTickets(t)
-	p.must(t, cli.ExitOK, "plan", "--diff", "main..release")
+	p.must(t, cli.ExitOK, "plan", "--diff", "main..release", "--pipeline", "single")
 
 	md, err := os.ReadFile(p.path(".semar", "plans", p.head(t)[:12], "plan.md"))
 	if err != nil {

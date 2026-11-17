@@ -97,6 +97,7 @@ func newTrialRepo(t *testing.T) *trialRepo {
 	start := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
 	p := &planRepo{git: g, host: ou.Host, temp: t.TempDir()}
 	p.repo = &repo{dir: g.Dir, app: app, pay: pay, ordersURL: orders.URL, paymentsURL: payments.URL, opts: cli.Options{
+		HTTP:           offlineHTTP(),
 		Clock:          func() time.Time { return start.Add(time.Duration(clock.Add(1)) * time.Second) },
 		RunID:          func() domain.RunID { return domain.RunID(fmt.Sprintf("r-test-%04d", ids.Add(1))) },
 		User:           func() (string, error) { return "tester", nil },

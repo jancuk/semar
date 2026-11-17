@@ -72,6 +72,7 @@ func newRepo(t *testing.T, o repoOptions) *repo {
 	var clock, ids atomic.Int64
 	start := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
 	r.opts = cli.Options{
+		HTTP:  offlineHTTP(),
 		Clock: func() time.Time { return start.Add(time.Duration(clock.Add(1)) * time.Second) },
 		RunID: func() domain.RunID { return domain.RunID(fmt.Sprintf("r-test-%04d", ids.Add(1))) },
 		User:  func() (string, error) { return "tester", nil },

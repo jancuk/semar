@@ -36,6 +36,10 @@ func usageOutcome(ctx context.Context, err error) string {
 // recordUsage appends one record to the person's usage log. A failure is one notice, because
 // the plan itself has succeeded or failed already and the log is not worth a second failure.
 func (o options) recordUsage(stderr io.Writer, inst provider.Instance, model, reasoning string, out plan.Output, outcome, ref string, took time.Duration) {
+	o.appendUsage(stderr, o.usageRecord(inst, model, reasoning, out, outcome, ref, took))
+}
+
+func (o options) usageRecord(inst provider.Instance, model, reasoning string, out plan.Output, outcome, ref string, took time.Duration) usage.Record {
 	r := out.Result
 	if r.Model != "" {
 		model = r.Model
@@ -43,13 +47,16 @@ func (o options) recordUsage(stderr io.Writer, inst provider.Instance, model, re
 	if r.Reasoning != "" {
 		reasoning = r.Reasoning
 	}
-	rec := usage.Record{
+	return usage.Record{
 		At: o.Clock(), Provider: inst.ID(), Kind: inst.Kind(), Model: model, Reasoning: reasoning, Command: "plan", Ref: ref,
 		Outcome: outcome, Attempts: out.Attempts, Turns: r.Turns,
 		InputTokens: r.InputTokens, OutputTokens: r.OutputTokens,
 		CacheReadTokens: r.CacheReadTokens, CacheWriteTokens: r.CacheWriteTokens,
 		CostUSD: r.CostUSD, DurationMs: took.Milliseconds(), Limits: r.Limits,
 	}
+}
+
+func (o options) appendUsage(stderr io.Writer, rec usage.Record) {
 	home, err := o.home()
 	if err == nil {
 		err = usage.Append(home, rec)
@@ -73,7 +80,9 @@ func (o options) recordPipelineUsage(stderr io.Writer, insts []provider.Instance
 		if i < 0 {
 			continue
 		}
-		o.recordUsage(stderr, insts[i], u.Model, u.Reasoning, plan.Output{Result: u.Result, Attempts: u.Calls}, outcome, ref, u.Took)
+		rec := o.usageRecord(insts[i], u.Model, u.Reasoning, plan.Output{Result: u.Result, Attempts: u.Calls}, outcome, ref, u.Took)
+		rec.Pipeline, rec.Asked = usage.PipelineCriteria, u.Asked
+		o.appendUsage(stderr, rec)
 	}
 }
 
@@ -110,6 +119,9 @@ func pipelineUseLine(out plan.Output) string {
 			jobs += " (" + strings.Join(by, ", ") + ")"
 		}
 		parts = append(parts, jobs, plural(st.Corrections, "correction"))
+		if st.FixtureJobs > 0 {
+			parts = append(parts, plural(st.FixturesDrafted, "fixture")+" drafted")
+		}
 	}
 	input := tokenCount(r.InputTokens) + " input"
 	if r.CacheReadTokens > 0 {

@@ -50,10 +50,10 @@ func TestRemoveAgentFiles(t *testing.T) {
 
 func TestNextRunNamesAProductionEnvironment(t *testing.T) {
 	prod := config.Environment{Kind: config.KindProduction}
-	if got := nextRun(prod, "production", "", "0123456789abcdef"); got != "semar run --all --env production" {
+	if got := nextRun(prod, "production", "", "0123456789abcdef"); got != "semar run --env production" {
 		t.Errorf("nextRun = %q", got)
 	}
-	if got := nextRun(config.Environment{Kind: config.KindTest}, "uat", "", "0123456789abcdef"); got != "semar run --all" {
+	if got := nextRun(config.Environment{Kind: config.KindTest}, "uat", "", "0123456789abcdef"); got != "semar run" {
 		t.Errorf("nextRun = %q", got)
 	}
 }
@@ -84,5 +84,27 @@ func TestModelUseLine(t *testing.T) {
 				t.Errorf("modelUseLine = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCostLimitNoteNamesTheProvidersItCannotBind(t *testing.T) {
+	claude := config.Provider{ID: "claude", Kind: "claude"}
+	codex := config.Provider{ID: "codex", Kind: "codex"}
+	api := config.Provider{ID: "acme", Kind: "openai"}
+	cases := []struct {
+		name  string
+		limit float64
+		ps    []config.Provider
+		want  string
+	}{
+		{"no limit", 0, []config.Provider{codex}, ""},
+		{"every provider reports", 5, []config.Provider{claude, claude}, "semar: no new job starts once the providers have reported $5.00"},
+		{"one that does not", 5, []config.Provider{claude, codex}, "semar: no new job starts once the providers have reported $5.00; it does not bind codex (codex), which reports no cost"},
+		{"none that does", 0.5, []config.Provider{codex, api}, "semar: the cost limit of $0.50 binds nothing in this plan: codex (codex), acme (openai) report no cost"},
+	}
+	for _, tc := range cases {
+		if got := costLimitNote(tc.limit, tc.ps); got != tc.want {
+			t.Errorf("%s: costLimitNote = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

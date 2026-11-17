@@ -143,6 +143,7 @@ func newPlanRepo(t *testing.T, app sampleapp.Options) *planRepo {
 	start := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
 	p := &planRepo{git: g, host: u.Host, temp: t.TempDir()}
 	p.repo = &repo{dir: g.Dir, app: a, opts: cli.Options{
+		HTTP:     offlineHTTP(),
 		Clock:    func() time.Time { return start.Add(time.Duration(clock.Add(1)) * time.Second) },
 		RunID:    func() domain.RunID { return domain.RunID(fmt.Sprintf("r-test-%04d", ids.Add(1))) },
 		User:     func() (string, error) { return "tester", nil },
@@ -257,8 +258,8 @@ func TestPlanFromADiffEndToEnd(t *testing.T) {
 	contains(t, "stdout", res.stdout,
 		"SHOP-482 (behaviour): 1 scenario", "SHOP-483 (behaviour): 1 scenario", "not drafted: 1",
 		"plan: "+p.path(".semar", "plans", p.head(t)[:12], "plan.md"),
-		"next:\n  semar run --all --build "+p.head(t)[:12]+"\n  semar review\n  semar run --all --build "+p.head(t)[:12]+"\n",
-		"The first run shows whether the drafted requests fit the service, and the second gives the result.")
+		"next:\n  semar review SHOP-482-01   ",
+		"  semar run --build "+p.head(t)[:12]+"   run the approved scenarios against the service\n  semar status   where things stand\n")
 	contains(t, "stderr", res.stderr, "wrote "+p.path(".semar", "semar.yaml"), "export "+planTokenEnv, "several minutes")
 	if n := jobs.Load(); n != 1 {
 		t.Errorf("the planner ran %d times, want 1", n)

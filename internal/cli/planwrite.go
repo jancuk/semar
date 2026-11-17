@@ -16,6 +16,7 @@ import (
 	"github.com/jancuk/semar/internal/atomicfile"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/evidence"
+	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/obligation"
 	"github.com/jancuk/semar/internal/scenario"
@@ -101,6 +102,22 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 		storeDirs = append(storeDirs, filepath.Dir(scriptFiles[i]))
 		checked = append(checked, filepath.Dir(f.rel), filepath.Dir(scriptFiles[i]))
 	}
+	var fixtureFiles []planFile
+	for _, d := range out.FixtureDrafts {
+		if !d.Drafted {
+			continue
+		}
+		if err := idcheck.Check("fixture", string(d.Fixture.ID)); err != nil {
+			return "", fmt.Errorf("fixture %s: %w", d.Fixture.ID, err)
+		}
+		data, err := fixture.Marshal(d.Fixture)
+		if err != nil {
+			return "", err
+		}
+		f := planFile{filepath.Join(".semar", "fixtures", string(d.Fixture.ID)+".yaml"), data}
+		fixtureFiles = append(fixtureFiles, f)
+		checked = append(checked, filepath.Dir(f.rel))
+	}
 	var md bytes.Buffer
 	if err := plan.Render(&md, in, out); err != nil {
 		return "", err
@@ -131,7 +148,7 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 	if err != nil {
 		return "", err
 	}
-	for _, f := range scenarioFiles {
+	for _, f := range slices.Concat(fixtureFiles, scenarioFiles) {
 		if _, err := root.Lstat(f.rel); !errors.Is(err, fs.ErrNotExist) {
 			return "", fmt.Errorf("%s exists already; nothing was written", filepath.Join(dir, f.rel))
 		}
@@ -156,7 +173,7 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 	if err != nil {
 		return w.undo(err)
 	}
-	for _, f := range scenarioFiles {
+	for _, f := range slices.Concat(fixtureFiles, scenarioFiles) {
 		if err := w.writeFile(f); err != nil {
 			return w.undo(err)
 		}

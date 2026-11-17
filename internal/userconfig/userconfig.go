@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -78,6 +79,10 @@ type Plan struct {
 	// its checks twice. It is the person's choice and never the repository's, because it decides
 	// which provider receives the repository's code.
 	Ladder []string `yaml:"ladder,omitempty"`
+	// MaxCost is the most that one plan may spend, in dollars, as the providers report it. When the
+	// sum reaches it, no new job starts. 0 sets no limit. It is the person's choice and never the
+	// repository's, because it decides what the person spends.
+	MaxCost float64 `yaml:"maxCost,omitempty"`
 }
 
 // Provider is one entry. BaseURL and APIKey belong to the API kinds and Setup to the
@@ -241,6 +246,9 @@ func (f File) Validate() error {
 		add("%s: default must name a provider", FileName)
 	case !seen[f.Default]:
 		add("%s: default %q is not one of the providers", FileName, f.Default)
+	}
+	if c := f.Plan.MaxCost; c < 0 || math.IsNaN(c) || math.IsInf(c, 0) {
+		add("%s: plan.maxCost must be a positive number of dollars, or left out", FileName)
 	}
 	for _, step := range f.Plan.Ladder {
 		id, _, err := config.ParseRung(step)

@@ -161,6 +161,21 @@ func diffInitFlags(cfg config.Config, envFlag, profileFlag string, f initFlags, 
 			}
 		}
 	}
+	if given["describe"] {
+		var known []account
+		for name := range cfg.AuthProfiles {
+			known = append(known, account{name: name})
+		}
+		described, err := parseDescribe(f.describe, known)
+		if err != nil {
+			return nil, err
+		}
+		for name, text := range described {
+			if have := cfg.AuthProfiles[name].Description; have != text {
+				diffs = append(diffs, fmt.Sprintf("  --describe %s is %s, and the file has %s", terminalSafe(name), terminalSafe(text), valueOr(terminalSafe(have), "no description")))
+			}
+		}
+	}
 	slices.Sort(diffs)
 	return diffs, nil
 }

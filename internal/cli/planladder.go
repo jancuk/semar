@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/jancuk/semar/internal/config"
+	"github.com/jancuk/semar/internal/knowledge"
 	"github.com/jancuk/semar/internal/provider"
 	"github.com/jancuk/semar/internal/stage/plan"
 )
@@ -34,7 +35,7 @@ func checkPipelineFlags(f planFlags) error {
 	}
 	criteria := f.pipeline == pipelineCriteria
 	switch {
-	case f.ladder != "" && !criteria:
+	case f.ladder != "" && f.pipeline == pipelineSingle:
 		return errors.New("--ladder needs --pipeline criteria: the single pipeline has one job, and it runs on one model")
 	case f.ladder != "" && (f.provider != "" || f.model != ""):
 		return errors.New("--ladder names the provider and the model of each step; do not pass --provider or --model with it")
@@ -42,6 +43,43 @@ func checkPipelineFlags(f planFlags) error {
 		return errors.New("--with-setup is for the single pipeline: the jobs of the criteria pipeline have no tools, so there is nothing of your setup for them to use")
 	}
 	return nil
+}
+
+// choosePipeline says how the plan is made. --pipeline decides when it is given. Otherwise the plan
+// takes the criteria pipeline when a ticket of the change has acceptance criteria, because a small
+// model plans one criterion at a time for a twentieth of the cost, and the single pipeline when none
+// has, or when --with-setup asks for the tools that only the single pipeline gives. why is the line
+// that tells the person which one was taken and why, or "" when the person chose.
+func choosePipeline(f planFlags, tickets []knowledge.Ticket) (criteria bool, why string, err error) {
+	switch f.pipeline {
+	case pipelineCriteria:
+		return true, "", nil
+	case pipelineSingle:
+		return false, "", nil
+	}
+	withCriteria := 0
+	for _, t := range tickets {
+		if len(plan.Criteria(t)) > 0 {
+			withCriteria++
+		}
+	}
+	var reason string
+	switch {
+	case f.withSetupSet && f.withSetup:
+		reason = "--with-setup needs the single pipeline, because the jobs of the criteria pipeline have no tools"
+	case withCriteria == 0:
+		reason = "no ticket of this change has acceptance criteria in a ticket file; with them, each criterion is planned by itself, which costs less (see --pipeline criteria)"
+	default:
+		verb := "has"
+		if withCriteria > 1 {
+			verb = "have"
+		}
+		return true, fmt.Sprintf("semar: %s of this change %s acceptance criteria, so each criterion is planned by itself; --pipeline single plans the change in one job", plural(withCriteria, "ticket"), verb), nil
+	}
+	if f.ladder != "" {
+		return false, "", fmt.Errorf("--ladder needs the criteria pipeline, and this plan uses the single one: %s", reason)
+	}
+	return false, "semar: plans the change in one job: " + reason, nil
 }
 
 // ladderSteps is the ladder that was asked for: --ladder, else plan.ladder of the person's own
@@ -72,25 +110,18 @@ func criteriaLadder(ctx context.Context, stderr io.Writer, o options, f planFlag
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	type step struct{ id, model string }
-	var list []step
+	var list []rungStep
 	for _, text := range steps {
 		id, model, err := config.ParseRung(text)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("--ladder: %w", err)
 		}
-		list = append(list, step{id, model})
+		list = append(list, rungStep{id, model})
 	}
 	if len(list) == 0 {
-		pc, _, err := src.choose(f.provider)
-		if err != nil {
+		if list, err = src.defaultLadder(f.provider, f.model); err != nil {
 			return nil, nil, nil, err
 		}
-		model, err := planModel(f.model, pc, src.filePath)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		list = []step{{pc.ID, model}}
 	}
 	o.drop.set(append(secretEnvNames(cfg), keyEnvNames(src.file)...))
 	opened := map[string]provider.Instance{}
@@ -128,6 +159,61 @@ func criteriaLadder(ctx context.Context, stderr io.Writer, o options, f planFlag
 	}
 	return rungs, configs, insts, nil
 }
+
+// defaultLadder is the ladder of a person who set none: the provider and model of the plan, and for
+// Claude Code with no --model, haiku, sonnet, and then the model of the provider.
+func (s providerSources) defaultLadder(flagProvider, flagModel string) ([]rungStep, error) {
+	pc, _, err := s.choose(flagProvider)
+	if err != nil {
+		return nil, err
+	}
+	model, err := planModel(flagModel, pc, s.filePath)
+	if err != nil {
+		return nil, err
+	}
+	if pc.Kind == provider.KindClaude && flagModel == "" {
+		return defaultClaudeLadder(pc.ID, model), nil
+	}
+	return []rungStep{{pc.ID, model}}, nil
+}
+
+// firstRung is the provider and the model that do the first job of a plan by criteria, which is what
+// an offer to plan estimates: the first step of the ladder of your providers file, else the first of
+// the default ladder. model is "" for the provider's own model.
+func firstRung(o options, dir string, cfg config.Config) (providerID, model string, err error) {
+	src, err := loadSources(o, dir, cfg)
+	if err != nil {
+		return "", "", err
+	}
+	steps, err := src.ladderSteps("")
+	if err != nil {
+		return "", "", err
+	}
+	if len(steps) > 0 {
+		return config.ParseRung(steps[0])
+	}
+	list, err := src.defaultLadder("", "")
+	if err != nil {
+		return "", "", err
+	}
+	return list[0].id, list[0].model, nil
+}
+
+// defaultClaudeLadder is the ladder of a person who set none and plans with Claude Code: the small
+// model first, then sonnet, and then the model of the provider for what neither could answer. A
+// step that repeats an earlier one is left out.
+func defaultClaudeLadder(id, own string) []rungStep {
+	var out []rungStep
+	for _, m := range []string{"haiku", "sonnet", own} {
+		if !slices.ContainsFunc(out, func(s rungStep) bool { return s.model == m }) {
+			out = append(out, rungStep{id, m})
+		}
+	}
+	return out
+}
+
+// rungStep is a step of a ladder before its provider is opened.
+type rungStep struct{ id, model string }
 
 // criteriaStartLine says which models answer a criterion, and where the source goes when a model
 // is an API: the jobs carry the diff of the tickets' files and the operations of the API document.

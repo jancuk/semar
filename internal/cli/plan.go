@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,6 +40,8 @@ type planFlags struct {
 	noTrial      bool
 	pipeline     string
 	ladder       string
+	maxCost      float64
+	maxCostSet   bool
 	maxScenarios int
 	env          string
 	authProfile  string
@@ -61,6 +64,7 @@ func newPlanCommand(o options) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			f.withSetupSet = cmd.Flags().Changed("with-setup")
+			f.maxCostSet = cmd.Flags().Changed("max-cost")
 			f.initGiven = initFlagGiven(cmd)
 			f.given = givenInitFlags(cmd)
 			return planChange(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
@@ -72,8 +76,9 @@ func newPlanCommand(o options) *cobra.Command {
 	cmd.Flags().StringVar(&f.reasoning, "reasoning", "", "the reasoning level of the planner, such as high (default: the provider's reasoning, else its own default)")
 	cmd.Flags().StringVar(&f.provider, "provider", "", "the provider that plans (default: see semar providers)")
 	cmd.Flags().BoolVar(&f.withSetup, "with-setup", false, "plan with your MCP servers and skills, which add tokens to every turn (default: plan.withSetup of your providers file, else off)")
-	cmd.Flags().StringVar(&f.pipeline, "pipeline", pipelineSingle, "how the plan is made: single, one job that reads the repository, or criteria, one job with no tools for each acceptance criterion, which suits small models")
+	cmd.Flags().StringVar(&f.pipeline, "pipeline", "", "how the plan is made: criteria, one job with no tools for each acceptance criterion, which suits small models; or single, one job that reads the repository (default: criteria when a ticket of the change has acceptance criteria, else single)")
 	cmd.Flags().StringVar(&f.ladder, "ladder", "", "with --pipeline criteria, the models from the cheapest up, each as <provider id>:<model>, such as claude:haiku,claude:sonnet,claude:opus (default: plan.ladder of your providers file, else the provider and model of the plan)")
+	cmd.Flags().Float64Var(&f.maxCost, "max-cost", 0, "the most this plan may spend, in dollars, as the providers report it: when the sum reaches it, no new job starts, the jobs that run finish, and the plan is written with what was answered, with exit code 2 (default: plan.maxCost of your providers file, else no limit)")
 	cmd.Flags().BoolVar(&f.noTrial, "no-trial", false, "do not send the read-only steps of the draft to the environment before the plan is written, for this run")
 	cmd.Flags().IntVar(&f.maxScenarios, "max-scenarios", 0, "the most scenarios to draft (default: plan.maxScenarios)")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to plan for; needed when there are several. With --base-url, the name of the new environment (default uat, or production with --kind production)")
@@ -89,6 +94,9 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	}
 	if err := checkPipelineFlags(f); err != nil {
 		return err
+	}
+	if f.maxCostSet && (f.maxCost <= 0 || math.IsNaN(f.maxCost) || math.IsInf(f.maxCost, 0)) {
+		return errors.New("--max-cost must be a positive number of dollars, such as 2.50")
 	}
 	if f.model != "" {
 		if err := config.CheckModel(f.model); err != nil {
@@ -185,7 +193,41 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if err != nil {
 		return err
 	}
-	criteria := f.pipeline == pipelineCriteria
+	root, err := sourceCopyRoot(o)
+	if err != nil {
+		return fmt.Errorf("create a directory for the copy of the source: %w", err)
+	}
+	tmp, err := os.MkdirTemp(root, sourceCopyPrefix)
+	if err != nil {
+		return fmt.Errorf("create a directory for the copy of the source: %w", err)
+	}
+	defer os.RemoveAll(tmp)
+	var leftOut []vcs.Skipped
+	if in.SourceDir, in.Diff, leftOut, err = prepareSource(ctx, g, cs, tmp); err != nil {
+		return err
+	}
+	for _, s := range leftOut {
+		in.LeftOut = append(in.LeftOut, plan.LeftOut{Path: s.Path, Reason: s.Reason})
+	}
+	if len(leftOut) > 0 {
+		fmt.Fprintf(stderr, "semar: %s of %s %s left out of the copy that the planner reads; plan.md lists them\n",
+			plural(len(leftOut), "file"), shortCommit(cs.HeadCommit), map[bool]string{true: "was", false: "were"}[len(leftOut) == 1])
+	}
+	if in.Knowledge, err = findKnowledge(stderr, in.SourceDir, folderInWorkTree(f.dir), cfg.Knowledge); err != nil {
+		return err
+	}
+	in.Tickets = findTickets(stderr, in.SourceDir, in.Knowledge, cs)
+	in.MaxCost = f.maxCost
+	if !f.maxCostSet && src.fileExists {
+		in.MaxCost = src.file.Plan.MaxCost
+	}
+	criteria, why, err := choosePipeline(f, in.Tickets)
+	if err != nil {
+		return err
+	}
+	if why != "" {
+		fmt.Fprintln(stderr, why)
+	}
 	var pc config.Provider
 	var model string
 	var inst provider.Instance
@@ -221,19 +263,6 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		}
 	}
 
-	root, err := sourceCopyRoot(o)
-	if err != nil {
-		return fmt.Errorf("create a directory for the copy of the source: %w", err)
-	}
-	tmp, err := os.MkdirTemp(root, sourceCopyPrefix)
-	if err != nil {
-		return fmt.Errorf("create a directory for the copy of the source: %w", err)
-	}
-	defer os.RemoveAll(tmp)
-	var leftOut []vcs.Skipped
-	if in.SourceDir, in.Diff, leftOut, err = prepareSource(ctx, g, cs, tmp); err != nil {
-		return err
-	}
 	if criteria {
 		// The jobs of the criteria pipeline read nothing, so they run in a directory of their own
 		// that holds nothing: no job can see the copy of the source.
@@ -243,17 +272,6 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		}
 		in.Ladder, in.Previous = ladder, loadAnswers(f.dir)
 	}
-	for _, s := range leftOut {
-		in.LeftOut = append(in.LeftOut, plan.LeftOut{Path: s.Path, Reason: s.Reason})
-	}
-	if len(leftOut) > 0 {
-		fmt.Fprintf(stderr, "semar: %s of %s %s left out of the copy that the planner reads; plan.md lists them\n",
-			plural(len(leftOut), "file"), shortCommit(cs.HeadCommit), map[bool]string{true: "was", false: "were"}[len(leftOut) == 1])
-	}
-	if in.Knowledge, err = findKnowledge(stderr, in.SourceDir, folderInWorkTree(f.dir), cfg.Knowledge); err != nil {
-		return err
-	}
-	in.Tickets = findTickets(stderr, in.SourceDir, in.Knowledge, cs)
 
 	in.BaseAPI = baseDocuments(ctx, g, cs, in.Knowledge)
 	rig := planTrial(ctx, stderr, o, f, cfg, envName, env, &in, &catalogue)
@@ -262,6 +280,16 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	in.Reasoning = pc.Reasoning
 	in.SetupOn = provider.IsHarness(pc.Kind) && (pc.Setup.MCP || pc.Setup.Skills)
 	if criteria {
+		if note := costLimitNote(in.MaxCost, rungConfigs); note != "" {
+			fmt.Fprintln(stderr, note)
+		}
+	} else if note := costLimitNote(in.MaxCost, []config.Provider{pc}); note != "" {
+		fmt.Fprintln(stderr, note)
+	}
+	var fxRig *fixtureRig
+	if criteria {
+		fxRig = planFixtureTrial(o, f, cfg, envName, env, in.AuthProfile)
+		in.FixtureTrial = fxRig
 		fmt.Fprintln(stderr, criteriaStartLine(ladder, rungConfigs, cs.Head))
 	} else {
 		fmt.Fprintln(stderr, startLine(pc, cs.Head, model, pc.Reasoning))
@@ -281,6 +309,10 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if rig != nil {
 		rig.close(stderr, o.Clock())
 	}
+	if fxRig != nil {
+		fxRig.close(stderr)
+	}
+	in.Fixtures = append(slices.Clone(in.Fixtures), out.DraftedEntries()...)
 	if err == nil {
 		fmt.Fprintf(stderr, "semar: the planner finished in %s\n", formatElapsed(rep.Elapsed()))
 	}
@@ -305,6 +337,11 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	}
 	record("ok", filepath.Base(filepath.Dir(planFile)))
 	printPlanDone(stdout, out, len(cfg.Knowledge) > 0, trialSummary(in, out), useLine(out, in.SetupOn), planFile, nextRun(env, envName, f.env, cs.HeadCommit))
+	if out.CostLimit {
+		fmt.Fprintf(stderr, "semar: the cost limit of %s was reached: %s. Plan again to do the rest: the answers that exist are reused\n",
+			plan.Dollars(in.MaxCost), stoppedWords(out))
+		return exitError{ExitUndecided}
+	}
 	if len(out.Scenarios) == 0 {
 		return exitError{ExitUndecided}
 	}
@@ -542,7 +579,11 @@ func findKnowledge(stderr io.Writer, sourceDir, folder string, list []config.Kno
 func planFailed(ctx context.Context, stderr io.Writer, err error) error {
 	var rejected *plan.Rejected
 	var perr *provider.Error
+	var limit *plan.CostLimitError
 	switch {
+	case errors.As(err, &limit):
+		fmt.Fprintf(stderr, "semar: %s; nothing was written\n", limit)
+		return exitError{ExitUndecided}
 	case ctx.Err() != nil:
 		fmt.Fprintln(stderr, "semar: the plan was interrupted, and nothing was written")
 		return exitError{ExitUndecided}
@@ -566,7 +607,7 @@ func planFailed(ctx context.Context, stderr io.Writer, err error) error {
 // nextRun is the run command that can reach passed: a service with no build probe needs its
 // build declared, and the head of the plan is what the test environment is meant to run.
 func nextRun(env config.Environment, envName, envFlag, head string) string {
-	cmd := "semar run --all"
+	cmd := "semar run"
 	// A production environment is run only when it is named.
 	if envFlag != "" || env.Kind == config.KindProduction {
 		cmd += " --env " + terminalSafe(envName)
@@ -602,6 +643,23 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, p
 		fmt.Fprintf(w, "%s (%s): %s\n", terminalSafe(t.Key), terminalSafe(t.Kind), plural(count[t.Key], "scenario"))
 	}
 	fmt.Fprintf(w, "not drafted: %d\n", len(out.Draft.NotDrafted))
+	for _, d := range out.FixtureDrafts {
+		if d.Drafted {
+			fmt.Fprintf(w, "fixture drafted: %s. %s Not approved: semar review %s\n", terminalSafe(d.Need.ID), terminalSafe(plan.FixtureRunWords(d)), terminalSafe(d.Need.ID))
+			continue
+		}
+		why := d.Reason
+		if why == "" && len(d.Problems) > 0 {
+			why = d.Problems[0].Message
+			if d.Problems[0].Path != "" {
+				why = d.Problems[0].Path + ": " + why
+			}
+		}
+		fmt.Fprintf(w, "fixture not drafted: %s: %s\n", terminalSafe(d.Need.ID), terminalSafe(oneLine(why)))
+	}
+	if st := out.Pipeline; st != nil && st.NotPlanned > 0 {
+		fmt.Fprintf(w, "criteria not planned: the cost limit of %s was reached: %d\n", plan.Dollars(out.MaxCost), st.NotPlanned)
+	}
 	if st := out.Pipeline; st != nil && st.Unanswered > 0 {
 		fmt.Fprintf(w, "criteria that no model answered: %d, listed as gaps in the plan\n", st.Unanswered)
 	}
@@ -616,9 +674,58 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, p
 		fmt.Fprintln(w, modelUse)
 	}
 	if len(out.Scenarios) > 0 {
-		fmt.Fprintf(w, "next:\n  %s\n  semar review\n  %s\n", run, run)
-		fmt.Fprintln(w, "The first run shows whether the drafted requests fit the service, and the second gives the result.")
+		fmt.Fprintf(w, "next:\n  semar review %s   read what the plan drafted, a fixture before the scenarios that use it, and approve it\n", terminalSafe(firstToReview(out)))
+		fmt.Fprintf(w, "  %s   run the approved scenarios against the service\n  semar status   where things stand\n", run)
 	}
+}
+
+// costLimitNote tells the person at the start what the limit does, and which provider it cannot bind
+// because it reports no cost. It is empty when there is no limit.
+func costLimitNote(limit float64, providers []config.Provider) string {
+	if limit <= 0 {
+		return ""
+	}
+	var blind []string
+	seen := map[string]bool{}
+	for _, p := range providers {
+		if seen[p.ID] {
+			continue
+		}
+		seen[p.ID] = true
+		if !provider.ReportsCost(p.Kind) {
+			blind = append(blind, fmt.Sprintf("%s (%s)", terminalSafe(p.ID), terminalSafe(p.Kind)))
+		}
+	}
+	switch {
+	case len(blind) == 0:
+		return fmt.Sprintf("semar: no new job starts once the providers have reported %s", plan.Dollars(limit))
+	case len(blind) == len(seen):
+		return fmt.Sprintf("semar: the cost limit of %s binds nothing in this plan: %s report no cost", plan.Dollars(limit), strings.Join(blind, ", "))
+	}
+	return fmt.Sprintf("semar: no new job starts once the providers have reported %s; it does not bind %s, which reports no cost", plan.Dollars(limit), strings.Join(blind, ", "))
+}
+
+// stoppedWords says what the cost limit left undone, for the line that follows a plan that it cut.
+func stoppedWords(out plan.Output) string {
+	switch st := out.Pipeline; {
+	case st == nil:
+		return "the plan stopped before the next attempt, and the draft that passed was written"
+	case st.NotPlanned == 1:
+		return "1 criterion was not planned, and plan.md lists it as not planned"
+	case st.NotPlanned > 1:
+		return fmt.Sprintf("%d criteria were not planned, and plan.md lists each as not planned", st.NotPlanned)
+	}
+	return "a fixture was not drafted, or a criterion was not planned again, as plan.md says"
+}
+
+// firstToReview is what a person reads first: a drafted fixture, then the first scenario.
+func firstToReview(out plan.Output) string {
+	for _, d := range out.FixtureDrafts {
+		if d.Drafted {
+			return d.Need.ID
+		}
+	}
+	return string(out.Scenarios[0].ID)
 }
 
 func plural(n int, noun string) string {

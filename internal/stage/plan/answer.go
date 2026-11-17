@@ -18,6 +18,9 @@ const (
 	KindScenario    = "scenario"
 	KindManualCheck = "manualCheck"
 	KindNotDrafted  = "notDrafted"
+	// KindNeedsFixture says that the criterion needs data that no fixture gives, and names the
+	// fixture that would give it.
+	KindNeedsFixture = "needsFixture"
 )
 
 // Answer is what a job returns for one criterion. It names an operation of its packet, an account,
@@ -34,6 +37,11 @@ type Answer struct {
 	Expected    string        `json:"expected,omitempty"`
 	What        string        `json:"what,omitempty"`
 	Needs       string        `json:"needs,omitempty"`
+	// FixtureID, FixtureState, and FixtureOutputs name the fixture of a needsFixture answer: the ID,
+	// one sentence on the state that it prepares, and the values that a step needs from it.
+	FixtureID      string   `json:"fixtureId,omitempty"`
+	FixtureState   string   `json:"fixtureState,omitempty"`
+	FixtureOutputs []string `json:"fixtureOutputs,omitempty"`
 }
 
 type AnswerGiven struct {
@@ -95,9 +103,9 @@ func DecodeAnswer(data []byte) (Answer, error) {
 		return Answer{}, errors.New("data follows the answer object")
 	}
 	switch e.Answer.Kind {
-	case KindScenario, KindManualCheck, KindNotDrafted:
+	case KindScenario, KindManualCheck, KindNotDrafted, KindNeedsFixture:
 	default:
-		return Answer{}, fmt.Errorf("the answer kind %q must be one of %s, %s, %s", e.Answer.Kind, KindScenario, KindManualCheck, KindNotDrafted)
+		return Answer{}, fmt.Errorf("the answer kind %q must be one of %s, %s, %s, %s", e.Answer.Kind, KindScenario, KindManualCheck, KindNeedsFixture, KindNotDrafted)
 	}
 	return e.Answer, nil
 }
@@ -134,7 +142,14 @@ func (p Packet) AnswerSchema() json.RawMessage {
 		"what":  text("What cannot be tested through the API."),
 		"needs": text("What is missing, such as fixture <proposed id>, or an account."),
 	})
-	root := object(map[string]any{"answer": map[string]any{"anyOf": []any{scenario, manual, notDrafted}}})
+	needsFixture := object(map[string]any{
+		"kind":           enum("string", KindNeedsFixture),
+		"what":           text("What the scenario would test, in one sentence."),
+		"fixtureId":      text("The ID of the fixture, such as order.paid: lower case words with dots."),
+		"fixtureState":   text("One sentence on the state that the fixture prepares, such as: a board of the default account that a second account is a member of."),
+		"fixtureOutputs": array(text("The name of one value that a step needs from the fixture, such as id."), "The values that a step reads from the fixture, 1 to 16 names."),
+	})
+	root := object(map[string]any{"answer": map[string]any{"anyOf": []any{scenario, manual, needsFixture, notDrafted}}})
 	// The parts that every operation shares are written once.
 	root["$defs"] = map[string]any{"check": p.checkSchema(), "account": p.accountSchema()}
 	data, err := json.Marshal(root)
