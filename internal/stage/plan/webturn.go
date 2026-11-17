@@ -34,12 +34,13 @@ var aliasPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // turnWire is the JSON of a turn: one object whose kind says which of its fields hold the answer.
 type turnWire struct {
-	Kind    string        `json:"kind"`
-	Actions []actionWire  `json:"actions,omitempty"`
-	Title   string        `json:"title,omitempty"`
-	Intent  string        `json:"intent,omitempty"`
-	Reason  string        `json:"reason,omitempty"`
-	Given   []AnswerGiven `json:"given,omitempty"`
+	Kind     string        `json:"kind"`
+	Actions  []actionWire  `json:"actions,omitempty"`
+	Title    string        `json:"title,omitempty"`
+	Intent   string        `json:"intent,omitempty"`
+	Unproved string        `json:"unproved,omitempty"`
+	Reason   string        `json:"reason,omitempty"`
+	Given    []AnswerGiven `json:"given,omitempty"`
 }
 
 type actionWire struct {
@@ -80,7 +81,7 @@ func DecodeTurn(data []byte, page pagelist.List, first bool, catalogue []fixture
 		if blank(w.Intent) {
 			ps.add("turn.intent", "a done answer needs an intent: what was true before the change and what is true now")
 		}
-		return TurnDone{Title: w.Title, Intent: w.Intent}, ps.list, nil
+		return TurnDone{Title: w.Title, Intent: w.Intent, Unproved: strings.TrimSpace(w.Unproved)}, ps.list, nil
 	case turnManual:
 		if blank(w.Reason) {
 			ps.add("turn.reason", "a manual answer needs the reason, in one sentence")
@@ -202,7 +203,7 @@ func TurnSchema(page pagelist.List, first bool, catalogue []fixture.Entry) json.
 	}
 	branches := []any{
 		object(map[string]any{"kind": enum("string", turnAct), "actions": array(map[string]any{"anyOf": actions}, "1 to 5 actions, done in order.")}),
-		object(map[string]any{"kind": enum("string", turnDone), "title": text("A short title that names the requirement."), "intent": text("Two sentences: what was true before the change and what is true now.")}),
+		object(map[string]any{"kind": enum("string", turnDone), "title": text("A short title that names the requirement."), "intent": text("Two sentences: what was true before the change and what is true now."), "unproved": text("The part of the criterion that your checks did not prove, in one sentence, or an empty text when they prove all of it.")}),
 		object(map[string]any{"kind": enum("string", turnManual), "reason": text("Why a person must do the check, in one sentence.")}),
 	}
 	if first && len(catalogue) > 0 {

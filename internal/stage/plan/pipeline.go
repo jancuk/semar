@@ -55,11 +55,14 @@ type StoredAnswer struct {
 // WebResult is how the exploring of one web criterion ended. Exactly one of Test and Manual is set. Rung
 // is the rung that wrote the test, or the last that tried.
 type WebResult struct {
-	Test    *WebTest
-	Manual  string
-	Rung    int
-	Turns   int
-	Actions int
+	Test *WebTest
+	// Unproved is what the checks of the test leave to a person, when the flow proved only part of the
+	// criterion.
+	Unproved string
+	Manual   string
+	Rung     int
+	Turns    int
+	Actions  int
 }
 
 // WebStats is what the web part of a plan did.
@@ -598,7 +601,7 @@ func assemble(in Input, outcomes []CriterionOutcome) (Draft, []int) {
 			t := o.Web.Test
 			d.WebTests = append(d.WebTests, WebTestDraft{
 				Ticket: t.Scenario.Ticket, ID: string(t.Scenario.ID), Title: t.Scenario.Title, Cite: t.Cite,
-				Replay: t.Replay, ScenarioPath: t.ScenarioPath, FailsNow: t.FailsNow,
+				Replay: t.Replay, ScenarioPath: t.ScenarioPath, FailsNow: t.FailsNow, Unproved: o.Web.Unproved,
 			})
 		}
 	}

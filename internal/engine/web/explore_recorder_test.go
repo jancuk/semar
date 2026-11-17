@@ -72,10 +72,11 @@ Promise.allSettled([fetch(%q), fetch('/thing')]).then(r => {
 	}
 }
 
+// A page may start its request a moment after the click, so a settle gives it that moment first.
 func TestSettleWaitsForTheRequestsOfThePage(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/p", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<!doctype html><title>Slow</title><button onclick="fetch('/slow').then(r => r.text()).then(t => { const p = document.createElement('p'); p.textContent = t; document.body.append(p); })">Load</button>`)
+		fmt.Fprint(w, `<!doctype html><title>Slow</title><button onclick="setTimeout(() => fetch('/slow').then(r => r.text()).then(t => { const p = document.createElement('p'); p.textContent = t; document.body.append(p); }), 200)">Load</button>`)
 	})
 	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond)

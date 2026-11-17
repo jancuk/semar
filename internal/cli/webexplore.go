@@ -100,6 +100,7 @@ func (w *webExplorer) Explore(ctx context.Context, req plan.WebRequest, drive pl
 	x := web.NewExplorer(rec)
 	x.RunID = string(w.o.RunID())
 	br := &flowBrowser{w: w, rec: rec, x: x, fx: fx}
+	fx.runID = &x.RunID
 	end, err := drive(ctx, br)
 	if err != nil {
 		return plan.WebOutcome{}, err
@@ -118,13 +119,14 @@ func (w *webExplorer) Explore(ctx context.Context, req plan.WebRequest, drive pl
 // replay must end as the recording predicts: passed when every check met its claim, failed when one did
 // not. A test that ends otherwise is removed, because a wrong test costs more than a manual check.
 func (w *webExplorer) write(ctx context.Context, req plan.WebRequest, end plan.FlowEnd, events []record.Event, fx *flowFixtures) (plan.WebOutcome, error) {
+	vars := fx.vars()
 	claims := make([]record.Claim, len(end.Checks))
 	for i, c := range end.Checks {
-		claims[i] = record.Claim{Expect: c.Expect, Cite: req.Cite}
+		claims[i] = record.Claim{Expect: strings.ReplaceAll(c.Expect, web.RunIDVariable, vars["run.id"]), Cite: req.Cite}
 	}
 	opts := record.Options{
 		ID: req.ID, Ticket: req.Ticket, App: w.app, Service: w.svc.Name, BaseURL: w.svc.BaseURL,
-		AuthProfile: w.authProfile, Given: fx.given, Values: record.NewValues(fx.vars()), Date: w.o.Clock(), Claims: claims,
+		AuthProfile: w.authProfile, Given: fx.given, Values: record.NewValues(vars), Date: w.o.Clock(), Claims: claims,
 	}
 	var err error
 	if opts.Existing, err = screens.Load(w.dir, w.app); err != nil && !errors.Is(err, screens.ErrNotFound) {
@@ -200,6 +202,8 @@ type flowFixtures struct {
 	given []domain.Given
 	got   fixtureValues
 	undo  func()
+	// runID is the ID that the browser types for {{run.id}}.
+	runID *string
 }
 
 // release cleans the fixtures up. It may be called more than once.
@@ -212,10 +216,12 @@ func (f *flowFixtures) release() {
 
 // vars are the values that the fixtures gave, and the ID of the run, which the test keeps as variables.
 func (f *flowFixtures) vars() map[string]string {
-	if f.got.vars == nil {
-		return map[string]string{}
+	vars := map[string]string{}
+	maps.Copy(vars, f.got.vars)
+	if f.runID != nil && *f.runID != "" {
+		vars["run.id"] = *f.runID
 	}
-	return f.got.vars
+	return vars
 }
 
 // make makes the fixtures the model named, as semar record --given does.

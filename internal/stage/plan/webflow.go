@@ -63,8 +63,10 @@ type Turn interface{ isTurn() }
 // TurnAct does 1 to 5 actions, in order.
 type TurnAct struct{ Actions []Action }
 
-// TurnDone says that the flow proved the criterion. Title and Intent are those of the written test.
-type TurnDone struct{ Title, Intent string }
+// TurnDone says that the flow proved the criterion, or the part of it that the page shows. Title and
+// Intent are those of the written test. Unproved is what the checks did not prove, or empty: a person
+// still checks that.
+type TurnDone struct{ Title, Intent, Unproved string }
 
 // TurnManual says that a person must do the check, and why.
 type TurnManual struct{ Reason string }

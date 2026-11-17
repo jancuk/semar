@@ -195,7 +195,8 @@ func TestThePlanListsTheWebTestsAndWhatTheWebPartDid(t *testing.T) {
 		"- Web: 2 criteria explored in a browser, 2 tests written (2 checks fail on this build), 0 left for a person, 6 turns with 6 calls,",
 		"- Web model haiku (haiku, provider p)",
 		"- Web criterion " + ticket482 + ":11: test SHOP-482-02 written by haiku in 3 turns",
-		"web 1\n",
+		"web test: SHOP-482-02",
+		"web 3\n",
 		"| " + ticket482 + ":11 | web test | haiku | 0 |",
 		"web test: SHOP-482-01",
 	} {

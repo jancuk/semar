@@ -121,6 +121,7 @@ func TestAnActionThatCannotBeDoneSaysWhy(t *testing.T) {
 	page := `<!doctype html><title>Odd</title>
 <button disabled>Off</button>
 <input type="password" aria-label="Password">
+<div><input type="text" aria-label="Empty"><button>Beside</button></div>
 <div style="position:relative"><button id="under">Under</button><div style="position:absolute;inset:0;background:#fff;opacity:.99"></div></div>
 <button id="gone" onclick="this.remove()">Gone</button>
 <p>text</p>`
@@ -131,13 +132,14 @@ func TestAnActionThatCannotBeDoneSaysWhy(t *testing.T) {
 		do   func() error
 		want string
 	}{
-		"a disabled button":        {func() error { return x.Click(ctx, refOf(t, l, "button", "Off")) }, "is disabled"},
-		"a reference of no list":   {func() error { return x.Click(ctx, "e99") }, "e99 is not in the last list"},
-		"a field of a text":        {func() error { return x.Fill(ctx, refOf(t, l, "text", "text"), "x") }, "is not a field that takes text"},
-		"a covered button":         {func() error { return x.Click(ctx, refOf(t, l, "button", "Under")) }, "covered"},
-		"a check of a password":    {func() error { _, err := x.Check(ctx, refOf(t, l, "textbox", "Password")); return err }, "password"},
-		"a key that is not known":  {func() error { return x.Press(ctx, "", "F13") }, "Enter or Escape"},
-		"a check of a hidden text": {func() error { _, err := x.Check(ctx, refOf(t, l, "button", "Under")); return err }, "covered"},
+		"a disabled button":         {func() error { return x.Click(ctx, refOf(t, l, "button", "Off")) }, "is disabled"},
+		"a reference of no list":    {func() error { return x.Click(ctx, "e99") }, "e99 is not in the last list"},
+		"a field of a text":         {func() error { return x.Fill(ctx, refOf(t, l, "text", "text"), "x") }, "is not a field that takes text"},
+		"a covered button":          {func() error { return x.Click(ctx, refOf(t, l, "button", "Under")) }, "covered"},
+		"a check of a password":     {func() error { _, err := x.Check(ctx, refOf(t, l, "textbox", "Password")); return err }, "password"},
+		"a key that is not known":   {func() error { return x.Press(ctx, "", "F13") }, "Enter or Escape"},
+		"a check of an empty field": {func() error { _, err := x.Check(ctx, refOf(t, l, "textbox", "Empty")); return err }, "shows no text"},
+		"a check of a hidden text":  {func() error { _, err := x.Check(ctx, refOf(t, l, "button", "Under")); return err }, "covered"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := tc.do(); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -185,4 +187,26 @@ func TestAFillOfAPasswordFieldIsNeverReadBack(t *testing.T) {
 	if l2, err := x.List(t.Context()); err != nil || strings.Contains(l2.String(), "hunter2") {
 		t.Errorf("the list holds the password: %v\n%s", err, l2.String())
 	}
+}
+
+func TestADateFieldIsListedForWhatItIsAndRefusesTypedText(t *testing.T) {
+	page := `<!doctype html><title>Due</title><label for="d">Due date</label><input id="d" type="datetime-local"><label for="m">Month</label><input id="m" type="month"><input type="text" aria-label="Plain">`
+	r := newRecRig(t, map[string]string{"/due": page})
+	x, l := r.explore("/due")
+	for _, kind := range []string{"datetime-local", "month"} {
+		ref := ""
+		for _, e := range l.Elements {
+			if e.Role == kind {
+				ref = e.Ref
+			}
+		}
+		if ref == "" {
+			t.Fatalf("the list has no %s field:\n%s", kind, l.String())
+		}
+		err := x.Fill(t.Context(), ref, "2026-12-01")
+		if err == nil || !strings.Contains(err.Error(), "a "+kind+" field, which a flow cannot type into") {
+			t.Errorf("fill of a %s field: %v", kind, err)
+		}
+	}
+	r.must(x.Fill(t.Context(), refOf(t, l, "textbox", "Plain"), "ok"))
 }

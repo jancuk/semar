@@ -40,6 +40,7 @@ type WebTestDraft struct {
 	Title        string     `json:"title"`
 	Cite         string     `json:"cite"`
 	Replay       string     `json:"replay"`
+	Unproved     string     `json:"unproved,omitempty"`
 	ScenarioPath string     `json:"scenarioPath,omitempty"`
 	FailsNow     []FailsNow `json:"failsNow,omitempty"`
 }

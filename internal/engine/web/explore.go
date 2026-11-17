@@ -159,6 +159,9 @@ func (x *Explorer) Fill(ctx context.Context, ref, text string) error {
 		return err
 	}
 	defer t.release()
+	if kind := untypedKind(t.name); kind != "" {
+		return fmt.Errorf("%s is a %s field, which a flow cannot type into", t.name, kind)
+	}
 	if err := t.rd.fill(t.id, text); err != nil {
 		return fmt.Errorf("%s: %w", t.name, err)
 	}
@@ -220,6 +223,7 @@ const checkPointJS = `function(){
   el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
   const text = (e) => (e.tagName === 'INPUT' || e.tagName === 'TEXTAREA') ? norm(e.value) : norm(e.innerText);
   const want = text(el);
+  if (!want) return 'empty';
   const b = el.getBoundingClientRect();
   for (const fy of [0.5, 0.25, 0.75, 0.1, 0.9]) {
     for (const fx of [0.5, 0.25, 0.75, 0.1, 0.9]) {
@@ -251,9 +255,14 @@ func (x *Explorer) Check(ctx context.Context, ref string) (shown string, err err
 	if res.Result == nil {
 		return "", fmt.Errorf("%s cannot be read", t.name)
 	}
-	var secret string
-	if json.Unmarshal(res.Result.Value, &secret) == nil && secret == "secret" {
-		return "", fmt.Errorf("%s is a password field, and a password is never read", t.name)
+	var word string
+	if json.Unmarshal(res.Result.Value, &word) == nil {
+		switch word {
+		case "secret":
+			return "", fmt.Errorf("%s is a password field, and a password is never read", t.name)
+		case "empty":
+			return "", fmt.Errorf("%s shows no text, so there is nothing to check: check an element that shows the result", t.name)
+		}
 	}
 	var pt []float64
 	if json.Unmarshal(res.Result.Value, &pt) != nil || len(pt) != 2 {
@@ -273,4 +282,16 @@ func (x *Explorer) Check(ctx context.Context, ref string) (shown string, err err
 		time.Sleep(20 * time.Millisecond)
 	}
 	return "", fmt.Errorf("%s was not read: the page did not report a check", t.name)
+}
+
+// untypedKind is the kind of a field that a flow cannot type into, from the role that the list gave it:
+// the browser draws these with a picker of its own, and text that is inserted does not reach them.
+func untypedKind(name string) string {
+	_, rest, _ := strings.Cut(name, " (")
+	role, _, _ := strings.Cut(rest, " ")
+	switch role {
+	case "date", "datetime-local", "time", "month", "week", "color", "slider", "file":
+		return role
+	}
+	return ""
 }

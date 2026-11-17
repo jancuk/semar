@@ -32,6 +32,8 @@ var recorderJS string
 const (
 	bindingName  = "__semarEvent"
 	requestedFor = 10 * time.Second
+	// graceAfterAction is how long Settle waits before it asks whether the page is still.
+	graceAfterAction = 300 * time.Millisecond
 )
 
 // RecorderOptions say which profile the window uses. Hidden runs Chrome with no window: it is for a
@@ -257,6 +259,13 @@ func (r *Recorder) Settle(ctx context.Context) {
 		case <-c.Done():
 		}
 	}()
+	// A page often starts its request, or draws its answer, a moment after an action, and a page that
+	// looks still in that moment is not settled yet.
+	select {
+	case <-c.Done():
+		return
+	case <-time.After(graceAfterAction):
+	}
 	r.settle(c, defaultSettle)
 }
 

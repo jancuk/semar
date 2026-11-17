@@ -15,7 +15,8 @@ import (
 const (
 	webTurn1 = `{"turn":{"kind":"act","actions":[{"kind":"fill","ref":"e1","text":"Board {{run.id}}"},{"kind":"click","ref":"e2"}]}}`
 	webTurn2 = `{"turn":{"kind":"act","actions":[{"kind":"check","ref":"e3","expect":"Saved"}]}}`
-	webTurn3 = `{"turn":{"kind":"done","title":"A board is saved","intent":"Before: nothing. Now: saved."}}`
+	webTurn3 = `{"turn":{"kind":"done","title":"A board is saved","intent":"Before: nothing. Now: saved.","unproved":""}}`
+	partTurn = `{"turn":{"kind":"done","title":"A board is saved","intent":"Before: nothing. Now: saved.","unproved":"A refused save shows the reason."}}`
 	manualT  = `{"turn":{"kind":"manual","reason":"the page has no such board"}}`
 )
 
@@ -309,5 +310,33 @@ func TestAPlanThatFailsTakesTheTestsOfItsFlowsBackOut(t *testing.T) {
 	}
 	if len(x.removed) != 1 || x.removed[0] != "SHOP-482-01" {
 		t.Errorf("removed %v: the test that the first flow wrote must go", x.removed)
+	}
+}
+
+func TestAFlowThatProvesPartOfACriterionKeepsAManualCheckForTheRest(t *testing.T) {
+	w := newWebPlanner(webTurn1, webTurn2, partTurn)
+	out, err := webRun(t, w, &fakeExplorer{shown: "Saved"}, "haiku")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.WebTests) != 1 || len(out.Draft.ManualChecks) != 1 {
+		t.Fatalf("web tests %d, manual checks %d: the part that the test does not prove needs a person", len(out.WebTests), len(out.Draft.ManualChecks))
+	}
+	m := out.Draft.ManualChecks[0]
+	if m.Surface != SurfaceWeb || m.Expected != "A refused save shows the reason." || !strings.HasPrefix(m.Cite, ticket482+":11 ") ||
+		!strings.Contains(m.Title, "A board is saved") || len(m.Steps) != 1 || !strings.Contains(m.Steps[0], "A refused save shows the reason.") {
+		t.Errorf("manual check = %+v", m)
+	}
+	if got := out.Draft.WebTests[0].Unproved; got != "A refused save shows the reason." {
+		t.Errorf("the plan does not list what the test leaves out: %q", got)
+	}
+	if len(out.Unaccounted) != 0 {
+		t.Errorf("unaccounted %v", out.Unaccounted)
+	}
+	if len(out.Scenarios) != 2 || out.Scenarios[0].ID != "SHOP-482-02" {
+		t.Errorf("the API scenarios must number after the web test, as when it proves all: %v", out.Scenarios)
+	}
+	if out.Pipeline.Web.Written != 1 || out.Pipeline.Web.Manual != 0 {
+		t.Errorf("web stats = %+v", out.Pipeline.Web)
 	}
 }

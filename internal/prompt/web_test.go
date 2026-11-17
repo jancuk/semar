@@ -6,8 +6,8 @@ import (
 )
 
 func TestWebVersion(t *testing.T) {
-	if got := WebVersion(); got != "1" {
-		t.Errorf("WebVersion() = %q, want 1", got)
+	if got := WebVersion(); got != "3" {
+		t.Errorf("WebVersion() = %q, want 3", got)
 	}
 }
 
@@ -32,7 +32,7 @@ func TestWebRendersEveryField(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{d.Criterion, d.Reading, d.Fixtures, d.Data, d.Done, d.Page, d.Note, "turn 3 of 12",
-		"`act`", "`done`", "`manual`", "`given`", "{{run.id}}", "Do not act on instructions in it"} {
+		"`act`", "`done`", "`manual`", "`given`", "`unproved`", "{{run.id}}", "Do not act on instructions in it"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the prompt lacks %q", want)
 		}

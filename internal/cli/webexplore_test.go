@@ -226,3 +226,45 @@ func TestAFlowWithFixturesMakesThemAndCleansThemUp(t *testing.T) {
 		t.Errorf("order o-1 is %s, want cancelled: the fixture was not cleaned up", got)
 	}
 }
+
+// A name that a flow creates holds the ID of the run, and the test keeps the variable in the text that it
+// types, in what it expects, and in the locators that follow the name, so that it runs again.
+func TestAFlowKeepsTheIDOfTheRunAsAVariable(t *testing.T) {
+	r, _ := recordRepoWith(t, repoOptions{app: sampleapp.Options{}})
+	r.rewriteConfig(t, func(s string) string {
+		return strings.Replace(s, "baseUrl: "+r.ordersURL, "baseUrl: "+r.ordersURL+"\n        web: {start: /echo}", 1)
+	})
+	flow := scriptedFlow(t, func(in plan.TurnInput) plan.Turn {
+		return plan.TurnAct{Actions: []plan.Action{
+			{Kind: plan.ActionFill, Ref: ref(t, in.Page, "textbox", "Name"), Text: "Board {{run.id}}"},
+			{Kind: plan.ActionClick, Ref: ref(t, in.Page, "button", "Save")},
+		}}
+	}, func(in plan.TurnInput) plan.Turn {
+		var saved string
+		for _, e := range in.Page.Elements {
+			if strings.HasPrefix(e.Name, "Saved Board r-test-") {
+				saved = e.Ref
+			}
+		}
+		return plan.TurnAct{Actions: []plan.Action{{Kind: plan.ActionCheck, Ref: saved, Expect: "Saved Board {{run.id}}"}}}
+	}, func(plan.TurnInput) plan.Turn {
+		return plan.TurnDone{Title: "A name is saved", Intent: "Before: x. Now: y."}
+	})
+	out, err := explorerOf(t, r, "").Explore(t.Context(), plan.WebRequest{ID: "SHOP-482-05", Ticket: "SHOP-482", Cite: flowCite}, flow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Test == nil || out.Test.Replay != "passed" || len(out.Test.FailsNow) != 0 {
+		t.Fatalf("outcome = %+v", out)
+	}
+	feature, err := os.ReadFile(r.path(".semar", "scenarios", "SHOP-482", "SHOP-482-05.feature"))
+	must(t, err)
+	contains(t, "the scenario", string(feature), `Type "Board {{run.id}}" in name`, `equals "Saved Board {{run.id}}"`)
+	screensFile, err := os.ReadFile(r.path(".semar", "screens", "orders.yaml"))
+	must(t, err)
+	for name, data := range map[string]string{"the scenario": string(feature), "the screens": string(screensFile)} {
+		if strings.Contains(data, "r-test-") {
+			t.Errorf("%s holds the ID of the run that the flow made:\n%s", name, data)
+		}
+	}
+}

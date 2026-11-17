@@ -352,6 +352,9 @@ func writeWebTests(b *strings.Builder, tests []WebTestDraft, ticket string) {
 	b.WriteString("\nWeb tests that a model wrote, replayed once, and not approved: read each one with semar review:\n")
 	for i, w := range mine {
 		fmt.Fprintf(b, "\n%d. %s: %s. Cite: %s. Replay: %s.\n", i+1, shown(w.ID, maxValueShown), shown(strings.TrimRight(strings.TrimSpace(w.Title), "."), maxTextShown), shown(w.Cite, maxTextShown), shown(w.Replay, maxValueShown))
+		if w.Unproved != "" {
+			fmt.Fprintf(b, "   - Not proved by the test, left to a person: %s\n", shown(w.Unproved, maxTextShown))
+		}
 		for _, f := range w.FailsNow {
 			fmt.Fprintf(b, "   - Fails now: %s should show %s, and the page shows %s.\n", shown(f.Element, maxValueShown), strconv.Quote(shown(f.Expect, maxValueShown)), strconv.Quote(shown(f.Shown, maxValueShown)))
 		}

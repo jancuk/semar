@@ -36,8 +36,11 @@ func TestDecodeTurnReadsEachKind(t *testing.T) {
 		a.Actions[3] != (Action{Kind: ActionDrag, Ref: "e1", To: "e2"}) || a.Actions[4].Expect != "Save" {
 		t.Fatalf("turn = %#v, problems %v", turn, ps)
 	}
-	if d, ok := mustTurn(t, `{"turn":{"kind":"done","title":"A board is saved","intent":"Before: x. Now: y."}}`, false).(TurnDone); !ok || d.Title != "A board is saved" {
+	if d, ok := mustTurn(t, `{"turn":{"kind":"done","title":"A board is saved","intent":"Before: x. Now: y.","unproved":""}}`, false).(TurnDone); !ok || d.Title != "A board is saved" || d.Unproved != "" {
 		t.Errorf("done = %#v", d)
+	}
+	if d, ok := mustTurn(t, `{"turn":{"kind":"done","title":"A card moves","intent":"Before: x. Now: y.","unproved":"A refused move puts the card back."}}`, false).(TurnDone); !ok || d.Unproved != "A refused move puts the card back." {
+		t.Errorf("done with a part left = %#v", d)
 	}
 	if m, ok := mustTurn(t, `{"turn":{"kind":"manual","reason":"no such page"}}`, false).(TurnManual); !ok || m.Reason != "no such page" {
 		t.Errorf("manual = %#v", m)
@@ -102,7 +105,7 @@ func TestDecodeTurnRefusesWhatIsNotATurn(t *testing.T) {
 
 func TestTheTurnSchemaIsClosedAndNamesTheReferencesOfThePage(t *testing.T) {
 	schema := string(TurnSchema(twoElementPage(), false, []fixture.Entry{boardFixture}))
-	for _, want := range []string{`"enum":["e1","e2"]`, `"enum":["act"]`, `"enum":["done"]`, `"enum":["manual"]`, `"enum":["Enter","Escape"]`,
+	for _, want := range []string{`"unproved"`, `"enum":["e1","e2"]`, `"enum":["act"]`, `"enum":["done"]`, `"enum":["manual"]`, `"enum":["Enter","Escape"]`,
 		`"enum":["click"]`, `"enum":["fill"]`, `"enum":["drag"]`, `"enum":["check"]`, `"additionalProperties":false`} {
 		if !strings.Contains(schema, want) {
 			t.Errorf("the schema lacks %s:\n%s", want, schema)

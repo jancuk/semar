@@ -78,17 +78,22 @@ func (rs *runState) exploreWeb(ctx context.Context, outcomes []CriterionOutcome)
 		if !o.Answered || o.Result.Manual == nil || o.Result.Manual.Surface != SurfaceWeb {
 			continue
 		}
+		m := *o.Result.Manual
 		res, err := rs.exploreOne(ctx, *o)
 		if err != nil {
 			rs.undoWeb(outcomes)
 			return fmt.Errorf("criterion %s: %w", o.Packet.Cite, err)
 		}
 		o.Web = res
-		if res.Test != nil {
-			o.Result.Manual = nil
-			sc := res.Test.Scenario
-			rs.in.Existing[sc.Ticket] = append(slices.Clone(rs.in.Existing[sc.Ticket]), sc)
+		if res.Test == nil {
+			continue
 		}
+		o.Result.Manual = nil
+		if res.Unproved != "" {
+			o.Result.Manual = restOfManual(m, res.Test.Scenario.Title, res.Unproved)
+		}
+		sc := res.Test.Scenario
+		rs.in.Existing[sc.Ticket] = append(slices.Clone(rs.in.Existing[sc.Ticket]), sc)
 	}
 	return nil
 }
@@ -161,6 +166,9 @@ func (rs *runState) exploreOne(ctx context.Context, o CriterionOutcome) (*WebRes
 		res.Actions += out.End.Actions
 		if out.Test != nil {
 			res.Test, res.Manual = out.Test, ""
+			if out.End.Done != nil {
+				res.Unproved = oneLine(out.End.Done.Unproved, maxManualText)
+			}
 			return res, nil
 		}
 		res.Manual = out.Manual
@@ -171,6 +179,17 @@ func (rs *runState) exploreOne(ctx context.Context, o CriterionOutcome) (*WebRes
 		}
 	}
 	return res, nil
+}
+
+// restOfManual is the manual check that stays when a web test proves only part of a criterion: the part
+// that it leaves out, with the cite of the criterion.
+func restOfManual(m ManualCheckDraft, title, unproved string) *ManualCheckDraft {
+	return &ManualCheckDraft{
+		Ticket: m.Ticket, Surface: m.Surface, Cite: m.Cite,
+		Title:    oneLine("The rest of the criterion, which the web test "+strings.TrimRight(title, ".")+" does not prove", maxManualTitle),
+		Steps:    []string{oneLine("Check what the web test leaves out: "+unproved, maxManualText)},
+		Expected: unproved,
+	}
 }
 
 // manualReading is what a first job wrote for a person to do, as a help to the model of the flow.

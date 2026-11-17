@@ -98,6 +98,10 @@ func recordRepoWith(t *testing.T, o repoOptions) (*repo, *shopPages) {
 		mux.HandleFunc("/refund", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, refundShop(pages.refund.Load())) })
 		mux.HandleFunc("/signin", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, signInShop) })
 		mux.HandleFunc("/desk", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, tabSessionShop) })
+		mux.HandleFunc("/echo", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, `<!doctype html><title>Echo</title><label>Name <input id="name" type="text"></label><button id="save">Save</button><p id="out"></p>
+<script>document.getElementById('save').addEventListener('click', () => { document.getElementById('out').textContent = 'Saved ' + document.getElementById('name').value; });</script>`)
+		})
 		mux.HandleFunc("/braces", func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprint(w, `<!doctype html><title>Braces</title><p id="t">hello {{x}} world</p>`)
 		})

@@ -29,6 +29,7 @@
         if (t === 'checkbox' || t === 'radio') return t;
         if (t === 'range') return 'slider';
         if (t === 'file') return 'file';
+        if (['date', 'datetime-local', 'time', 'month', 'week', 'color'].includes(t)) return t;
         return 'textbox';
       }
     }
