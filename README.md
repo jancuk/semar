@@ -70,6 +70,7 @@ These parts are implemented in Go.
 * **The use case ledger:** each use case that needs testing ends in one stated state, so that nothing is skipped without a word. See [See that nothing is skipped: the use case ledger](#see-that-nothing-is-skipped-the-use-case-ledger).
 * **Exports:** `semar export` writes a stored run as CTRF, JUnit XML, or SARIF. See [Send results to your tools](#send-results-to-your-tools).
 * **The web:** a journey leg or a scenario with the tag `@surface:web` drives Chrome on a profile of Semar's own, finds elements through screen objects that a person approves, and repairs a broken locator with no model. `semar login`, `semar review --screens`, and `semar screens repair`. Plan 22 describes it.
+* **Record a web test:** `semar record` opens Chrome on Semar's own profile, records the flow that a person does, takes what the person points at with the Option key as the expected result, and writes the screens, the scenario, and the script. Nobody writes a locator. See [Record a web test](#record-a-web-test) and Plan 28.
 * **Gherkin scenarios:** a scenario is a `.feature` file that product and QA read and confirm as it is, with the requests in a YAML script apart from it. `semar scenarios convert` moves older YAML scenario files over and keeps their confirmations. See [Hand-written scenarios](#hand-written-scenarios) and Plan 24.
 * **Planning with small models:** `semar plan` plans one acceptance criterion at a time when a ticket of the change has acceptance criteria. Code finds the operations, fields, diff, fixtures, and accounts that a criterion needs, a job with no tools answers in a fixed shape, code checks the answer, and a failing answer goes to the next model of the ladder. With Claude Code the ladder is `haiku`, then `sonnet`. A criterion that needs data no fixture gives gets a fixture that a job drafts and the plan runs once. `--max-cost` bounds what a plan spends. See [Plan with a small model](#plan-with-a-small-model).
 * **A first run with no hand-written files:** `semar init` asks for the address of the service, the variable of the token, and who each account is, and finds the build probe at `/version`. In a repository that is set up, `semar init` checks this machine and lists what is missing. See [Plan with a small model](#plan-with-a-small-model).
@@ -704,6 +705,63 @@ order.paid  1.0.0  team-orders  approved  not checked on uat  used by SHOP-482-0
 
 Cleanup never changes an outcome. A record that cleanup could not remove is listed in the report under "Still exists". Each scenario of the report shows what it was given, for example `Given order: order.paid 1.0.0 (hash 8b38156352ff), made by create; cleanup done`.
 
+### Record a web test
+
+A web test took three hand-written files: the screens, a script, and a scenario. `semar record` writes all three while you do the flow once in Chrome. You write no locator.
+
+```bash
+semar login shop --env uat        # once: sign in on Semar's own profile
+semar record SHOP-482-07 uat --given order.paid as o --open '/orders/{{o.id}}'
+```
+
+```text
+Made the fixture order.paid.
+A Chrome window is open at https://shop.uat.example.com/orders/o_4471
+  Do the flow. Hold Option and click what must be true. Close the window to finish.
+
+Recorded 4 actions and 2 checks.
+Wrote .semar/screens/shop.yaml (1 screen, 5 elements)
+      .semar/scenarios/SHOP-482/SHOP-482-07.feature
+      the script of SHOP-482-07
+Replayed once: passed.
+
+Next: semar review SHOP-482-07
+```
+
+The window is Semar's own profile of the environment and the account, never the browser that you use. Do the flow as a user does: click, type, press Enter or Escape, drag, or type another address. Hold Option (Alt on Windows and Linux) and click what must be true. The page does not get that click. The element shows an outline for a moment, and the text that it shows becomes an expected result. Close the window to finish.
+
+A test with no check proves nothing, so a recording with no check writes nothing and says so.
+
+Semar writes the scenario with one line for each action and a `Then` line for each check, and you can reword the lines and the title. The step IDs in the comments tie the lines to the script.
+
+```gherkin
+  @id:SHOP-482-07 @ticket:SHOP-482 @surface:web @auth:support-agent
+  Scenario: Recorded on 2026-11-17: Order
+    Given the fixture order.paid as o
+    And Open /orders/{{o.id}}
+    # step: open
+    When Click refund
+    # step: click-refund
+    And Type "5" in amount
+    # step: fill-amount
+    And Click confirm-refund
+    # step: click-confirm-refund
+    Then the element refund-total equals "5.00"
+    # person
+    And the element status equals "partly refunded"
+    # person
+```
+
+* **How elements are found.** Semar picks, for each element, the way that a redesign changes least: a test ID (`data-testid`, `data-test`, or `data-qa`), the role with the name, the text, and last a short CSS path. It uses a role with a name, or a text, only when exactly one element of the page is found that way. An element that a check reads is never found by the text that the check expects. The name of an element comes from its test ID, its name, or its text.
+* **A password is never read.** Semar notes that a secret was typed, and the step is written with `secret: env:<NAME>`. Name the variable with `--secret-env <NAME>`, or Semar asks for it after the window closes. The test types the value of that variable when it replays.
+* **Data that repeats.** `--given <fixture>[ as <alias>]` makes the fixture before the window opens and cleans it up after. Every value that the fixture gave, and the run ID, is written as its variable wherever it is in a path, a typed text, a name, or the text of a check, so `/orders/o_4471` becomes `/orders/{{o.id}}`. A value of one or two characters is left as it is. Use `--as <account>` when the fixture needs an account.
+* **Screens that exist.** The elements go into `.semar/screens/<app>.yaml`, and `--app` names another file than the service. A screen or an element that is there is kept: a new element is added below the last one of its screen, and an element with the same name and another locator gets a number. A second recording does not break the tests of the first.
+* **Replay.** After it writes, `record` replays the scenario once with no window and says how it went. A scenario that does not replay is still written, with the step that failed, so that you can fix it or record again. `--no-replay` skips it.
+* **Nothing is approved.** A recording made in a minute can hold a mistake, so a person reviews the screens file and the scenario. The command ends with `semar review <id>`, and `--covers <use case id>` also prints `semar check <use case id> --by <id>`. [Plan 26](docs/implementation/26-daily-loop.md) builds those two commands. `record` only prints them.
+* **Safety.** `semar record` refuses a production environment and a read-only one, because it clicks and types. It refuses an ID that has a scenario unless `--replace` is set. It uses `--service` when the environment has several, `--ticket` for a ticket other than the group of the ID, and `--open <path>` for the first page.
+
+It does not record on Android, a wait of time, a check of anything but the text of an element, a choice in a select list, hover, a file upload, or a second tab. Add them to the files by hand.
+
 ### Test a business flow with a journey
 
 A journey is a business flow that crosses services, such as "an order is placed, paid, and shown as paid". A scenario tests one service. No service owns a journey: a named person, the owner, does. A journey runs one leg at a time against one set of builds, and its result is valid only for those builds.
@@ -1055,6 +1113,7 @@ Every command takes `--dir <path>`, the root of the repository that holds `.sema
 | `semar providers` | Prints your providers and marks the one that would plan here. No model |
 | `semar init` | On a terminal, asks for the address of the service, the token variable, and who each account is, then writes `.semar/semar.yaml`, with a `knowledge` entry for each conventional path that it finds and the build probe at `/version` when the service has one, and `.semar/.gitignore` when there is none. `--base-url <url>` and the other flags answer the questions. `--account <name>=<ENV>` adds an auth profile, `--describe <account>=<text>` says who an account is, and both can repeat. In a repository that is set up, it checks this machine and writes nothing |
 | `semar script add <file>` | Checks a script against its scenario and stores it |
+| `semar record <scenario id> [environment]` | Opens Chrome on Semar's own profile, records what a person does, and writes the screens, the scenario, and the script. Takes `--open <path>`, `--given <fixture>[ as <alias>]`, `--as <account>`, `--service <name>`, `--app <name>`, `--ticket <key>`, `--covers <use case id>`, `--secret-env <NAME>`, `--replace`, and `--no-replay` |
 | `semar run [environment]` | Runs the scenarios of the change and its critical journeys, and ends with the status of the change. The change is the commits from the base branch to `HEAD`. Before it sends anything it prints the change, the target with its build, what it selected, and the gaps. `--all` runs every scenario and every critical journey, `--scenario <id>` runs the scenarios named and no journey, `--no-journeys` leaves the journeys out, `--no-plan` never offers to plan, and `--base <branch>` names another base |
 | `semar review [id...]` | Shows what needs a person, one item at a time: the fixtures and screens files that are not approved, the scenarios that need a confirmation grouped by use case, and the journeys. It answers `y` to approve, `n` to skip, `d` for the details (the whole file, as Gherkin for a scenario), and `q` to stop. An ID narrows it: a scenario, a ticket, a fixture, a journey, or the app of a screens file. `--yes` approves everything with no question. With no terminal and no `--yes` it lists the items and exits 2 |
 | `semar scenarios convert` | Converts every `.yaml` or `.yml` scenario file under `.semar/scenarios` to a Gherkin `.feature` file in place, and deletes the YAML file. The expectation hashes stay the same. It never overwrites a file |
@@ -1173,7 +1232,7 @@ An export is refused for a run that did not finish, for a run whose stored evide
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | The test workflow from intake to release, who acts in each phase, and the exit criteria |
 | [docs/USER_SCENARIOS.md](docs/USER_SCENARIOS.md) | Walkthroughs from the user's side: setup, a failed scenario, pipeline mode, sign-in, and regression |
 | [docs/implementation/README.md](docs/implementation/README.md) | The implementation guide: engineering rules, architecture, dependencies, and the sequence of plans |
-| [Plan 16](docs/implementation/16-trial-run.md), [17](docs/implementation/17-fixtures.md), [18](docs/implementation/18-journeys.md), [19](docs/implementation/19-coverage-ledger.md), [20](docs/implementation/20-exports.md), and [25](docs/implementation/25-small-models.md) | The trial run, fixtures, API journeys, the use case ledger, the exports, and planning with small models, as built: the rules, the file formats, and the tests |
+| [Plan 16](docs/implementation/16-trial-run.md), [17](docs/implementation/17-fixtures.md), [18](docs/implementation/18-journeys.md), [19](docs/implementation/19-coverage-ledger.md), [20](docs/implementation/20-exports.md), [25](docs/implementation/25-small-models.md), and [28](docs/implementation/28-record-a-web-test.md) | The trial run, fixtures, API journeys, the use case ledger, the exports, planning with small models, and recording a web test, as built: the rules, the file formats, and the tests |
 
 ## Open questions
 

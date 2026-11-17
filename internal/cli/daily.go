@@ -84,6 +84,9 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 			return err
 		}
 		runs = append(runs, fin)
+		if f.done != nil {
+			f.done(fin.record, fin.reportPath)
+		}
 		fmt.Fprintln(stdout)
 		if err := report.Lines(stdout, fin.record); err != nil {
 			return err
@@ -293,7 +296,7 @@ func chooseChange(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 	}
 	notPlanned := unplanned()
 	if withFile := ticketsWithFiles(f.dir, cfg, notPlanned); len(withFile) > 0 && !f.noPlan && o.Terminal() {
-		est := o.PlanEstimate(ctx, o, cfg, withFile)
+		est := o.PlanEstimate(ctx, o, f.dir, cfg, withFile)
 		if offerToPlan(ctx, stdout, newLineReader(o.Stdin), est, withFile) {
 			if err := planTheChange(ctx, stdout, stderr, o, f, envName); err != nil {
 				return sel, 0, err

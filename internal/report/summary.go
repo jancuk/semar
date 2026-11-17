@@ -121,7 +121,7 @@ func Lines(w io.Writer, run domain.Run) error {
 			line := plain(string(r.Scenario)) + "\t" + plain(word)
 			switch {
 			case len(r.Reasons) > 0:
-				head, more := cut(r.Reasons[0].Text, maxShown)
+				head, more := cut(shownReason(r.Reasons), maxShown)
 				line += "\t" + plain(head)
 				if more > 0 {
 					line += cutMark(more)
@@ -136,6 +136,18 @@ func Lines(w io.Writer, run domain.Run) error {
 		}
 	}
 	return tw.Flush()
+}
+
+// shownReason is the reason that a result line shows: the first one that is a cause. A step that was
+// never sent has no recorded result, and that is a consequence of the reason that stopped the run,
+// such as a screens file that is not approved.
+func shownReason(reasons []domain.Reason) string {
+	for _, r := range reasons {
+		if !strings.HasSuffix(r.Text, "has no recorded result") {
+			return r.Text
+		}
+	}
+	return reasons[0].Text
 }
 
 // DeclaredBuilds names each build that a person declared, because nothing read it from the service.
@@ -161,10 +173,12 @@ func resultWord(outcome string, reasons []domain.Reason) string {
 
 // nextMark ends a line with the command that follows its word, or with nothing.
 func nextMark(line, word, subject string) string {
-	if next := words.Next(word, plain(subject)); next != "" && !strings.Contains(line, next) {
-		return " → " + next
+	next := words.Next(word, plain(subject))
+	// A reason that names its own command, such as the review of a screens file, is the next step.
+	if next == "" || strings.Contains(line, strings.TrimSpace(words.Next(word, ""))) {
+		return ""
 	}
-	return ""
+	return " → " + next
 }
 
 // plain keeps text on one line and drops control and format characters, so a service cannot

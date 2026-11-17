@@ -653,7 +653,7 @@ func writeTrial(b *strings.Builder, in Input, out Output) {
 	fmt.Fprintf(b, "Code sent the read-only steps once to %s before the plan was written. %s ", value(tr.Env), buildsSentence(tr.Builds, value))
 	b.WriteString("A trial result is evidence about a request. It is not a test result, and no expected result was compared.")
 	if tr.Run != "" {
-		fmt.Fprintf(b, " Run %s holds every request: semar activity %s.", value(string(tr.Run)), value(string(tr.Run)))
+		fmt.Fprintf(b, " Run %s holds every request: semar show %s --activity.", value(string(tr.Run)), value(string(tr.Run)))
 	}
 	b.WriteString("\n")
 	if len(out.AfterTrial) > 0 {

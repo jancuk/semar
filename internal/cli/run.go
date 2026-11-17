@@ -43,6 +43,9 @@ type runFlags struct {
 	base       string
 	dir        string
 	headed     bool
+	// done is told how the scenarios of the run ended, and where the report is. semar record uses it to
+	// say how the replay of a new recording went.
+	done func(run domain.Run, report string)
 }
 
 func newRunCommand(o options) *cobra.Command {
@@ -238,7 +241,7 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 		deps.Fixtures = fx
 	}
 	eng := rg.webEngine(o, envName, env, headed)
-	deps.Web, deps.Screens = eng, screenSource{repo: repo, approvals: confirm.NewLocal(rg.store.Root())}
+	deps.Web, deps.Screens = eng, screenSource{repo: repo, approvals: confirm.NewLocal(rg.store.Root()), trusted: trustedScreens(ctx)}
 	return &replayRig{envRig: rg, runner: replay.New(deps), web: eng}, nil
 }
 

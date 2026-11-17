@@ -31,10 +31,16 @@ func (rg *envRig) webEngine(o options, envName string, env config.Environment, h
 type screenSource struct {
 	repo      string
 	approvals *confirm.Local
+	// trusted is an app whose screens count as approved in this run, with no approval stored. Only
+	// the replay that semar record makes of its own recording sets it.
+	trusted string
 }
 
 func (s screenSource) Load(app string) (domain.Screens, error) { return screens.Load(s.repo, app) }
 
 func (s screenSource) Approved(app string, h domain.Hash) (bool, error) {
+	if s.trusted != "" && app == s.trusted {
+		return true, nil
+	}
 	return s.approvals.ScreensApproved(app, h)
 }

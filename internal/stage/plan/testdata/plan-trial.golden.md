@@ -80,7 +80,7 @@ None.
 
 ## Trial run
 
-Code sent the read-only steps once to local before the plan was written. The environment ran orders 9f3c2ab. A trial result is evidence about a request. It is not a test result, and no expected result was compared. Run r-20261117T081500Z-1a2b holds every request: semar activity r-20261117T081500Z-1a2b.
+Code sent the read-only steps once to local before the plan was written. The environment ran orders 9f3c2ab. A trial result is evidence about a request. It is not a test result, and no expected result was compared. Run r-20261117T081500Z-1a2b holds every request: semar show r-20261117T081500Z-1a2b --activity.
 
 The planner kept the expected results of each scenario that it kept, matched by ticket and title. A scenario that was renamed counts as a new one.
 

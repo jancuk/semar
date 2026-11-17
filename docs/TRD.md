@@ -2091,6 +2091,29 @@ The engine runs Chrome on a profile of Semar's own, headless by default and with
 
 **Not built.** The engine adapter interface and the gateway of [Engines and the gateway](#engines-and-the-gateway), and so the use of an existing MCP server for the web. The MCP tools `web_*`, the pilot, and an agent that authors web steps. Known interruptions of an app, and object storage for evidence.
 
+### Recording a web test
+
+Built in [Plan 28](implementation/28-record-a-web-test.md). `semar record` is the same Chrome profile and the same engine code as a run, with a person in front. A person does the flow once, and Semar writes the screens file, the scenario, and the script. The planner does not draft web steps, because a model that cannot see the page invents locators. A recording has the page.
+
+```text
+window ─► recorder script ─► events ─► Build ─► Write ─► replay once
+(a person            in every page      in order  pure     3 files   semar run,
+ or a test)                                                            no window
+```
+
+* **Recorder.** `web.Recorder` starts Chrome on the profile of the account, adds one script to every page before the page's own scripts run, and binds one function that sends events to Semar. The command that opens a window and a test that sends input to a hidden one run the same code. They differ in who sends the input. The window loop is the one of `semar login`.
+* **Events.** `record.Event` has a kind (`open`, `click`, `fill`, `press`, `drag`, `check`), the page (its path and title), the elements with the locator that the script chose and the name that they are called by, and a value. A move of the page that a click or a form caused is not an event, and a move to a typed address is. A click that puts the cursor in a text field is part of typing. A text is sent when the field loses focus or Enter commits it, and always before the key, the click, or the check that follows it.
+* **Check.** A click with the Option key is stopped before the page sees any of its events. The element shows an outline for a moment, and the event holds the text that the element shows, read as the engine of a replay reads it.
+* **Locator.** The script chooses a locator for each element in the order that a redesign changes least: a test ID, the role with the name, the text, and a path of at most a few tags. A test ID counts when exactly one visible element has it, and a role with a name or a text counts when exactly one visible element is found by it. A check never finds its element by the text that it reads.
+* **Secret.** The script never reads a password field, and no event, file, or log holds one. The step is written with `secret: env:<NAME>`.
+* **Build.** `record.Build` is pure. It replaces the values that a fixture gave by their variables, merges what repeats, names the screens and the elements, and gives the scenario, the script, and the elements that the screens file lacks. A check goes under the step before it when that step acted on the same screen. Otherwise a wait for the first element of the check stands between them.
+* **Write.** `record.Write` makes both files in memory and checks the folders before it writes the first one. It adds elements to an existing screens file below the last element of their screen and leaves every other byte as it was. The script goes through the code of `semar script add`.
+* **Replay.** After it writes, the command runs the scenario once, with no window, through `semar run`. The screens of the recorded app count as approved for that one run, and no approval is stored.
+
+Trust: the page under test can send an event to the binding as the recorder does, so a person reviews every file that `record` writes before a test relies on it. Nothing that it writes is approved. A recording of a production or a read-only environment is refused, because a recording clicks and types.
+
+**Not built.** Recording on Android, a recorded wait of time, a check of anything but the text of an element, a choice in a select list, hover, a file upload, a second tab, and a frame inside the page.
+
 ### Android engine
 
 The engine drives an emulator or a device through `adb`. It installs the build under test, launches the app, reads the screen as a list of elements with refs, sends input, and captures screenshots and `logcat`. [Signing in](#signing-in) describes sign-in on the device.
@@ -3437,6 +3460,7 @@ A team edition on a shared server is a later stage. It is where single sign-on, 
 | `semar changes --build` | Print the build view: tickets on UAT, commits with no ticket, and overlaps. No model |
 | `semar doctor` | Check providers, sign-in state, hosts, build probes, and the Grafana token. Read-only |
 | `semar login <auth profile>` | Open the profile's own Chrome window, or the emulator's account settings, for a person to sign in once |
+| `semar record <scenario id> [environment]` | Open Semar's Chrome window, record the flow that a person does, and write the screens, the scenario, and the script. Replays the scenario once |
 | `semar logout <auth profile>` | Delete the stored session of a profile |
 | `semar plan --mr <id>` | Draft scenarios for a merge request, or for a local branch with `--branch` |
 | `semar review <scenario>` | Confirm a scenario's expected results as the signed-in code-host user |

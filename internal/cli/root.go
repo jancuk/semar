@@ -40,7 +40,7 @@ type options struct {
 	// Email is the user.email of git for the repository in dir, or "" when it is not set. A review
 	// stores it with each approval.
 	Email func(dir string) string
-	// PlanEstimate says what planning will cost, for the offer of semar run. Nil knows nothing yet.
+	// PlanEstimate says what planning will cost, for the offer of semar run. Nil reads the usage log.
 	PlanEstimate planEstimator
 	Environ      func() []string // the person's environment, for a harness that runs with their setup
 	Home         string          // where providers.yaml and usage.jsonl live; "" is $SEMAR_HOME or ~/.config/semar
@@ -101,7 +101,7 @@ func (o options) withDefaults() options {
 		o.Tick = realTicker
 	}
 	if o.PlanEstimate == nil {
-		o.PlanEstimate = noEstimateYet
+		o.PlanEstimate = usageEstimate
 	}
 	if o.Email == nil {
 		o.Email = gitEmail
@@ -204,8 +204,7 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 			root.AddCommand(c)
 		}
 	}
-	// semar record joins this group when it exists.
-	grouped(groupDaily, newInitCommand(o), newRunCommand(o), newReviewCommand(o), newStatusCommand(o), newCheckCommand(o),
+	grouped(groupDaily, newInitCommand(o), newRunCommand(o), newRecordCommand(o), newReviewCommand(o), newStatusCommand(o), newCheckCommand(o),
 		newDeferCommand(o), newLogCommand(), newShowCommand(), newRmCommand(o), newPlanCommand(o))
 	grouped(groupMore, newChangesCommand(), newExportCommand(), newFixtureCommand(o), newJourneyCommand(o), newProvidersCommand(o),
 		newDashboardCmd(o), newScenariosCommand(), newScreensCommand(o), newScriptCommand(), newLoginCommand(o), version)

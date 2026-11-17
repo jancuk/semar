@@ -4,9 +4,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jancuk/semar/internal/cli"
 	"github.com/jancuk/semar/internal/sampleapp"
+	"github.com/jancuk/semar/internal/usage"
 )
 
 // dailyRepo is the sample application on a branch that changes one ticket, with a scenario for that
@@ -87,10 +89,20 @@ func TestRunOffersToPlanOnATerminalAndPlansOnlyOnY(t *testing.T) {
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
 	r.must(t, cli.ExitOK, "review", "--yes")
 
+	r.opts.Home = t.TempDir()
 	r.opts.Terminal = func() bool { return true }
 	r.opts.Stdin = strings.NewReader("n\n")
 	res := r.must(t, cli.ExitUndecided, "run")
-	contains(t, "the offer", res.stdout, "SHOP-490 has a ticket file and no use cases. Plan it now with claude with its default model, no estimate yet? [y/N]")
+	contains(t, "the offer", res.stdout, "SHOP-490 has a ticket file and no use cases. Plan it now with claude with haiku, no estimate yet? [y/N]")
+
+	// Earlier plans by criteria on the model that would plan first give the offer its amount.
+	rec := usage.Record{At: time.Now(), Provider: "claude", Kind: "claude", Pipeline: usage.PipelineCriteria, Asked: "haiku", Outcome: "ok", Attempts: 4, CostUSD: 0.08}
+	if err := usage.Append(r.opts.Home, rec); err != nil {
+		t.Fatal(err)
+	}
+	r.opts.Stdin = strings.NewReader("n\n")
+	res = r.must(t, cli.ExitUndecided, "run")
+	contains(t, "the offer with an amount", res.stdout, "Plan it now with claude with haiku, about $0.02 for 1 criterion, from 4 earlier jobs of claude haiku? [y/N]")
 	if exists(t, r.path(".semar", "plans")) {
 		t.Error("run planned without a y")
 	}

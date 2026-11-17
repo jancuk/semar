@@ -9,6 +9,8 @@ import (
 
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/knowledge"
+	"github.com/jancuk/semar/internal/stage/plan"
+	"github.com/jancuk/semar/internal/usage"
 )
 
 // PlanEstimate says what planning some tickets will use: who plans, with which model, and what it
@@ -17,13 +19,35 @@ type PlanEstimate struct {
 	Provider, Model, Cost string
 }
 
-// planEstimator gives the estimate that semar run shows before it offers to plan (Plan 26, D6). The
-// plan stage of Plan 27 supplies the real one, from the usage log. The default knows nothing.
-type planEstimator func(ctx context.Context, o options, cfg config.Config, tickets []string) PlanEstimate
+// planEstimator gives the estimate that semar run shows before it offers to plan (Plan 26, D6).
+type planEstimator func(ctx context.Context, o options, dir string, cfg config.Config, tickets []string) PlanEstimate
 
-func noEstimateYet(_ context.Context, _ options, cfg config.Config, _ []string) PlanEstimate {
+// usageEstimate names the provider and the model that would plan first, and what the criteria of the
+// tickets cost on them in the usage log (Plan 27, D12). What it cannot read stays empty, and the
+// offer then says that there is no estimate yet.
+func usageEstimate(_ context.Context, o options, dir string, cfg config.Config, tickets []string) PlanEstimate {
 	p := cfg.PlanProvider()
-	return PlanEstimate{Provider: p.ID, Model: p.Model}
+	est := PlanEstimate{Provider: p.ID, Model: p.Model}
+	id, model, err := firstRung(o, dir, cfg)
+	if err != nil {
+		return est
+	}
+	est.Provider, est.Model = id, model
+	home, err := o.home()
+	if err != nil {
+		return est
+	}
+	criteria := 0
+	for _, t := range readTickets(dir, cfg, tickets) {
+		criteria += len(plan.Criteria(t))
+	}
+	if criteria == 0 {
+		return est
+	}
+	if e, err := usage.EstimateCost(home, id, model, criteria); err == nil && e.Known {
+		est.Cost = e.String()
+	}
+	return est
 }
 
 func (e PlanEstimate) String() string {
@@ -42,9 +66,8 @@ func (e PlanEstimate) String() string {
 	return fmt.Sprintf("%s with %s, %s", who, model, cost)
 }
 
-// ticketsWithFiles is the tickets of keys that have a ticket file in the tickets source of the
-// repository.
-func ticketsWithFiles(dir string, cfg config.Config, keys []string) []string {
+// readTickets is the ticket files of keys in the tickets source of the repository.
+func readTickets(dir string, cfg config.Config, keys []string) []knowledge.Ticket {
 	list := cfg.Knowledge
 	if len(list) == 0 {
 		list = knowledge.Conventional(dir)
@@ -53,8 +76,13 @@ func ticketsWithFiles(dir string, cfg config.Config, keys []string) []string {
 	if err != nil {
 		return nil
 	}
+	return knowledge.ReadTickets(dir, sources, keys)
+}
+
+// ticketsWithFiles is the tickets of keys that have a ticket file.
+func ticketsWithFiles(dir string, cfg config.Config, keys []string) []string {
 	var out []string
-	for _, t := range knowledge.ReadTickets(dir, sources, keys) {
+	for _, t := range readTickets(dir, cfg, keys) {
 		out = append(out, t.Key)
 	}
 	slices.Sort(out)

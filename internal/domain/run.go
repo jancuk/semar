@@ -55,6 +55,8 @@ type ScenarioResult struct {
 const (
 	PurposeTrial        = "trial"
 	PurposeFixtureCheck = "fixture-check"
+	// PurposeRecording is the run of the fixtures that semar record makes for a recording.
+	PurposeRecording = "recording"
 )
 
 type Run struct {
