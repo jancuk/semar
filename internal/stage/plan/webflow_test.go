@@ -300,3 +300,21 @@ func TestACheckThatDiffersIsRecordedWhenTheModelSendsItAgain(t *testing.T) {
 		t.Errorf("the model was asked twice: %s", m.asked[2].Note)
 	}
 }
+
+// The texts of the manual check that code writes must pass the limits that a draft is held to: a
+// text that is one character too long made the plan refuse its own draft.
+func TestTheManualCheckOfAnUnprovedPartFitsTheLimitsOfADraft(t *testing.T) {
+	long := strings.Repeat("the order after a reload ", 40)
+	m := restOfManual(ManualCheckDraft{Ticket: "SHOP-482", Surface: "web", Cite: "docs/tickets/SHOP-482.md:11 x"}, strings.Repeat("A long title ", 40), oneLine(long, maxManualText))
+	if n := len([]rune(m.Title)); n > maxManualTitle {
+		t.Errorf("the title has %d characters, and the limit is %d", n, maxManualTitle)
+	}
+	if n := len([]rune(m.Expected)); n > maxManualText {
+		t.Errorf("the expected result has %d characters, and the limit is %d", n, maxManualText)
+	}
+	for _, s := range m.Steps {
+		if n := len([]rune(s)); n > maxManualText {
+			t.Errorf("a step has %d characters, and the limit is %d", n, maxManualText)
+		}
+	}
+}

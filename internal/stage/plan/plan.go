@@ -351,10 +351,11 @@ func codeList(names []string) string {
 	return strings.Join(quoted, ", ")
 }
 
+// oneLine is s on one line and never longer than limit: a cut text ends with an ellipsis that counts.
 func oneLine(s string, limit int) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if rs := []rune(s); len(rs) > limit {
-		return string(rs[:limit]) + "…"
+		return string(rs[:limit-1]) + "…"
 	}
 	return s
 }
