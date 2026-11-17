@@ -446,3 +446,34 @@ func TestFromPlanWritesAnUnaccountedCriterionAsAGapObligation(t *testing.T) {
 		t.Errorf("planning again added the criteria twice: %v", ids(again["SHOP-482"]))
 	}
 }
+
+func TestAManualCheckKeepsItsSurfaceInTheFile(t *testing.T) {
+	d := manualDraft()
+	d.ManualChecks[0].Surface = "web"
+	got, err := obligation.FromPlan(changeSet(), d, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := got["SHOP-482"]
+	data, err := obligation.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "surface: web\n") {
+		t.Errorf("the file does not name the surface:\n%s", data)
+	}
+	back, err := obligation.Parse(data, "SHOP-482.plan.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := back.Obligations[0].Manual; m == nil || m.Surface != "web" {
+		t.Errorf("manual after a round trip: %+v", m)
+	}
+	f.Obligations[0].Manual.Surface = "desktop"
+	if ps := obligation.Validate(f, "SHOP-482.plan.yaml"); len(ps) != 1 || !strings.Contains(ps[0].Message, "manual.surface must be one of web, mobile, other") {
+		t.Errorf("problems %v", ps)
+	}
+	if other := got["SHOP-481"].Obligations[0].Manual; other.Surface != "" {
+		t.Errorf("a check with no surface got %q", other.Surface)
+	}
+}

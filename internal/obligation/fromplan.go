@@ -142,6 +142,7 @@ func FromPlanWith(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario
 			Cite:   oneLine(mc.Cite, maxCite),
 			Manual: &Manual{
 				Kind:      "judgement",
+				Surface:   mc.Surface,
 				Text:      "Only a person can check this criterion, on a screen, on a device, or by a gesture",
 				Steps:     steps,
 				Expected:  oneLine(mc.Expected, maxManual),

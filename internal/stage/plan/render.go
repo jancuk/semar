@@ -348,6 +348,9 @@ func writeManualChecks(b *strings.Builder, checks []ManualCheckDraft, ticket str
 	b.WriteString("\nManual checks for a person:\n")
 	for i, m := range mine {
 		fmt.Fprintf(b, "\n%d. %s. Cite: %s\n", i+1, shown(strings.TrimRight(strings.TrimSpace(m.Title), "."), maxTextShown), shown(m.Cite, maxTextShown))
+		if m.Surface != "" {
+			fmt.Fprintf(b, "   - Surface: %s\n", shown(m.Surface, maxValueShown))
+		}
 		for _, s := range m.Steps {
 			fmt.Fprintf(b, "   - %s\n", shown(s, maxTextShown))
 		}

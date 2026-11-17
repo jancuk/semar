@@ -179,12 +179,12 @@ func TestConvertSaysInPlainWordsWhatIsWrong(t *testing.T) {
 
 func TestConvertAManualCheckAndANotDraftedEntry(t *testing.T) {
 	in, p := firstPacket(t)
-	manual := answerOf(t, `{"answer":{"kind":"manualCheck","title":"The order page shows the refund","manualSteps":["Open the order","Read the history"],"expected":"The refund is in the history"}}`)
+	manual := answerOf(t, `{"answer":{"kind":"manualCheck","title":"The order page shows the refund","surface":"web","manualSteps":["Open the order","Read the history"],"expected":"The refund is in the history"}}`)
 	res, ps := p.Convert(manual, in)
-	if len(ps) > 0 || res.Manual == nil || res.Manual.Cite != p.Why() || res.Manual.Ticket != "SHOP-482" || len(res.Manual.Steps) != 2 {
+	if len(ps) > 0 || res.Manual == nil || res.Manual.Cite != p.Why() || res.Manual.Ticket != "SHOP-482" || len(res.Manual.Steps) != 2 || res.Manual.Surface != "web" {
 		t.Errorf("manual = %+v, problems %s", res.Manual, messages(ps))
 	}
-	if _, ps := p.Convert(answerOf(t, `{"answer":{"kind":"manualCheck","title":"","manualSteps":[],"expected":""}}`), in); len(ps) != 3 {
+	if _, ps := p.Convert(answerOf(t, `{"answer":{"kind":"manualCheck","title":"","surface":"web","manualSteps":[],"expected":""}}`), in); len(ps) != 3 {
 		t.Errorf("problems:\n%s", messages(ps))
 	}
 	nd := answerOf(t, `{"answer":{"kind":"notDrafted","what":"the refund of an order of another shop","needs":"fixture order.other"}}`)
@@ -411,5 +411,27 @@ func TestAStepThatExpectsARefusalMayBreakAValidationRule(t *testing.T) {
 	}
 	if _, ps := p.Convert(withStep(t, success), in); !strings.Contains(messages(ps), "is an integer") {
 		t.Errorf("a wrong type was accepted in a step that expects success: %q", messages(ps))
+	}
+}
+
+func TestAManualCheckNamesItsSurface(t *testing.T) {
+	in, p := firstPacket(t)
+	for _, surface := range []string{"web", "mobile", "other"} {
+		a := answerOf(t, `{"answer":{"kind":"manualCheck","title":"t","surface":"`+surface+`","manualSteps":["x"],"expected":"e"}}`)
+		if res, ps := p.Convert(a, in); len(ps) > 0 || res.Manual.Surface != surface {
+			t.Errorf("surface %s: %+v, problems %s", surface, res.Manual, messages(ps))
+		}
+	}
+	for name, raw := range map[string]string{
+		"none":    `{"answer":{"kind":"manualCheck","title":"t","manualSteps":["x"],"expected":"e"}}`,
+		"unknown": `{"answer":{"kind":"manualCheck","title":"t","surface":"desktop","manualSteps":["x"],"expected":"e"}}`,
+	} {
+		_, ps := p.Convert(answerOf(t, raw), in)
+		if got := messages(ps); !strings.Contains(got, "surface") {
+			t.Errorf("%s: problems:\n%s\nwant one about the surface", name, got)
+		}
+	}
+	if got := string(p.AnswerSchema()); !strings.Contains(got, `"surface":{"enum":["web","mobile","other"],"type":"string"}`) {
+		t.Errorf("the schema has no closed surface:\n%s", got)
 	}
 }

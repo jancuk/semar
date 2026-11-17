@@ -34,9 +34,11 @@ type Answer struct {
 	Given       []AnswerGiven `json:"given,omitempty"`
 	Steps       []AnswerStep  `json:"steps,omitempty"`
 	ManualSteps []string      `json:"manualSteps,omitempty"`
-	Expected    string        `json:"expected,omitempty"`
-	What        string        `json:"what,omitempty"`
-	Needs       string        `json:"needs,omitempty"`
+	// Surface is where a person makes a manual check: web, mobile, or other. Code explores the web ones.
+	Surface  string `json:"surface,omitempty"`
+	Expected string `json:"expected,omitempty"`
+	What     string `json:"what,omitempty"`
+	Needs    string `json:"needs,omitempty"`
 	// FixtureID, FixtureState, and FixtureOutputs name the fixture of a needsFixture answer: the ID,
 	// one sentence on the state that it prepares, and the values that a step needs from it.
 	FixtureID      string   `json:"fixtureId,omitempty"`
@@ -110,6 +112,15 @@ func DecodeAnswer(data []byte) (Answer, error) {
 	return e.Answer, nil
 }
 
+// The surfaces of a manual check: a page in a browser, a screen of a phone app, or anything else.
+var Surfaces = []string{SurfaceWeb, SurfaceMobile, SurfaceOther}
+
+const (
+	SurfaceWeb    = "web"
+	SurfaceMobile = "mobile"
+	SurfaceOther  = "other"
+)
+
 // The operators of a check, as the structured Then line names them.
 var (
 	checkOperators = []string{"equals", "notEquals", "contains", "exists", "notExists", "greater", "less", "count", "equalsPath"}
@@ -134,6 +145,7 @@ func (p Packet) AnswerSchema() json.RawMessage {
 	manual := object(map[string]any{
 		"kind":        enum("string", KindManualCheck),
 		"title":       text("A short title."),
+		"surface":     enum("string", Surfaces...),
 		"manualSteps": array(text("One action of the person."), "What the person does, 1 to 20 steps."),
 		"expected":    text("What the person must see."),
 	})

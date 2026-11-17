@@ -164,3 +164,14 @@ func TestAccountsReachThePromptOnlyWithTwoOrMore(t *testing.T) {
 		t.Error("a prompt with one account and no ticket file has the new sections")
 	}
 }
+
+func TestThePlanNamesTheSurfaceOfAManualCheck(t *testing.T) {
+	in := goldenInput(t)
+	in.Tickets, in.Accounts = ticketInput(t).Tickets, ticketInput(t).Accounts
+	d := ticketGoldenDraft(t)
+	d.ManualChecks = []ManualCheckDraft{manual(func(m *ManualCheckDraft) { m.Surface = "mobile" }), manual(nil)}
+	got := render(t, in, goldenOutput(t, in, d))
+	if strings.Count(got, "   - Surface: mobile\n") != 1 || strings.Contains(got, "Surface: \n") || strings.Count(got, "Surface:") != 1 {
+		t.Errorf("plan.md does not name the surface of the first check only:\n%s", got)
+	}
+}

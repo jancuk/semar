@@ -25,7 +25,7 @@ func refundAnswer(title string, amount, status int, field string) string {
   "expect":[{"subject":"status","name":"","operator":"equals","value":%d}]}]}}`, title, field, amount, status)
 }
 
-const manualAnswer = `{"answer":{"kind":"manualCheck","title":"The order page shows the refund","manualSteps":["Open the order"],"expected":"The refund is listed"}}`
+const manualAnswer = `{"answer":{"kind":"manualCheck","title":"The order page shows the refund","surface":"web","manualSteps":["Open the order"],"expected":"The refund is listed"}}`
 
 // answersByCriterion answers each criterion of the shop ticket by its line, and the line 9 criterion
 // wrongly while bad is set. It records every prompt that it was given.

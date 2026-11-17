@@ -6,8 +6,8 @@ import (
 )
 
 func TestCriterionVersion(t *testing.T) {
-	if got := CriterionVersion(); got != "3" {
-		t.Errorf("CriterionVersion() = %q, want 3", got)
+	if got := CriterionVersion(); got != "4" {
+		t.Errorf("CriterionVersion() = %q, want 4", got)
 	}
 }
 
@@ -31,7 +31,7 @@ func TestCriterionRendersEveryField(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{d.Criterion, d.Operations, d.Fixtures, d.Accounts, "acts as `default`", d.Diff, d.DiffOmitted, d.Existing,
-		"`scenario`", "`manualCheck`", "`notDrafted`", "{{name}}", "missing-{{run.id}}"} {
+		"`scenario`", "`manualCheck`", "`surface`", "`notDrafted`", "{{name}}", "missing-{{run.id}}"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the prompt lacks %q", want)
 		}

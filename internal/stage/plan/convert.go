@@ -152,6 +152,9 @@ func (p Packet) convertManual(a Answer, ps *problems) *ManualCheckDraft {
 	if blank(a.Expected) {
 		ps.add("expected", "a manual check needs the result that the person must see")
 	}
+	if !slices.Contains(Surfaces, a.Surface) {
+		ps.add("surface", "a manual check names its surface, one of %s, and this one names %q", strings.Join(Surfaces, ", "), a.Surface)
+	}
 	if n := len(a.ManualSteps); n < 1 || n > maxManualSteps {
 		ps.add("manualSteps", "a manual check has 1 to %d steps, and this one has %d", maxManualSteps, n)
 	}
@@ -160,7 +163,7 @@ func (p Packet) convertManual(a Answer, ps *problems) *ManualCheckDraft {
 			ps.add(fmt.Sprintf("manualSteps[%d]", i), "the step is empty")
 		}
 	}
-	return &ManualCheckDraft{Ticket: p.Ticket, Title: a.Title, Steps: a.ManualSteps, Expected: a.Expected, Cite: p.Why()}
+	return &ManualCheckDraft{Ticket: p.Ticket, Title: a.Title, Surface: a.Surface, Steps: a.ManualSteps, Expected: a.Expected, Cite: p.Why()}
 }
 
 func (p Packet) convertScenario(a Answer, in Input, ps *problems) ScenarioDraft {

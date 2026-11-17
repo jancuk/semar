@@ -58,6 +58,9 @@ var sources = []Source{SourceCriterion, SourceDiff, SourceKnowledge, SourceTestc
 
 var manualKinds = []string{"physical_device", "third_party_otp", "judgement", "other"}
 
+// manualSurfaces are where a person makes a manual check.
+var manualSurfaces = []string{"web", "mobile", "other"}
+
 type Obligation struct {
 	ID       string              `yaml:"id"`
 	Title    string              `yaml:"title"`
@@ -83,7 +86,10 @@ type Retired struct {
 }
 
 type Manual struct {
-	Kind      string   `yaml:"kind"`
+	Kind string `yaml:"kind"`
+	// Surface is where a person makes the check: web, mobile, or other. It is empty for a check that
+	// no model sorted.
+	Surface   string   `yaml:"surface,omitempty"`
 	Text      string   `yaml:"text"`
 	Steps     []string `yaml:"steps"`
 	Expected  string   `yaml:"expected"`
@@ -201,7 +207,7 @@ var knownKeys = map[string][]string{
 	shapeFile:       {"apiVersion", "kind", "ticket", "obligations"},
 	shapeObligation: {"id", "title", "source", "cite", "ticket", "covers", "journeys", "gap", "manual", "retired"},
 	shapeRetired:    {"scenario", "reason", "user", "day"},
-	shapeManual:     {"kind", "text", "steps", "expected", "writtenBy"},
+	shapeManual:     {"kind", "surface", "text", "steps", "expected", "writtenBy"},
 }
 
 // walker records the line of every key and item, and the keys that no file may hold. A node
@@ -450,6 +456,9 @@ func validateManual(m Manual, p string, add func(path, format string, args ...an
 		case utf8.RuneCountInString(text) > maxManual:
 			add(p+"."+field, "manual.%s is longer than %d characters", field, maxManual)
 		}
+	}
+	if m.Surface != "" && !slices.Contains(manualSurfaces, m.Surface) {
+		add(p+".surface", "manual.surface must be one of %s", strings.Join(manualSurfaces, ", "))
 	}
 	oneLine("text", m.Text, true)
 	oneLine("expected", m.Expected, true)

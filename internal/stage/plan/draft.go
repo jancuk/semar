@@ -32,8 +32,10 @@ type Draft struct {
 // ManualCheckDraft is a check that a person makes on a screen or a device. Cite starts with
 // <ticket file>:<line> of the criterion.
 type ManualCheckDraft struct {
-	Ticket   string   `json:"ticket"`
-	Title    string   `json:"title"`
+	Ticket string `json:"ticket"`
+	Title  string `json:"title"`
+	// Surface is web, mobile, or other. The single pipeline leaves it empty.
+	Surface  string   `json:"surface,omitempty"`
 	Steps    []string `json:"steps"`
 	Expected string   `json:"expected"`
 	Cite     string   `json:"cite"`

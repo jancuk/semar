@@ -99,7 +99,7 @@ func TestPlanCriteriaPipelineEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	contains(t, "plan.md", string(md), "- Pipeline: criteria.", "| docs/tickets/SHOP-482.md:5 | scenario | small | 0 |", "Prompt version: criterion 3, fixture 3",
+	contains(t, "plan.md", string(md), "- Pipeline: criteria.", "| docs/tickets/SHOP-482.md:5 | scenario | small | 0 |", "Prompt version: criterion 4, fixture 3",
 		"| 5 | 1 | A refund above the rest of the total is refused with 422 and the error code REFUND_EXCEEDS_TOTAL. | SHOP-482-01 |",
 		"Tip: write each criterion as Given, When, and Then lines")
 }

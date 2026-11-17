@@ -76,6 +76,9 @@ func Marshal(f File) ([]byte, error) {
 		if m := o.Manual; m != nil {
 			mn := &yaml.Node{Kind: yaml.MappingNode}
 			put(mn, "kind", str(p+".manual.kind", m.Kind))
+			if m.Surface != "" {
+				put(mn, "surface", str(p+".manual.surface", m.Surface))
+			}
 			put(mn, "text", str(p+".manual.text", m.Text))
 			put(mn, "steps", strs(p+".manual.steps", m.Steps, false))
 			put(mn, "expected", str(p+".manual.expected", m.Expected))
@@ -160,5 +163,5 @@ func sameObligation(a, b Obligation) bool {
 		return true
 	}
 	x, y := *a.Manual, *b.Manual
-	return x.Kind == y.Kind && x.Text == y.Text && x.Expected == y.Expected && x.WrittenBy == y.WrittenBy && slices.Equal(x.Steps, y.Steps)
+	return x.Kind == y.Kind && x.Surface == y.Surface && x.Text == y.Text && x.Expected == y.Expected && x.WrittenBy == y.WrittenBy && slices.Equal(x.Steps, y.Steps)
 }
