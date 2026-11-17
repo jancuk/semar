@@ -73,6 +73,8 @@ type Output struct {
 	Pipeline *PipelineStats
 	Outcomes []CriterionOutcome
 	Answers  []StoredAnswer
+	// FixtureNeeds are the distinct fixtures that the answers named and no catalogue entry gives.
+	FixtureNeeds []FixtureNeed
 }
 
 // RefusedDraft is a draft that was not used: a problem of its own, or a problem that the trial

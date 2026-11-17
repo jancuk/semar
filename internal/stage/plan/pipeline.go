@@ -175,11 +175,42 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 	}
 
 	out := rs.output(b.Outcomes)
+	out.FixtureNeeds = collectNeeds(b.Outcomes)
 	out.Draft, out.Scenarios, out.Scripts = b.Draft, b.Scenarios, b.Scripts
 	out.Notes = compare(in, b.Scenarios, b.Scripts)
 	out.Trial, out.TrialReturned, out.Refused = tr, returned, refused
 	out.Unaccounted = Unaccounted(b.Draft, in.Tickets)
 	return out, nil
+}
+
+// collectNeeds lists each fixture that the answers name once, in the order of the criteria. When
+// criteria name one ID, the first state stands and the outputs are the union of theirs.
+func collectNeeds(outcomes []CriterionOutcome) []FixtureNeed {
+	var out []FixtureNeed
+	for _, o := range outcomes {
+		n := o.Result.Need
+		if !o.Answered || n == nil {
+			continue
+		}
+		i := slices.IndexFunc(out, func(f FixtureNeed) bool { return f.ID == n.ID })
+		if i < 0 {
+			out = append(out, FixtureNeed{ID: n.ID, State: n.State, Outputs: slices.Clone(n.Outputs), Cites: slices.Clone(n.Cites), Tickets: slices.Clone(n.Tickets)})
+			continue
+		}
+		f := &out[i]
+		for _, name := range n.Outputs {
+			if !slices.Contains(f.Outputs, name) && len(f.Outputs) < maxProposalNames {
+				f.Outputs = append(f.Outputs, name)
+			}
+		}
+		f.Cites = append(f.Cites, n.Cites...)
+		for _, t := range n.Tickets {
+			if !slices.Contains(f.Tickets, t) {
+				f.Tickets = append(f.Tickets, t)
+			}
+		}
+	}
+	return out
 }
 
 // built is a draft made from the outcomes, checked as a whole. Owners[i] is the outcome that gave

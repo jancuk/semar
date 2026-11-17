@@ -322,7 +322,7 @@ func TestAnswerSchemaIsClosed(t *testing.T) {
 	if !slices.Contains(bodyFields, "amount") || !slices.Contains(bodyFields, "customer") || slices.Contains(bodyFields, "orderId") {
 		t.Errorf("body fields = %v", bodyFields)
 	}
-	if !slices.Equal(kinds, []string{KindScenario, KindManualCheck, KindNotDrafted}) {
+	if !slices.Equal(kinds, []string{KindScenario, KindManualCheck, KindNeedsFixture, KindNotDrafted}) {
 		t.Errorf("kinds = %v", kinds)
 	}
 

@@ -6,7 +6,10 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
+	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/openapi"
 )
 
@@ -15,6 +18,19 @@ type CriterionResult struct {
 	Scenario   *ScenarioDraft
 	Manual     *ManualCheckDraft
 	NotDrafted *NotDrafted
+	// Need is set with NotDrafted when the answer names a fixture that the criterion needs.
+	Need *FixtureNeed
+}
+
+// FixtureNeed is a fixture that one or more criteria need and the catalogue lacks. The plan drafts it
+// (D7 of Plan 27) from the operations of the criteria that need it.
+type FixtureNeed struct {
+	ID      string
+	State   string
+	Outputs []string
+	Cites   []string // the cites of the criteria that need it, in the order of the plan
+	// Tickets are the tickets of those criteria.
+	Tickets []string
 }
 
 var (
@@ -64,6 +80,8 @@ func (p Packet) Convert(a Answer, in Input) (CriterionResult, []Problem) {
 		res.Scenario = &sd
 	case KindManualCheck:
 		res.Manual = p.convertManual(a, &ps)
+	case KindNeedsFixture:
+		res.NotDrafted, res.Need = p.convertNeed(a, in, &ps)
 	case KindNotDrafted:
 		if blank(a.What) {
 			ps.add("what", "say what cannot be tested through the API")
@@ -77,6 +95,52 @@ func (p Packet) Convert(a Answer, in Input) (CriterionResult, []Problem) {
 		return CriterionResult{}, ps.list
 	}
 	return res, nil
+}
+
+// convertNeed checks the fixture that an answer names, by the rules of a fixture file: the form of
+// the ID and of the names, and one paragraph of state. The criterion stays a gap until the fixture
+// is drafted, so the result is a notDrafted entry whose needs names the fixture.
+func (p Packet) convertNeed(a Answer, in Input, ps *problems) (*NotDrafted, *FixtureNeed) {
+	switch {
+	case !fixtureIDPattern.MatchString(a.FixtureID):
+		ps.add("fixtureId", "id %q "+fixtureIDRule, a.FixtureID)
+	case len(a.FixtureID) > maxFixtureIDBytes:
+		ps.add("fixtureId", "id %q is longer than %d bytes", a.FixtureID, maxFixtureIDBytes)
+	default:
+		if _, ok := fixtureIndex(in.Fixtures)[domain.FixtureID(a.FixtureID)]; ok {
+			ps.add("fixtureId", "%s is in the catalogue already; name it in given", a.FixtureID)
+		}
+	}
+	state := strings.TrimSpace(a.FixtureState)
+	switch {
+	case state == "":
+		ps.add("fixtureState", "say in one sentence what state the fixture prepares")
+	case utf8.RuneCountInString(state) > maxProposalDesc:
+		ps.add("fixtureState", "the state has %d characters; at most %d", utf8.RuneCountInString(state), maxProposalDesc)
+	case blankLine.MatchString(state) || strings.ContainsFunc(state, func(r rune) bool { return unicode.IsControl(r) && r != '\n' }):
+		ps.add("fixtureState", "the state must be one paragraph of plain text")
+	}
+	if n := len(a.FixtureOutputs); n < 1 || n > maxProposalNames {
+		ps.add("fixtureOutputs", "name 1 to %d values that a step reads from the fixture, and this answer names %d", maxProposalNames, n)
+	}
+	seen := map[string]bool{}
+	for i, o := range a.FixtureOutputs {
+		switch {
+		case !outputPattern.MatchString(o):
+			ps.add(fmt.Sprintf("fixtureOutputs[%d]", i), "name %q %s", o, outputRule)
+		case seen[o]:
+			ps.add(fmt.Sprintf("fixtureOutputs[%d]", i), "name %s is listed twice", o)
+		}
+		seen[o] = true
+	}
+	if blank(a.What) {
+		ps.add("what", "say what the scenario would test")
+	}
+	if len(ps.list) > 0 {
+		return nil, nil
+	}
+	nd := &NotDrafted{Ticket: p.Ticket, What: a.What, Needs: "fixture " + a.FixtureID + ": " + oneLine(state, 160), Cite: p.Why()}
+	return nd, &FixtureNeed{ID: a.FixtureID, State: state, Outputs: slices.Clone(a.FixtureOutputs), Cites: []string{p.Cite}, Tickets: []string{p.Ticket}}
 }
 
 func blank(s string) bool { return strings.TrimSpace(s) == "" }
