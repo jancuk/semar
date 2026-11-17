@@ -16,6 +16,7 @@ import (
 	"github.com/chromedp/chromedp/kb"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/engine/web/webinput"
 )
 
 // errCovered is the error of a click on an element that another element covers: a person could not
@@ -70,7 +71,7 @@ func (r *reader) click(id cdp.BackendNodeID) error {
 	if res.Result != nil && string(res.Result.Value) == "false" {
 		return errCovered
 	}
-	return chromedp.Do(r.ctx, chromedp.MouseClickXY(x, y))
+	return webinput.Click(r.ctx, x, y)
 }
 
 // drag holds the button on the middle of the first element, moves to the middle of the second, and
@@ -90,7 +91,7 @@ func (r *reader) drag(from, to cdp.BackendNodeID) error {
 	if err != nil {
 		return err
 	}
-	if err := chromedp.Do(r.ctx, chromedp.DragAndDropXY(fx, fy, tx, ty)); err != nil {
+	if err := webinput.Drag(r.ctx, fx, fy, tx, ty); err != nil {
 		if errors.Is(err, chromedp.ErrDragOutsideViewport) {
 			return errors.New("the two elements of the drag are not on the screen at the same time")
 		}
@@ -194,7 +195,7 @@ func pressKey(ctx context.Context, name string) error {
 	default:
 		return fmt.Errorf("the key %q is not known: use Enter, Tab, Escape, Backspace, Delete, Space, an arrow, Home, End, PageUp, PageDown, or one character", name)
 	}
-	return chromedp.Do(ctx, chromedp.KeyEvent(key))
+	return webinput.Keys(ctx, key)
 }
 
 // waitFor looks for the element until it is found or the time is up, and gives the last reading.

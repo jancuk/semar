@@ -1,14 +1,15 @@
-// Package webtest sends the input of a person to a Chrome tab through the browser protocol: the
-// mouse, the keyboard, and the drag. A test of the recorder uses it where a person would use their
-// hands, so that what the recorder hears is real input and not a call into the page.
+// Package webtest finds an element of a page by its selector and sends input to it with webinput, as
+// a person uses their hands. A test of the recorder uses it, so that what the recorder hears is real
+// input and not a call into the page.
 package webtest
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/chromedp"
+
+	"github.com/jancuk/semar/internal/engine/web/webinput"
 )
 
 // Driver sends input to one tab.
@@ -37,7 +38,7 @@ func (d Driver) Click(sel string) error {
 	if err != nil {
 		return err
 	}
-	return chromedp.Do(d.Tab, chromedp.MouseClickXY(x, y))
+	return webinput.Click(d.Tab, x, y)
 }
 
 // OptionClick is a click with the Option key held down.
@@ -46,15 +47,7 @@ func (d Driver) OptionClick(sel string) error {
 	if err != nil {
 		return err
 	}
-	for _, typ := range []input.DispatchMouseEventType{chromedp.MousePressed, chromedp.MouseReleased} {
-		err := chromedp.Do(d.Tab, chromedp.MouseEvent(typ, x, y, func(p *input.DispatchMouseEventParams) {
-			p.Button, p.ClickCount, p.Modifiers = input.MouseButtonLeft, 1, int64(chromedp.ModifierAlt)
-		}))
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return webinput.OptionClick(d.Tab, x, y)
 }
 
 // Type clicks a field to focus it and sends one key event for each character.
@@ -66,7 +59,7 @@ func (d Driver) Type(sel, text string) error {
 }
 
 // Keys sends key events: a character, or a key of the kb package such as kb.Enter.
-func (d Driver) Keys(keys string) error { return chromedp.Do(d.Tab, chromedp.KeyEvent(keys)) }
+func (d Driver) Keys(keys string) error { return webinput.Keys(d.Tab, keys) }
 
 // Drag presses on one element, moves in steps to another, and lets go.
 func (d Driver) Drag(from, to string) error {
@@ -78,5 +71,5 @@ func (d Driver) Drag(from, to string) error {
 	if err != nil {
 		return err
 	}
-	return chromedp.Do(d.Tab, chromedp.DragAndDropXY(fx, fy, tx, ty))
+	return webinput.Drag(d.Tab, fx, fy, tx, ty)
 }
