@@ -78,6 +78,9 @@ func newInitCommand(o options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			given := givenInitFlags(cmd)
 			asked := false
+			if _, err := os.Lstat(configPath(dir)); err == nil && f.baseURL == "" && !initFlagGiven(cmd) {
+				return checkMachine(cmd.Context(), o, cmd.OutOrStdout(), dir)
+			}
 			if f.baseURL == "" {
 				if !o.Terminal() {
 					return errors.New("--base-url is required: the address of the service in the environment. " +
