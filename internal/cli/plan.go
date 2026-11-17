@@ -209,7 +209,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	}
 	defer os.RemoveAll(tmp)
 	var leftOut []vcs.Skipped
-	if in.SourceDir, leftOut, err = prepareSource(ctx, g, cs, tmp); err != nil {
+	if in.SourceDir, in.Diff, leftOut, err = prepareSource(ctx, g, cs, tmp); err != nil {
 		return err
 	}
 	for _, s := range leftOut {
@@ -385,28 +385,28 @@ func pickAuthProfile(cfg config.Config, name string) (string, error) {
 
 // prepareSource copies the head commit for the planner, without the files that instruct an
 // agent (R5) and without Semar's own configuration, which names hosts (R19). It adds the change
-// table and the diff under .semar-plan, and returns the files that the copy left out.
-func prepareSource(ctx context.Context, g *vcs.Git, cs domain.ChangeSet, tmp string) (string, []vcs.Skipped, error) {
+// table and the diff under .semar-plan, and returns the diff and the files that the copy left out.
+func prepareSource(ctx context.Context, g *vcs.Git, cs domain.ChangeSet, tmp string) (string, []byte, []vcs.Skipped, error) {
 	src := filepath.Join(tmp, "src")
 	leftOut, err := g.Archive(ctx, cs.HeadCommit, src)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	if err := removeAgentFiles(src); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	for _, name := range []string{".semar", plan.PlanDir} {
 		if err := os.RemoveAll(filepath.Join(src, name)); err != nil {
-			return "", nil, fmt.Errorf("prepare the copy of the source: %w", err)
+			return "", nil, nil, fmt.Errorf("prepare the copy of the source: %w", err)
 		}
 	}
 	dir := filepath.Join(src, plan.PlanDir)
 	if err := os.Mkdir(dir, 0o700); err != nil {
-		return "", nil, fmt.Errorf("prepare the copy of the source: %w", err)
+		return "", nil, nil, fmt.Errorf("prepare the copy of the source: %w", err)
 	}
 	var table bytes.Buffer
 	if err := changeset.Table(&table, cs); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	if len(leftOut) > 0 {
 		table.WriteString("\n## Files left out of the copy\n\nThese files of the head commit are not in this copy, so they cannot be read.\n\n")
@@ -416,14 +416,14 @@ func prepareSource(ctx context.Context, g *vcs.Git, cs domain.ChangeSet, tmp str
 	}
 	diff, err := g.Diff(ctx, cs.MergeBase, cs.HeadCommit)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	for name, data := range map[string][]byte{"changes.md": table.Bytes(), "change.diff": diff} {
 		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
-			return "", nil, fmt.Errorf("prepare the copy of the source: %w", err)
+			return "", nil, nil, fmt.Errorf("prepare the copy of the source: %w", err)
 		}
 	}
-	return src, leftOut, nil
+	return src, diff, leftOut, nil
 }
 
 // removeAgentFiles matches names without regard to case, because a file system that ignores

@@ -20,6 +20,11 @@ type PlanData struct {
 	Attempt      bool   // false on the first attempt
 	Problems     string // a Markdown list of what the previous draft got wrong
 	ChangeTable  string
+	LeftOut      string // a Markdown list of the files that the copy of the source lacks; empty when there is none
+	Diff         string // the difference as a fenced block; empty when none of it is shown
+	DiffWhole    bool   // Diff is the whole difference
+	DiffOmitted  string // a Markdown list of the files whose hunks Diff lacks; empty when there is none
+	API          string // a Markdown list of the API operations that the difference names; empty when there is none
 	Services     string
 	Methods      string
 	MaxScenarios int

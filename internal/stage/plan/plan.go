@@ -90,8 +90,13 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 	if err := changeset.Table(&table, in.Change); err != nil {
 		return Output{}, fmt.Errorf("plan: %w", err)
 	}
+	shown := chooseDiff(in.Diff, in.Change.Files, MaxDiffBytes)
 	data := prompt.PlanData{
 		ChangeTable:  strings.TrimRight(table.String(), "\n"),
+		LeftOut:      leftOutList(in.LeftOut),
+		DiffWhole:    shown.Whole,
+		DiffOmitted:  strings.Join(shown.Omitted, "\n"),
+		API:          apiExcerpt(in.Knowledge, in.Diff),
 		Services:     codeList(in.Services),
 		Methods:      strings.Join(in.Methods, ", "),
 		MaxScenarios: in.Limits.MaxScenarios,
@@ -100,6 +105,9 @@ func Run(ctx context.Context, p Planner, in Input) (Output, error) {
 		Fixtures:     fixtureList(in.Fixtures),
 		Tickets:      ticketList(in.Tickets, ticketKeys(in.Tickets)),
 		Accounts:     accountList(in.Accounts),
+	}
+	if shown.Text != "" {
+		data.Diff = fenced("diff", shown.Text)
 	}
 	var total provider.Result
 	var problems []Problem

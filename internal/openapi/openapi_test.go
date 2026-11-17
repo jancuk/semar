@@ -328,3 +328,28 @@ func FuzzParse(f *testing.F) {
 		_ = m
 	})
 }
+
+func TestParseReadsTheOperationIDAndSummary(t *testing.T) {
+	docs := map[string]string{
+		"json": `{"openapi": "3.0.3", "paths": {"/orders/{id}/refunds": {"post": {"operationId": "refundOrder", "summary": "Refund an order", "responses": {"201": {}}}, "get": {"responses": {"200": {}}}}}}`,
+		"yaml": "openapi: 3.0.3\npaths:\n  /orders/{id}/refunds:\n    post:\n      operationId: refundOrder\n      summary: Refund an order\n      responses:\n        \"201\": {description: ok}\n    get:\n      responses:\n        \"200\": {description: ok}\n",
+	}
+	for name, src := range docs {
+		t.Run(name, func(t *testing.T) {
+			doc, err := openapi.Parse([]byte(src), name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(doc.Operations) != 2 {
+				t.Fatalf("operations = %+v", doc.Operations)
+			}
+			get, post := doc.Operations[0], doc.Operations[1]
+			if get.Method != "GET" || get.ID != "" || get.Summary != "" {
+				t.Errorf("get = %+v", get)
+			}
+			if post.Method != "POST" || post.ID != "refundOrder" || post.Summary != "Refund an order" {
+				t.Errorf("post = %+v", post)
+			}
+		})
+	}
+}

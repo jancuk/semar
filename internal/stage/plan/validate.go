@@ -29,6 +29,7 @@ import (
 type Input struct {
 	Change        domain.ChangeSet
 	SourceDir     string   // the copy of the source at the head commit
+	Diff          []byte   // the difference between the merge base and the head, which the prompt carries as far as MaxDiffBytes allows
 	Services      []string // names from the configuration
 	Methods       []string // methods the environment allows
 	AuthProfile   string

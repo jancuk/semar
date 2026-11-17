@@ -114,7 +114,7 @@ The planner could not read these files of the head commit.
 - Setup: the planner could use 2 MCP servers and 3 skills of your own setup, under the permission mode default
 - Tool calls: Read 7, MCP tools (names withheld) 3
 - Refused tool calls: 2
-- Prompt version: 7
+- Prompt version: 8
 
 Every expected result here was read from the code by a model. Confirm each scenario before its result counts.
 

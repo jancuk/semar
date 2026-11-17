@@ -73,6 +73,8 @@ type Operation struct {
 	Path     string   // as written, for example /orders/{id}
 	Statuses []string // the keys of responses, sorted: "200", "4XX", "default"
 	Line     int      // the line of the operation in a YAML document, 0 when unknown
+	ID       string   // operationId, "" when the operation has none
+	Summary  string   // summary, "" when the operation has none
 }
 
 // Match is the answer of Lookup.
@@ -235,9 +237,12 @@ func readJSON(data []byte, name string) (rawDoc, error) {
 			}
 			op := Operation{Method: strings.ToUpper(m), Path: p}
 			var o struct {
+				ID        string                     `json:"operationId"`
+				Summary   string                     `json:"summary"`
 				Responses map[string]json.RawMessage `json:"responses"`
 			}
 			if json.Unmarshal(rawOp, &o) == nil {
+				op.ID, op.Summary = o.ID, o.Summary
 				if b.spend(len(o.Responses)) != nil {
 					return rawDoc{}, tooMuch(name)
 				}
@@ -355,6 +360,18 @@ func readYAML(data []byte, name string) (rawDoc, error) {
 			}
 			op := Operation{Method: strings.ToUpper(mk.Value), Path: pk.Value, Line: mk.Line}
 			if o := resolve(item.Content[j+1]); o != nil && o.Kind == yaml.MappingNode {
+				for _, f := range []struct {
+					key string
+					to  *string
+				}{{"operationId", &op.ID}, {"summary", &op.Summary}} {
+					v, err := look(o, f.key)
+					if err != nil {
+						return rawDoc{}, err
+					}
+					if v != nil && v.Kind == yaml.ScalarNode {
+						*f.to = v.Value
+					}
+				}
 				r, err := look(o, "responses")
 				if err != nil {
 					return rawDoc{}, err
