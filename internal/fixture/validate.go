@@ -66,14 +66,26 @@ var (
 // Validate checks rules F2 to F14 on a parsed fixture. With services set, it also checks F16: every
 // step names one of them. With services nil, F16 is skipped; an empty list refuses every service.
 // F1 and F15 are checked by Parse.
-func Validate(f domain.Fixture, services []string) []Problem {
-	return validate(f, "", services)
+func Validate(f domain.Fixture, services []string, opts ...Option) []Problem {
+	return validate(f, "", services, opts...)
+}
+
+// Option adds a rule that needs the configuration.
+type Option func(*validator)
+
+// Accounts gives the auth profiles of the configuration, for rule F17: the as of a step is one of
+// them. Without this option only the form of the name is checked.
+func Accounts(names ...string) Option {
+	return func(v *validator) { v.accounts, v.accountsKnown = names, true }
 }
 
 // validate is Validate for a fixture that came from file, as the caller names it. An empty file
 // skips the check of the file name.
-func validate(f domain.Fixture, file string, services []string) []Problem {
+func validate(f domain.Fixture, file string, services []string, opts ...Option) []Problem {
 	v := &validator{file: file, services: services, f: f}
+	for _, o := range opts {
+		o(v)
+	}
 	v.header()
 	v.params()
 	if f.Lease != "" && f.Lease != domain.LeaseExclusive {
@@ -90,6 +102,9 @@ type validator struct {
 	services []string
 	f        domain.Fixture
 	ps       []Problem
+
+	accounts      []string
+	accountsKnown bool
 	// captured holds, for each phase, every name that the steps of the phase capture
 	captured map[string]map[string]bool
 }
@@ -233,6 +248,7 @@ func (v *validator) phase(name string, steps []domain.FixtureStep, createNames m
 			}
 			return name == domain.PhaseCleanup && createNames[n]
 		}
+		v.as(where, st.As)
 		v.request(where, name, st.Request, known)
 		v.captures(where, name, st.Captures, all)
 		for _, c := range st.Captures {
@@ -240,6 +256,24 @@ func (v *validator) phase(name string, steps []domain.FixtureStep, createNames m
 		}
 		v.until(where, st)
 	}
+}
+
+func (v *validator) as(where, name string) {
+	if name == "" {
+		return
+	}
+	if err := idcheck.Check("auth profile name", name); err != nil {
+		v.add(where+".as", "%s", err)
+		return
+	}
+	if !v.accountsKnown || slices.Contains(v.accounts, name) {
+		return
+	}
+	if len(v.accounts) == 0 {
+		v.add(where+".as", "%s is not an auth profile of the configuration, and the configuration has no auth profile: leave out as", name)
+		return
+	}
+	v.add(where+".as", "%s is not an auth profile of the configuration: use one of %s, or leave out as", name, strings.Join(slices.Sorted(slices.Values(v.accounts)), ", "))
 }
 
 const unknownVariable = " is not a known variable"

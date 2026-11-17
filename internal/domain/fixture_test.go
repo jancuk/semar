@@ -79,6 +79,9 @@ func TestFixtureHashCoversEveryField(t *testing.T) {
 		"Find.Captures.JSONPath": func(f *domain.Fixture) {
 			f.Find[0].Captures[0].JSONPath = "$.data[1].id"
 		},
+		"Find.As":                func(f *domain.Fixture) { f.Find[0].As = "carol" },
+		"Create.As":              func(f *domain.Fixture) { f.Create[0].As = "carol" },
+		"Cleanup.As":             func(f *domain.Fixture) { f.Cleanup[0].As = "carol" },
 		"Find.Captures.Element":  func(f *domain.Fixture) { f.Find[0].Captures[0].Element = "title" },
 		"Create":                 func(f *domain.Fixture) { f.Create = nil },
 		"Create.Until":           func(f *domain.Fixture) { f.Create[0].Until = nil },

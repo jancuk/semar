@@ -202,6 +202,30 @@ func TestValidateRules(t *testing.T) {
 	}
 }
 
+func TestValidateAsOfAStep(t *testing.T) {
+	f := example(t)
+	f.Create[0].As = "carol"
+	f.Cleanup[0].As = "carol"
+	if ps := Validate(f, nil); len(ps) != 0 {
+		t.Fatalf("a step that names an account is valid without a list of accounts: %v", ps)
+	}
+	if ps := Validate(f, nil, Accounts("default", "carol")); len(ps) != 0 {
+		t.Fatalf("problems = %v", ps)
+	}
+	ps := Validate(f, nil, Accounts("default", "bob"))
+	if !hasProblem(ps, "create[0].as", "carol is not an auth profile of the configuration: use one of bob, default, or leave out as") ||
+		!hasProblem(ps, "cleanup[0].as", "carol is not an auth profile") {
+		t.Fatalf("problems = %v", ps)
+	}
+	if ps := Validate(f, nil, Accounts()); !hasProblem(ps, "create[0].as", "the configuration has no auth profile: leave out as") {
+		t.Fatalf("problems = %v", ps)
+	}
+	f.Create[0].As = "Car ol"
+	if ps := Validate(f, nil); !hasProblem(ps, "create[0].as", "auth profile name") {
+		t.Fatalf("a bad name is a problem with no list of accounts: %v", ps)
+	}
+}
+
 func TestValidateWithoutServicesSkipsF16(t *testing.T) {
 	f := example(t)
 	f.Create[1].Request.Service = "ledger"

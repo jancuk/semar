@@ -34,7 +34,7 @@ const (
 
 var testKey = []byte("0123456789abcdef0123456789abcdef")
 
-var tokens = map[string]string{"alice": "tok-alice", "payments-tester": "tok-pay"}
+var tokens = map[string]string{"alice": "tok-alice", "bob": "tok-bob", "payments-tester": "tok-pay"}
 
 // fakeClock moves only when the resolver sleeps, so no test waits.
 type fakeClock struct {
@@ -157,7 +157,7 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	red, err := redact.New(config.Redact{}, func() []string { return []string{"tok-alice", "tok-pay"} }, testKey)
+	red, err := redact.New(config.Redact{}, func() []string { return []string{"tok-alice", "tok-bob", "tok-pay"} }, testKey)
 	if err != nil {
 		t.Fatal(err)
 	}

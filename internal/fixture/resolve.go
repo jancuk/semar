@@ -612,7 +612,10 @@ func (r *Resolver) send(ctx context.Context, e *entry, pass domain.Pass, phase s
 			return outcome{notSent: true, renderErr: err, failure: "could not be built: its json body does not encode"}, nil
 		}
 	}
-	auth := r.d.ServiceAuth[rendered.Service]
+	auth := st.As
+	if auth == "" {
+		auth = r.d.ServiceAuth[rendered.Service]
+	}
 	if auth == "" {
 		auth = e.auth
 	}

@@ -223,7 +223,7 @@ func (m *machineCheck) approvals(dir string, cfg config.Config) {
 	if n > 0 {
 		parts = append(parts, plural(n, "scenario"))
 	}
-	if cat, err := fixture.Load(dir, allServices(cfg)); err == nil {
+	if cat, err := fixture.Load(dir, allServices(cfg), fixtureAccounts(cfg)); err == nil {
 		n = 0
 		for _, fx := range cat.Fixtures {
 			if ok, err := approvals.FixtureApproved(fx.ID, domain.FixtureHash(fx)); err != nil || !ok {

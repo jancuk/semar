@@ -455,8 +455,12 @@ func writeFixturesDrafted(b *strings.Builder, out Output) {
 		if len(users) > 0 {
 			used = strings.Join(users, ", ")
 		}
+		requests := counted(len(d.Fixture.Create)+len(d.Fixture.Cleanup), "request")
+		if as := d.Fixture.Accounts(); len(as) > 0 {
+			requests += " as " + shown(strings.Join(as, ", "), maxValueShown)
+		}
 		fmt.Fprintf(b, "- %s: %s. %s, %s. %s\n", id, strings.TrimRight(shown(d.Fixture.Description, maxTextShown), "."),
-			counted(len(d.Fixture.Create)+len(d.Fixture.Cleanup), "request"), clean, FixtureRunWords(d))
+			requests, clean, FixtureRunWords(d))
 		fmt.Fprintf(b, "  Used by %s. Not approved → semar review %s\n", shown(used, maxTextShown), id)
 	}
 }

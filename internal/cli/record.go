@@ -412,7 +412,7 @@ func makeFixtures(ctx context.Context, cmd *cobra.Command, o options, f recordTe
 		return fixtureValues{vars: map[string]string{}}, none, nil
 	}
 	out, errw := cmd.OutOrStdout(), cmd.ErrOrStderr()
-	cat, err := fixture.Load(f.dir, allServices(cfg))
+	cat, err := fixture.Load(f.dir, allServices(cfg), fixtureAccounts(cfg))
 	if err != nil {
 		return fixtureValues{}, none, err
 	}

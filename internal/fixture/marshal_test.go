@@ -45,3 +45,29 @@ func TestMarshalWritesAFileThatParsesToTheSameFixture(t *testing.T) {
 		t.Errorf("the file holds keys that a drafted fixture has no value for:\n%s", text)
 	}
 }
+
+func TestMarshalKeepsTheAccountOfAStep(t *testing.T) {
+	fx := drafted()
+	fx.Create[0].As = "carol"
+	data, err := Marshal(fx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), "as: carol") != 1 {
+		t.Errorf("the file has one as:\n%s", data)
+	}
+	back, err := Parse(data, "order.cancelled.yaml")
+	if err != nil {
+		t.Fatalf("Parse: %v\n%s", err, data)
+	}
+	if back.Create[0].As != "carol" || back.Create[1].As != "" {
+		t.Errorf("as after a round trip = %q, %q", back.Create[0].As, back.Create[1].As)
+	}
+	if domain.FixtureHash(back) != domain.FixtureHash(fx) || domain.FixtureHash(fx) == domain.FixtureHash(drafted()) {
+		t.Error("the hash must cover as, and survive the round trip")
+	}
+	plain, _ := Marshal(drafted())
+	if strings.Contains(string(plain), "as:") {
+		t.Errorf("a step with no account has no as:\n%s", plain)
+	}
+}

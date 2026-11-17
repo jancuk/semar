@@ -372,3 +372,47 @@ func TestPlanMarksAnApprovedFixture(t *testing.T) {
 		t.Errorf("an approved fixture is marked as not approved:\n%s", prompt)
 	}
 }
+
+const otherTokenVar = "SEMAR_OTHER_TOKEN"
+
+// withOtherAccount adds the account other, which the sample orders service knows as bob.
+func (r *repo) withOtherAccount(t *testing.T) {
+	t.Helper()
+	t.Setenv(otherTokenVar, "tok-bob")
+	r.rewriteConfig(t, func(s string) string {
+		return s + "  other:\n    session: {header: Authorization, value: \"Bearer {{secret.TOKEN}}\"}\n    secrets: {TOKEN: \"env:" + otherTokenVar + "\"}\n"
+	})
+}
+
+func TestFixtureCheckSendsAStepAsItsAccount(t *testing.T) {
+	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
+	r.withOtherAccount(t)
+	// The order is made by the other account, so the account of the run cannot read it.
+	r.writeFixture(t, "order.paid.yaml", strings.Replace(orderPaidFixture, "  - request: { service: orders, method: POST, path: /v1/orders,", "  - as: other\n    request: { service: orders, method: POST, path: /v1/orders,", 1))
+	r.approveFixture(t)
+
+	res := r.must(t, cli.ExitUndecided, "fixture", "check", "order.paid", "--env", "local", "--auth-profile", "support-agent")
+	contains(t, "the check", res.stdout, "create step 3 (GET /v1/orders/{{id}}) answered 403")
+
+	text := strings.ReplaceAll(orderPaidFixture, "  - request: { service: orders, method: POST,", "  - as: other\n    request: { service: orders, method: POST,")
+	text = strings.ReplaceAll(text, "  - request: { service: orders, method: GET, path: \"/v1/orders/{{id}}\"", "  - as: other\n    request: { service: orders, method: GET, path: \"/v1/orders/{{id}}\"")
+	r.writeFixture(t, "order.paid.yaml", text)
+	r.approveFixture(t)
+	res = r.must(t, cli.ExitOK, "fixture", "check", "order.paid", "--env", "local", "--auth-profile", "support-agent")
+	contains(t, "the check", res.stdout, "healthy")
+}
+
+func TestAFixtureStepThatActsAsAnUnknownAccountIsRefused(t *testing.T) {
+	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
+	r.writeFixture(t, "order.paid.yaml", strings.Replace(orderPaidFixture, "  - request: { service: orders, method: POST, path: /v1/orders,", "  - as: carol\n    request: { service: orders, method: POST, path: /v1/orders,", 1))
+	res := r.must(t, cli.ExitUndecided, "fixture", "list")
+	contains(t, "the list", res.stdout, "invalid: .semar/fixtures/order.paid.yaml: create[0].as: carol is not an auth profile of the configuration: use one of payments-tester, support-agent, or leave out as")
+}
+
+func TestFixtureListNamesTheAccountsThatAFixtureActsAs(t *testing.T) {
+	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
+	r.withOtherAccount(t)
+	r.writeFixture(t, "order.paid.yaml", strings.Replace(orderPaidFixture, "  - request: { service: orders, method: POST, path: /v1/orders,", "  - as: other\n    request: { service: orders, method: POST, path: /v1/orders,", 1))
+	res := r.must(t, cli.ExitOK, "fixture", "list")
+	contains(t, "the list", res.stdout, "order.paid", "acts as other", "used by SHOP-482-05")
+}

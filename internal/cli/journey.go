@@ -414,7 +414,7 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir string, cfg config.Config, envName string, env config.Environment, declared map[string]string, chosen []domain.Journey, headed bool, announce func()) (finishedRun, error) {
 	var cat *fixture.Catalogue
 	if slices.ContainsFunc(chosen, func(j domain.Journey) bool { return len(j.Given) > 0 }) {
-		c, err := fixture.Load(dir, allServices(cfg))
+		c, err := fixture.Load(dir, allServices(cfg), fixtureAccounts(cfg))
 		if err != nil {
 			return finishedRun{}, err
 		}
