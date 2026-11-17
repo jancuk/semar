@@ -82,6 +82,9 @@ func recordRepoWith(t *testing.T, o repoOptions) (*repo, *shopPages) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/refund", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, refundShop(pages.refund.Load())) })
 		mux.HandleFunc("/signin", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, signInShop) })
+		mux.HandleFunc("/braces", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, `<!doctype html><title>Braces</title><p id="t">hello {{x}} world</p>`)
+		})
 		mux.HandleFunc("/orders/", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, orderShop(strings.TrimPrefix(r.URL.Path, "/orders/")))
 		})
@@ -241,6 +244,17 @@ func TestRecordRefusesAScenarioThatExistsUntilItIsToldToReplaceIt(t *testing.T) 
 	must(t, err)
 	if string(before) != string(after) {
 		t.Errorf("a second recording of the same page changed the screens file:\n%s\n---\n%s", before, after)
+	}
+}
+
+func TestRecordRefusesATextThatTheEngineWouldReadAsAVariable(t *testing.T) {
+	r, _ := recordRepo(t)
+	res := r.record(t, t.Context(), cli.ExitError, func(d webtest.Driver) {
+		must(t, d.OptionClick("#t"))
+	}, "SHOP-482-14", "--open", "/braces")
+	contains(t, "the error", res.stderr, "nothing was written", "step wait-t", "x is used before any step captures it")
+	if exists(t, r.path(".semar", "screens")) || exists(t, r.path(".semar", "scenarios", "SHOP-482", "SHOP-482-14.feature")) {
+		t.Error("a file was written for a recording that makes an invalid script")
 	}
 }
 

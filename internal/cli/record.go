@@ -234,6 +234,17 @@ func recordTest(ctx context.Context, cmd *cobra.Command, o options, f recordTest
 		return fmt.Errorf("the recording makes a scenario that is not valid: %s: %s", p.Path, p.Message)
 	}
 
+	if ps := script.Validate(draft.Scenario, draft.Script); len(ps) > 0 {
+		msgs := make([]string, len(ps))
+		for i, p := range ps {
+			msgs[i] = terminalSafe(oneLine(p.Message))
+			if p.Step != "" {
+				msgs[i] = "step " + string(p.Step) + ": " + msgs[i]
+			}
+		}
+		return fmt.Errorf("nothing was written: the recording makes a script that does not fit its scenario: %s", strings.Join(msgs, "; "))
+	}
+
 	written, err := record.Write(f.dir, draft, record.WriteOptions{App: app, Subject: ticket, Replace: replace})
 	if err != nil {
 		return err
