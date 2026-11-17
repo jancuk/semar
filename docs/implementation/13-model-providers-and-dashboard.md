@@ -7,7 +7,7 @@ A person chooses which model plans their tests, and manages that choice in one p
 1. `semar plan` can use Claude Code, Codex, the Anthropic API, the OpenAI API, or any server that speaks the OpenAI chat format (DeepSeek, OpenRouter, a local server).
 2. Provider definitions live in the person's own file, `~/.config/semar/providers.yaml`.
 3. `semar dashboard` opens a page on the person's own machine that shows the providers, signs a harness in, sets the default provider and model, and shows usage. Every change is written to `providers.yaml`, and a hand edit of the file shows in the page.
-4. A harness provider uses the person's own MCP servers and skills by default.
+4. A harness provider can use the person's own MCP servers and skills. A plan loads them only when the person asks ([Plan 23](23-plan-tokens.md), D1).
 
 ## Decisions
 
@@ -29,7 +29,7 @@ New risks and the answer to each:
 
 | Risk | Answer |
 |---|---|
-| Text in the repository tells the planner to call an MCP tool that writes | The person's own permission rules decide which tools run. `setup.deny` names tools that never run. `plan.md` lists every tool that was called and how many calls were refused. `--no-setup` turns the setup off for one run |
+| Text in the repository tells the planner to call an MCP tool that writes | The person's own permission rules decide which tools run. `setup.deny` names tools that never run. `plan.md` lists every tool that was called and how many calls were refused. A plan runs without the setup unless `--with-setup` or `plan.withSetup` asks for it (Plan 23) |
 | A settings file, a skill, or an MCP file inside the copy loads with the person's setup | Only the user-level setup is loaded. Plan 12 already removes agent instruction files from the copy. Task B proves by a live test that nothing in the copy loads |
 | Another page in the browser calls the dashboard | The server listens on `127.0.0.1` only, needs a random token on every API call, checks `Host` and `Origin`, and sends no CORS header |
 | A key appears in a log, an error, or the usage file | A key is never written to any of them. Error text passes the redaction that the Claude driver already uses |
@@ -90,7 +90,7 @@ In this order:
 
 The person's file comes before `semar.yaml` because `semar.yaml` is committed in the repository under test. Once a person has a file of their own, a repository cannot choose where that person's source goes.
 
-An ID is looked up in the person's file first and in `providers` of `semar.yaml` second. The person's definition wins. A provider from `semar.yaml` of a harness kind gets the default setup (both switches on). A provider from `semar.yaml` of an API kind is refused, because `semar.yaml` can set neither an address nor a key. `--no-setup` clears the setup for the run, the deny list included.
+An ID is looked up in the person's file first and in `providers` of `semar.yaml` second. The person's definition wins. A provider from `semar.yaml` of a harness kind gets the default setup (both switches on). A provider from `semar.yaml` of an API kind is refused, because `semar.yaml` can set neither an address nor a key. A plan clears the setup, the deny list included, unless the person asks for it with `--with-setup` or `plan.withSetup` of the person's file (Plan 23, D1).
 
 The model: the flag `--model`, then the provider's `model`, then the harness's default. An API kind needs a model, and a missing one is an error before any job starts.
 
@@ -227,11 +227,11 @@ The page uses `internal/dashboard/ui/style.css` as given and does not change its
 
 `internal/cli`, `internal/config`, `internal/stage/plan`, `internal/prompt`.
 
-* The order of [Which provider plans](#which-provider-plans), with `--provider` and `--no-setup` on `semar plan`.
+* The order of [Which provider plans](#which-provider-plans), with `--provider` and `--with-setup` on `semar plan`.
 * The registry gets the `codex`, `anthropic`, and `openai` kinds.
 * After a job, one usage record is appended. A failure to append is one notice on standard error and never fails the command.
 * `plan.md` names the provider, its kind and model, the number of MCP servers and skills that were loaded, the file tools with their number of calls, the number of calls of MCP tools, and the number of refused calls.
-* The start line says what the planner may use, for example "with your MCP servers and skills (`--no-setup` turns them off)".
+* The start line says what the planner may use, for example "with your MCP servers and skills, which add tokens to every turn" when a plan runs with the setup.
 * `semar providers` prints the providers, the default, and the path of the file.
 
 ## Checks

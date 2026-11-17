@@ -103,6 +103,25 @@ func idList(ps []config.Provider) string {
 	return strings.Join(ids, ", ")
 }
 
+// withSetup says whether a plan job may load the setup of the provider: the flag when the run
+// gave it, else plan.withSetup of the person's file. semar.yaml is never asked, because it is
+// committed in the repository under test.
+func (s providerSources) withSetup(flag, flagSet bool) bool {
+	if flagSet {
+		return flag
+	}
+	return s.fileExists && s.file.Plan.WithSetup
+}
+
+// planSetup is the setup a plan job runs with. The MCP servers and the skills add tokens to
+// every turn and the planner needs neither, so a job loads them only when the person asked.
+func planSetup(p config.Provider, withSetup bool) config.Setup {
+	if !withSetup {
+		return config.Setup{}
+	}
+	return p.Setup
+}
+
 // choose picks the provider that plans: the flag, then the default of the person's file when it
 // exists, then plan.provider of semar.yaml, then the built-in claude. The person's file comes
 // before semar.yaml because semar.yaml is committed in the repository under test.
@@ -140,11 +159,11 @@ func startLine(p config.Provider, head, model, reasoning string) string {
 	var may string
 	switch {
 	case provider.IsHarness(p.Kind) && p.Setup.MCP && p.Setup.Skills:
-		may = ", and can use your MCP servers and skills (--no-setup turns them off)"
+		may = ", and can use your MCP servers and skills, which add tokens to every turn"
 	case provider.IsHarness(p.Kind) && p.Setup.MCP:
-		may = ", and can use your MCP servers (--no-setup turns them off)"
+		may = ", and can use your MCP servers, which add tokens to every turn"
 	case provider.IsHarness(p.Kind) && p.Setup.Skills:
-		may = ", and can use your skills (--no-setup turns them off)"
+		may = ", and can use your skills, which add tokens to every turn"
 	case provider.IsHarness(p.Kind):
 		may = ", and can only read the copy of the source"
 	case provider.IsAPI(p.Kind):

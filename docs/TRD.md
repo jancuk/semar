@@ -2228,7 +2228,7 @@ Planned, not built. Semar does not build every surface engine itself. It integra
 
 During a verification run the agent sees one MCP server, `semar`. Semar applies policy to each call, forwards it to the real engine, and records it. A call that Semar did not see cannot become evidence, so the agent has no direct path to an engine (product rule 1). In an interactive session the user's agent may have its own servers. Calls through them are not recorded, never count as evidence, and the report says so, as today.
 
-Planning is different. The planner is read-only and may use the person's own MCP servers and skills.
+Planning is different. The planner is read-only. It has the three file tools, and it uses the person's own MCP servers and skills only when the person asks for them with `--with-setup` or `plan.withSetup` in the person's own providers file (Plan 23, D1).
 
 ### Registration
 

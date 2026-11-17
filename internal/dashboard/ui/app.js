@@ -1313,8 +1313,8 @@
         h('span', {}, h('span', { class: 'label' }, label, ' ', savedTag(id, key)), h('span', { class: 'help', text: help })));
     };
     const note = h('p', { class: 'note full' },
-      'A plan uses more tokens with these on, and the planner has them while it reads a repository. ',
-      code('semar plan --no-setup'), ' turns them off for one run.',
+      'A plan runs without these, because they add tokens to every turn and the planner needs only the file tools. ',
+      code('semar plan --with-setup'), ' loads them for one run, and ', code('plan.withSetup: true'), ' in the providers file loads them for every plan.',
       p.kind === 'codex' ? ' Codex always reads your own instruction file.' : '');
     const controls = [
       sw('mcp', 'MCP servers', 'The planner can call the tools you set up in ' + name + '.'),

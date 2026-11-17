@@ -33,7 +33,7 @@ An agent that knows nothing about the product cannot choose a good scenario, add
 | Source | What it gives the agent | Today |
 | --- | --- | --- |
 | The source code | The routes, the request and response types, and what a change touched | Built. The planner reads a copy of the source |
-| MCP servers | The team's own tools, such as the tracker, the logs, and the documents | Built for a harness provider, which loads your MCP servers. The planner is not yet told to read the ticket through them |
+| MCP servers | The team's own tools, such as the tracker, the logs, and the documents | Built for a harness provider, which loads your MCP servers when a plan runs with `--with-setup`. The planner is not yet told to read the ticket through them |
 | The documents of the repository | An API document (OpenAPI or Swagger) and the team's documents under `docs/` | Built. See [Tell the planner about your documents](#tell-the-planner-about-your-documents) |
 | A knowledge base and memory | Earlier tickets, decisions, test cases, and documents outside the repository, such as a tracker or a wiki | Specified, not built |
 
@@ -163,7 +163,7 @@ semar plan --diff main..release \
 What `plan` does:
 
 1. It copies the source at the head commit to a temporary directory.
-2. It starts the planner in that copy. The planner can read a file, search, and list files. It cannot read a file outside the copy, and it cannot reach your environment. With a harness provider it can also use your own MCP servers and skills, unless you turn them off. See [Choose the model](#choose-the-model).
+2. It starts the planner in that copy. The planner can read a file, search, and list files. It cannot read a file outside the copy, and it cannot reach your environment. With a harness provider it can also use your own MCP servers and skills when you ask with `--with-setup`. See [Choose the model](#choose-the-model).
 3. The model returns one draft. Code validates it. Problems go back to the model, for at most three attempts.
 4. Code sends the read-only steps of a valid draft once to your environment. A request problem goes back to the model inside the same three attempts. See [The trial run](#the-trial-run).
 5. It writes the files below and removes the copy.
@@ -281,7 +281,7 @@ The page lists your providers and shows for each one whether it is installed and
 * add a provider, and paste an API key, which goes to the keychain of your operating system;
 * start the sign-in of Claude Code or Codex;
 * choose the provider that plans, its model from a list, and its reasoning level;
-* turn your MCP servers and skills on or off for a harness provider;
+* turn your MCP servers and skills on or off for a harness provider (a plan loads them only with `--with-setup` or `plan.withSetup`);
 * see the usage: runs, turns, tokens, and cost per provider and model, and for Claude Code the subscription windows that it reported after the last run.
 
 The page runs until you press Ctrl+C. It listens on `127.0.0.1` only, and its address holds a token that every request needs.
@@ -323,16 +323,23 @@ semar plan --diff <link or range> --provider deepseek --model <model name>
 semar plan --diff <link or range> --reasoning high
 ```
 
-**Your MCP servers and skills.** A harness provider loads them by default, with your own permission rules. Your hooks and your instruction file are not loaded for Claude Code. Nothing inside the repository under test is loaded: no settings, no MCP file, no skill.
+**Your MCP servers and skills.** A harness provider can load them, with your own permission rules, but a plan runs without them unless you ask: see `--with-setup` below. Your hooks and your instruction file are not loaded for Claude Code. Nothing inside the repository under test is loaded: no settings, no MCP file, no skill.
 
 Know three things before you rely on this:
 
 * The planner reads a repository while it has these tools. Text in a file can ask it to call one. Your permission rules decide which tools run, and `setup.deny` names tools that never run. `plan.md` records how many tool calls were made and how many were refused.
-* It costs more. Every tool and skill is described to the model on every turn. On one machine with many plugins, a plan with the setup on used ten times the input tokens of the same plan without it.
-* `--no-setup` turns the setup off for one run. The planner then has the three file tools only.
+* It costs more. Every tool and skill is described to the model on every turn. On one machine with many plugins, the setup added about 51,000 input tokens to every turn of a Claude Code job, and a plan runs for tens of turns.
+* A plan therefore has the three file tools only. `--with-setup` loads the setup for one run. `plan.withSetup: true` in your providers file loads it for every plan. The repository's `semar.yaml` cannot turn it on. `--with-setup=false` turns a `plan.withSetup: true` off for one run.
 
 ```bash
-semar plan --diff <link or range> --no-setup
+semar plan --diff <link or range> --with-setup
+```
+
+```yaml
+version: 1
+default: claude
+plan:
+  withSetup: true               # plan with your MCP servers and skills
 ```
 
 An API provider never has MCP servers or skills. It runs with the three file tools.
@@ -396,7 +403,7 @@ The third part, "Where the planner says a document and the code differ", holds w
 * Semar cannot tell whether the planner opened a document. It tells the planner to read it.
 * An API document in YAML can be 2 MiB at most, and one in JSON 5 MiB. A YAML document above its limit is still given to the planner as a document, and no request is compared with it. A file above 5 MiB is left out of the copy.
 * The planner cannot report a difference for a document whose file name holds a space or a colon.
-* A wiki or a tracker outside the repository is not reached through this section. A harness provider reaches it through your MCP servers.
+* A wiki or a tracker outside the repository is not reached through this section. A harness provider reaches it through your MCP servers, with `--with-setup`.
 
 **A repository that has a configuration already.** Add the `knowledge` section to `.semar/semar.yaml` by hand, and commit the documents: a document that is only in your working tree is reported as not in the copy. When the file lists no source and a conventional path exists, `semar plan` prints a hint:
 
@@ -971,7 +978,7 @@ Every command takes `--dir <path>`, the root of the repository that holds `.sema
 | Command | What it does |
 | --- | --- |
 | `semar changes --diff <link or range>` | Prints the tickets, commits, and files of a change. No model |
-| `semar plan --diff <link or range>` | Drafts scenarios and scripts for a change, and writes `plan.md` and the obligations. Tells the planner to read the documents that `knowledge` lists, and sends the read-only steps of the draft once to the environment. Also takes `--provider <id>`, `--model <name>`, `--reasoning <level>`, `--no-setup`, `--no-trial`, `--max-scenarios <n>`, and `--no-fetch` |
+| `semar plan --diff <link or range>` | Drafts scenarios and scripts for a change, and writes `plan.md` and the obligations. Tells the planner to read the documents that `knowledge` lists, and sends the read-only steps of the draft once to the environment. Also takes `--provider <id>`, `--model <name>`, `--reasoning <level>`, `--with-setup`, `--no-trial`, `--max-scenarios <n>`, and `--no-fetch` |
 | `semar dashboard` | Opens a page on your machine to manage the model providers and see usage. `--no-open` prints the address only, `--port <n>` sets the port |
 | `semar providers` | Prints your providers and marks the one that would plan here. No model |
 | `semar init --base-url <url>` | Writes `.semar/semar.yaml`, with a `knowledge` entry for each conventional path that it finds, and `.semar/.gitignore` when there is none. `--account <name>=<ENV>` adds an auth profile, and can repeat |

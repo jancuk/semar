@@ -62,7 +62,17 @@ func absolute(name, v string) (string, error) {
 type File struct {
 	Version   int        `yaml:"version"`
 	Default   string     `yaml:"default"`
+	Plan      Plan       `yaml:"plan,omitempty"`
 	Providers []Provider `yaml:"providers"`
+}
+
+// Plan holds what the person decides about planning for every provider. It is read from this
+// file only, because the repository under test must not be able to widen what the planner loads.
+type Plan struct {
+	// WithSetup lets a plan job of a harness kind load the MCP servers and skills that the
+	// provider's setup allows. They add tokens to every turn, so a plan runs without them
+	// unless this is true or the run passes --with-setup.
+	WithSetup bool `yaml:"withSetup,omitempty"`
 }
 
 // Provider is one entry. BaseURL and APIKey belong to the API kinds and Setup to the
@@ -164,7 +174,7 @@ func ensureHome(home string) error {
 
 // normalized returns a copy in which a harness kind states both switches.
 func (f File) normalized() File {
-	out := File{Version: f.Version, Default: f.Default, Providers: make([]Provider, len(f.Providers))}
+	out := File{Version: f.Version, Default: f.Default, Plan: f.Plan, Providers: make([]Provider, len(f.Providers))}
 	for i, p := range f.Providers {
 		if provider.IsHarness(p.Kind) {
 			s := resolveSetup(p.Setup)

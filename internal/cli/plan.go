@@ -34,7 +34,8 @@ type planFlags struct {
 	model        string
 	reasoning    string
 	provider     string
-	noSetup      bool
+	withSetup    bool
+	withSetupSet bool
 	noTrial      bool
 	maxScenarios int
 	env          string
@@ -57,6 +58,7 @@ func newPlanCommand(o options) *cobra.Command {
 		Short: "Draft scenarios and scripts for the change between two branches",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			f.withSetupSet = cmd.Flags().Changed("with-setup")
 			f.initGiven = initFlagGiven(cmd)
 			f.given = givenInitFlags(cmd)
 			return planChange(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
@@ -66,7 +68,7 @@ func newPlanCommand(o options) *cobra.Command {
 	cmd.Flags().StringVar(&f.model, "model", "", "the model of the planner (default: the provider's model)")
 	cmd.Flags().StringVar(&f.reasoning, "reasoning", "", "the reasoning level of the planner, such as high (default: the provider's reasoning, else its own default)")
 	cmd.Flags().StringVar(&f.provider, "provider", "", "the provider that plans (default: see semar providers)")
-	cmd.Flags().BoolVar(&f.noSetup, "no-setup", false, "plan without your MCP servers and skills, for this run")
+	cmd.Flags().BoolVar(&f.withSetup, "with-setup", false, "plan with your MCP servers and skills, which add tokens to every turn (default: plan.withSetup of your providers file, else off)")
 	cmd.Flags().BoolVar(&f.noTrial, "no-trial", false, "do not send the read-only steps of the draft to the environment before the plan is written, for this run")
 	cmd.Flags().IntVar(&f.maxScenarios, "max-scenarios", 0, "the most scenarios to draft (default: plan.maxScenarios)")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to plan for; needed when there are several. With --base-url, the name of the new environment (default uat, or production with --kind production)")
@@ -179,9 +181,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if err != nil {
 		return err
 	}
-	if f.noSetup {
-		pc.Setup = config.Setup{}
-	}
+	pc.Setup = planSetup(pc, src.withSetup(f.withSetup, f.withSetupSet))
 	if f.reasoning != "" {
 		pc.Reasoning = f.reasoning
 	}

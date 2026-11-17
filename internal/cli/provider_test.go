@@ -104,7 +104,12 @@ func TestWhichProviderPlans(t *testing.T) {
 	both := func(def string) *userconfig.File {
 		return &userconfig.File{Version: 1, Default: def, Providers: []userconfig.Provider{mine, theirs}}
 	}
-	on := config.Setup{MCP: true, Skills: true}
+	off := config.Setup{}
+	opted := func(def string) *userconfig.File {
+		f := both(def)
+		f.Plan.WithSetup = true
+		return f
+	}
 	cases := []struct {
 		name      string
 		file      *userconfig.File
@@ -116,17 +121,21 @@ func TestWhichProviderPlans(t *testing.T) {
 		wantSetup config.Setup
 		wantUser  bool
 	}{
-		{"nothing names one", nil, "", "", nil, "claude", "", on, false},
-		{"semar.yaml lists providers", nil, repo, "", nil, "planner", "repo-model", on, false},
-		{"semar.yaml names one", nil, repo, "other", nil, "other", "", on, false},
-		{"your file beats semar.yaml", both("mine"), repo, "other", nil, "mine", "mine-model", config.Setup{Skills: true}, true},
-		{"the flag beats your file and semar.yaml", both("mine"), repo, "planner", []string{"--provider", "other"}, "other", "", on, false},
-		{"the flag beats the built-in", nil, repo, "", []string{"--provider", "claude"}, "claude", "", on, false},
-		{"an ID in both comes from your file", both("mine"), repo, "planner", []string{"--provider", "planner"}, "planner", "file-model", config.Setup{MCP: true}, true},
-		{"semar.yaml names an ID of your file", both("mine"), "", "planner", []string{"--provider", "planner"}, "planner", "file-model", config.Setup{MCP: true}, true},
-		{"no setup", nil, repo, "", []string{"--no-setup"}, "planner", "repo-model", config.Setup{}, false},
-		{"no setup beats your file", both("mine"), repo, "", []string{"--no-setup"}, "mine", "mine-model", config.Setup{}, true},
-		{"the flag model beats the provider's", both("mine"), repo, "", []string{"--model", "flag-model"}, "mine", "flag-model", config.Setup{Skills: true}, true},
+		{"nothing names one", nil, "", "", nil, "claude", "", off, false},
+		{"semar.yaml lists providers", nil, repo, "", nil, "planner", "repo-model", off, false},
+		{"semar.yaml names one", nil, repo, "other", nil, "other", "", off, false},
+		{"your file beats semar.yaml", both("mine"), repo, "other", nil, "mine", "mine-model", off, true},
+		{"the flag beats your file and semar.yaml", both("mine"), repo, "planner", []string{"--provider", "other"}, "other", "", off, false},
+		{"the flag beats the built-in", nil, repo, "", []string{"--provider", "claude"}, "claude", "", off, false},
+		{"an ID in both comes from your file", both("mine"), repo, "planner", []string{"--provider", "planner"}, "planner", "file-model", off, true},
+		{"semar.yaml names an ID of your file", both("mine"), "", "planner", []string{"--provider", "planner"}, "planner", "file-model", off, true},
+		{"the flag model beats the provider's", both("mine"), repo, "", []string{"--model", "flag-model"}, "mine", "flag-model", off, true},
+		{"with-setup loads the setup of your file", both("mine"), repo, "", []string{"--with-setup"}, "mine", "mine-model", config.Setup{Skills: true}, true},
+		{"with-setup loads the default setup of a provider of semar.yaml", nil, repo, "", []string{"--with-setup"}, "planner", "repo-model", config.Setup{MCP: true, Skills: true}, false},
+		{"plan.withSetup of your file loads the setup", opted("planner"), repo, "", []string{"--provider", "planner"}, "planner", "file-model", config.Setup{MCP: true}, true},
+		{"plan.withSetup of your file is off for one run", opted("mine"), repo, "", []string{"--with-setup=false"}, "mine", "mine-model", off, true},
+		{"with-setup adds nothing to a provider whose setup is off", &userconfig.File{Version: 1, Default: "bare", Providers: []userconfig.Provider{
+			{ID: "bare", Kind: "claude", Setup: &userconfig.Setup{MCP: ptr(false), Skills: ptr(false)}}}}, "", "", []string{"--with-setup"}, "bare", "", off, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -215,9 +224,11 @@ func TestStartLine(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{"harness with the setup", userconfig.File{Version: 1, Default: "claude", Providers: []userconfig.Provider{{ID: "claude", Kind: "claude"}}}, nil,
-			[]string{"provider claude (claude) plans release with its default model, and can use your MCP servers and skills (--no-setup turns them off); this can take several minutes"}},
-		{"harness without the setup", userconfig.File{Version: 1, Default: "claude", Providers: []userconfig.Provider{{ID: "claude", Kind: "claude"}}}, []string{"--no-setup"},
+		{"harness with the setup", userconfig.File{Version: 1, Default: "claude", Providers: []userconfig.Provider{{ID: "claude", Kind: "claude"}}}, []string{"--with-setup"},
+			[]string{"provider claude (claude) plans release with its default model, and can use your MCP servers and skills, which add tokens to every turn; this can take several minutes"}},
+		{"harness with the setup of your file", userconfig.File{Version: 1, Default: "claude", Plan: userconfig.Plan{WithSetup: true}, Providers: []userconfig.Provider{{ID: "claude", Kind: "claude"}}}, nil,
+			[]string{"and can use your MCP servers and skills, which add tokens to every turn"}},
+		{"harness without the setup", userconfig.File{Version: 1, Default: "claude", Providers: []userconfig.Provider{{ID: "claude", Kind: "claude"}}}, nil,
 			[]string{"and can only read the copy of the source"}},
 		{"API kind", userconfig.File{Version: 1, Default: "acme", Providers: []userconfig.Provider{{ID: "acme", Kind: "openai", Model: "acme-chat", BaseURL: "http://127.0.0.1:9/v1", APIKey: "env:ACME_KEY"}}}, nil,
 			[]string{"provider acme (openai) plans release with acme-chat, and sends the files it reads to http://127.0.0.1:9/v1;"}},
@@ -392,4 +403,19 @@ func TestProvidersCommandShowsReasoning(t *testing.T) {
 	}})
 	res := p.must(t, cli.ExitOK, "providers")
 	contains(t, "stdout", res.stdout, "REASONING", "xhigh", "(its default)")
+}
+
+// The opt-in has no key in semar.yaml: the repository under test is refused when it tries one.
+func TestSemarYAMLHasNoSetupSwitch(t *testing.T) {
+	p := newPlanRepo(t, sampleapp.Options{})
+	p.configure(t, goodDraft)
+	p.useProviders(t, "  - id: planner\n    kind: claude\n", "planner")
+	p.rewriteConfig(t, func(s string) string { return s + "  withSetup: true\n" })
+	s := &spy{err: &provider.Error{Class: provider.ProviderError, Detail: "stop"}}
+	p.opts.Providers = s.registry
+	res := p.must(t, cli.ExitError, "plan", "--diff", "main..release")
+	contains(t, "stderr", res.stderr, "unknown key withSetup in plan")
+	if len(s.cfgs) != 0 {
+		t.Errorf("a provider was built from a semar.yaml that asks for the setup: %+v", s.cfgs)
+	}
 }

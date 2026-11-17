@@ -391,3 +391,29 @@ func TestReasoning(t *testing.T) {
 		}
 	})
 }
+
+func TestPlanWithSetupRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	f := valid()
+	f.Plan.WithSetup = true
+	if err := Save(home, f); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(home, FileName))
+	if err != nil || !strings.Contains(string(data), "plan:\n    withSetup: true") {
+		t.Fatalf("the file does not hold the switch (%v):\n%s", err, data)
+	}
+	got, _, err := Load(home)
+	if err != nil || !got.Plan.WithSetup {
+		t.Fatalf("Load = %+v, %v", got.Plan, err)
+	}
+
+	off := valid()
+	if err := Save(home, off); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(filepath.Join(home, FileName))
+	if strings.Contains(string(data), "plan:") {
+		t.Errorf("an unset switch is written:\n%s", data)
+	}
+}
