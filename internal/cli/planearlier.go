@@ -52,7 +52,9 @@ func readEarlier(repo string, inChange map[string]bool, scs []domain.Scenario) m
 				}
 			}
 		}
-		if l.Source == obligation.SourceCriterion && l.Manual != nil && strings.Contains(l.ID, "/manual-") {
+		// The check for the rest of a web test goes with that test: alone it keeps no criterion, so a
+		// test that semar rm removed is written again.
+		if l.Source == obligation.SourceCriterion && l.Manual != nil && strings.Contains(l.ID, "/manual-") && !strings.HasPrefix(l.Title, plan.RestOfCriterion) {
 			e.Manual = true
 		}
 		if l.Cite != "" {

@@ -122,3 +122,16 @@ func TestEarlierNeverBelievesAScenarioOfAnotherTicket(t *testing.T) {
 		t.Errorf("a scenario of another ticket counts as a test: %+v", got)
 	}
 }
+
+// A web test that proves part of a criterion leaves a manual check for the rest. That check belongs to
+// the test: when the test is removed with semar rm, the next plan must write the test again.
+func TestTheManualCheckForTheRestOfAWebTestDoesNotKeepACriterionByItself(t *testing.T) {
+	cite := earlierFile + ":7 Web: the order page shows the refund"
+	dir, scs := earlierRepo(t, nil, "SHOP-482",
+		obligation.Obligation{ID: "SHOP-482/manual-1", Title: plan.RestOfCriterion + "The order page shows the refund does not prove", Source: obligation.SourceCriterion, Cite: cite,
+			Manual: &obligation.Manual{Kind: "judgement", Text: "t", Steps: []string{"s"}, Expected: "e", WrittenBy: "ai"}})
+	got := readEarlier(dir, map[string]bool{"SHOP-482": true}, scs)["SHOP-482"]
+	if len(got) != 1 || got[0].Manual || len(got[0].Cites) != 1 {
+		t.Fatalf("the entry is %+v, want one entry with its cite that is no manual check of its own", got)
+	}
+}

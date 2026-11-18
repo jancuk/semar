@@ -182,12 +182,16 @@ func (rs *runState) exploreOne(ctx context.Context, o CriterionOutcome) (*WebRes
 	return res, nil
 }
 
+// RestOfCriterion starts the title of the manual check that a web test leaves for the part that it does
+// not prove. A second plan reads it: such a check belongs to its test, and keeps no criterion by itself.
+const RestOfCriterion = "The rest of the criterion, which the web test "
+
 // restOfManual is the manual check that stays when a web test proves only part of a criterion: the part
 // that it leaves out, with the cite of the criterion.
 func restOfManual(m ManualCheckDraft, title, unproved string) *ManualCheckDraft {
 	return &ManualCheckDraft{
 		Ticket: m.Ticket, Surface: m.Surface, Cite: m.Cite,
-		Title:    oneLine("The rest of the criterion, which the web test "+strings.TrimRight(title, ".")+" does not prove", maxManualTitle),
+		Title:    oneLine(RestOfCriterion+strings.TrimRight(title, ".")+" does not prove", maxManualTitle),
 		Steps:    []string{oneLine("Check what the web test leaves out: "+unproved, maxManualText)},
 		Expected: unproved,
 	}
