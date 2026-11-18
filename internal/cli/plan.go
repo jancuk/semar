@@ -233,6 +233,11 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	}
 	if criteria {
 		in.Earlier = readEarlier(f.dir, inChange, scs)
+		if again := plan.Classify(in.Tickets, in.Earlier); again.AllKept() {
+			fmt.Fprintf(stdout, "Every criterion of %s has a test or a manual check already. Nothing was planned. To plan one again, remove its test with semar rm.\n",
+				terminalSafe(strings.Join(again.Tickets(), ", ")))
+			return nil
+		}
 	}
 	var pc config.Provider
 	var model string

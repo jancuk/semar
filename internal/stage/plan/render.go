@@ -60,7 +60,7 @@ func Render(w io.Writer, in Input, out Output) error {
 	for i, sc := range out.Scenarios {
 		ids[i] = sc.ID
 	}
-	accounting := Accounting(d, in.Tickets, ids)
+	accounting := Accounting(d, in.Tickets, ids, out.Again)
 	tickets := slices.Clone(d.Tickets)
 	slices.SortStableFunc(tickets, func(a, b TicketDraft) int { return strings.Compare(a.Key, b.Key) })
 	for _, t := range tickets {

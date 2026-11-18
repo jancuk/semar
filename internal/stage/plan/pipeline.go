@@ -187,6 +187,10 @@ func (rs *runState) overLimit() bool {
 	return false
 }
 
+// ErrAllKept is the end of a plan of tickets whose every criterion has a test or a manual check
+// already: there is nothing to plan, and no model was asked.
+var ErrAllKept = errors.New("plan: every acceptance criterion has a test or a manual check already")
+
 // RunCriteria plans one criterion at a time. Code builds a packet for each criterion of each
 // ticket file. A job with no tools answers each packet in a closed schema, and code checks the
 // answer. An answer with a problem goes back once to the same model with the problems in plain
@@ -196,8 +200,12 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 	if len(in.Ladder) == 0 {
 		return Output{}, errors.New("plan: the criteria pipeline needs at least one model")
 	}
-	packets := Packets(in, prompt.CriterionVersion())
+	again := Classify(in.Tickets, in.Earlier)
+	packets := packetsOf(in, prompt.CriterionVersion(), again)
 	if len(packets) == 0 {
+		if again.Count(StateKept) > 0 {
+			return Output{}, ErrAllKept
+		}
 		return Output{}, errors.New("plan: the criteria pipeline plans from the acceptance criteria in the ticket files, and the change has none; " +
 			"list a tickets folder under knowledge in semar.yaml, and write each ticket's criteria under a heading that holds \"Acceptance criteria\", or plan with --pipeline single")
 	}
@@ -287,7 +295,8 @@ func RunCriteria(ctx context.Context, in Input) (Output, error) {
 	}
 	out.Notes = compare(in, b.Scenarios, b.Scripts)
 	out.Trial, out.TrialReturned, out.Refused = tr, returned, refused
-	out.Unaccounted = Unaccounted(b.Draft, in.Tickets)
+	out.Unaccounted = unaccounted(b.Draft, in.Tickets, &again)
+	out.Again = &again
 	return out, nil
 }
 

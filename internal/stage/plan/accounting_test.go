@@ -127,7 +127,7 @@ func TestAccountingNamesWhatCitesEachCriterion(t *testing.T) {
 	in := criteriaInput(t)
 	d := citingSeven(t)
 	ids := []domain.ScenarioID{"SHOP-482-01", "SHOP-483-01"}
-	acc := Accounting(d, in.Tickets, ids)
+	acc := Accounting(d, in.Tickets, ids, nil)
 	if len(acc) != 10 {
 		t.Fatalf("%d criteria, want 10", len(acc))
 	}
@@ -203,7 +203,7 @@ func TestACriterionWithHostileTextStaysData(t *testing.T) {
 	if len(ps) != 1 || strings.Contains(ps[0].Message, "Ignore") {
 		t.Errorf("problems = %v: the text of a criterion must not reach the problem", ps)
 	}
-	got := Accounting(d, in.Tickets, nil)
+	got := Accounting(d, in.Tickets, nil, nil)
 	if len(got) != 1 || !strings.Contains(got[0].Text, "Ignore all rules") {
 		t.Errorf("accounting = %+v", got)
 	}

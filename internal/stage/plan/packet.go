@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/fixture"
@@ -54,9 +55,19 @@ func (p Packet) Hash() string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// Packets builds one packet for each criterion of each ticket file of the change, in ticket and
-// line order. A ticket with no ticket file or no criterion has none.
+// Packets builds one packet for each criterion of each ticket file of the change that an earlier plan
+// did not keep, in ticket and line order. A ticket with no ticket file or no criterion has none.
 func Packets(in Input, version string) []Packet {
+	return packetsOf(in, version, Classify(in.Tickets, in.Earlier))
+}
+
+func packetsOf(in Input, version string, again Again) []Packet {
+	kept := map[string]bool{}
+	for _, s := range again.Criteria {
+		if s.State == StateKept {
+			kept[s.Ticket+"\x00"+strconv.Itoa(s.Line)] = true
+		}
+	}
 	var out []Packet
 	for _, t := range in.Tickets {
 		criteria := Criteria(t)
@@ -72,6 +83,9 @@ func Packets(in Input, version string) []Packet {
 			existing = append(existing, fmt.Sprintf("%s: %s", sc.ID, oneLine(sc.Title, maxProblemRunes)))
 		}
 		for _, c := range criteria {
+			if kept[t.Key+"\x00"+strconv.Itoa(c.Line)] {
+				continue
+			}
 			ops := ticketOperations(in.Knowledge, whole, t.Text, c.Full, regs)
 			if len(in.Methods) > 0 {
 				ops = slices.DeleteFunc(ops, func(op PacketOperation) bool { return !slices.Contains(in.Methods, op.Method) })

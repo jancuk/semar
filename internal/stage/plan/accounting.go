@@ -19,8 +19,10 @@ type Accounted struct {
 
 // Accounting lists every acceptance criterion of the ticket files, in key and line order, with
 // what cites it. A cite names a criterion when it names its file and one of its lines. ids are
-// the IDs of the scenarios of the draft, in order; a missing ID is shown as "scenario <n>".
-func Accounting(d Draft, tickets []knowledge.Ticket, ids []domain.ScenarioID) []Accounted {
+// the IDs of the scenarios of the draft, in order; a missing ID is shown as "scenario <n>". A kept
+// criterion of again, which the plan did not plan again, is accounted for by the tests and the manual
+// check that keep it (D9).
+func Accounting(d Draft, tickets []knowledge.Ticket, ids []domain.ScenarioID, again *Again) []Accounted {
 	index := ticketIndex(tickets)
 	var out []Accounted
 	for _, key := range slices.Sorted(maps.Keys(index)) {
@@ -55,6 +57,19 @@ func Accounting(d Draft, tickets []knowledge.Ticket, ids []domain.ScenarioID) []
 					add("not drafted: " + oneLine(n.What, 80))
 				}
 			}
+			if len(a.CitedBy) == 0 && again != nil {
+				for _, st := range again.Criteria {
+					if st.State != StateKept || st.Ticket != c.Ticket || st.Line != c.Line {
+						continue
+					}
+					for _, id := range st.Tests {
+						a.CitedBy = append(a.CitedBy, string(id)+" (kept)")
+					}
+					if st.Manual {
+						a.CitedBy = append(a.CitedBy, "manual check (kept)")
+					}
+				}
+			}
 			out = append(out, a)
 		}
 	}
@@ -73,8 +88,12 @@ func AllCriteria(tickets []knowledge.Ticket) []Criterion {
 
 // Unaccounted are the criteria that nothing cites.
 func Unaccounted(d Draft, tickets []knowledge.Ticket) []Criterion {
+	return unaccounted(d, tickets, nil)
+}
+
+func unaccounted(d Draft, tickets []knowledge.Ticket, again *Again) []Criterion {
 	var out []Criterion
-	for _, a := range Accounting(d, tickets, nil) {
+	for _, a := range Accounting(d, tickets, nil, again) {
 		if len(a.CitedBy) == 0 {
 			out = append(out, a.Criterion)
 		}

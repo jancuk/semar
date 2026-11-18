@@ -83,6 +83,20 @@ func (a Again) Count(s State) int {
 	return n
 }
 
+// AllKept says that the ticket files have criteria and every one is kept: there is nothing to plan.
+func (a Again) AllKept() bool { return len(a.Criteria) > 0 && a.Count(StateKept) == len(a.Criteria) }
+
+// Tickets are the keys of the tickets that have criteria, in order.
+func (a Again) Tickets() []string {
+	var out []string
+	for _, c := range a.Criteria {
+		if !slices.Contains(out, c.Ticket) {
+			out = append(out, c.Ticket)
+		}
+	}
+	return out
+}
+
 // Classify gives each criterion of each ticket file one state from what the plans before it decided (D4
 // to D6, D8). It reads nothing and calls no model.
 func Classify(tickets []knowledge.Ticket, earlier map[string][]Earlier) Again {

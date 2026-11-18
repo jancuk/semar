@@ -74,6 +74,9 @@ type Output struct {
 	Pipeline *PipelineStats
 	Outcomes []CriterionOutcome
 	Answers  []StoredAnswer
+	// Again is what a second plan did with each criterion: kept, new, or changed, and the entries of
+	// criteria that the ticket no longer has. It is set by the criteria pipeline only.
+	Again *Again
 	// WebTests are the tests that flows wrote for web criteria. They are already on disk, replayed once, and
 	// the plan lists them and links their use cases. WebOff is why no web criterion was explored, or "".
 	WebTests []WebTest
