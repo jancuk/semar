@@ -21,6 +21,10 @@ var ErrNoCheck = errors.New("a test needs at least one check: hold Option and cl
 // it from at replay.
 var ErrSecretName = errors.New("a password was typed, so the test needs the name of the environment variable that holds it: use --secret-env <NAME>")
 
+// ErrOtherRun is the answer to a recording that used a record which a run made: the test would need a
+// record that is gone at the next run.
+var ErrOtherRun = errors.New("the recording used a record that a run made")
+
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // CheckSecretEnv refuses a name that is not an environment variable.
@@ -94,6 +98,9 @@ func Build(events []Event, o Options) (Draft, error) {
 	}
 	b := &builder{o: o, namers: map[string]*Namer{}, added: map[string]int{}, ids: map[string]int{}}
 	items := b.items(events)
+	if err := otherRun(items, o); err != nil {
+		return Draft{}, err
+	}
 	checks := 0
 	secret := false
 	for _, it := range items {
@@ -357,4 +364,43 @@ func plural(n int, noun string) string {
 		return "1 " + noun
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// otherRun refuses a recording that still names a run after the values of this run became variables.
+// What is left is a record of another run, or the ID of this run in a form that no variable gives.
+func otherRun(items []item, o Options) error {
+	found := func(what string, texts ...string) error {
+		for _, t := range texts {
+			if id, ok := domain.RunIDIn(t, ""); ok {
+				return fmt.Errorf("%w: %s holds %s, and a test that needs it breaks when that record is gone; make the record in this flow with {{run.id}} in its name, or take it from a fixture", ErrOtherRun, what, id)
+			}
+		}
+		return nil
+	}
+	element := func(what string, e *Element) error {
+		if e == nil {
+			return nil
+		}
+		return found(what, e.Locator.TestID, e.Locator.Name, e.Locator.Text, e.Locator.CSS)
+	}
+	for i, it := range items {
+		what := fmt.Sprintf("action %d", i+1)
+		if err := element(what, it.ev.Target); err != nil {
+			return err
+		}
+		if err := element(what, it.ev.To); err != nil {
+			return err
+		}
+		if !it.ev.Secret {
+			if err := found(what, it.ev.Value); err != nil {
+				return err
+			}
+		}
+	}
+	for i, c := range o.Claims {
+		if err := found(fmt.Sprintf("check %d", i+1), o.Values.Replace(c.Expect)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

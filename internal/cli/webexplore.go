@@ -273,7 +273,21 @@ type flowBrowser struct {
 
 func (b *flowBrowser) List(ctx context.Context) (pagelist.List, error) {
 	b.rec.Settle(ctx)
-	return b.x.List(ctx)
+	l, err := b.x.List(ctx)
+	if err != nil {
+		return l, err
+	}
+	return ownElements(l, b.x.RunID), nil
+}
+
+// ownElements leaves out each element that names another run: what an earlier flow or run left on the
+// page. A model that sees such a record uses it, and its test then needs a record that is gone later.
+func ownElements(l pagelist.List, own string) pagelist.List {
+	l.Elements = slices.DeleteFunc(slices.Clone(l.Elements), func(e pagelist.Element) bool {
+		_, other := domain.RunIDIn(e.Name+" "+e.Value, domain.RunID(own))
+		return other
+	})
+	return l
 }
 
 func (b *flowBrowser) Act(ctx context.Context, a plan.Action) (string, error) {

@@ -335,3 +335,38 @@ func TestBuildTitlesTheScenarioWithTheDateAndTheFirstPage(t *testing.T) {
 		t.Errorf("scenario = %+v", d.Scenario)
 	}
 }
+
+// A flow that uses what an earlier run left behind gives a test that breaks when that record is gone.
+func TestBuildRefusesARecordingThatUsesARecordOfAnotherRun(t *testing.T) {
+	o := options()
+	o.Values = record.NewValues(map[string]string{"run.id": "r-20261118T004200Z-aaaa"})
+	p := onPage("/orders", "Orders")
+	own := []record.Event{
+		{Kind: record.KindOpen, Page: p},
+		{Kind: record.KindClick, Page: p, Target: el("button", "Order r-20261118T004200Z-aaaa")},
+		{Kind: record.KindCheck, Page: p, Target: el("status", "status"), Value: "open"},
+	}
+	d, err := record.Build(own, o)
+	if err != nil {
+		t.Fatalf("a record of this run is the run's own: %v", err)
+	}
+	if got := feature(t, d); strings.Contains(got, "004200") {
+		t.Errorf("the ID of this run stays in the test:\n%s", got)
+	}
+
+	for name, ev := range map[string]record.Event{
+		"a click":   {Kind: record.KindClick, Page: p, Target: el("button", "Order r-20261118T004030Z-96e2")},
+		"a fill":    {Kind: record.KindFill, Page: p, Target: el("textbox", "note"), Value: "see r-20261118T004030Z-96e2"},
+		"a locator": {Kind: record.KindClick, Page: p, Target: css("#order-r-20261118t004030z-96e2", "order")},
+	} {
+		other := []record.Event{own[0], ev, own[2]}
+		_, err := record.Build(other, o)
+		if !errors.Is(err, record.ErrOtherRun) {
+			t.Errorf("%s on a record of another run: err = %v, want ErrOtherRun", name, err)
+			continue
+		}
+		if !strings.Contains(strings.ToLower(err.Error()), "r-20261118t004030z-96e2") {
+			t.Errorf("%s: the message does not name the run: %v", name, err)
+		}
+	}
+}

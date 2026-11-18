@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -19,4 +20,17 @@ func (id RunID) Time() (time.Time, error) {
 		return time.Time{}, fmt.Errorf("the run ID %q holds no time", string(id))
 	}
 	return t, nil
+}
+
+var runIDInText = regexp.MustCompile(`(?i)r-[0-9]{8}t[0-9]{6}z-[0-9a-f]{4,}`)
+
+// RunIDIn finds the first run ID in a text that is not own. The letter case is not read, because a
+// page puts the name of a record in lower case in an address or an id.
+func RunIDIn(text string, own RunID) (string, bool) {
+	for _, m := range runIDInText.FindAllString(text, -1) {
+		if !strings.EqualFold(m, string(own)) {
+			return m, true
+		}
+	}
+	return "", false
 }
