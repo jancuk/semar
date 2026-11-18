@@ -36,13 +36,16 @@ var gapKinds = []string{kindNotDrafted, kindUncovered, kindDifference, kindManua
 // existing. Every text from the draft is cut and made one line here, and the YAML encoder
 // writes it as one string, so a text cannot add a key.
 func FromPlan(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario, existing map[string]File) (map[string]File, error) {
-	return FromPlanWith(cs, d, scenarios, nil, existing)
+	return FromPlanWith(cs, d, scenarios, nil, nil, existing)
 }
 
-// FromPlanWith is FromPlan with the acceptance criteria that nothing in the plan cites. Each is
-// written as an obligation with a gap and no checklist, so the ledger still shows it (D9).
-func FromPlanWith(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario, unaccounted []plan.Criterion, existing map[string]File) (map[string]File, error) {
-	b := &builder{cs: cs, files: map[string]*building{}, existing: existing}
+// FromPlanWith is FromPlan with the acceptance criteria of the ticket files and the ones that
+// nothing in the plan cites. Each of the second is written as an obligation with a gap and no
+// checklist, so the ledger still shows it (D9). An entry that cites one of the first by its file
+// and line gets that criterion's number and key, which is how a later plan knows the criterion
+// has a test.
+func FromPlanWith(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario, criteria, unaccounted []plan.Criterion, existing map[string]File) (map[string]File, error) {
+	b := &builder{cs: cs, files: map[string]*building{}, existing: existing, criteria: criteria}
 
 	for _, sc := range scenarios {
 		t, err := b.ticket(sc.Ticket)
@@ -53,7 +56,7 @@ func FromPlanWith(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario
 		if title == "" {
 			title = string(sc.ID)
 		}
-		o := Obligation{ID: t.key + "/" + kindScenario + string(sc.ID), Title: title, Source: SourceDiff, Covers: []domain.ScenarioID{sc.ID}}
+		o := Obligation{ID: t.key + "/" + kindScenario + string(sc.ID), Title: title, Source: SourceDiff, Covers: []domain.ScenarioID{sc.ID}, Criterion: b.criterionOf(sc.Ticket, scenarioCites(sc))}
 		if err := b.addOnce(t, o); err != nil {
 			return nil, err
 		}
@@ -69,6 +72,7 @@ func FromPlanWith(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario
 		}
 		if err := b.addGap(t, kindNotDrafted, Obligation{
 			Title: oneLine(nd.What, maxTitle), Source: SourceDiff, Gap: oneLine("not drafted: needs "+nd.Needs, maxGap),
+			Criterion: b.criterionOf(key, []string{nd.Cite}),
 		}); err != nil {
 			return nil, err
 		}
@@ -137,9 +141,10 @@ func FromPlanWith(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario
 			}
 		}
 		if err := b.addGap(t, kindManualCheck, Obligation{
-			Title:  oneLine(mc.Title, maxTitle),
-			Source: SourceCriterion,
-			Cite:   oneLine(mc.Cite, maxCite),
+			Title:     oneLine(mc.Title, maxTitle),
+			Source:    SourceCriterion,
+			Cite:      oneLine(mc.Cite, maxCite),
+			Criterion: b.criterionOf(mc.Ticket, []string{mc.Cite}),
 			Manual: &Manual{
 				Kind:      "judgement",
 				Surface:   mc.Surface,
@@ -158,10 +163,11 @@ func FromPlanWith(cs domain.ChangeSet, d plan.Draft, scenarios []domain.Scenario
 			return nil, fmt.Errorf("a criterion that the planner did not account for: %w", err)
 		}
 		if err := b.addGap(t, kindCriterion, Obligation{
-			Title:  oneLine("Criterion "+strconv.Itoa(c.Number)+": "+c.Text, maxTitle),
-			Source: SourceCriterion,
-			Cite:   oneLine(c.Cite(), maxCite),
-			Gap:    "criterion not accounted for by the planner",
+			Title:     oneLine("Criterion "+strconv.Itoa(c.Number)+": "+c.Text, maxTitle),
+			Source:    SourceCriterion,
+			Cite:      oneLine(c.Cite(), maxCite),
+			Gap:       "criterion not accounted for by the planner",
+			Criterion: &CriterionRef{Number: c.Number, Key: c.Key},
 		}); err != nil {
 			return nil, err
 		}
@@ -191,6 +197,32 @@ type builder struct {
 	cs       domain.ChangeSet
 	files    map[string]*building
 	existing map[string]File
+	criteria []plan.Criterion
+}
+
+// criterionOf is the criterion of a ticket that the first of the cites names, or nil.
+func (b *builder) criterionOf(ticket string, cites []string) *CriterionRef {
+	for _, cite := range cites {
+		for _, c := range b.criteria {
+			if c.Ticket == ticket && c.Cited(cite) {
+				return &CriterionRef{Number: c.Number, Key: c.Key}
+			}
+		}
+	}
+	return nil
+}
+
+// scenarioCites are the cites of the expectations of a scenario that rest on the ticket.
+func scenarioCites(sc domain.Scenario) []string {
+	var out []string
+	for _, st := range sc.Steps {
+		for _, e := range st.Expect {
+			if e.Source == domain.SourceTicket && e.Cite != "" {
+				out = append(out, e.Cite)
+			}
+		}
+	}
+	return out
 }
 
 // ticket returns the file being built for a ticket, starting from the existing one.

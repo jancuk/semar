@@ -1,6 +1,8 @@
 package plan
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"regexp"
 	"strconv"
 	"strings"
@@ -33,6 +35,9 @@ type Criterion struct {
 	End    int
 	Text   string // one clean line, cut; the number is not part of it
 	Full   string // the same line with more room, for a packet
+	// Key says which criterion this is across edits of the file: the digest of its whole text, which
+	// has no number and one space between words. Text and Full are cut, so they cannot give it.
+	Key string
 }
 
 // Cite is the place of the first line of the criterion.
@@ -57,7 +62,14 @@ func Criteria(t knowledge.Ticket) []Criterion {
 	flush := func() {
 		if open {
 			c := &out[len(out)-1]
-			line := oneLine(strings.Join(parts, " "), 1<<20)
+			whole := oneLine(strings.Join(parts, " "), 1<<20)
+			sum := sha256.Sum256([]byte(whole))
+			c.Key = hex.EncodeToString(sum[:])
+			cut := make([]string, len(parts))
+			for i, p := range parts {
+				cut[i] = cutTicketLine(p)
+			}
+			line := oneLine(strings.Join(cut, " "), 1<<20)
 			c.Text, c.Full = cutRunes(line, maxCriterionText), cutRunes(line, maxCriterionFull)
 		}
 		open, gwt, parts = false, false, nil
@@ -67,7 +79,7 @@ func Criteria(t knowledge.Ticket) []Criterion {
 	}
 	for i, line := range strings.Split(t.Text, "\n") {
 		n := i + 1
-		line = ticketLine(line)
+		line = cleanTicketLine(line)
 		if fencePattern.MatchString(line) {
 			fenced = !fenced
 			if open && in {
@@ -127,6 +139,9 @@ func Criteria(t knowledge.Ticket) []Criterion {
 	flush()
 	return out
 }
+
+// Cited says whether a cite, as an expectation or a manual check holds it, names this criterion.
+func (c Criterion) Cited(cite string) bool { return cites(cite, c) }
 
 func cutRunes(s string, limit int) string {
 	if rs := []rune(s); len(rs) > limit {

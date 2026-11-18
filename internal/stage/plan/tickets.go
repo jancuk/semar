@@ -209,7 +209,17 @@ func ticketBlock(t knowledge.Ticket) string {
 	return b.String()
 }
 
-func ticketLine(s string) string {
+// ticketLine is a line of a ticket file as the prompt holds it.
+func ticketLine(s string) string { return cutTicketLine(cleanTicketLine(s)) }
+
+func cutTicketLine(s string) string {
+	if rs := []rune(s); len(rs) > maxTicketLine {
+		return string(rs[:maxTicketLine]) + "…"
+	}
+	return s
+}
+
+func cleanTicketLine(s string) string {
 	s = strings.TrimRight(s, "\r")
 	s = strings.Map(func(r rune) rune {
 		switch {
@@ -220,9 +230,6 @@ func ticketLine(s string) string {
 		}
 		return r
 	}, s)
-	if rs := []rune(s); len(rs) > maxTicketLine {
-		return string(rs[:maxTicketLine]) + "…"
-	}
 	return s
 }
 

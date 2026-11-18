@@ -61,6 +61,16 @@ func Accounting(d Draft, tickets []knowledge.Ticket, ids []domain.ScenarioID) []
 	return out
 }
 
+// AllCriteria are the criteria of every ticket file, in key and line order.
+func AllCriteria(tickets []knowledge.Ticket) []Criterion {
+	index := ticketIndex(tickets)
+	var out []Criterion
+	for _, key := range slices.Sorted(maps.Keys(index)) {
+		out = append(out, Criteria(index[key])...)
+	}
+	return out
+}
+
 // Unaccounted are the criteria that nothing cites.
 func Unaccounted(d Draft, tickets []knowledge.Ticket) []Criterion {
 	var out []Criterion

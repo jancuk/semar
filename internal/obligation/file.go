@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -71,10 +72,20 @@ type Obligation struct {
 	Journeys []string            `yaml:"journeys,omitempty"`
 	Gap      string              `yaml:"gap,omitempty"`
 	Manual   *Manual             `yaml:"manual,omitempty"`
+	// Criterion is the acceptance criterion that a plan wrote this entry for. A later plan skips a
+	// criterion that has an entry with its key and a test that exists.
+	Criterion *CriterionRef `yaml:"criterion,omitempty"`
 	// Retired are the scenarios that a person took away from this use case with semar rm. The use
 	// case stays, and it shows who retired each test and why, so that removing a test never makes a
 	// use case look done.
 	Retired []Retired `yaml:"retired,omitempty"`
+}
+
+// CriterionRef names a criterion of a ticket file: its number there, and its key, which is the digest
+// of its whole text (see plan.Criterion).
+type CriterionRef struct {
+	Number int    `yaml:"number"`
+	Key    string `yaml:"key"`
 }
 
 // Retired is one scenario that semar rm took out of the covers of a use case.
@@ -201,12 +212,14 @@ const (
 	shapeObligation = "obligation"
 	shapeManual     = "manual"
 	shapeRetired    = "retired"
+	shapeCriterion  = "criterion"
 )
 
 var knownKeys = map[string][]string{
 	shapeFile:       {"apiVersion", "kind", "ticket", "obligations"},
-	shapeObligation: {"id", "title", "source", "cite", "ticket", "covers", "journeys", "gap", "manual", "retired"},
+	shapeObligation: {"id", "title", "source", "cite", "ticket", "covers", "journeys", "gap", "manual", "criterion", "retired"},
 	shapeRetired:    {"scenario", "reason", "user", "day"},
+	shapeCriterion:  {"number", "key"},
 	shapeManual:     {"kind", "surface", "text", "steps", "expected", "writtenBy"},
 }
 
@@ -272,6 +285,8 @@ func childShape(shape, key string) string {
 		return shapeObligation + "[]"
 	case shape == shapeObligation && key == "manual":
 		return shapeManual
+	case shape == shapeObligation && key == "criterion":
+		return shapeCriterion
 	case shape == shapeObligation && key == "retired":
 		return shapeRetired + "[]"
 	}
@@ -389,10 +404,20 @@ func validateObligation(o Obligation, fileTicket, p string, add func(path, forma
 	if o.Manual != nil {
 		validateManual(*o.Manual, p+".manual", add)
 	}
+	if c := o.Criterion; c != nil {
+		if c.Number < 1 {
+			add(p+".criterion.number", "criterion.number must be 1 or more")
+		}
+		if !criterionKey.MatchString(c.Key) {
+			add(p+".criterion.key", "criterion.key must be 64 lowercase hexadecimal digits")
+		}
+	}
 	for i, r := range o.Retired {
 		validateRetired(r, fmt.Sprintf("%s.retired[%d]", p, i), add)
 	}
 }
+
+var criterionKey = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func validateRetired(r Retired, p string, add func(path, format string, args ...any)) {
 	if err := idcheck.Scenario(string(r.Scenario)); err != nil {

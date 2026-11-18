@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -66,6 +67,12 @@ func Marshal(f File) ([]byte, error) {
 				covers[j] = string(c)
 			}
 			put(n, "covers", strs(p+".covers", covers, true))
+		}
+		if c := o.Criterion; c != nil {
+			cn := &yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle}
+			put(cn, "number", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.Itoa(c.Number)})
+			put(cn, "key", str(p+".criterion.key", c.Key))
+			put(n, "criterion", cn)
 		}
 		if len(o.Journeys) > 0 {
 			put(n, "journeys", strs(p+".journeys", o.Journeys, true))
@@ -155,7 +162,7 @@ func sameFile(a, b File) bool {
 }
 
 func sameObligation(a, b Obligation) bool {
-	if a.ID != b.ID || a.Title != b.Title || a.Source != b.Source || a.Cite != b.Cite || a.Ticket != b.Ticket || a.Gap != b.Gap ||
+	if a.ID != b.ID || a.Title != b.Title || a.Source != b.Source || a.Cite != b.Cite || a.Ticket != b.Ticket || a.Gap != b.Gap || !equalRef(a.Criterion, b.Criterion) ||
 		!slices.Equal(a.Covers, b.Covers) || !slices.Equal(a.Retired, b.Retired) || !slices.Equal(a.Journeys, b.Journeys) || (a.Manual == nil) != (b.Manual == nil) {
 		return false
 	}
@@ -164,4 +171,11 @@ func sameObligation(a, b Obligation) bool {
 	}
 	x, y := *a.Manual, *b.Manual
 	return x.Kind == y.Kind && x.Surface == y.Surface && x.Text == y.Text && x.Expected == y.Expected && x.WrittenBy == y.WrittenBy && slices.Equal(x.Steps, y.Steps)
+}
+
+func equalRef(a, b *CriterionRef) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

@@ -386,7 +386,11 @@ func obligationsOf(root *os.Root, in plan.Input, out plan.Output) (files []planF
 		existing[key], old[rel] = f, data
 	}
 
-	made, err := obligation.FromPlanWith(in.Change, d, scenarios, out.Unaccounted, existing)
+	var criteria []plan.Criterion
+	if out.Pipeline != nil {
+		criteria = plan.AllCriteria(in.Tickets)
+	}
+	made, err := obligation.FromPlanWith(in.Change, d, scenarios, criteria, out.Unaccounted, existing)
 	if err != nil {
 		return nil, nil, fmt.Errorf("make the obligations: %w; nothing was written", err)
 	}
