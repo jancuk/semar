@@ -42,12 +42,14 @@ var (
 
 // Why is the cite of what an answer says, as every expectation of the answer carries it: the cite of
 // the criterion and its first sentence. The model never writes it.
-func (p Packet) Why() string {
-	s := p.Criterion
-	if i := strings.Index(s, ". "); i > 0 {
-		s = s[:i]
+func (p Packet) Why() string { return p.Cite + " " + whyText(p.Criterion) }
+
+// whyText is the first sentence of a criterion, cut: what a cite of the criterion says after its place.
+func whyText(criterion string) string {
+	if i := strings.Index(criterion, ". "); i > 0 {
+		criterion = criterion[:i]
 	}
-	return p.Cite + " " + cutRunes(strings.TrimRight(s, ". "), 160)
+	return cutRunes(strings.TrimRight(criterion, ". "), 160)
 }
 
 func (p Packet) operation(key string) (PacketOperation, bool) {
