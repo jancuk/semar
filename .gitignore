@@ -4,3 +4,8 @@ bin/
 .semar/semar.local.yaml
 testdata/e2e/.semar/runs/
 testdata/e2e/.semar/store/
+
+# The design papers stay on the machine. The guide and the roadmap are what is published.
+docs/*
+!docs/GUIDE.md
+!docs/ROADMAP.md
