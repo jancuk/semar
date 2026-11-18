@@ -50,8 +50,8 @@ type Standing struct {
 	Tests []domain.ScenarioID
 	// Manual says that a manual check of the criterion keeps it, or that one was written for the earlier text.
 	Manual bool
-	// Entered says that an obligation entry of the criterion exists, with no test. A case that was not
-	// drafted is one.
+	// Entered says that an obligation entry of the criterion exists, with no test that keeps it: a case
+	// that was not drafted, or an entry that names the place of the criterion.
 	Entered bool
 }
 
@@ -121,6 +121,7 @@ func classifyTicket(criteria []Criterion, entries []Earlier) ([]Standing, []Remo
 	byKey := map[string][]Earlier{}
 	var dead []Earlier
 	claimed := map[int]bool{}
+	placed := map[string]bool{}
 	for _, e := range entries {
 		if e.Key != "" {
 			if today[e.Key] {
@@ -130,22 +131,32 @@ func classifyTicket(criteria []Criterion, entries []Earlier) ([]Standing, []Remo
 			}
 			continue
 		}
-		matched := false
+		resolved, unmatched := false, false
 		for _, cite := range e.Cites {
 			if i := matchCite(criteria, claimed, cite); i >= 0 {
 				byKey[criteria[i].Key] = append(byKey[criteria[i].Key], e)
-				claimed[i], matched = true, true
+				claimed[i], resolved = true, true
+				continue
+			}
+			if citeText(cite) != "" {
+				unmatched = true
+				continue
+			}
+			if i := slices.IndexFunc(criteria, func(c Criterion) bool { return c.Cited(cite) }); i >= 0 {
+				// An entry that names only the place of a criterion is an entry of it, and no more: it
+				// has no text that could keep or change the criterion.
+				placed[criteria[i].Key] = true
+				resolved = true
 			}
 		}
-		if !matched {
+		if !resolved && unmatched {
 			dead = append(dead, e)
 		}
 	}
-
 	consumed := map[int]bool{}
 	out := make([]Standing, len(criteria))
 	for i, c := range criteria {
-		s := Standing{Criterion: c, State: StateNew}
+		s := Standing{Criterion: c, State: StateNew, Entered: placed[c.Key]}
 		for _, e := range byKey[c.Key] {
 			s.Entered = true
 			s.Tests = appendNew(s.Tests, e.Tests)

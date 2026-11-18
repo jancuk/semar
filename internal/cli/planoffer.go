@@ -37,10 +37,8 @@ func usageEstimate(_ context.Context, o options, dir string, cfg config.Config, 
 	if err != nil {
 		return est
 	}
-	criteria := 0
-	for _, t := range readTickets(dir, cfg, tickets) {
-		criteria += len(plan.Criteria(t))
-	}
+	again := criteriaAgain(dir, cfg, tickets)
+	criteria := again.Count(plan.StateNew) + again.Count(plan.StateChanged)
 	if criteria == 0 {
 		return est
 	}
@@ -64,6 +62,35 @@ func (e PlanEstimate) String() string {
 		cost = "no estimate yet"
 	}
 	return fmt.Sprintf("%s with %s, %s", who, model, cost)
+}
+
+// criteriaAgain is what a plan would do with the criteria of the tickets that have a ticket file: the
+// plan of a criterion that has a test or a manual check costs nothing, so an estimate counts the rest.
+func criteriaAgain(dir string, cfg config.Config, keys []string) plan.Again {
+	tickets := readTickets(dir, cfg, keys)
+	scs, err := loadAllScenarios(dir)
+	if err != nil {
+		return plan.Classify(tickets, nil)
+	}
+	inChange := map[string]bool{}
+	for _, k := range keys {
+		inChange[k] = true
+	}
+	return plan.Classify(tickets, readEarlier(dir, inChange, scs))
+}
+
+// ticketsWithMissingCriteria is the tickets of keys with a criterion that no obligation entry names, or
+// one that was edited since a plan wrote its test (D12). A criterion that a plan could not draft has an
+// entry, so it does not count: a plan would try it again and fail the same way.
+func ticketsWithMissingCriteria(dir string, cfg config.Config, keys []string) []string {
+	var out []string
+	for _, s := range criteriaAgain(dir, cfg, keys).Criteria {
+		if (s.State == plan.StateNew && !s.Entered || s.State == plan.StateChanged) && !slices.Contains(out, s.Ticket) {
+			out = append(out, s.Ticket)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // readTickets is the ticket files of keys in the tickets source of the repository.
@@ -90,9 +117,19 @@ func ticketsWithFiles(dir string, cfg config.Config, keys []string) []string {
 }
 
 // offerToPlan asks whether to plan the tickets, with the estimate, and says whether the person agreed.
-func offerToPlan(ctx context.Context, stdout io.Writer, in *lineReader, est PlanEstimate, tickets []string) bool {
-	fmt.Fprintf(stdout, "%s %s a ticket file and no use cases. Plan %s now with %s? [y/N] ",
-		strings.Join(tickets, ", "), map[bool]string{true: "has", false: "have"}[len(tickets) == 1], map[bool]string{true: "it", false: "them"}[len(tickets) == 1], est)
+// fresh are tickets with a ticket file and no use case. missing have use cases, and a criterion that
+// none of them names.
+func offerToPlan(ctx context.Context, stdout io.Writer, in *lineReader, est PlanEstimate, fresh, missing []string) bool {
+	verb := func(keys []string) string { return map[bool]string{true: "has", false: "have"}[len(keys) == 1] }
+	var what []string
+	if len(fresh) > 0 {
+		what = append(what, fmt.Sprintf("%s %s a ticket file and no use cases", strings.Join(fresh, ", "), verb(fresh)))
+	}
+	if len(missing) > 0 {
+		what = append(what, fmt.Sprintf("%s %s criteria with no test or manual check yet", strings.Join(missing, ", "), verb(missing)))
+	}
+	fmt.Fprintf(stdout, "%s. Plan %s now with %s? [y/N] ",
+		strings.Join(what, ", and "), map[bool]string{true: "it", false: "them"}[len(fresh)+len(missing) == 1], est)
 	line, ok := in.read(ctx)
 	if !ok {
 		fmt.Fprintln(stdout)

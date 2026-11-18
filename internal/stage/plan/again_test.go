@@ -156,3 +156,13 @@ func TestAgainSharesNothingBetweenTickets(t *testing.T) {
 		t.Errorf("states %q, removed %+v", got, a.Removed)
 	}
 }
+
+func TestAgainTakesAnEntryThatNamesOnlyAPlaceAsAnEntryAndNothingMore(t *testing.T) {
+	a := Classify(againTicket(againFile), map[string][]Earlier{"SHOP-7": {{Cites: []string{ticket482 + ":6"}, Tests: ids("SHOP-7-02")}}})
+	if got := states(a); got != "1:new 2:new 3:new" {
+		t.Fatalf("states %q", got)
+	}
+	if a.Criteria[0].Entered || !a.Criteria[1].Entered || len(a.Removed) != 0 {
+		t.Errorf("entered %v %v, removed %+v", a.Criteria[0].Entered, a.Criteria[1].Entered, a.Removed)
+	}
+}

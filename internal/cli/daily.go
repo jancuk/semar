@@ -295,9 +295,11 @@ func chooseChange(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 		return out
 	}
 	notPlanned := unplanned()
-	if withFile := ticketsWithFiles(f.dir, cfg, notPlanned); len(withFile) > 0 && !f.noPlan && o.Terminal() {
-		est := o.PlanEstimate(ctx, o, f.dir, cfg, withFile)
-		if offerToPlan(ctx, stdout, newLineReader(o.Stdin), est, withFile) {
+	planned := slices.DeleteFunc(slices.Clone(sel.input.Tickets), func(t string) bool { return slices.Contains(notPlanned, t) })
+	fresh, missing := ticketsWithFiles(f.dir, cfg, notPlanned), ticketsWithMissingCriteria(f.dir, cfg, planned)
+	if len(fresh)+len(missing) > 0 && !f.noPlan && o.Terminal() {
+		est := o.PlanEstimate(ctx, o, f.dir, cfg, slices.Concat(fresh, missing))
+		if offerToPlan(ctx, stdout, newLineReader(o.Stdin), est, fresh, missing) {
 			if err := planTheChange(ctx, stdout, stderr, o, f, envName); err != nil {
 				return sel, 0, err
 			}

@@ -54,9 +54,9 @@ func readEarlier(repo string, inChange map[string]bool, scs []domain.Scenario) m
 		}
 		if l.Source == obligation.SourceCriterion && l.Manual != nil && strings.Contains(l.ID, "/manual-") {
 			e.Manual = true
-			if l.Cite != "" {
-				cites = append(cites, l.Cite)
-			}
+		}
+		if l.Cite != "" {
+			cites = append(cites, l.Cite)
 		}
 		if e.Key == "" {
 			e.Cites = cites
