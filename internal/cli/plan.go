@@ -231,6 +231,9 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	if why != "" {
 		fmt.Fprintln(stderr, why)
 	}
+	if criteria {
+		in.Earlier = readEarlier(f.dir, inChange, scs)
+	}
 	var pc config.Provider
 	var model string
 	var inst provider.Instance

@@ -63,6 +63,9 @@ type Input struct {
 	// MaxCost bounds what the plan may spend, in dollars, as the providers report it. 0 sets no
 	// bound. When the sum reaches it, no new job starts.
 	MaxCost float64
+	// Earlier is what plans before this one decided for the criteria of each ticket, as the command read
+	// it from the obligations files and the scenario files. A criterion with a test among them is kept.
+	Earlier map[string][]Earlier
 	// Web explores the web criteria in a browser and writes their tests. Nil leaves each web criterion a
 	// manual check, and WebOff says why, in one line, for the plan to show once.
 	Web    WebExplorer
