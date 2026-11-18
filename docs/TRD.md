@@ -997,6 +997,15 @@ ticket file ─► criteria ─► packet (code) ─► job, no tools ─► ans
 
 An acceptance criterion may be a numbered line or a group of Given, When, and Then lines under the heading "Acceptance criteria". The second form is easier for a small model, and plan.md says so when a ticket has only prose.
 
+### Values that follow the run, and a second plan
+
+Built in Plans [31](implementation/31-dates-that-follow-the-run.md), [32](implementation/32-review-shows-what-is-sent.md), and [33](implementation/33-plan-again.md).
+
+* **Date variables.** A script, an expected value, a fixture parameter, a journey leg, and a web text may hold `{{date.today}}`, `{{date.plus7d}}`, `{{datetime.minus1d}}`, `{{local.now}}`, and the like. `script.Resolve` gives a name its value: the map of variables first, then a date variable computed from the time inside `run.id`. `date` and `local` use the zone of the machine, and `datetime` is UTC.
+* **No value that expires.** `plan.Validate` refuses a typed-in date that is less than 3650 days from `Input.Now`, unless the ticket file names the day. The criteria pipeline refuses a typed-in ID in a query parameter or a top-level body field of a step that expects no refusal. `record.Build` refuses a recording that still names a run.
+* **Review.** `semar review` loads the stored script and the last run with the same expectation hash. It prints what each step sends, and next to each expected result what that run observed. `plan.md` prints what each step sends and no value of a response.
+* **A second plan.** `plan.Classify` gives each criterion one state from the obligations of earlier plans: kept, new, or changed. A kept criterion makes no packet. The plan reports the tests of a changed or removed criterion and removes nothing.
+
 ### Change coverage
 
 Every scenario cites the hunks that motivate it. Code inverts that list: for each hunk in the change set, which scenarios cover it. A `behaviour` hunk that no scenario cites is uncovered, and the plan says so.

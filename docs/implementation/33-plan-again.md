@@ -109,6 +109,6 @@ Each task is one commit, with its test written first.
 * The single pipeline still writes every test again on a second plan.
 * A criterion that was split in two, or two that were merged, show as removed and new.
 * A change after the first sentence of a criterion is not seen for an entry that D8 matches.
-* A manual check keeps its criterion for good. A web criterion that was left a manual check because the browser was off is not explored on a later plan, and `semar rm` does not remove a manual check. To plan it again, a person deletes its entry from the obligations file.
+* A manual check keeps its criterion for good, with one exception that was added after the first run on a real repository: the check that a web test leaves for the part that it does not prove goes with that test, and keeps no criterion by itself. So `semar rm` of a web test makes the next plan write it again. Its old check for the rest stays in the obligations file, and a new one is written beside it. A web criterion that was left a manual check because the browser was off is still not explored on a later plan, and `semar rm` does not remove a manual check. To plan it again, a person deletes its entry from the obligations file.
 * An entry that a person wrote by hand, with no `criterion` and no text in its cite, keeps no criterion. The criterion is planned, and only the offer of the daily command is held back.
 * The daily command does not say which criterion is missing, only the ticket.

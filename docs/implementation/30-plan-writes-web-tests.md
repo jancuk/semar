@@ -211,12 +211,13 @@ What the five live runs before this one found, and the structure that now preven
 * **A test that did not run again.** A model used a board that an earlier run had left, and its check named a run ID that the replay did not have. The prompt now tells the model to make its own data, and the run ID is a value of every flow, so the typed text, the locators, and the text of a check keep the variable. Before this, a flow with no fixture wrote the literal ID.
 * **A check that proves nothing.** A model checked the label "Due date" and a "Clear due date" button, and the test listed a mismatch that only a wrong element caused. A check on an element with no text is refused, and the prompt says that a label or a control is not a result.
 * **Numbers.** A flow that proved part of a criterion left the number of its test out of the numbers of the plan, so an API scenario took the same number and no plan was written. The plan then removed the web test, as it does for every plan that fails, and the next run numbered correctly. A test now covers it.
+* **Records of another run.** Found on 2026-11-18 with the work of Plans 31 to 33. The flow of a higher model started on the page that the flow of the lower model left behind, used its board, and wrote a test whose locator held the ID of that flow. The test passed at the plan and was inconclusive at the next run. `record.Build` now refuses a recording that still names a run after the values of its own run became variables, and the page list of a flow leaves out each element that names another run. `plan.md` also says why the flow of a lower model wrote no test, because the person pays for the higher one.
+* **Dates.** Plan 31 gives a flow the date variables. A flow types `{{date.plus1d}}` or `{{local.plus1d}}` for a date near today, and a fixed date at least 10 years away when the page must show the date in its own words.
 
 ## Not built
 
 * A mobile screen, a flow across two tabs, a file upload, a hover, and a choice in a select list, which the recorder does not hear.
 * A `color` field and a slider, which a flow cannot type into. The clearing of a date or time field is not written as a step, as for a text field, and a flow clears it with the button of the page.
-* A date that is relative to the day of the run. A typed date is the same at every run, so a criterion that depends on the present time is proved with a date far in the past or far in the future.
 * An action that opens an address. A flow starts at the first page of the service and moves by clicks.
 * More than one service with a web page in one plan: the first is explored.
 * The count of web criteria in the estimate before a plan.
