@@ -92,6 +92,8 @@ func Render(w io.Writer, in Input, out Output) error {
 		}
 	}
 
+	writeAgain(&b, out.Again)
+
 	b.WriteString("\n## Not drafted\n\n")
 	if len(d.NotDrafted) == 0 {
 		b.WriteString("Nothing.\n")
@@ -418,6 +420,63 @@ func writeManualChecks(b *strings.Builder, checks []ManualCheckDraft, ticket str
 	}
 }
 
+// writeAgain lists what a second plan did not plan again, and why (D11). It writes nothing for a plan
+// that found no criterion that an earlier plan had decided something for.
+func writeAgain(b *strings.Builder, a *Again) {
+	if a == nil || (a.Count(StateKept) == 0 && a.Count(StateChanged) == 0 && len(a.Removed) == 0) {
+		return
+	}
+	b.WriteString("\n## Criteria that earlier plans covered\n\n")
+	for _, s := range a.Criteria {
+		switch s.State {
+		case StateKept:
+			fmt.Fprintf(b, "- Kept, criterion %d of %s. %s No job ran for it.\n", s.Number, shown(s.Ticket, maxValueShown), keptWords(s))
+		case StateChanged:
+			fmt.Fprintf(b, "- Changed, criterion %d of %s. It was edited, so it was planned again.", s.Number, shown(s.Ticket, maxValueShown))
+			if len(s.Tests) > 0 {
+				fmt.Fprintf(b, " Tests of the earlier text: %s. Read them against the new text, and remove one with `semar rm` if it is wrong now.", testList(s.Tests))
+			}
+			if s.Manual {
+				b.WriteString(" A manual check was written for the earlier text: read it again.")
+			}
+			b.WriteString("\n")
+		}
+	}
+	for _, r := range a.Removed {
+		if r.Number > 0 {
+			fmt.Fprintf(b, "- Removed, a criterion of %s that was number %d. The ticket file no longer has it.", shown(r.Ticket, maxValueShown), r.Number)
+		} else {
+			fmt.Fprintf(b, "- Removed, a criterion of %s that began \"%s\". The ticket file has none with that text any more.", shown(r.Ticket, maxValueShown), shown(r.Cite, maxValueShown))
+		}
+		if len(r.Tests) > 0 {
+			fmt.Fprintf(b, " Tests written for it: %s. Remove one with `semar rm` if no other criterion needs it.", testList(r.Tests))
+		}
+		if r.Manual {
+			b.WriteString(" A manual check was written for it: remove it from its obligations file if it is not needed.")
+		}
+		b.WriteString("\n")
+	}
+}
+
+func keptWords(s Standing) string {
+	var parts []string
+	if len(s.Tests) > 0 {
+		parts = append(parts, "Tests: "+testList(s.Tests)+".")
+	}
+	if s.Manual {
+		parts = append(parts, "A manual check keeps it.")
+	}
+	return strings.Join(parts, " ")
+}
+
+func testList(ids []domain.ScenarioID) string {
+	names := make([]string, len(ids))
+	for i, id := range ids {
+		names[i] = shown(string(id), maxValueShown)
+	}
+	return strings.Join(names, ", ")
+}
+
 // writeCriteria is the table of the acceptance criteria of a ticket file, with what cites each
 // one (D9). A criterion that nothing cites says so, and becomes a gap obligation.
 func writeCriteria(b *strings.Builder, accounting []Accounted, ticket string) {
@@ -536,6 +595,9 @@ func writePipeline(b *strings.Builder, out Output) {
 	for _, u := range st.Uses {
 		fmt.Fprintf(b, "- Model %s (%s, provider %s): %d calls, %d input tokens, %d output tokens\n",
 			shown(u.Model, maxValueShown), shown(valueOr(u.Result.Model, "reported no model name"), maxValueShown), shown(u.PlannerID, maxValueShown), u.Calls, u.Result.InputTokens, u.Result.OutputTokens)
+	}
+	if n := out.Again; n != nil && n.Count(StateKept) > 0 {
+		fmt.Fprintf(b, "- Kept: %d, which had a test or a manual check already, so no job ran for them\n", n.Count(StateKept))
 	}
 	fmt.Fprintf(b, "- Criteria: %d, with %d calls, %d corrections, %d escalated to a higher model, %d reused from an earlier plan, and %d that no model answered\n",
 		st.Criteria, st.Calls, st.Corrections, st.Escalated, st.Reused, st.Unanswered)

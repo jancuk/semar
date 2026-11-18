@@ -236,6 +236,9 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		if again := plan.Classify(in.Tickets, in.Earlier); again.AllKept() {
 			fmt.Fprintf(stdout, "Every criterion of %s has a test or a manual check already. Nothing was planned. To plan one again, remove its test with semar rm.\n",
 				terminalSafe(strings.Join(again.Tickets(), ", ")))
+			for _, line := range againLines(&again)[1:] {
+				fmt.Fprintln(stdout, line)
+			}
 			return nil
 		}
 	}
@@ -696,6 +699,9 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, p
 	if len(out.Scenarios) > 0 || len(out.WebTests) > 0 {
 		fmt.Fprintf(w, "next:\n  semar review %s   read what the plan drafted, a fixture before the scenarios that use it, and approve it\n", terminalSafe(firstToReview(out)))
 		fmt.Fprintf(w, "  %s   run the approved scenarios against the service\n  semar status   where things stand\n", run)
+	}
+	for _, line := range againLines(out.Again) {
+		fmt.Fprintln(w, line)
 	}
 }
 

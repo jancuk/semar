@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 
@@ -66,4 +67,38 @@ func readEarlier(repo string, inChange map[string]bool, scs []domain.Scenario) m
 		out[l.Ticket] = append(out[l.Ticket], e)
 	}
 	return out
+}
+
+// againLines end the output of a plan that found something that earlier plans had decided: how many
+// criteria were kept, planned, and removed, and for each test of an earlier text the command that
+// removes it. The plan never removes a test itself, because a person approved it (D7). A plan that
+// found nothing of the kind has no line.
+func againLines(a *plan.Again) []string {
+	if a == nil || (a.Count(plan.StateKept) == 0 && a.Count(plan.StateChanged) == 0 && len(a.Removed) == 0) {
+		return nil
+	}
+	changed := a.Count(plan.StateChanged)
+	lines := []string{fmt.Sprintf("criteria: %d, %d kept, %d planned (%d changed), %d removed",
+		len(a.Criteria), a.Count(plan.StateKept), a.Count(plan.StateNew)+changed, changed, len(a.Removed))}
+	for _, s := range a.Criteria {
+		if s.State != plan.StateChanged {
+			continue
+		}
+		for _, id := range s.Tests {
+			lines = append(lines, fmt.Sprintf("%s was written for an earlier text of criterion %d. Read both tests. To remove the old one: semar rm %s --reason \"criterion %d changed\"",
+				terminalSafe(string(id)), s.Number, terminalSafe(string(id)), s.Number))
+		}
+	}
+	for _, r := range a.Removed {
+		for _, id := range r.Tests {
+			if r.Number > 0 {
+				lines = append(lines, fmt.Sprintf("%s was written for a criterion that %s no longer has (it was criterion %d). To remove it: semar rm %s --reason \"criterion %d was removed\"",
+					terminalSafe(string(id)), terminalSafe(r.Ticket), r.Number, terminalSafe(string(id)), r.Number))
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("%s was written for a criterion that %s no longer has. To remove it: semar rm %s --reason \"its criterion was removed\"",
+				terminalSafe(string(id)), terminalSafe(r.Ticket), terminalSafe(string(id))))
+		}
+	}
+	return lines
 }

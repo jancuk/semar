@@ -627,8 +627,14 @@ func assemble(in Input, outcomes []CriterionOutcome) (Draft, []int) {
 	for _, o := range outcomes {
 		planned[o.Packet.Ticket]++
 	}
+	kept := map[string]int{}
+	for _, s := range Classify(in.Tickets, in.Earlier).Criteria {
+		if s.State == StateKept {
+			kept[s.Ticket]++
+		}
+	}
 	for _, t := range in.Change.Tickets {
-		d.Tickets = append(d.Tickets, criteriaTicket(in, d, t.Key, planned[t.Key]))
+		d.Tickets = append(d.Tickets, criteriaTicket(in, d, t.Key, planned[t.Key], kept[t.Key]))
 	}
 	scenarios, manual, nd := len(d.Scenarios), len(d.ManualChecks), len(d.NotDrafted)
 	d.Summary = fmt.Sprintf("Planned one acceptance criterion at a time: %d scenarios, %d manual checks, and %d criteria or scenarios not drafted.", scenarios, manual, nd)
@@ -645,7 +651,7 @@ func notPlanned(in Input) string {
 
 // criteriaTicket says what code knows of a ticket: it changes behaviour when a criterion of it gave a
 // scenario, a manual check, or a notDrafted entry.
-func criteriaTicket(in Input, d Draft, key string, criteria int) TicketDraft {
+func criteriaTicket(in Input, d Draft, key string, criteria, kept int) TicketDraft {
 	t := TicketDraft{Key: key, Kind: "none", Risk: "standard", Behaviour: ticketTitle(in, key)}
 	covered := slices.ContainsFunc(d.Scenarios, func(s ScenarioDraft) bool { return s.Ticket == key }) ||
 		slices.ContainsFunc(d.WebTests, func(w WebTestDraft) bool { return w.Ticket == key }) ||
@@ -655,6 +661,8 @@ func criteriaTicket(in Input, d Draft, key string, criteria int) TicketDraft {
 	case covered:
 		t.Kind = "behaviour"
 		t.Reason = fmt.Sprintf("its %s were planned one at a time", counted(criteria, "acceptance criterion"))
+	case kept > 0 && criteria == 0:
+		t.Reason = fmt.Sprintf("its %s %s a test or a manual check from an earlier plan", counted(kept, "acceptance criterion"), map[bool]string{true: "has", false: "have"}[kept == 1])
 	case criteria > 0:
 		t.Reason = "no model gave an accepted answer for its acceptance criteria, so each is listed as a gap"
 	default:
