@@ -606,11 +606,11 @@ func writeWebPart(b *strings.Builder, out Output) {
 			continue
 		}
 		if o.Web.Test != nil {
-			fmt.Fprintf(b, "- Web criterion %s: test %s written by %s in %s\n", shown(o.Packet.Cite, maxValueShown), shown(string(o.Web.Test.Scenario.ID), maxValueShown),
-				shown(valueOr(out.Pipeline.modelOf(o.Web.Rung), "a model"), maxValueShown), counted(o.Web.Turns, "turn"))
+			fmt.Fprintf(b, "- Web criterion %s: test %s written by %s in %s%s\n", shown(o.Packet.Cite, maxValueShown), shown(string(o.Web.Test.Scenario.ID), maxValueShown),
+				shown(valueOr(out.Pipeline.modelOf(o.Web.Rung), "a model"), maxValueShown), counted(o.Web.Turns, "turn"), earlierFlows(out, *o.Web))
 			continue
 		}
-		fmt.Fprintf(b, "- Web criterion %s: left for a person, because %s\n", shown(o.Packet.Cite, maxValueShown), shown(o.Web.Manual, maxTextShown))
+		fmt.Fprintf(b, "- Web criterion %s: left for a person, because %s%s\n", shown(o.Packet.Cite, maxValueShown), shown(o.Web.Manual, maxTextShown), earlierFlows(out, *o.Web))
 	}
 }
 
@@ -872,4 +872,13 @@ func trialLine(ts TrialStep, sc domain.Scenario, captures []string, value func(s
 		line += ", capture " + value(name) + found
 	}
 	return line
+}
+
+// earlierFlows says why each lower model wrote no test, because the person pays for the higher one.
+func earlierFlows(out Output, w WebResult) string {
+	var b strings.Builder
+	for rung, why := range w.Earlier {
+		fmt.Fprintf(&b, ", after %s wrote no test: %s", shown(valueOr(out.Pipeline.modelOf(rung), "a model"), maxValueShown), shown(strings.TrimRight(why, "."), maxTextShown))
+	}
+	return b.String()
 }

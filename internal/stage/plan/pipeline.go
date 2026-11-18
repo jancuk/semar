@@ -63,6 +63,8 @@ type WebResult struct {
 	Rung     int
 	Turns    int
 	Actions  int
+	// Earlier is why the flow of each lower model wrote no test, in the order of the ladder.
+	Earlier []string
 }
 
 // WebStats is what the web part of a plan did.

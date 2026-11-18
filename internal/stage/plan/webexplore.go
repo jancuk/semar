@@ -152,6 +152,7 @@ func (rs *runState) exploreOne(ctx context.Context, o CriterionOutcome) (*WebRes
 				rs.web.Escalated++
 			}
 			rs.mu.Unlock()
+			res.Earlier = append(res.Earlier, res.Manual)
 		}
 		res.Rung = rung
 		catalogue := slices.Clone(rs.in.Fixtures)

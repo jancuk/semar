@@ -201,6 +201,12 @@ func TestAFlowThatEndsAsManualIsTriedOnTheNextModelAndNowhereElse(t *testing.T) 
 	if o := out.Outcomes[2]; o.Web.Rung != 1 {
 		t.Errorf("the test came from rung %d, want 1", o.Web.Rung)
 	}
+	// The person pays for the higher model, so the plan says why the lower one wrote no test.
+	var b strings.Builder
+	writePipeline(&b, out)
+	if want := "written by sonnet in 4 turns, after haiku wrote no test: the page has no such board"; !strings.Contains(b.String(), want) {
+		t.Errorf("plan.md does not say why haiku wrote no test, want %q in:\n%s", want, b.String())
+	}
 
 	// A browser that could not be opened is not the fault of the model, so no other model is asked.
 	w = newWebPlanner(webTurn1, webTurn2, webTurn3)
