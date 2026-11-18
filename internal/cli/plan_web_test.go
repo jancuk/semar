@@ -129,6 +129,9 @@ func TestPlanWritesAWebTestAndAnAPITestAndARunOfThemPasses(t *testing.T) {
 	obligations, err := os.ReadFile(p.path(".semar", "obligations", "SHOP-482.plan.yaml"))
 	must(t, err)
 	contains(t, "the obligations", string(obligations), "SHOP-482/scenario-SHOP-482-01", "SHOP-482/scenario-SHOP-482-02", "surface: mobile")
+	if n := strings.Count(string(obligations), "criterion: {number: "); n != 3 {
+		t.Errorf("%d entries name their criterion, want the web test, the API scenario, and the manual check:\n%s", n, obligations)
+	}
 	if strings.Contains(string(obligations), "refund page shows the total") && strings.Contains(string(obligations), "manual-") && strings.Contains(string(obligations), "Open the refund page") {
 		t.Errorf("the web criterion is still a manual check:\n%s", obligations)
 	}
