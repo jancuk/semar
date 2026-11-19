@@ -53,7 +53,13 @@ type junitCase struct {
 	Failure    *junitProblem    `xml:"failure,omitempty"`
 	Error      *junitProblem    `xml:"error,omitempty"`
 	Skipped    *junitSkipped    `xml:"skipped,omitempty"`
-	SystemOut  string           `xml:"system-out"`
+	// The attempts before the last one, in the dialect of Maven Surefire: a flaky element for each
+	// attempt that did not pass when a later one did, and a rerun element when none did.
+	FlakyFailures []*junitProblem `xml:"flakyFailure"`
+	FlakyErrors   []*junitProblem `xml:"flakyError"`
+	RerunFailures []*junitProblem `xml:"rerunFailure"`
+	RerunErrors   []*junitProblem `xml:"rerunError"`
+	SystemOut     string          `xml:"system-out"`
 }
 
 type junitProblem struct {
@@ -100,6 +106,12 @@ func JUnit(w io.Writer, r Run) error {
 		if sc.Unknown {
 			c.Properties = &junitProperties{List: []junitProperty{{Name: "semar.durationUnknown", Value: "true"}}}
 		}
+		if n := len(sc.Result.Attempts); n > 1 {
+			c.SystemOut += fmt.Sprintf("; attempts: %d, flaky: %t", n, sc.Result.Flaky)
+			c.Properties = addProperty(c.Properties, "semar.attempts", fmt.Sprint(n))
+			c.Properties = addProperty(c.Properties, "semar.flaky", fmt.Sprint(sc.Result.Flaky))
+			c.addAttempts(sc.Result)
+		}
 		message, detail := reasonTexts(sc.Result.Reasons)
 		message, detail = xmlText(message), xmlText(detail)
 		outcome := xmlText(cutMessage(string(sc.Result.Outcome)))
@@ -144,6 +156,32 @@ func JUnit(w io.Writer, r Run) error {
 		return err
 	}
 	return nil
+}
+
+func addProperty(p *junitProperties, name, value string) *junitProperties {
+	if p == nil {
+		p = &junitProperties{}
+	}
+	p.List = append(p.List, junitProperty{Name: name, Value: value})
+	return p
+}
+
+// addAttempts adds an element for each attempt before the deciding one.
+func (c *junitCase) addAttempts(res domain.ScenarioResult) {
+	for _, a := range res.Attempts[:len(res.Attempts)-1] {
+		message, detail := reasonTexts(a.Reasons)
+		p := &junitProblem{Message: xmlText(message), Type: xmlText(cutMessage(string(a.Outcome))), Text: xmlText(detail)}
+		switch {
+		case res.Flaky && a.Outcome == domain.OutcomeFailed:
+			c.FlakyFailures = append(c.FlakyFailures, p)
+		case res.Flaky:
+			c.FlakyErrors = append(c.FlakyErrors, p)
+		case a.Outcome == domain.OutcomeFailed:
+			c.RerunFailures = append(c.RerunFailures, p)
+		default:
+			c.RerunErrors = append(c.RerunErrors, p)
+		}
+	}
 }
 
 // addJourneyCase adds the case of a journey. A journey that did not pass is never green: blocked

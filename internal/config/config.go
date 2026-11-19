@@ -151,7 +151,12 @@ type Trust struct {
 
 type Replay struct {
 	Workers int `yaml:"workers"`
+	// Retries is how many more times a scenario that failed or was inconclusive is replayed. 0 to 5.
+	Retries int `yaml:"retries"`
 }
+
+// MaxRetries is the most that replay.retries and --retries may ask for.
+const MaxRetries = 5
 
 // Provider's Kind names a factory in the provider registry. Outputs is for the fake kind only.
 //

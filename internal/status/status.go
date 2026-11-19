@@ -192,6 +192,11 @@ func notes(g Group, it Item) []string {
 	if it.ByAuthor {
 		out = append(out, "approved by an author of the change")
 	}
+	for _, c := range e.Covers {
+		if strings.HasPrefix(c.Attempts, "flaky") {
+			out = append(out, fmt.Sprintf("%s: %s", c.Scenario, c.Attempts))
+		}
+	}
 	return out
 }
 

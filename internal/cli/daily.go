@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 
@@ -32,9 +33,15 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 	if f.all && len(f.scenarios) > 0 {
 		return errors.New("name the scenarios with --scenario <id>, or use --all, and not both")
 	}
+	if len(f.suites) > 0 && (f.all || len(f.scenarios) > 0) {
+		return errors.New("--suite cannot be combined with --all or --scenario")
+	}
 	cfg, err := config.Load(f.dir)
 	if err != nil {
 		return err
+	}
+	if f.retriesSet {
+		cfg.Replay.Retries = f.retries
 	}
 	envName, env, err := cfg.Environment(f.env)
 	if err != nil {
@@ -217,6 +224,16 @@ func chooseRun(ctx context.Context, stdout, stderr io.Writer, o options, in *lin
 		}
 		sel.change = "the scenarios named"
 		sel.input.Tickets = ticketsOf(sel.scenarios)
+	case len(f.suites) > 0:
+		scs, err := loadAllScenarios(f.dir)
+		if err != nil {
+			return sel, 0, err
+		}
+		if sel.scenarios, err = inSuites(scs, f.suites); err != nil {
+			return sel, 0, err
+		}
+		sel.change = "the " + strings.Join(slices.Compact(slices.Sorted(slices.Values(f.suites))), ", ") + " suite"
+		sel.input.Tickets = ticketsOf(sel.scenarios)
 	case f.all:
 		scs, err := loadAllScenarios(f.dir)
 		if err != nil {
@@ -230,7 +247,7 @@ func chooseRun(ctx context.Context, stdout, stderr io.Writer, o options, in *lin
 		return chooseChange(ctx, stdout, stderr, o, in, f, cfg, envName)
 	}
 	sel.obs = loadObligationsForRun(stderr, f.dir)
-	if len(f.scenarios) > 0 {
+	if len(f.scenarios) > 0 || len(f.suites) > 0 {
 		sel.obs = slices.DeleteFunc(sel.obs, func(l obligation.Located) bool {
 			return !slices.Contains(sel.input.Tickets, ticketKey(l)) && !slices.ContainsFunc(l.Covers, func(id domain.ScenarioID) bool {
 				return slices.ContainsFunc(sel.scenarios, func(sc domain.Scenario) bool { return sc.ID == id })
@@ -239,6 +256,30 @@ func chooseRun(ctx context.Context, stdout, stderr io.Writer, o options, in *lin
 	}
 	sel.gaps = surfaceGaps(sel.scenarios)
 	return sel, 0, nil
+}
+
+// inSuites is the scenarios that are in any of the suites, in the order given. A suite that no scenario
+// is in is an error that names the suites that exist.
+func inSuites(scs []domain.Scenario, names []string) ([]domain.Scenario, error) {
+	have := map[string]bool{}
+	for _, sc := range scs {
+		for _, s := range sc.Suites {
+			have[s] = true
+		}
+	}
+	for _, name := range names {
+		if have[name] {
+			continue
+		}
+		known := slices.Sorted(maps.Keys(have))
+		if len(known) == 0 {
+			return nil, fmt.Errorf("no scenario is in the suite %q: no scenario has a @suite: tag", name)
+		}
+		return nil, fmt.Errorf("no scenario is in the suite %q: the suites that exist are %s", name, strings.Join(known, ", "))
+	}
+	return slices.DeleteFunc(slices.Clone(scs), func(sc domain.Scenario) bool {
+		return !slices.ContainsFunc(sc.Suites, func(s string) bool { return slices.Contains(names, s) })
+	}), nil
 }
 
 func ticketsOf(scs []domain.Scenario) []string {

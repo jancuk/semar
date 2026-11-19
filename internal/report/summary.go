@@ -3,6 +3,7 @@ package report
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"unicode"
@@ -83,7 +84,25 @@ func countLine(results []domain.ScenarioResult) string {
 	if other > 0 {
 		parts = append(parts, fmt.Sprintf("unknown %d", other))
 	}
+	if n := flakyCount(results); n > 0 {
+		parts = append(parts, fmt.Sprintf("flaky %d", n))
+	}
 	return strings.Join(parts, ", ")
+}
+
+func flakyCount(results []domain.ScenarioResult) int {
+	n := 0
+	for _, r := range results {
+		if r.Flaky {
+			n++
+		}
+	}
+	return n
+}
+
+// attemptNote says how a scenario that ran more than once came out, or "" when it ran once.
+func attemptNote(r domain.ScenarioResult) string {
+	return words.Attempts(string(r.Outcome), r.Flaky, len(r.Attempts), r.AttemptsAllowed)
 }
 
 // Summary writes one line per scenario, one line with the count of each outcome, the coverage
@@ -128,6 +147,16 @@ func Lines(w io.Writer, run domain.Run) error {
 				}
 			case r.Outcome != domain.OutcomePassed:
 				line += "\tno reason recorded"
+			}
+			if slices.ContainsFunc(r.Reasons, func(reason domain.Reason) bool { return reason.Text == words.NotRunAgain }) {
+				line += " (" + words.NotRunAgain + ")"
+			}
+			if note := attemptNote(r); note != "" {
+				if r.Outcome == domain.OutcomePassed {
+					line += "\t" + note
+				} else {
+					line += " (" + note + ")"
+				}
 			}
 			line += nextMark(line, word, string(r.Scenario))
 			if _, err := fmt.Fprintln(tw, line); err != nil {

@@ -94,6 +94,9 @@ func validate(c Config, name string) error {
 	if c.Replay.Workers < 0 {
 		add("replay.workers must not be negative")
 	}
+	if c.Replay.Retries < 0 || c.Replay.Retries > MaxRetries {
+		add("replay.retries must be from 0 to %d", MaxRetries)
+	}
 	for _, s := range c.Policy.Trust.Confirm {
 		if !slices.Contains(sources, s) {
 			add("policy.trust.confirm: %s is not a source", s)

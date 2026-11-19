@@ -45,6 +45,8 @@ type ctrfTest struct {
 	Message  string            `json:"message,omitempty"`
 	Trace    string            `json:"trace,omitempty"`
 	Suite    string            `json:"suite,omitempty"`
+	Retries  int               `json:"retries,omitempty"`
+	Flaky    bool              `json:"flaky,omitempty"`
 	Extra    map[string]string `json:"extra"`
 }
 
@@ -99,6 +101,10 @@ func CTRF(w io.Writer, r Run) error {
 		if sc.Unknown {
 			t.Extra["semarDurationUnknown"] = "true"
 		}
+		if n := len(sc.Result.Attempts); n > 1 {
+			t.Retries, t.Flaky = n-1, sc.Result.Flaky
+			t.Extra["semarAttempts"] = attemptOutcomes(sc.Result.Attempts)
+		}
 		if sc.Result.Outcome != domain.OutcomePassed {
 			t.Message, t.Trace = reasonTexts(sc.Result.Reasons)
 		}
@@ -149,6 +155,15 @@ func CTRF(w io.Writer, r Run) error {
 	}
 	_, err = w.Write(data)
 	return err
+}
+
+// attemptOutcomes lists the outcome of each attempt in order, such as "failed, passed".
+func attemptOutcomes(attempts []domain.Attempt) string {
+	parts := make([]string, len(attempts))
+	for i, a := range attempts {
+		parts[i] = cutMessage(string(a.Outcome))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func epochMillis(ms int64, zero bool) int64 {

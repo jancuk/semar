@@ -301,7 +301,7 @@ func reasonWord(outcome string, reasons []domain.Reason) string {
 // hash of its scenario counts only while the scenario file has the same one. A result of an older
 // run has none, and counts as it always did.
 func coverOf(repo string, run domain.Run, r domain.ScenarioResult) obligation.Cover {
-	c := obligation.Cover{Scenario: r.Scenario, Found: true, Outcome: string(r.Outcome), Run: run.ID, Builds: run.BuildsEnd, Word: reasonWord(string(r.Outcome), r.Reasons)}
+	c := obligation.Cover{Scenario: r.Scenario, Found: true, Outcome: string(r.Outcome), Run: run.ID, Builds: run.BuildsEnd, Word: reasonWord(string(r.Outcome), r.Reasons), Attempts: words.Attempts(string(r.Outcome), r.Flaky, len(r.Attempts), r.AttemptsAllowed)}
 	if r.ExpectHash != "" {
 		sc, err := loadScenario(repo, r.Scenario)
 		c.ScenarioChanged = err != nil || domain.ExpectHash(sc) != r.ExpectHash

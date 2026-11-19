@@ -38,6 +38,9 @@ const (
 	fixtureIDRule = "must match ^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)*$"
 )
 
+// SuiteName is the form of a name in @suite:.
+var SuiteName = regexp.MustCompile(`^[a-z0-9-]+$`)
+
 var (
 	fixtureIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*$`)
 	namePattern      = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
@@ -74,6 +77,11 @@ func Validate(s domain.Scenario, origin Origin) []Problem {
 		add("steps", "at least one step is required")
 	}
 	ps = append(ps, validateGiven(s.Given)...)
+	for i, name := range s.Suites {
+		if !SuiteName.MatchString(name) {
+			add(fmt.Sprintf("suites[%d]", i), "a suite name has lower-case letters, digits, and - only")
+		}
+	}
 
 	seen := map[domain.StepID]bool{}
 	for i, st := range s.Steps {

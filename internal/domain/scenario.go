@@ -45,6 +45,9 @@ type Scenario struct {
 	AuthProfile string     `yaml:"authProfile"`
 	Given       []Given    `yaml:"given,omitempty"`
 	Steps       []Step     `yaml:"steps"`
+	// Suites names the sets that semar run --suite picks the scenario by. It is no part of ExpectHash,
+	// so a person can regroup an approved scenario with no new review.
+	Suites []string `yaml:"suites,omitempty"`
 }
 
 type Step struct {

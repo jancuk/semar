@@ -38,6 +38,9 @@ const (
 	msgNoDetail         = "no result was recorded"
 	msgMismatch         = "the recorded evidence does not match the scenario"
 	msgNoBuild          = "no build was recorded"
+
+	// SetupFailedPrefix starts the reason of a scenario blocked because a setup step did not succeed.
+	SetupFailedPrefix = "setup failed: "
 )
 
 // outcomeOrder returns the order in which the rules decide. The first rule that matched gives the outcome.
@@ -122,7 +125,7 @@ func Compute(in Input) domain.ScenarioResult {
 			add(domain.OutcomeBlocked, step.ID, fmt.Sprintf("the environment does not allow a step %s: %s", step.ID, a.Refused))
 		case step.Setup:
 			if why := setupFailure(a); why != "" {
-				add(domain.OutcomeBlocked, step.ID, fmt.Sprintf("setup failed: %s %s", step.ID, why))
+				add(domain.OutcomeBlocked, step.ID, fmt.Sprintf(SetupFailedPrefix+"%s %s", step.ID, why))
 			}
 		}
 
@@ -173,7 +176,7 @@ func Compute(in Input) domain.ScenarioResult {
 			switch {
 			case refused:
 			case inv.State == domain.CheckFalse && step.Setup:
-				add(domain.OutcomeBlocked, step.ID, fmt.Sprintf("setup failed: %s %s was not met", step.ID, inv.Expected))
+				add(domain.OutcomeBlocked, step.ID, fmt.Sprintf(SetupFailedPrefix+"%s %s was not met", step.ID, inv.Expected))
 			case inv.State == domain.CheckFalse:
 				text := fmt.Sprintf("step %s broke an invariant: expected %s, observed %s", step.ID, inv.Expected, inv.Observed)
 				if inv.Detail != "" {

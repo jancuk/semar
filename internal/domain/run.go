@@ -57,12 +57,40 @@ type CheckResult struct {
 	Confirmed bool       `json:"confirmed"`
 }
 
+// Attempt is one replay of a scenario: its own outcome, reasons, checks, and the actions that hold its
+// evidence.
+type Attempt struct {
+	Outcome Outcome       `json:"outcome"`
+	Reasons []Reason      `json:"reasons"`
+	Checks  []CheckResult `json:"checks"`
+	Actions []ActionID    `json:"actions"`
+}
+
+// Settle is the attempt that decides a scenario, and whether the scenario is flaky. The deciding
+// attempt is the last one, because a scenario is replayed again only after an attempt that did not
+// pass. A scenario is flaky when it passed after an attempt that did not.
+func Settle(attempts []Attempt) (deciding Attempt, flaky bool) {
+	if len(attempts) == 0 {
+		return Attempt{}, false
+	}
+	deciding = attempts[len(attempts)-1]
+	return deciding, len(attempts) > 1 && deciding.Outcome == OutcomePassed
+}
+
 type ScenarioResult struct {
 	Scenario ScenarioID    `json:"scenario"`
 	Outcome  Outcome       `json:"outcome"`
 	Reasons  []Reason      `json:"reasons"`
 	Checks   []CheckResult `json:"checks"`
 	Actions  []ActionID    `json:"actions"`
+	// Attempts holds every attempt, in order, when the scenario was replayed more than once. The fields
+	// above are those of the deciding attempt. It is empty, and not encoded, for a scenario that ran
+	// once and in a result stored before attempts existed, whose single attempt is the fields above.
+	Attempts []Attempt `json:"attempts,omitempty"`
+	// AttemptsAllowed is how many attempts the run allowed, set only with Attempts.
+	AttemptsAllowed int `json:"attemptsAllowed,omitempty"`
+	// Flaky is true when the scenario passed on an attempt after the first.
+	Flaky bool `json:"flaky,omitempty"`
 	// ExpectHash is the ExpectHash of the scenario that was judged. It is empty, and not encoded,
 	// in a result stored before it was recorded.
 	ExpectHash Hash `json:"expectHash,omitempty"`

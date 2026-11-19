@@ -29,8 +29,11 @@ type Cover struct {
 	Reason   string // the first reason of the result
 	// Word is what a person reads for the result (Plan 26, D7). "needs review" says that an
 	// approval is missing. Empty means the outcome is the word.
-	Word   string
-	Builds []domain.BuildRef
+	Word string
+	// Attempts says how a scenario that ran more than once came out, such as "flaky, passed on attempt
+	// 2 of 3". Empty for a result with one attempt.
+	Attempts string
+	Builds   []domain.BuildRef
 	// ScenarioChanged is true when the result stored the expectation hash of its scenario and the
 	// scenario file has another one now, or cannot be read: the pass judged something else.
 	ScenarioChanged bool

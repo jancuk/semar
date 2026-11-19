@@ -365,3 +365,27 @@ func TestHTMLIsAStableFunctionOfItsInput(t *testing.T) {
 		t.Error("two renderings of one input differ")
 	}
 }
+
+func TestAFlakyPassIsNamedUnderTheVerifiedUseCase(t *testing.T) {
+	flaky := entry("SHOP-482/1", obligation.Verified, func(e *obligation.Entry) {
+		e.Covers = []obligation.Cover{{Scenario: "SHOP-482-01", Found: true, Outcome: "passed", Attempts: "flaky, passed on attempt 2 of 3"}}
+	})
+	steady := entry("SHOP-482/2", obligation.Verified, func(e *obligation.Entry) {
+		e.Covers = []obligation.Cover{{Scenario: "SHOP-482-02", Found: true, Outcome: "passed"}}
+	})
+	rep := status.Build(status.Input{Environment: "local", BuildsRead: true, Entries: []obligation.Entry{flaky, steady}})
+	if rep.Code != 0 {
+		t.Errorf("a flaky pass changed the exit code to %d", rep.Code)
+	}
+	var b bytes.Buffer
+	if err := status.Text(&b, rep); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "SHOP-482-01: flaky, passed on attempt 2 of 3") {
+		t.Errorf("the status does not name the flaky scenario:\n%s", out)
+	}
+	if strings.Contains(out, "SHOP-482/2") {
+		t.Errorf("a steady use case is listed under verified:\n%s", out)
+	}
+}

@@ -2,7 +2,10 @@
 // stored outcomes do not change; this is the only place that renames them.
 package words
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Of is the word for a stored outcome and its reasons. An approval that is missing, whether of a
 // scenario, a fixture, or a screens file, is "needs review" because a person can settle it. A
@@ -47,4 +50,23 @@ func Line(subject, word, detail string) string {
 		line += " → " + next
 	}
 	return line
+}
+
+// NotRunAgain is the reason of a scenario that failed and was not run again, because it sent a
+// request of the once list of its environment.
+const NotRunAgain = "the scenario sent a request that effects.once lists, so it was not run again"
+
+// Attempts says how a scenario that ran more than once came out, or "" when it ran once. ran is the
+// number of attempts it made and allowed the number the run gave it.
+func Attempts(outcome string, flaky bool, ran, allowed int) string {
+	allowed = max(allowed, ran)
+	switch {
+	case ran < 2:
+		return ""
+	case flaky:
+		return fmt.Sprintf("flaky, passed on attempt %d of %d", ran, allowed)
+	case ran == allowed:
+		return fmt.Sprintf("%s on all %d attempts", outcome, ran)
+	}
+	return fmt.Sprintf("%s on attempt %d of %d", outcome, ran, allowed)
 }

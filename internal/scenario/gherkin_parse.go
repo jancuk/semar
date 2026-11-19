@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -134,7 +135,7 @@ func (p *reader) read(sc *messages.Scenario) (domain.Scenario, error) {
 		return domain.Scenario{}, p.fail(sc.Examples[0].Location.Line, "Examples are not used: write each case as its own Scenario file")
 	}
 	s := domain.Scenario{APIVersion: apiVersion, Kind: kind, Title: sc.Name, Intent: intentOf(sc.Description)}
-	var have struct{ id, ticket, surface, auth bool }
+	var have struct{ id, ticket, surface, auth, suite bool }
 	newline := false
 	for _, t := range sc.Tags {
 		tl := t.Location.Line
@@ -164,6 +165,13 @@ func (p *reader) read(sc *messages.Scenario) (domain.Scenario, error) {
 			s.Surface = domain.Surface(v)
 		case "auth":
 			err = set(&have.auth, &s.AuthProfile)
+		case "suite":
+			if have.suite {
+				err = p.fail(tl, "the tag @suite: appears twice: write several names as @suite:a,b")
+				break
+			}
+			have.suite = true
+			s.Suites, err = p.suites(tl, value, hasValue)
 		case "intent-newline":
 			switch {
 			case hasValue:
@@ -183,7 +191,7 @@ func (p *reader) read(sc *messages.Scenario) (domain.Scenario, error) {
 				have.auth = true
 			}
 		default:
-			err = p.fail(tl, "the tag %s is not used. A Scenario takes @id:<id>, @ticket:<key>, @surface:api|web, @auth:<profile>, @noauth, and @intent-newline", t.Name)
+			err = p.fail(tl, "the tag %s is not used. A Scenario takes @id:<id>, @ticket:<key>, @surface:api|web, @auth:<profile>, @noauth, @suite:<name>, and @intent-newline", t.Name)
 		}
 		if err != nil {
 			return domain.Scenario{}, err
@@ -210,6 +218,23 @@ func (p *reader) read(sc *messages.Scenario) (domain.Scenario, error) {
 	}
 	s.Steps, s.Given = steps, given
 	return s, nil
+}
+
+// suites reads the names of a @suite: tag. A name has lower-case letters, digits, and -.
+func (p *reader) suites(line int64, value string, hasValue bool) ([]string, error) {
+	if !hasValue || value == "" {
+		return nil, p.fail(line, "the tag @suite: has no value")
+	}
+	names := strings.Split(value, ",")
+	for i, n := range names {
+		switch {
+		case !SuiteName.MatchString(n):
+			return nil, p.fail(line, "the suite name %q must have lower-case letters, digits, and - only", n)
+		case slices.Contains(names[:i], n):
+			return nil, p.fail(line, "the suite %s is named twice", n)
+		}
+	}
+	return names, nil
 }
 
 // intentOf is the description with the indentation that the writer added taken off, and the backslash

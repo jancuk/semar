@@ -55,10 +55,12 @@ A declared build cannot show that the service was redeployed during the run.
 {{ range .Attention -}}
 ### {{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}
 
-Outcome: **{{ .Outcome }}**{{ if .Next }} Next: `{{ .Next }}`{{ end }}
+Outcome: **{{ .Outcome }}**{{ if .Next }} Next: `{{ .Next }}`{{ end }}{{ if .Attempts }} ({{ .Attempts }}){{ end }}
 
 {{ range .Reasons -}}
 - Reason: {{ .Text }}{{ if .Step }} (step {{ .Step }}){{ end }}
+{{ end }}{{ range .Tries -}}
+- {{ . }}
 {{ end }}
 {{ if .Fixtures }}{{ range .Fixtures -}}
 - {{ . }}
@@ -78,8 +80,9 @@ Outcome: **{{ .Outcome }}**{{ if .Next }} Next: `{{ .Next }}`{{ end }}
 <summary>Passed ({{ len .Passed }})</summary>
 
 {{ range .Passed -}}
-- {{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}
-{{ range .Fixtures }}  - {{ . }}
+- {{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}{{ if .Attempts }} ({{ .Attempts }}){{ end }}
+{{ range .Tries }}  - {{ . }}
+{{ end }}{{ range .Fixtures }}  - {{ . }}
 {{ end }}{{ end }}
 </details>
 

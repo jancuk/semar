@@ -639,3 +639,19 @@ func TestEnvironmentChecks(t *testing.T) {
 		}
 	}
 }
+
+func TestReplayRetriesDefaultToZeroAndStayWithinFive(t *testing.T) {
+	cfg, err := loadText(t, "version: 1\n")
+	if err != nil || cfg.Replay.Retries != 0 {
+		t.Fatalf("default: retries %d, err %v", cfg.Replay.Retries, err)
+	}
+	cfg, err = loadText(t, "version: 1\nreplay: {retries: 5}\n")
+	if err != nil || cfg.Replay.Retries != 5 {
+		t.Fatalf("5: retries %d, err %v", cfg.Replay.Retries, err)
+	}
+	for _, n := range []string{"6", "-1"} {
+		if _, err := loadText(t, "version: 1\nreplay: {retries: "+n+"}\n"); err == nil || !strings.Contains(err.Error(), "replay.retries must be from 0 to 5") {
+			t.Errorf("retries %s: error %v", n, err)
+		}
+	}
+}

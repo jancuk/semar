@@ -28,14 +28,21 @@ import (
 	"github.com/jancuk/semar/internal/redact"
 	"github.com/jancuk/semar/internal/replay"
 	"github.com/jancuk/semar/internal/report"
+	"github.com/jancuk/semar/internal/scenario"
 	"github.com/jancuk/semar/internal/secret"
 )
 
 const reportFile = "report.md"
 
 type runFlags struct {
-	scenarios  []string
-	all        bool
+	scenarios []string
+	suites    []string
+	all       bool
+	ci        bool
+	// retries is the value of --retries. retriesSet is false when the flag was not given, so that
+	// replay.retries stands.
+	retries    int
+	retriesSet bool
 	noJourneys bool
 	noPlan     bool
 	noReview   bool
@@ -58,6 +65,8 @@ func newRunCommand(o options) *cobra.Command {
 			"The change is the commits from the base branch to HEAD. --all runs every scenario and every critical journey, and --scenario <id> runs the scenarios named and no journey.\n" +
 			"A ticket of the change that has a ticket file and no use cases is not planned. On a terminal, run offers to plan it and asks first. With no terminal, or with --no-plan, it never plans, and its exit code is at least 2.\n" +
 			"When a test of the run needs a person to review it, on a terminal, run offers the review once the tests ran. A yes runs the review of semar review for those tests, then runs the tests that were approved again, and ends with the status of that second run. With no terminal, or with --no-review, it never asks.\n" +
+			"--suite <name> runs every scenario whose @suite: tag names it, whatever the change is, and no journey; repeat it for more suites. --retries <n> runs a scenario that failed or was inconclusive again, up to n more times, with a clean browser and session; a scenario that passes on a later attempt passes and is marked flaky. A scenario that sent a request of effects.once is never run again.\n" +
+			"--ci asks no question, plans nothing, offers no review, and prints where the report is.\n" +
 			"Exit 0 when everything that ran passed, 1 when something failed, and 2 otherwise.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -67,10 +76,27 @@ func newRunCommand(o options) *cobra.Command {
 				}
 				f.env = args[0]
 			}
+			if cmd.Flags().Changed("retries") {
+				if f.retries < 0 || f.retries > config.MaxRetries {
+					return fmt.Errorf("--retries takes a number from 0 to %d", config.MaxRetries)
+				}
+				f.retriesSet = true
+			}
+			for _, name := range f.suites {
+				if !scenario.SuiteName.MatchString(name) {
+					return fmt.Errorf("the suite name %q must have lower-case letters, digits, and - only", name)
+				}
+			}
+			if f.ci {
+				f.noPlan, f.noReview = true, true
+			}
 			return runDaily(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
 		},
 	}
 	cmd.Flags().StringArrayVar(&f.scenarios, "scenario", nil, "run the scenario with this ID, and no journey; repeat for more")
+	cmd.Flags().StringArrayVar(&f.suites, "suite", nil, "run every scenario of this suite, and no journey; repeat for more")
+	cmd.Flags().IntVar(&f.retries, "retries", 0, "run a scenario that failed or was inconclusive again, up to this many more times, from 0 to 5 (default: replay.retries, else 0)")
+	cmd.Flags().BoolVar(&f.ci, "ci", false, "ask no question, plan nothing, and offer no review, as on a machine with no terminal")
 	cmd.Flags().BoolVar(&f.all, "all", false, "run every scenario and every critical journey, not only those of the change")
 	cmd.Flags().BoolVar(&f.noJourneys, "no-journeys", false, "leave the critical journeys out")
 	cmd.Flags().BoolVar(&f.noPlan, "no-plan", false, "never offer to plan a ticket that has no use cases")
@@ -240,6 +266,8 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 		Confirm:  confirmations(ctx, rg.store.Root()),
 		Trust:    cfg.Policy.Trust.Confirm,
 		Workers:  cfg.Replay.Workers,
+		Retries:  cfg.Replay.Retries,
+		Once:     rg.once,
 		Run:      rg.id,
 		Accounts: slices.Sorted(maps.Keys(cfg.AuthProfiles)),
 		NoToken:  noTokenAccounts(cfg),
@@ -318,6 +346,12 @@ func newEnvRig(ctx context.Context, o options, repo string, cfg config.Config, e
 		id: id, store: store, run: run, policy: policy, engine: engine, probed: probed,
 		builds: declared.prober(env.Services),
 	}, nil
+}
+
+// once says whether a call is a request of the once list of the environment.
+func (rg *envRig) once(c api.Call) bool {
+	u, err := api.JoinURL(rg.services[c.Service], c.Path, c.Query)
+	return err == nil && rg.policy.Once(effects.Request{Method: strings.ToUpper(c.Method), URL: u})
 }
 
 // resolver gives the fixtures of the catalogue through the engine of this run, so that every

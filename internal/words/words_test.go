@@ -63,3 +63,24 @@ func TestLine(t *testing.T) {
 		}
 	}
 }
+
+func TestAttempts(t *testing.T) {
+	cases := []struct {
+		outcome      string
+		flaky        bool
+		ran, allowed int
+		want         string
+	}{
+		{"passed", false, 0, 0, ""},
+		{"passed", false, 1, 3, ""},
+		{"passed", true, 2, 3, "flaky, passed on attempt 2 of 3"},
+		{"failed", false, 3, 3, "failed on all 3 attempts"},
+		{"failed", false, 2, 3, "failed on attempt 2 of 3"},
+		{"blocked", false, 2, 3, "blocked on attempt 2 of 3"},
+	}
+	for _, c := range cases {
+		if got := words.Attempts(c.outcome, c.flaky, c.ran, c.allowed); got != c.want {
+			t.Errorf("Attempts(%s, %v, %d, %d) = %q, want %q", c.outcome, c.flaky, c.ran, c.allowed, got, c.want)
+		}
+	}
+}

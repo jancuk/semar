@@ -70,6 +70,14 @@ func Render(s domain.Scenario, subject string) ([]byte, error) {
 	default:
 		tags = append(tags, "@auth:"+s.AuthProfile)
 	}
+	if len(s.Suites) > 0 {
+		for i, name := range s.Suites {
+			if !SuiteName.MatchString(name) || slices.Contains(s.Suites[:i], name) {
+				r.fail(fmt.Sprintf("suites[%d]", i), "must be a name of lower-case letters, digits, and -, used once")
+			}
+		}
+		tags = append(tags, "@suite:"+strings.Join(s.Suites, ","))
+	}
 	body, newline := strings.CutSuffix(s.Intent, "\n")
 	if newline {
 		tags = append(tags, "@intent-newline")
@@ -671,6 +679,8 @@ func difference(want, got domain.Scenario) string {
 		return "surface"
 	case want.AuthProfile != got.AuthProfile:
 		return "authProfile"
+	case !slices.Equal(want.Suites, got.Suites):
+		return "suites"
 	}
 	if len(want.Given) != len(got.Given) {
 		return "given"

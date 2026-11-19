@@ -52,6 +52,9 @@ type scenarioView struct {
 	Reasons            []reasonView
 	Fixtures           []string
 	Checks             []checkView
+	// Attempts says how a scenario that ran more than once came out. Tries has one line for each attempt.
+	Attempts string
+	Tries    []string
 }
 
 type ledgerView struct {
@@ -114,6 +117,10 @@ func buildView(d Data) markdownView {
 			Outcome: shown(word),
 			Next:    words.Next(word, shown(string(r.Scenario))),
 		}
+		sv.Attempts = shown(attemptNote(r))
+		for i, a := range r.Attempts {
+			sv.Tries = append(sv.Tries, fmt.Sprintf("Attempt %d: %s%s", i+1, a.Outcome, shownAttemptReason(a)))
+		}
 		sv.Reproduce = "semar run --scenario " + sv.ID
 		if j, ok := legs[r.Scenario]; ok {
 			sv.Reproduce = journeyCommand(j, run.Environment)
@@ -147,6 +154,14 @@ func buildView(d Data) markdownView {
 	v.Blocked = blockedViews(d.Activity)
 	v.DocChecks = docViews(d.Activity)
 	return v
+}
+
+// shownAttemptReason is ": " and the first reason of an attempt that did not pass, or nothing.
+func shownAttemptReason(a domain.Attempt) string {
+	if a.Outcome == domain.OutcomePassed || len(a.Reasons) == 0 {
+		return ""
+	}
+	return ": " + shown(shownReason(a.Reasons))
 }
 
 // statusCommand is the command that shows the use cases of the tickets. A key that is not safe

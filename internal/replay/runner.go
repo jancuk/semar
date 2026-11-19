@@ -24,6 +24,7 @@ import (
 	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/script"
 	"github.com/jancuk/semar/internal/verdict"
+	"github.com/jancuk/semar/internal/words"
 )
 
 const (
@@ -72,6 +73,12 @@ type Deps struct {
 	// scenario with a web step ends blocked.
 	Web     WebDoer
 	Screens ScreenSource
+	// Retries is how many more times a scenario is replayed after an attempt that failed or was
+	// inconclusive. Zero replays nothing.
+	Retries int
+	// Once says whether sending the call would use a request of the once list of the environment. Nil
+	// means the environment has none.
+	Once func(api.Call) bool
 }
 
 type Runner struct {
@@ -101,6 +108,8 @@ type replayed struct {
 	fixtures  []domain.FixtureRecord
 	captured  map[string]string // every capture of every step, raw. Never stored
 	last      *api.Call         // the call of the last step that was sent
+	sentOnce  bool              // a request of the once list was sent, or may have been
+	earlier   []replayed        // the attempts before this one, oldest first
 }
 
 // Run replays each scenario and returns one result per scenario, in input order.
@@ -137,7 +146,7 @@ func (r *Runner) Run(ctx context.Context, scenarios []domain.Scenario) (results 
 				runs[i] = r.unsent(sc, reasonInterrupted, nil)
 				return nil
 			}
-			runs[i], errs[i] = r.replay(ctx, sc)
+			runs[i], errs[i] = r.attempts(ctx, sc)
 			return nil
 		})
 	}
@@ -159,23 +168,84 @@ func (r *Runner) decide(scenarios []domain.Scenario, runs []replayed, start, end
 	results := make([]domain.ScenarioResult, len(scenarios))
 	for i, sc := range scenarios {
 		run := runs[i]
-		res := verdict.Compute(verdict.Input{
-			Scenario:    sc,
-			Steps:       run.steps,
-			Confirmed:   run.confirmed,
-			BuildsStart: start,
-			BuildsEnd:   end,
-			NotRun:      run.notRun,
-			Blocked:     run.blocked,
-		})
-		for _, s := range endFailed {
-			res.Reasons = append(res.Reasons, domain.Reason{Rule: domain.OutcomeInconclusive, Text: fmt.Sprintf("the build of %s could not be read after the run", s)})
+		all := append(slices.Clone(run.earlier), run)
+		attempts := make([]domain.Attempt, len(all))
+		var fixtures []domain.FixtureRecord
+		var res domain.ScenarioResult
+		for j, a := range all {
+			res = judge(sc, a, start, end)
+			for _, s := range endFailed {
+				res.Reasons = append(res.Reasons, domain.Reason{Rule: domain.OutcomeInconclusive, Text: fmt.Sprintf("the build of %s could not be read after the run", s)})
+			}
+			res.Reasons = append(res.Reasons, a.notes...)
+			attempts[j] = domain.Attempt{Outcome: res.Outcome, Reasons: res.Reasons, Checks: res.Checks, Actions: res.Actions}
+			fixtures = append(fixtures, a.fixtures...)
 		}
-		res.Reasons = append(res.Reasons, run.notes...)
-		res.Fixtures = run.fixtures
+		deciding, flaky := domain.Settle(attempts)
+		res.Outcome, res.Reasons, res.Checks, res.Actions = deciding.Outcome, deciding.Reasons, deciding.Checks, deciding.Actions
+		res.Flaky, res.Fixtures = flaky, fixtures
+		if len(attempts) > 1 {
+			res.Attempts, res.AttemptsAllowed = attempts, r.d.Retries+1
+		}
 		results[i] = res
 	}
 	return results
+}
+
+func judge(sc domain.Scenario, run replayed, start, end []domain.BuildRef) domain.ScenarioResult {
+	return verdict.Compute(verdict.Input{
+		Scenario:    sc,
+		Steps:       run.steps,
+		Confirmed:   run.confirmed,
+		BuildsStart: start,
+		BuildsEnd:   end,
+		NotRun:      run.notRun,
+		Blocked:     run.blocked,
+	})
+}
+
+// attempts replays a scenario until it passes or cannot pass by being replayed again. Each replay
+// starts with a clean browser and fresh variables. The error is that of the last replay.
+func (r *Runner) attempts(ctx context.Context, sc domain.Scenario) (replayed, error) {
+	var earlier []replayed
+	for {
+		run, err := r.replay(ctx, sc)
+		if err != nil || ctx.Err() != nil || len(earlier) >= r.d.Retries || !retriable(sc, run) {
+			run.earlier = earlier
+			return run, err
+		}
+		if run.sentOnce {
+			run.notes = append(run.notes, domain.Reason{Rule: domain.OutcomeInconclusive, Text: words.NotRunAgain})
+			run.earlier = earlier
+			return run, nil
+		}
+		earlier = append(earlier, run)
+	}
+}
+
+// retriable says whether an attempt ended in a way that another attempt could change: it failed, it
+// was inconclusive for a reason other than a missing approval, or it was blocked only because a setup
+// step got no good answer. Any other block is the environment's rule or a missing file, which a
+// second attempt cannot change. The builds are judged once for the
+// whole run, so this reads the attempt with stand-in builds that never differ.
+func retriable(sc domain.Scenario, run replayed) bool {
+	same := []domain.BuildRef{{Service: "-", Commit: "-"}}
+	res := judge(sc, run, same, same)
+	switch res.Outcome {
+	case domain.OutcomeFailed:
+		return true
+	case domain.OutcomeInconclusive:
+		texts := make([]string, len(res.Reasons))
+		for i, reason := range res.Reasons {
+			texts[i] = reason.Text
+		}
+		return words.Of(string(res.Outcome), texts) != "needs review"
+	case domain.OutcomeBlocked:
+		return !slices.ContainsFunc(res.Reasons, func(reason domain.Reason) bool {
+			return reason.Rule == domain.OutcomeBlocked && !strings.HasPrefix(reason.Text, verdict.SetupFailedPrefix)
+		})
+	}
+	return false
 }
 
 // unsent is a scenario that was decided before any of its steps could be sent.
@@ -460,7 +530,11 @@ func (r *Runner) send(ctx context.Context, wr *webRun, run *replayed, sc domain.
 		note(step.ID, fmt.Sprintf("step %s could not be sent: the request could not be built", step.ID))
 		return sent{}, nil
 	}
+	once := r.d.Once != nil && r.d.Once(call)
 	res, err := r.d.Engine.Do(ctx, call)
+	if once && res.Action.Refused == "" {
+		run.sentOnce = true
+	}
 	run.last = &call
 	return sent{res.Action, res.Captured, res.Missing, true}, err
 }
