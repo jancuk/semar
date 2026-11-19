@@ -567,27 +567,6 @@ func scenarioItems(dir string, uses []obligation.Located, todo []unconfirmed, fi
 	return out
 }
 
-// coverEdgeCase makes an approved edge case one more test of every use case that its base covers. Until a
-// person approves it, no use case holds it, so it cannot change the state of one.
-func coverEdgeCase(dir string, uses []obligation.Located, sc domain.Scenario) error {
-	if sc.Edge == nil {
-		return nil
-	}
-	for _, l := range uses {
-		if !slices.Contains(l.Covers, sc.Edge.Base) || slices.Contains(l.Covers, sc.ID) {
-			continue
-		}
-		err := obligation.Edit(dir, l.ID, func(ob *obligation.Obligation) error {
-			ob.Covers = append(ob.Covers, sc.ID)
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // dropOf is the drop of an item that holds one edge case, and nil for any other item.
 func dropOf(us []unconfirmed) func(io.Writer, options, string) error {
 	if len(us) != 1 || us[0].sc.Edge == nil {

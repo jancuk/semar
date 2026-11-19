@@ -230,7 +230,7 @@ func TestSelectKeepsTheHigherPriorityByOperationAndByPlan(t *testing.T) {
 
 func TestSummaryCountsWhatItDraftedAndWhatItLeftOut(t *testing.T) {
 	line := edge.Summary(3, []edge.Left{{Reason: edge.ReasonNoStatus}, {Reason: edge.ReasonNoStatus}, {Reason: edge.ReasonWrite}})
-	want := "edge cases: 3 drafted, 3 left out (2 because the API document declares no fitting status; 1 because it writes, and a write is never tried as another account); each needs your review"
+	want := "edge cases: 3 drafted, 3 left out (2 because the API document declares no fitting status; 1 because it writes, and a write is never tried as another account)"
 	if line != want {
 		t.Errorf("summary:\n%s\nwant:\n%s", line, want)
 	}

@@ -190,6 +190,9 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 			return w.undo(err)
 		}
 	}
+	if err := w.coverEdgeCases(dir, out.Scenarios); err != nil {
+		return w.undo(err)
+	}
 	for i, s := range scripts {
 		if err := store.PutScript(s); err != nil {
 			return w.undo(err)
@@ -224,6 +227,68 @@ func (w *planWriter) replaceFile(f planFile, old []byte) error {
 		return err
 	}
 	w.replaced[f.rel] = old
+	return nil
+}
+
+// coverEdgeCases makes each edge case of the plan one more test of every use case that its base
+// covers. It runs after the obligations files are written, so a base that this plan wrote counts, and
+// it remembers the content of a file that it changes, so that undo can put it back.
+func (w *planWriter) coverEdgeCases(dir string, scenarios []domain.Scenario) error {
+	if !slices.ContainsFunc(scenarios, func(sc domain.Scenario) bool { return sc.Edge != nil }) {
+		return nil
+	}
+	uses, problems, err := obligation.Load(dir)
+	if err != nil {
+		return err
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("fix the obligations files first: %s", problems[0])
+	}
+	for _, sc := range scenarios {
+		if sc.Edge == nil {
+			continue
+		}
+		for _, l := range uses {
+			if !slices.Contains(l.Covers, sc.Edge.Base) || slices.Contains(l.Covers, sc.ID) {
+				continue
+			}
+			rel := filepath.FromSlash(l.File)
+			if _, held := w.replaced[rel]; !held && !slices.Contains(w.files, rel) {
+				old, err := obligation.ReadFile(w.root, rel)
+				if err != nil {
+					return err
+				}
+				w.replaced[rel] = old
+			}
+		}
+		if err := coverEdgeCase(dir, uses, sc); err != nil {
+			return err
+		}
+		uses, _, err = obligation.Load(dir)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// coverEdgeCase makes an edge case one more test of every use case that its base covers.
+func coverEdgeCase(dir string, uses []obligation.Located, sc domain.Scenario) error {
+	if sc.Edge == nil {
+		return nil
+	}
+	for _, l := range uses {
+		if !slices.Contains(l.Covers, sc.Edge.Base) || slices.Contains(l.Covers, sc.ID) {
+			continue
+		}
+		err := obligation.Edit(dir, l.ID, func(ob *obligation.Obligation) error {
+			ob.Covers = append(ob.Covers, sc.ID)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -346,7 +411,7 @@ func obligationsOf(root *os.Root, in plan.Input, out plan.Output) (files []planF
 	for _, m := range d.ManualChecks {
 		tickets[m.Ticket] = true
 	}
-	// An edge case is no obligation: it counts for its base only after a person approves it.
+	// An edge case is no obligation of its own: writePlan adds it to the covers of the use cases of its base.
 	scenarios := slices.DeleteFunc(slices.Clone(out.Scenarios), func(sc domain.Scenario) bool { return sc.Edge != nil })
 	for _, wt := range out.WebTests {
 		tickets[wt.Scenario.Ticket] = true

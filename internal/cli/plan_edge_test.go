@@ -156,7 +156,6 @@ func TestPlanDraftsEdgeCasesAndCasesAsAnotherAccountWithNoModel(t *testing.T) {
 		"1 because the API document declares no fitting status",
 		"1 because its request could not be tried as another account",
 		"1 because it writes, and a write is never tried as another account",
-		"; each needs your review\n",
 		"SHOP-482 (behaviour): 1 scenario", "SHOP-483 (behaviour): 2 scenarios")
 
 	files := p.edgeFiles(t)
@@ -204,32 +203,22 @@ func TestPlanDraftsEdgeCasesAndCasesAsAnotherAccountWithNoModel(t *testing.T) {
 		t.Errorf("the unknown-id case was sent %d times, want once", n)
 	}
 
-	// No case changes a use case before a person approves it.
-	obligations, err := filepath.Glob(p.path(".semar", "obligations", "*.yaml"))
-	if err != nil || len(obligations) == 0 {
-		t.Fatalf("obligations %v, %v", obligations, err)
-	}
-	for _, f := range obligations {
-		data, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(data), "-E0") || strings.Contains(string(data), "-E1") {
-			t.Errorf("%s holds an edge case before a person approved it:\n%s", f, data)
-		}
-	}
 	md := p.planMD(t)
 	contains(t, "plan.md", md, "SHOP-482-E01", "Edge case: GET /v1/orders/{id} with an unknown id")
+	p.assertNoSecret(t, []string{token, "tok-bob"})
+}
 
-	// After the approval, a case is one more test of the use case of its base.
-	approved := p.must(t, cli.ExitOK, "review", "--yes")
-	contains(t, "review", approved.stdout, "approved SHOP-482-E01")
+func TestAnEdgeCaseCountsForTheUseCaseOfItsBaseWhenThePlanWritesIt(t *testing.T) {
+	p := edgeRepo(t, "")
+	res := p.must(t, cli.ExitOK, "plan", "--diff", "main..release")
+	if strings.Contains(res.stdout, "needs your review") || strings.Contains(res.stdout, "semar review") {
+		t.Errorf("the plan points to a review:\n%s", res.stdout)
+	}
 	data, err := os.ReadFile(p.path(".semar", "obligations", "SHOP-482.plan.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	contains(t, "the use case of SHOP-482-01", string(data), "covers: [SHOP-482-01, SHOP-482-E01")
-	p.assertNoSecret(t, []string{token, "tok-bob"})
 }
 
 func TestPlanLimitsEdgeCasesByPriority(t *testing.T) {
@@ -289,10 +278,8 @@ func TestADroppedEdgeCaseIsRemovedAndNotDraftedAgain(t *testing.T) {
 		t.Fatal("no unknown-id case of SHOP-483")
 	}
 
-	p.opts.Terminal = func() bool { return true }
-	p.opts.Stdin = strings.NewReader("x\n")
-	res := p.must(t, cli.ExitOK, "review", id)
-	contains(t, "review", res.stdout, "[x] drop", "retired scenario "+id, "approved 0 of 1 item, dropped 1")
+	res := p.must(t, cli.ExitOK, "rm", id, "--reason", "dropped by a person")
+	contains(t, "rm", res.stdout, "retired scenario "+id)
 	if _, ok := p.edgeFiles(t)[id]; ok {
 		t.Errorf("%s is still there", id)
 	}
@@ -300,7 +287,7 @@ func TestADroppedEdgeCaseIsRemovedAndNotDraftedAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	contains(t, "edge-dropped.yaml", string(dropped), "SHOP-483|GET /v1/orders/{id}|unknown-id|id", "scenario: "+id, "reason: dropped in the review")
+	contains(t, "edge-dropped.yaml", string(dropped), "SHOP-483|GET /v1/orders/{id}|unknown-id|id", "scenario: "+id, "reason: dropped by a person")
 
 	// The same plan again has to start from new base tests, so the earlier ones are retired first. The edge
 	// cases that were not dropped go too, by file, because semar rm would drop them as well.
@@ -326,7 +313,7 @@ func TestADroppedEdgeCaseIsRemovedAndNotDraftedAgain(t *testing.T) {
 		}
 	}
 	again := p.must(t, cli.ExitOK, "plan", "--diff", "main..release")
-	contains(t, "stdout", again.stdout, "1 because a person dropped it in an earlier review")
+	contains(t, "stdout", again.stdout, "1 because a person dropped it with semar rm")
 	for _, text := range p.edgeFiles(t) {
 		if strings.Contains(text, "@edge-kind:unknown-id") && strings.Contains(text, "@id:SHOP-483-") {
 			t.Errorf("the dropped case was drafted again:\n%s", text)

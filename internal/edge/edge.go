@@ -32,7 +32,7 @@ const (
 // Reasons that a case is left out, as the plan says them.
 const (
 	ReasonNoStatus   = "the API document declares no fitting status"
-	ReasonDropped    = "a person dropped it in an earlier review"
+	ReasonDropped    = "a person dropped it with semar rm"
 	ReasonWrite      = "it writes, and a write is never tried as another account"
 	ReasonNoAnswer   = "the environment gave no answer to try it as another account"
 	ReasonServerFail = "the environment failed when the request was tried as another account"
@@ -230,9 +230,6 @@ func Summary(drafted int, left []Left) string {
 			parts[i] = fmt.Sprintf("%d because %s", counts[r], r)
 		}
 		fmt.Fprintf(&b, ", %d left out (%s)", len(left), strings.Join(parts, "; "))
-	}
-	if drafted > 0 {
-		b.WriteString("; each needs your review")
 	}
 	return b.String()
 }
