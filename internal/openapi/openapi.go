@@ -37,7 +37,8 @@ type Document struct {
 	Prefixes   []string    // path prefixes from basePath or from the path of each servers[].url, without a trailing slash
 	Operations []Operation // sorted by Path, then Method
 
-	index *routeIndex // built by Parse; Lookup builds a temporary one when it is nil
+	index   *routeIndex  // built by Parse; Lookup builds a temporary one when it is nil
+	schemas *schemaStore // the response schemas, for Validate; nil when the details could not be read
 }
 
 // routeIndex maps a normalised route to the operations that answer it, in the order of

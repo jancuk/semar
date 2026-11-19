@@ -436,6 +436,7 @@ func (r *Runner) note(ts *plan.TrialStep, res api.Result) {
 		ts.Status = a.Response.Status
 	}
 	ts.Err = a.Err
+	ts.Doc = a.Doc
 	switch {
 	case a.Refused != "":
 		// A redirect that the policy refused: the response is a 3xx and nothing was captured from it.

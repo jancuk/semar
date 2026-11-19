@@ -64,6 +64,7 @@ type TrialStep struct {
 	Err      string   // a transport error, from the recorded action
 	Found    bool     // for a given entry: find gave a record
 	Action   domain.ActionID
+	Doc      *domain.DocCheck // what the check against the API document found, nil when nothing
 }
 
 // trialProblems turns a trial into the problems that go back to the planner and the steps that

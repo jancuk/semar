@@ -923,6 +923,7 @@ func trialLine(ts TrialStep, sc domain.Scenario, captures []string, value func(s
 		return head + " " + on + " got no answer"
 	}
 	line := fmt.Sprintf("%s %s answered %d", head, on, ts.Status)
+	line += docNote(ts.Doc, value)
 	if ts.Status >= 400 {
 		return line
 	}
@@ -943,4 +944,26 @@ func earlierFlows(out Output, w WebResult) string {
 		fmt.Fprintf(&b, ", after %s wrote no test: %s", shown(valueOr(out.Pipeline.modelOf(rung), "a model"), maxValueShown), shown(strings.TrimRight(why, "."), maxTextShown))
 	}
 	return b.String()
+}
+
+// docNote says what the check against the API document found in a trial response. It names the
+// first misfit and counts the rest, never a value, so that a person who reviews the draft sees it.
+func docNote(d *domain.DocCheck, value func(string) string) string {
+	if d == nil {
+		return ""
+	}
+	var parts []string
+	if len(d.Misfits) > 0 {
+		parts = append(parts, "the response does not fit the API document: "+value(d.SchemaText()))
+	}
+	if d.Undeclared {
+		parts = append(parts, fmt.Sprintf("the API document does not declare status %d", d.Status))
+	}
+	if d.Slow() {
+		parts = append(parts, fmt.Sprintf("the response took %d ms, over the limit of %d ms", d.TookMS, d.LimitMS))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return ", " + strings.Join(parts, ", ")
 }

@@ -66,6 +66,7 @@ type browserStep struct {
 type markdownView struct {
 	Browser                            []browserStep
 	Blocked                            []blockedView
+	DocChecks                          []docView
 	RunID, Environment, Started, Ended string
 	EnvironmentKind                    string
 	BuildsStart, BuildsEnd, Counts     string
@@ -144,6 +145,7 @@ func buildView(d Data) markdownView {
 	}
 	v.Browser = browserSteps(d.Activity)
 	v.Blocked = blockedViews(d.Activity)
+	v.DocChecks = docViews(d.Activity)
 	return v
 }
 

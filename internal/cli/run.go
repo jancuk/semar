@@ -90,6 +90,7 @@ type finishedRun struct {
 	interrupted bool
 	coverage    string // the use case line of the report
 	blocked     []report.BlockedHost
+	docs        []report.DocFinding
 }
 
 // executeScenarios replays the scenarios against one environment, writes the report, and closes the
@@ -148,7 +149,7 @@ func executeScenarios(ctx context.Context, stderr io.Writer, o options, dir stri
 			return finishedRun{}, err
 		}
 	}
-	return finishedRun{record: record, reportPath: filepath.Join(r.store.Root(), "runs", string(r.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts)}, nil
+	return finishedRun{record: record, reportPath: filepath.Join(r.store.Root(), "runs", string(r.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts), docs: report.DocFindings(acts)}, nil
 }
 
 // effectsWords says what a test may change in an environment of this effects mode.
@@ -310,6 +311,7 @@ func newEnvRig(ctx context.Context, o options, repo string, cfg config.Config, e
 		Run:      id,
 		Version:  Version,
 		Clock:    o.Clock,
+		Doc:      responseChecker(repo, cfg, env),
 	})
 	return &envRig{
 		secrets: secrets, recorder: rec, services: services,

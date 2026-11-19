@@ -109,6 +109,15 @@ The browser did not reach these hosts, because `environments.{{ $.Environment }}
 - {{ .Host }}{{ if .Met }}: {{ .Met }}{{ end }}
 {{ end -}}
 {{ end -}}
+{{ if .DocChecks }}
+## Checks against the API document
+
+Each response was checked against the API document, and against the time limit when the environment has one.
+
+{{ range .DocChecks -}}
+- {{ .Scenario }}, step {{ .Step }}, {{ .Operation }}: {{ .Text }} ({{ .Effect }})
+{{ end -}}
+{{ end -}}
 {{ if .Browser }}
 ## Browser steps
 

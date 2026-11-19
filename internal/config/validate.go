@@ -189,6 +189,19 @@ func validateEnvironment(name string, e Environment, profiles map[string]AuthPro
 		add("%s.web.chrome must be an absolute path, got %q", p, c)
 	}
 	validateData(p+".data", e.Data, add)
+	validateChecks(p+".checks", e.Checks, add)
+}
+
+func validateChecks(p string, c Checks, add func(string, ...any)) {
+	if !slices.Contains([]string{"", "fail", "warn", "off"}, c.Schema) {
+		add("%s.schema must be fail, warn, or off, got %q", p, c.Schema)
+	}
+	if !slices.Contains([]string{"", "warn", "fail"}, c.ResponseTime.On) {
+		add("%s.responseTime.on must be warn or fail, got %q", p, c.ResponseTime.On)
+	}
+	if c.ResponseTime.Limit < 0 {
+		add("%s.responseTime.limit must not be negative", p)
+	}
 }
 
 const (

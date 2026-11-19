@@ -139,6 +139,14 @@ func (r *Redactor) Action(a domain.Action) domain.Action {
 		w := webRecord(s, *a.Web)
 		out.Web = &w
 	}
+	if a.Doc != nil {
+		d := *a.Doc
+		d.Misfits = make([]domain.Misfit, len(a.Doc.Misfits))
+		for i, m := range a.Doc.Misfits {
+			d.Misfits[i] = domain.Misfit{Path: s.text(m.Path), Want: s.text(m.Want), Got: m.Got}
+		}
+		out.Doc = &d
+	}
 	out.Err = s.text(a.Err)
 	out.Refused = s.text(a.Refused)
 	out.Why = s.text(a.Why)

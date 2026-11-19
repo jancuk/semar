@@ -602,3 +602,40 @@ func TestAServiceMayNameItsWebStartPage(t *testing.T) {
 		t.Errorf("an unknown key under web: %v", err)
 	}
 }
+
+func TestEnvironmentChecks(t *testing.T) {
+	const head = "version: 1\nenvironments:\n  shop:\n    kind: test\n    hosts: [h]\n    methods: [GET]\n    effects: {mode: read_only}\n"
+	cfg, err := loadText(t, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := cfg.Environments["shop"]
+	if env.Name != "shop" || env.Checks.Schema != "" || env.Checks.ResponseTime.Limit != 0 {
+		t.Errorf("defaults: %+v", env)
+	}
+	cfg, err = loadText(t, head+"    checks:\n      schema: warn\n      responseTime: {limit: 2s, on: fail}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := cfg.Environments["shop"].Checks; c.Schema != "warn" || c.ResponseTime.Limit != 2*time.Second || c.ResponseTime.On != "fail" {
+		t.Errorf("checks: %+v", c)
+	}
+	cfg, err = loadText(t, head+"    checks:\n      schema: off\n")
+	if err != nil || cfg.Environments["shop"].Checks.Schema != "off" {
+		t.Errorf("off: %v %+v", err, cfg.Environments["shop"].Checks)
+	}
+	for text, want := range map[string]string{
+		"    checks: {schema: sometimes}\n":                   "checks.schema must be fail, warn, or off",
+		"    checks: {responseTime: {on: maybe}}\n":           "checks.responseTime.on must be warn or fail",
+		"    checks: {responseTime: {limit: -1s}}\n":          "checks.responseTime.limit must not be negative",
+		"    checks: {responseTime: {limit: 2s, extra: 1}}\n": "",
+	} {
+		_, err := loadText(t, head+text)
+		switch {
+		case err == nil:
+			t.Errorf("%q was accepted", text)
+		case want != "" && !strings.Contains(err.Error(), want):
+			t.Errorf("%q: %v", text, err)
+		}
+	}
+}

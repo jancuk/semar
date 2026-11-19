@@ -163,6 +163,7 @@ func planTrial(ctx context.Context, stderr io.Writer, o options, f planFlags, cf
 		Timeout:  timeout,
 		Budget:   trialRequests,
 		Clock:    o.Clock,
+		Doc:      responseChecker(f.dir, cfg, env),
 	})
 
 	deps := trial.Deps{

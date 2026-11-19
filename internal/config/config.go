@@ -37,6 +37,8 @@ const (
 )
 
 type Environment struct {
+	// Name is the key of the environment in the file. Load sets it.
+	Name     string    `yaml:"-"`
 	Kind     string    `yaml:"kind"`
 	Hosts    []string  `yaml:"hosts"`
 	Methods  []string  `yaml:"methods"`
@@ -46,6 +48,21 @@ type Environment struct {
 	Web Web `yaml:"web"`
 	// Data is the set of values that tests need, keyed by a dotted name such as customers.default.
 	Data map[string]string `yaml:"data"`
+	// Checks says what every API response is judged by besides the expected results of its step.
+	Checks Checks `yaml:"checks"`
+}
+
+// Checks is environments.<name>.checks. Schema is fail, warn, or off, and empty means fail.
+type Checks struct {
+	Schema       string       `yaml:"schema"`
+	ResponseTime ResponseTime `yaml:"responseTime"`
+}
+
+// ResponseTime is the time limit of a response. With no Limit nothing is checked. On is warn or
+// fail, and empty means warn.
+type ResponseTime struct {
+	Limit time.Duration `yaml:"limit"`
+	On    string        `yaml:"on"`
 }
 
 // Web's Chrome is the path of the Chrome program. Empty finds one on the machine.
@@ -260,6 +277,10 @@ func parse(data []byte, name string) (Config, error) {
 	applyPlanDefaults(&cfg)
 	if err := validate(cfg, name); err != nil {
 		return Config{}, err
+	}
+	for n, e := range cfg.Environments {
+		e.Name = n
+		cfg.Environments[n] = e
 	}
 	// Every later reader sees the clean path. validate has accepted it, so one trailing
 	// slash is the only thing left to remove.

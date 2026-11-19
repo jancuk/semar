@@ -190,6 +190,10 @@ func Compute(in Input) domain.ScenarioResult {
 			}
 		}
 
+		for _, text := range docFailures(step, a) {
+			add(domain.OutcomeFailed, step.ID, text)
+		}
+
 		if hasResponse(a) && !refused && len(ev.Invariants) == 0 {
 			add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("the invariants of step %s were not evaluated", step.ID))
 		}

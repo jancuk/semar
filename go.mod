@@ -10,7 +10,9 @@ require (
 	github.com/chromedp/chromedp v0.23.1
 	github.com/cucumber/gherkin/go/v43 v43.0.0
 	github.com/cucumber/messages/go/v35 v35.0.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.9
 	github.com/theory/jsonpath v0.12.3
 	github.com/zalando/go-keyring v0.2.8
 	go.yaml.in/yaml/v4 v4.0.0
@@ -24,5 +26,5 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/spf13/pflag v1.0.9 // indirect
+	golang.org/x/text v0.14.0 // indirect
 )

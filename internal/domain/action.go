@@ -66,6 +66,8 @@ type Action struct {
 	At            time.Time         `json:"at"`
 	DurationMS    int64             `json:"durationMs"`
 	Why           string            `json:"why,omitempty"`
+	// Doc is what the check against the API document found, when it found anything.
+	Doc *DocCheck `json:"doc,omitempty"`
 }
 
 type HTTPRequest struct {
@@ -102,6 +104,8 @@ type Activity struct {
 	// Blocked lists the hosts that the browser refused to reach during a web action because the
 	// environment does not list them, in the form of a hosts entry.
 	Blocked []string `json:"blocked,omitempty"`
+	// Doc is the finding of the check against the API document, as the action holds it.
+	Doc *DocCheck `json:"doc,omitempty"`
 }
 
 type ObjectRef struct {

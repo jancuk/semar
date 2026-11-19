@@ -548,3 +548,17 @@ func TestPatternsOnJSONNumbers(t *testing.T) {
 		})
 	}
 }
+
+func TestActionRedactsAndCopiesTheDocCheck(t *testing.T) {
+	r := newRedactor(t, config.Redact{})
+	in := sampleAction()
+	in.Doc = &domain.DocCheck{Misfits: []domain.Misfit{{Path: "$.items." + secretValue, Want: "integer", Got: "string"}}}
+	out := r.Action(in)
+	if strings.Contains(out.Doc.Misfits[0].Path, secretValue) {
+		t.Errorf("a secret survived in the path of a misfit: %s", out.Doc.Misfits[0].Path)
+	}
+	out.Doc.Misfits[0].Want = "changed"
+	if in.Doc.Misfits[0].Want != "integer" {
+		t.Error("the output shares its misfits with the input")
+	}
+}

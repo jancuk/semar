@@ -393,6 +393,7 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 		return err
 	}
 	report.WriteBlocked(stdout, envName, "scenario", fin.blocked)
+	report.WriteDocWarnings(stdout, envName, fin.docs)
 	fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
 	if interrupted {
 		fmt.Fprintf(stderr, "semar: the run was interrupted: run %s is incomplete\n", record.ID)
@@ -515,7 +516,7 @@ func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir strin
 			return finishedRun{}, err
 		}
 	}
-	return finishedRun{record: record, reportPath: filepath.Join(rg.store.Root(), "runs", string(rg.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts)}, nil
+	return finishedRun{record: record, reportPath: filepath.Join(rg.store.Root(), "runs", string(rg.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts), docs: report.DocFindings(acts)}, nil
 }
 
 // legStepAccounts is the as of each step of a leg that has one.

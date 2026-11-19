@@ -45,6 +45,7 @@ func FromAction(a domain.Action, class effects.Class, evidencePath string) domai
 		Why:      a.Why,
 		TraceID:  a.TraceID,
 		Evidence: evidencePath,
+		Doc:      a.Doc,
 	}
 }
 

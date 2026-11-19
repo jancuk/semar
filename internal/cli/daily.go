@@ -107,6 +107,7 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 			return err
 		}
 		report.WriteBlocked(stdout, envName, "scenario", fin.blocked)
+		report.WriteDocWarnings(stdout, envName, fin.docs)
 		fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
 		code = max(code, report.JourneyExitCode(fin.record.Journeys))
 		if fin.interrupted {
@@ -426,6 +427,7 @@ func printScenarioRun(stdout io.Writer, envName string, fin finishedRun) error {
 		return err
 	}
 	report.WriteBlocked(stdout, envName, "scenario", fin.blocked)
+	report.WriteDocWarnings(stdout, envName, fin.docs)
 	fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
 	return nil
 }

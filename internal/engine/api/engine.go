@@ -26,6 +26,7 @@ import (
 
 	"github.com/theory/jsonpath"
 
+	"github.com/jancuk/semar/internal/apicheck"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/recorder"
@@ -58,6 +59,8 @@ type Options struct {
 	SpanID   func() string     // 16 lower-case hex characters
 	HTTP     http.RoundTripper // default: a transport that never reuses a connection
 	Logger   *slog.Logger      // default: discards
+	// Doc checks each answer of a step against the API document and a time limit. Nil checks nothing.
+	Doc *apicheck.Checker
 }
 
 type Call struct {
@@ -254,6 +257,12 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 		}
 		a.Err = msg
 		a.EffectUnknown = write && f.gotConn.Load()
+	}
+	if a.Refused == "" && a.Err == "" && a.Response.URL == "" && c.Use.Fixture == nil {
+		a.Doc = e.o.Doc.Check(apicheck.Response{
+			Service: c.Service, Method: method, Path: c.Path, FullPath: u.Path,
+			Status: resp.StatusCode, Body: body, Truncated: truncated, DurationMS: a.DurationMS,
+		})
 	}
 	if a.Refused != "" || a.Err != "" || truncated {
 		return e.record(ctx, label, a, nil, missing)

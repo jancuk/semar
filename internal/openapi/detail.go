@@ -67,6 +67,8 @@ func (d *Document) readDetail(data []byte, name string) {
 		return
 	}
 	paths, _ := top["paths"].(map[string]any)
+	store := newSchemaStore(top)
+	d.schemas = store
 	for i := range d.Operations {
 		op := &d.Operations[i]
 		item, _ := deref(top, paths[op.Path]).(map[string]any)
@@ -77,6 +79,7 @@ func (d *Document) readDetail(data []byte, name string) {
 		op.Params = readParams(top, item["parameters"], raw["parameters"])
 		op.Body, op.BodyRequired, op.BodyKnown, op.BodyOpen = readBody(top, raw)
 		op.Responses = readResponses(top, raw["responses"])
+		store.add(*op, responseSchemas(top, raw["responses"]))
 	}
 }
 
@@ -192,6 +195,11 @@ func nodeTree(n *yaml.Node, b *budget, depth int) (any, error) {
 			return nil, nil
 		case "!!bool":
 			return n.Value == "true", nil
+		case "!!int", "!!float":
+			// A schema compares numbers with numbers, so a plain one keeps its type.
+			if jsonNumber.MatchString(n.Value) {
+				return json.Number(n.Value), nil
+			}
 		}
 		return n.Value, nil
 	}
@@ -332,13 +340,7 @@ func readResponses(root map[string]any, v any) []Response {
 	responses, _ := v.(map[string]any)
 	var out []Response
 	for _, status := range sortedKeys(responses) {
-		resp, _ := deref(root, responses[status]).(map[string]any)
-		var schema any
-		if content, ok := resp["content"].(map[string]any); ok {
-			schema = jsonSchemaOf(root, content)
-		} else {
-			schema = resp["schema"] // Swagger 2
-		}
+		schema := responseSchema(root, responses[status])
 		if schema == nil {
 			continue
 		}
@@ -347,6 +349,27 @@ func readResponses(root map[string]any, v any) []Response {
 		flatten(root, "$", schema, 0, &fields, &seen)
 		if len(fields) > 0 {
 			out = append(out, Response{Status: status, Fields: fields})
+		}
+	}
+	return out
+}
+
+// responseSchema is the schema of the JSON body of one response, nil when the response has none.
+func responseSchema(root map[string]any, response any) any {
+	resp, _ := deref(root, response).(map[string]any)
+	if content, ok := resp["content"].(map[string]any); ok {
+		return jsonSchemaOf(root, content)
+	}
+	return resp["schema"] // Swagger 2
+}
+
+// responseSchemas maps each status to the schema of its JSON body, as the document writes it.
+func responseSchemas(root map[string]any, v any) map[string]any {
+	responses, _ := v.(map[string]any)
+	out := map[string]any{}
+	for status, resp := range responses {
+		if schema := responseSchema(root, resp); schema != nil {
+			out[status] = schema
 		}
 	}
 	return out
@@ -475,6 +498,8 @@ func flatten(root map[string]any, prefix string, schema any, depth int, out *[]F
 		}
 	}
 }
+
+var jsonNumber = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
 
 var simpleName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
