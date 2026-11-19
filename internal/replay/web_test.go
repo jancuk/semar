@@ -7,7 +7,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/engine/web"
 	"github.com/jancuk/semar/internal/replay"
@@ -107,7 +106,6 @@ func TestWebScenarioRunsThroughTheRunner(t *testing.T) {
 	sc.Steps[0].Expect = nil
 	s := webScript(sc)
 	fw, fs := &fakeWeb{}, &fakeScreens{text: boardScreens, approved: true}
-	r.confirm.Put(confirm.Record{Scenario: sc.ID, ExpectHash: domain.ExpectHash(sc), User: "u", Identity: "x", Sources: []domain.Source{domain.SourcePerson}})
 	res := r.runWeb(t, sc, s, fw, fs)
 	if res.Outcome != domain.OutcomePassed {
 		t.Fatalf("outcome = %s: %+v", res.Outcome, res.Reasons)
@@ -202,7 +200,6 @@ func TestAnElementThatIsNotFoundStopsTheScenarioInconclusive(t *testing.T) {
 		return web.Result{Action: a}, nil
 	}}
 	fs := &fakeScreens{text: boardScreens, approved: true}
-	r.confirm.Put(confirm.Record{Scenario: sc.ID, ExpectHash: domain.ExpectHash(sc), User: "u", Identity: "x", Sources: []domain.Source{domain.SourcePerson}})
 	res := r.runWeb(t, sc, s, fw, fs)
 	if res.Outcome != domain.OutcomeInconclusive {
 		t.Fatalf("outcome = %s: %+v", res.Outcome, res.Reasons)
@@ -224,7 +221,6 @@ func TestNoChromeBlocksTheScenario(t *testing.T) {
 	fw := &fakeWeb{reply: func(c web.Call, n int) (web.Result, error) {
 		return web.Result{}, fmt.Errorf("web open: %w", web.ErrChromeNotFound)
 	}}
-	r.confirm.Put(confirm.Record{Scenario: sc.ID, ExpectHash: domain.ExpectHash(sc), User: "u", Identity: "x", Sources: []domain.Source{domain.SourcePerson}})
 	res := r.runWeb(t, sc, s, fw, &fakeScreens{text: boardScreens, approved: true})
 	if res.Outcome != domain.OutcomeBlocked {
 		t.Fatalf("outcome = %s: %+v", res.Outcome, res.Reasons)
@@ -242,7 +238,6 @@ func TestALocatorWithAnUnknownVariableStopsTheStep(t *testing.T) {
 	s.Steps[0].Web.Path = "/"
 	s.ExpectHash = domain.ExpectHash(sc)
 	fw := &fakeWeb{}
-	r.confirm.Put(confirm.Record{Scenario: sc.ID, ExpectHash: domain.ExpectHash(sc), User: "u", Identity: "x", Sources: []domain.Source{domain.SourcePerson}})
 	// The screens name {{leg.other}}, which no earlier step captured and no preset holds.
 	res := r.runWeb(t, sc, s, fw, &fakeScreens{text: strings.Replace(boardScreens, "leg.title", "leg.other", 1), approved: true})
 	if res.Outcome != domain.OutcomeInconclusive || !hasReason(res, "the locator of element card") {
@@ -333,7 +328,6 @@ func TestTheChecksOfAWebStepGoToTheEngineToWaitFor(t *testing.T) {
 	s := webScript(sc)
 	s.Steps[1].Captures = nil
 	fw, fs := &fakeWeb{}, &fakeScreens{text: boardScreens, approved: true}
-	r.confirm.Put(confirm.Record{Scenario: sc.ID, ExpectHash: domain.ExpectHash(sc), User: "u", Identity: "x", Sources: []domain.Source{domain.SourcePerson}})
 	r.runWeb(t, sc, s, fw, fs)
 	read := fw.calls[1]
 	if len(read.Until) != 4 {

@@ -392,7 +392,7 @@ func TestExportEndToEnd(t *testing.T) {
 			t.Fatalf("scenario %s is %s, want %s: %+v", rr.Scenario, rr.Outcome, want[rr.Scenario], rr.Reasons)
 		}
 		for _, c := range rr.Checks {
-			if c.State == domain.CheckFalse && c.Confirmed {
+			if c.State == domain.CheckFalse {
 				falseChecks++
 			}
 		}
@@ -657,6 +657,7 @@ func (r *repo) latestRunOf(t *testing.T, id string) string {
 func TestExportEndToEndInconclusive(t *testing.T) {
 	r := newRepo(t, repoOptions{})
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
+	r.editFeature(t, func(s string) string { return dropExpectations(s) })
 
 	r.must(t, cli.ExitUndecided, "run", "--scenario", scenarioID)
 	e := r.exportAll(t, filepath.Base(r.latestRun(t)))
@@ -716,4 +717,24 @@ func TestExportEndToEndInvariantAndChangedEvidence(t *testing.T) {
 			t.Errorf("a %s file was written for a run that changed", format)
 		}
 	}
+}
+
+// dropExpectations removes every Then and And line of a feature, with the comment under it, so that a
+// scenario has no check besides the invariants and ends inconclusive.
+func dropExpectations(feature string) string {
+	var out []string
+	skip := false
+	for _, line := range strings.Split(feature, "\n") {
+		trim := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trim, "Then ") || strings.HasPrefix(trim, "And "):
+			skip = true
+			continue
+		case skip && strings.HasPrefix(trim, "#"):
+			continue
+		}
+		skip = false
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }

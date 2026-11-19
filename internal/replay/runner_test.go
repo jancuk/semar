@@ -151,8 +151,6 @@ func newRig(t *testing.T, o rigOptions) *rig {
 			Scripts:  store,
 			Builds:   prober,
 			Services: []string{"orders"},
-			Confirm:  conf,
-			Trust:    []domain.Source{domain.SourceDiff, domain.SourceBaseline},
 			Run:      runID,
 		},
 	}
@@ -199,28 +197,6 @@ func copyScenario(sc domain.Scenario, s domain.Script, id domain.ScenarioID) (do
 func (r *rig) putScript(t *testing.T, s domain.Script) {
 	t.Helper()
 	if err := r.store.PutScript(s); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func (r *rig) confirmAll(t *testing.T, scs ...domain.Scenario) {
-	t.Helper()
-	for _, sc := range scs {
-		r.confirmSources(t, sc, domain.SourceDiff, domain.SourceBaseline)
-	}
-}
-
-func (r *rig) confirmSources(t *testing.T, sc domain.Scenario, sources ...domain.Source) {
-	t.Helper()
-	err := r.confirm.Put(confirm.Record{
-		Scenario:   sc.ID,
-		ExpectHash: domain.ExpectHash(sc),
-		User:       "tester",
-		Identity:   "local, unverified identity",
-		At:         time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC),
-		Sources:    sources,
-	})
-	if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -281,26 +257,23 @@ func TestReplay(t *testing.T) {
 		mode    string
 		timeout time.Duration
 		delay   time.Duration
-		confirm bool
 		want    domain.Outcome
 		reason  string
 		check   func(t *testing.T, app *sampleapp.App, res domain.ScenarioResult)
 	}{
-		{name: "correct service", mode: "test_data", confirm: true, want: domain.OutcomePassed,
+		{name: "correct service", mode: "test_data", want: domain.OutcomePassed,
 			check: func(t *testing.T, _ *sampleapp.App, res domain.ScenarioResult) {
 				if len(res.Reasons) != 0 {
 					t.Errorf("a passed result has reasons: %+v", res.Reasons)
 				}
 			}},
-		{name: "refund above the total is accepted", defects: []sampleapp.Defect{sampleapp.RefundOverTotal}, mode: "test_data", confirm: true,
+		{name: "refund above the total is accepted", defects: []sampleapp.Defect{sampleapp.RefundOverTotal}, mode: "test_data",
 			want: domain.OutcomeFailed, reason: "step refund-too-much: expected status 422, observed status 201 (source ticket)"},
-		{name: "refund answers 500", defects: []sampleapp.Defect{sampleapp.RefundServerError}, mode: "test_data", confirm: true,
+		{name: "refund answers 500", defects: []sampleapp.Defect{sampleapp.RefundServerError}, mode: "test_data",
 			want: domain.OutcomeFailed, reason: "no server error"},
-		{name: "nobody confirmed the diff result", mode: "test_data", confirm: false,
-			want: domain.OutcomeInconclusive, reason: "an expected result is not confirmed"},
-		{name: "build changed during the run", defects: []sampleapp.Defect{sampleapp.BuildChanges}, mode: "test_data", confirm: true,
+		{name: "build changed during the run", defects: []sampleapp.Defect{sampleapp.BuildChanges}, mode: "test_data",
 			want: domain.OutcomeStale, reason: "the build changed during the run"},
-		{name: "read-only environment", mode: "read_only", confirm: true,
+		{name: "read-only environment", mode: "read_only",
 			want: domain.OutcomeBlocked, reason: "the environment does not allow a step",
 			check: func(t *testing.T, app *sampleapp.App, _ domain.ScenarioResult) {
 				if n := app.Requests("POST", "/v1/"); n != 0 {
@@ -309,7 +282,7 @@ func TestReplay(t *testing.T) {
 			}},
 		// The sample application delays only a refund it accepts, so the refund above the total must be accepted to be slow.
 		{name: "write times out", defects: []sampleapp.Defect{sampleapp.SlowRefund, sampleapp.RefundOverTotal}, mode: "test_data",
-			timeout: 2 * time.Second, delay: time.Minute, confirm: true,
+			timeout: 2 * time.Second, delay: time.Minute,
 			want: domain.OutcomeInconclusive, reason: "a write timed out and its effect is unknown",
 			check: func(t *testing.T, app *sampleapp.App, _ domain.ScenarioResult) { // Review Focus 4
 				if n := app.Requests("POST", "/v1/orders/o-1/refunds"); n != 1 {
@@ -325,9 +298,6 @@ func TestReplay(t *testing.T) {
 			r := newRig(t, rigOptions{defects: tc.defects, mode: tc.mode, timeout: tc.timeout, delay: tc.delay})
 			sc := loadScenario(t)
 			r.putScript(t, loadScript(t))
-			if tc.confirm {
-				r.confirmAll(t, sc)
-			}
 			results, start, end := r.run(t, sc)
 			expect(t, results[0], tc.want, tc.reason)
 			if len(start) != 1 || len(end) != 1 {
@@ -344,7 +314,6 @@ func TestStoredActionsAreRedactedAndBelongToTheirStep(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	sc := loadScenario(t)
 	r.putScript(t, loadScript(t))
-	r.confirmAll(t, sc)
 	results, _, _ := r.run(t, sc)
 	expect(t, results[0], domain.OutcomePassed, "")
 	if len(results[0].Actions) != 3 {
@@ -375,7 +344,6 @@ func TestStoredActionsAreRedactedAndBelongToTheirStep(t *testing.T) {
 func TestMissingScriptIsBlocked(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	sc := loadScenario(t)
-	r.confirmAll(t, sc)
 	results, _, _ := r.run(t, sc)
 	expect(t, results[0], domain.OutcomeBlocked, "no script was accepted")
 	if n := r.app.Requests("", "/v1/"); n != 0 {
@@ -389,7 +357,6 @@ func TestScriptThatDoesNotFitIsBlocked(t *testing.T) {
 	s := loadScript(t)
 	s.Steps[1].Request.Method = "PUT"
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	problems := script.Validate(sc, s)
 	if len(problems) == 0 {
 		t.Fatal("the changed script has no problem")
@@ -411,7 +378,6 @@ func TestProbeFailureIsBlocked(t *testing.T) {
 	other, otherScript := copyScenario(sc, loadScript(t), "SHOP-482-02")
 	r.putScript(t, loadScript(t))
 	r.putScript(t, otherScript)
-	r.confirmAll(t, sc, other)
 	results, start, end := r.run(t, sc, other)
 	for _, res := range results {
 		expect(t, res, domain.OutcomeBlocked, "the build of orders could not be read")
@@ -463,7 +429,6 @@ func TestEndProbeFailureIsNotAPass(t *testing.T) {
 			r.deps.Builds = build.NewHTTP(services, nil)
 			sc := loadScenario(t)
 			r.putScript(t, loadScript(t))
-			r.confirmAll(t, sc)
 			results, start, end := r.run(t, sc)
 			expect(t, results[0], domain.OutcomeInconclusive, "the build of payments could not be read after the run")
 			if hasReason(results[0], "the build changed during the run") {
@@ -498,7 +463,6 @@ func TestCancelledRun(t *testing.T) {
 	other, otherScript := copyScenario(sc, loadScript(t), "SHOP-482-02")
 	r.putScript(t, loadScript(t))
 	r.putScript(t, otherScript)
-	r.confirmAll(t, sc, other)
 	r.deps.Workers = 1
 
 	results, start, end, err := replay.New(r.deps).Run(ctx, []domain.Scenario{sc, other})
@@ -533,7 +497,6 @@ func TestMissingCaptureStopsTheScenario(t *testing.T) {
 	s := loadScript(t)
 	s.Steps[0].Captures[0].JSONPath = "$.data.nope"
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	results, _, _ := r.run(t, sc)
 	expect(t, results[0], domain.OutcomeInconclusive, "capture order_id found no value")
 	if n := r.app.Requests("POST", "/v1/orders"); n != 1 {
@@ -550,7 +513,6 @@ func TestEngineErrorStopsTheScenario(t *testing.T) {
 	s := loadScript(t)
 	s.Steps[1].Request.Service = "payments"
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	results, _, end, err := replay.New(r.deps).Run(t.Context(), []domain.Scenario{sc})
 	if err == nil || !strings.Contains(err.Error(), "payments") || errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want the engine's error", err)
@@ -573,7 +535,6 @@ func TestResultsKeepTheInputOrder(t *testing.T) {
 		if i%2 == 0 {
 			r.putScript(t, s)
 		}
-		r.confirmAll(t, sc)
 		scs = append(scs, sc)
 	}
 	r.deps.Workers = 3
@@ -596,7 +557,6 @@ func TestScenariosDoNotShareData(t *testing.T) { // Q2
 	two, twoScript := copyScenario(loadScenario(t), loadScript(t), "SHOP-482-02")
 	r.putScript(t, oneScript)
 	r.putScript(t, twoScript)
-	r.confirmAll(t, one, two)
 	r.deps.Workers = 2
 	results, _, _ := r.run(t, one, two)
 	for _, res := range results {
@@ -631,7 +591,6 @@ func TestStepWithNoRequestStopsTheScenario(t *testing.T) {
 				t.Fatalf("the script has problems: %v", problems)
 			}
 			r.putScript(t, s)
-			r.confirmAll(t, sc)
 			results, _, _ := r.run(t, sc)
 			if results[0].Outcome == domain.OutcomePassed {
 				t.Errorf("outcome = passed; reasons %+v", results[0].Reasons)
@@ -690,7 +649,6 @@ func TestRecorderFailureKeepsCapturedValuesOutOfReasonsAndErrors(t *testing.T) {
 	s := loadScript(t)
 	s.Steps[1].Request.Query = map[string]string{"order": "{{order_id}}"}
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	results, _, _, err := replay.New(r.deps).Run(t.Context(), []domain.Scenario{sc})
 	if err == nil || !strings.Contains(err.Error(), "disk full") {
 		t.Fatalf("err = %v, want the recorder's error", err)
@@ -719,7 +677,6 @@ func TestRecorderFailureDuringACancellationIsNotDropped(t *testing.T) {
 	})
 	sc := loadScenario(t)
 	r.putScript(t, loadScript(t))
-	r.confirmAll(t, sc)
 	results, _, _, err := replay.New(r.deps).Run(ctx, []domain.Scenario{sc})
 	if err == nil || !strings.Contains(err.Error(), "disk full") {
 		t.Fatalf("err = %v, want the recorder's error as well as the cancellation", err)
@@ -747,7 +704,6 @@ func TestScenarioCutOffBetweenStepsIsInterrupted(t *testing.T) {
 	})
 	sc := loadScenario(t)
 	r.putScript(t, loadScript(t))
-	r.confirmAll(t, sc)
 	results, _, _, err := replay.New(r.deps).Run(ctx, []domain.Scenario{sc})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want the context's error", err)
@@ -767,7 +723,6 @@ func TestChecksReadTheRedactedAction(t *testing.T) {
 	r := newRig(t, rigOptions{redact: config.Redact{JSONPaths: []string{"$.data.refunded_total"}}})
 	sc := loadScenario(t)
 	r.putScript(t, loadScript(t))
-	r.confirmAll(t, sc)
 	results, _, _ := r.run(t, sc)
 	if results[0].Outcome == domain.OutcomePassed {
 		t.Fatalf("outcome = passed; the check read the raw value: %+v", results[0].Reasons)
@@ -795,41 +750,6 @@ func withBaseline(sc domain.Scenario) domain.Scenario {
 	steps[len(steps)-1] = last
 	sc.Steps = steps
 	return sc
-}
-
-func TestAConfirmationCoversOnlyTheSourcesItNames(t *testing.T) {
-	sc := withBaseline(loadScenario(t))
-	s := loadScript(t)
-	s.ExpectHash = domain.ExpectHash(sc)
-
-	t.Run("a source confirmed under a narrower trust list is not confirmed", func(t *testing.T) {
-		r := newRig(t, rigOptions{})
-		r.deps.Trust = []domain.Source{domain.SourceDiff}
-		r.putScript(t, s)
-		r.confirmSources(t, sc, domain.SourceDiff)
-		if res, _, _ := r.run(t, sc); res[0].Outcome != domain.OutcomePassed {
-			t.Fatalf("the narrow trust run = %s, reasons %+v", res[0].Outcome, res[0].Reasons)
-		}
-
-		r.deps.Trust = []domain.Source{domain.SourceDiff, domain.SourceBaseline}
-		res, _, _ := r.run(t, sc)
-		expect(t, res[0], domain.OutcomeInconclusive, "an expected result is not confirmed")
-	})
-
-	t.Run("a record without sources confirms nothing", func(t *testing.T) {
-		r := newRig(t, rigOptions{})
-		r.putScript(t, s)
-		dir := filepath.Join(r.store.Root(), "store", "confirmations", string(sc.ID), string(domain.ExpectHash(sc)))
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		old := `{"schema": 1, "scenario": "` + string(sc.ID) + `", "expectHash": "` + string(domain.ExpectHash(sc)) + `", "user": "old", "identity": "local, unverified identity", "at": "2026-11-14T10:00:00Z"}`
-		if err := os.WriteFile(filepath.Join(dir, "old.json"), []byte(old), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		res, _, _ := r.run(t, sc)
-		expect(t, res[0], domain.OutcomeInconclusive, "an expected result is not confirmed")
-	})
 }
 
 const givenID domain.ScenarioID = "SHOP-482-05"
@@ -1075,10 +995,17 @@ func TestRunIDVariable(t *testing.T) {
 	s := loadScript(t)
 	s.Steps[0].Request.JSON = map[string]any{"amount": 100000, "ref": "semar-{{run.id}}"}
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	results, _, _ := r.run(t, sc)
 	expect(t, results[0], domain.OutcomePassed, "")
 	if a := r.storedAction(t, sc.ID, "create-order"); !strings.Contains(string(a.Request.Body), `"ref":"semar-`+runID+`"`) {
 		t.Errorf("body = %s", a.Request.Body)
 	}
+}
+
+func TestAScenarioPassesWithNoConfirmationStored(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	sc := loadScenario(t)
+	r.putScript(t, loadScript(t))
+	results, _, _ := r.run(t, sc)
+	expect(t, results[0], domain.OutcomePassed, "")
 }

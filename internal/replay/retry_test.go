@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/engine/api"
@@ -29,7 +30,6 @@ func retried(t *testing.T, o rigOptions, retries int, setup func(*rig)) (*rig, d
 	r := newRig(t, o)
 	sc := loadScenario(t)
 	r.putScript(t, loadScript(t))
-	r.confirmAll(t, sc)
 	r.deps.Retries = retries
 	if setup != nil {
 		setup(r)
@@ -125,15 +125,18 @@ func TestARetryNeverSendsARequestOfTheOnceListAgain(t *testing.T) {
 	}
 }
 
-func TestAScenarioThatNeedsAReviewIsNotRunAgain(t *testing.T) {
-	r := newRig(t, rigOptions{})
+func TestAnInconclusiveAttemptIsRetried(t *testing.T) {
+	r := newRig(t, rigOptions{
+		defects: []sampleapp.Defect{sampleapp.SlowRefund, sampleapp.RefundOverTotal}, mode: "test_data",
+		timeout: time.Second, delay: time.Minute,
+	})
 	sc := loadScenario(t)
 	r.putScript(t, loadScript(t))
-	r.deps.Retries = 2
+	r.deps.Retries = 1
 	results, _, _ := r.run(t, sc)
-	expect(t, results[0], domain.OutcomeInconclusive, "not confirmed")
-	if n := r.app.Requests("POST", "/v1/orders"); n != 2 {
-		t.Errorf("the scenario sent %d writes, want the 2 of one attempt: a retry cannot give an approval", n)
+	expect(t, results[0], domain.OutcomeInconclusive, "a write timed out and its effect is unknown")
+	if len(results[0].Attempts) != 2 {
+		t.Errorf("%d attempts, want 2: an inconclusive attempt is tried again", len(results[0].Attempts))
 	}
 }
 

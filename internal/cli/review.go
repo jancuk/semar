@@ -693,3 +693,27 @@ func journeyItem(dir string, store *confirm.Local, trust []domain.Source, env co
 		},
 	}, true
 }
+
+// unconfirmedWhy is why the scenario of a leg has expected results that nobody confirmed, or "" when
+// none needs a person or one has confirmed them. Only semar review reads it.
+func unconfirmedWhy(store confirm.Store, trust []domain.Source, sc domain.Scenario, id domain.JourneyID) string {
+	var needed []domain.Source
+	for _, st := range sc.Steps {
+		for _, e := range st.Expect {
+			if confirm.NeedsExpectation(e, trust) {
+				needed = append(needed, e.Source)
+			}
+		}
+	}
+	if len(needed) == 0 {
+		return ""
+	}
+	rec, found, err := store.Get(sc.ID, domain.ExpectHash(sc))
+	switch {
+	case err != nil:
+		return "the confirmations could not be read: " + err.Error()
+	case !found || slices.ContainsFunc(needed, func(s domain.Source) bool { return !slices.Contains(rec.Sources, s) }):
+		return "an expected result is not confirmed: run semar review " + string(id)
+	}
+	return ""
+}

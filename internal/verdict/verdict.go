@@ -19,7 +19,6 @@ type StepEvidence struct {
 type Input struct {
 	Scenario    domain.Scenario
 	Steps       map[domain.StepID]StepEvidence
-	Confirmed   func(e domain.Expectation) bool // true when a person confirmed it, or its source needs no confirmation
 	BuildsStart []domain.BuildRef
 	BuildsEnd   []domain.BuildRef
 	NotRun      string   // not empty: why the scenario was not run
@@ -28,16 +27,14 @@ type Input struct {
 }
 
 const (
-	msgBuildChanged     = "the build changed during the run"
-	msgNotConfirmed     = "an expected result is not confirmed"
-	msgUnconfirmedFalse = "an expected result is not confirmed and not met"
-	msgNotEvaluated     = "a check could not be evaluated"
-	msgEffectUnknown    = "a write timed out and its effect is unknown"
-	msgRetried          = "the script needed a retry"
-	msgNoCheck          = "the scenario has no check besides the invariants"
-	msgNoDetail         = "no result was recorded"
-	msgMismatch         = "the recorded evidence does not match the scenario"
-	msgNoBuild          = "no build was recorded"
+	msgBuildChanged  = "the build changed during the run"
+	msgNotEvaluated  = "a check could not be evaluated"
+	msgEffectUnknown = "a write timed out and its effect is unknown"
+	msgRetried       = "the script needed a retry"
+	msgNoCheck       = "the scenario has no check besides the invariants"
+	msgNoDetail      = "no result was recorded"
+	msgMismatch      = "the recorded evidence does not match the scenario"
+	msgNoBuild       = "no build was recorded"
 
 	// SetupFailedPrefix starts the reason of a scenario blocked because a setup step did not succeed.
 	SetupFailedPrefix = "setup failed: "
@@ -133,7 +130,6 @@ func Compute(in Input) domain.ScenarioResult {
 			if !step.Setup {
 				expectations++
 			}
-			confirmed := in.Confirmed != nil && in.Confirmed(e)
 			r := check.Result{State: domain.CheckNotEvaluated, Detail: msgNoDetail}
 			if i < len(ev.Checks) {
 				r = ev.Checks[i]
@@ -141,13 +137,13 @@ func Compute(in Input) domain.ScenarioResult {
 			res.Checks = append(res.Checks, domain.CheckResult{
 				Step: step.ID, Index: i, Source: string(e.Source),
 				State: r.State, Expected: r.Expected, Observed: r.Observed, Detail: r.Detail,
-				Confirmed: confirmed, ByModel: e.By == "model",
+				ByModel: e.By == "model",
 			})
 			if refused {
 				continue
 			}
 			switch {
-			case r.State == domain.CheckFalse && confirmed:
+			case r.State == domain.CheckFalse:
 				by := ""
 				if e.By == "model" {
 					by = ", by model"
@@ -157,10 +153,6 @@ func Compute(in Input) domain.ScenarioResult {
 					text += ": " + r.Detail
 				}
 				add(domain.OutcomeFailed, step.ID, text)
-			case r.State == domain.CheckFalse:
-				add(domain.OutcomeInconclusive, step.ID, msgUnconfirmedFalse)
-			case !confirmed:
-				add(domain.OutcomeInconclusive, step.ID, msgNotConfirmed)
 			}
 			if r.State != domain.CheckTrue && r.State != domain.CheckFalse && a != nil && !noResponse {
 				text := msgNotEvaluated
@@ -175,7 +167,6 @@ func Compute(in Input) domain.ScenarioResult {
 			res.Checks = append(res.Checks, domain.CheckResult{
 				Step: step.ID, Index: -1, Source: domain.SourceInvariant,
 				State: inv.State, Expected: inv.Expected, Observed: inv.Observed, Detail: inv.Detail,
-				Confirmed: true,
 			})
 			switch {
 			case refused:

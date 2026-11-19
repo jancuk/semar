@@ -85,11 +85,11 @@ func TestDecideTable(t *testing.T) {
 		{
 			name: "row 2: the first leg that did not pass ended inconclusive",
 			in: Outcome{Legs: []domain.LegResult{
-				legResult("place", domain.OutcomeInconclusive, "an expected result is not confirmed"),
+				legResult("place", domain.OutcomeInconclusive, "a check could not be evaluated"),
 				legResult("pay", domain.OutcomeNotRun, "stopped after leg place"),
 			}, Start: start, End: &same},
 			want: domain.JourneyBlocked, first: "place",
-			reasons: []domain.Reason{reason(domain.OutcomeBlocked, "leg place ended inconclusive: an expected result is not confirmed")},
+			reasons: []domain.Reason{reason(domain.OutcomeBlocked, "leg place ended inconclusive: a check could not be evaluated")},
 		},
 		{
 			name:    "row 2: an invariant could not be evaluated",

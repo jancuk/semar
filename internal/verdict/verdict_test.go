@@ -64,7 +64,6 @@ func pass() verdict.Input {
 			"refund-too-much": {Action: ok("refunds", "refund-too-much", "a2"), Checks: []check.Result{trueResult(), trueResult()}, Invariants: inv()},
 			"order-unchanged": {Action: ok("refunds", "order-unchanged", "a3"), Checks: []check.Result{trueResult()}, Invariants: inv()},
 		},
-		Confirmed:   func(domain.Expectation) bool { return true },
 		BuildsStart: []domain.BuildRef{{Service: "orders", Commit: "bbbbbbb", ConfigHash: "c1"}},
 		BuildsEnd:   []domain.BuildRef{{Service: "orders", Commit: "bbbbbbb", ConfigHash: "c1"}},
 	}
@@ -154,14 +153,6 @@ func invariant(id domain.StepID, state domain.CheckState) mod {
 	return change(id, func(ev *verdict.StepEvidence) { ev.Invariants[0].State = state })
 }
 
-func unconfirmed(id domain.StepID, i int) mod {
-	return func(in *verdict.Input) {
-		prev := in.Confirmed
-		cite := string(id) + "/" + string(rune('0'+i))
-		in.Confirmed = func(e domain.Expectation) bool { return e.Cite != cite && prev(e) }
-	}
-}
-
 func noAction(id domain.StepID) mod {
 	return func(in *verdict.Input) { delete(in.Steps, id) }
 }
@@ -185,8 +176,6 @@ func noChecks() verdict.Input {
 	}
 	return in
 }
-
-func nilConfirmed(in *verdict.Input) { in.Confirmed = nil }
 
 func emptyScenario() verdict.Input {
 	in := pass()
@@ -217,7 +206,6 @@ func singleStep() verdict.Input {
 		Steps: map[domain.StepID]verdict.StepEvidence{
 			"only": {Action: ok("one", "only", "a1"), Checks: []check.Result{trueResult()}, Invariants: invOK()},
 		},
-		Confirmed:   func(domain.Expectation) bool { return true },
 		BuildsStart: []domain.BuildRef{{Service: "orders", Commit: "bbbbbbb", ConfigHash: "c1"}},
 		BuildsEnd:   []domain.BuildRef{{Service: "orders", Commit: "bbbbbbb", ConfigHash: "c1"}},
 	}
@@ -236,7 +224,6 @@ func writeNeverRan() verdict.Input {
 			"setup":  {Action: ok("write", "setup", "a1"), Invariants: invOK()},
 			"verify": {Action: ok("write", "verify", "a3"), Checks: []check.Result{trueResult()}, Invariants: invOK()},
 		},
-		Confirmed:   func(domain.Expectation) bool { return true },
 		BuildsStart: []domain.BuildRef{{Service: "orders", Commit: "bbbbbbb", ConfigHash: "c1"}},
 		BuildsEnd:   []domain.BuildRef{{Service: "orders", Commit: "bbbbbbb", ConfigHash: "c1"}},
 	}
@@ -347,8 +334,8 @@ func TestCompute(t *testing.T) {
 		want        domain.Outcome
 		wantReasons []string
 	}{
-		{"all true and confirmed", pass, domain.OutcomePassed, nil},
-		{"single step, all true and confirmed", singleStep, domain.OutcomePassed, nil},
+		{"all true", pass, domain.OutcomePassed, nil},
+		{"single step, all true", singleStep, domain.OutcomePassed, nil},
 		{"not run", with(pass, notRun("the surface is not supported")), domain.OutcomeNotRun, []string{"the surface is not supported"}},
 		{"not run wins over blocked", with(pass, notRun("filtered out"), blocked("sign-in failed")), domain.OutcomeNotRun, []string{"filtered out", "sign-in failed"}},
 		{"blocked before the run", with(pass, blocked("sign-in failed")), domain.OutcomeBlocked, []string{"sign-in failed"}},
@@ -365,12 +352,9 @@ func TestCompute(t *testing.T) {
 		{"builds list a different service", with(pass, func(in *verdict.Input) {
 			in.BuildsEnd = []domain.BuildRef{{Service: "billing", Commit: "bbbbbbb", ConfigHash: "c1"}}
 		}), domain.OutcomeStale, []string{"the build changed during the run"}},
-		{"confirmed check is false", with(pass, checkState("refund-too-much", 0, domain.CheckFalse)), domain.OutcomeFailed, []string{"refund-too-much"}},
+		{"a false check", with(pass, checkState("refund-too-much", 0, domain.CheckFalse)), domain.OutcomeFailed, []string{"refund-too-much"}},
 		{"invariant is false", with(pass, invariant("refund-too-much", domain.CheckFalse)), domain.OutcomeFailed, []string{"no server error"}},
 		{"two false checks in two steps", with(pass, checkState("refund-too-much", 1, domain.CheckFalse), checkState("order-unchanged", 0, domain.CheckFalse)), domain.OutcomeFailed, []string{"refund-too-much", "order-unchanged"}},
-		{"unconfirmed and true", with(pass, unconfirmed("refund-too-much", 1)), domain.OutcomeInconclusive, []string{"an expected result is not confirmed"}},
-		{"unconfirmed and false", with(pass, unconfirmed("refund-too-much", 1), checkState("refund-too-much", 1, domain.CheckFalse)), domain.OutcomeInconclusive, []string{"an expected result is not confirmed and not met"}},
-		{"nil Confirmed means not confirmed", with(pass, nilConfirmed), domain.OutcomeInconclusive, []string{"an expected result is not confirmed"}},
 		{"check not evaluated", with(pass, checkState("order-unchanged", 0, domain.CheckNotEvaluated)), domain.OutcomeInconclusive, []string{"a check could not be evaluated: no response was recorded"}},
 		{"invariant not evaluated", with(pass, invariant("order-unchanged", domain.CheckNotEvaluated)), domain.OutcomeInconclusive, []string{"a check could not be evaluated"}},
 		{"step did not run", with(pass, noAction("order-unchanged")), domain.OutcomeInconclusive, []string{"step order-unchanged has no recorded result"}},
@@ -416,7 +400,7 @@ func TestCompute(t *testing.T) {
 		{"stale with a failed check lists both", with(pass, buildsEnd("orders", "aaaaaaa"), checkState("refund-too-much", 0, domain.CheckFalse)), domain.OutcomeStale, []string{"the build changed during the run", "refund-too-much"}},
 		{"blocked wins over failed", with(pass, blocked("gate failed"), checkState("refund-too-much", 0, domain.CheckFalse)), domain.OutcomeBlocked, []string{"gate failed", "refund-too-much"}},
 		{"blocked wins over stale", with(pass, blocked("gate failed"), buildsEnd("orders", "aaaaaaa")), domain.OutcomeBlocked, []string{"gate failed", "the build changed during the run"}},
-		{"failed wins over inconclusive", with(pass, checkState("refund-too-much", 0, domain.CheckFalse), unconfirmed("order-unchanged", 0)), domain.OutcomeFailed, []string{"refund-too-much", "an expected result is not confirmed"}},
+		{"failed wins over inconclusive", with(pass, checkState("refund-too-much", 0, domain.CheckFalse), checkState("order-unchanged", 0, domain.CheckFalse)), domain.OutcomeFailed, []string{"refund-too-much", "order-unchanged"}},
 		{"failed setup keeps the earlier cause first", with(pass, setupStatus(500), noAction("refund-too-much")), domain.OutcomeBlocked, []string{"setup failed: create-order answered 500", "step refund-too-much has no recorded result"}},
 		{"refused step is reported once", with(pass, stepRefused("refund-too-much", "denied")), domain.OutcomeBlocked, nil},
 	}
@@ -567,7 +551,7 @@ func TestComputeTwoFalseChecksAreListedInStepOrder(t *testing.T) {
 }
 
 func TestComputeChecksAndActions(t *testing.T) {
-	in := with(pass, unconfirmed("refund-too-much", 1), checkState("order-unchanged", 0, domain.CheckFalse), invariant("create-order", domain.CheckFalse))()
+	in := with(pass, checkState("order-unchanged", 0, domain.CheckFalse), invariant("create-order", domain.CheckFalse))()
 	got := verdict.Compute(in)
 
 	wantActions := []domain.ActionID{"a1", "a2", "a3"}
@@ -592,11 +576,8 @@ func TestComputeChecksAndActions(t *testing.T) {
 	if c := got.Checks[0]; c.Source != domain.SourceInvariant || c.State != domain.CheckFalse {
 		t.Errorf("invariant result = %+v", c)
 	}
-	if c := got.Checks[1]; c.Source != "ticket" || !c.Confirmed || c.Expected != "status is 200" {
+	if c := got.Checks[1]; c.Source != "ticket" || c.Expected != "status is 200" {
 		t.Errorf("first expectation = %+v", c)
-	}
-	if c := got.Checks[2]; c.Confirmed {
-		t.Errorf("unconfirmed expectation reported as confirmed: %+v", c)
 	}
 	if c := got.Checks[4]; c.State != domain.CheckFalse || c.Observed != "status 402" {
 		t.Errorf("false check = %+v", c)
@@ -620,8 +601,8 @@ func TestComputeKeepsEveryCheckWhenStepHasNoEvidence(t *testing.T) {
 }
 
 func TestComputeIsPure(t *testing.T) {
-	in := with(pass, checkState("refund-too-much", 0, domain.CheckFalse), buildsEnd("orders", "aaaaaaa"), unconfirmed("order-unchanged", 0), retried)()
-	snapshot := with(pass, checkState("refund-too-much", 0, domain.CheckFalse), buildsEnd("orders", "aaaaaaa"), unconfirmed("order-unchanged", 0), retried)()
+	in := with(pass, checkState("refund-too-much", 0, domain.CheckFalse), buildsEnd("orders", "aaaaaaa"), retried)()
+	snapshot := with(pass, checkState("refund-too-much", 0, domain.CheckFalse), buildsEnd("orders", "aaaaaaa"), retried)()
 
 	first := verdict.Compute(in)
 	second := verdict.Compute(in)
@@ -660,7 +641,7 @@ func TestComputeIsDeterministic(t *testing.T) {
 				Invariants: []check.Result{{State: domain.CheckFalse, Expected: "no server error"}},
 			}
 		}
-		return verdict.Input{Scenario: sc, Steps: steps, Confirmed: func(domain.Expectation) bool { return true }}
+		return verdict.Input{Scenario: sc, Steps: steps}
 	}
 	first := verdict.Compute(build())
 	for i := 0; i < 50; i++ {
@@ -708,7 +689,6 @@ func FuzzCompute(f *testing.F) {
 		)
 		sc := domain.Scenario{ID: "fz"}
 		steps := map[domain.StepID]verdict.StepEvidence{}
-		confirmed := map[string]bool{}
 
 		// The oracle reads only these variables, which the generator sets from its own choices.
 		noPassReason := ""
@@ -786,12 +766,8 @@ func FuzzCompute(f *testing.F) {
 			for j := 0; j < n; j++ {
 				cite := string(id) + string(rune('0'+j))
 				step.Expect = append(step.Expect, expectation(cite))
-				confirmed[cite] = next()%16 != 0
 				if !setup {
 					anyExpectation = true
-				}
-				if !confirmed[cite] {
-					noPassReason = "an expectation is unconfirmed"
 				}
 				st := state(next())
 				if st != domain.CheckTrue {
@@ -831,17 +807,8 @@ func FuzzCompute(f *testing.F) {
 		in := verdict.Input{
 			Scenario:    sc,
 			Steps:       steps,
-			Confirmed:   func(e domain.Expectation) bool { return confirmed[e.Cite] },
 			BuildsStart: []domain.BuildRef{{Service: "orders", Commit: "a"}},
 			BuildsEnd:   []domain.BuildRef{{Service: "orders", Commit: "a"}},
-		}
-		if next()%16 == 0 {
-			in.Confirmed = nil
-			for _, step := range sc.Steps {
-				if len(step.Expect) > 0 {
-					noPassReason = "an expectation is unconfirmed"
-				}
-			}
 		}
 		switch next() % 20 {
 		case 1:
@@ -934,5 +901,41 @@ func TestTheFailureOfAModelWrittenResultSaysByModel(t *testing.T) {
 	plain := text(verdict.Compute(with(pass, failing)()))
 	if !strings.HasSuffix(plain, "(source ticket)") || strings.Contains(plain, "by model") {
 		t.Errorf("reason %q should name the source only", plain)
+	}
+}
+
+func TestAResultThatDoesNotHoldFailsWhoeverWroteIt(t *testing.T) {
+	for _, by := range []string{"", "model"} {
+		for _, src := range []domain.Source{domain.SourceTicket, domain.SourceDiff, domain.SourceBaseline} {
+			in := pass()
+			for i := range in.Scenario.Steps {
+				for j := range in.Scenario.Steps[i].Expect {
+					in.Scenario.Steps[i].Expect[j].By = by
+					in.Scenario.Steps[i].Expect[j].Source = src
+				}
+			}
+			if got := verdict.Compute(in); got.Outcome != domain.OutcomePassed {
+				t.Fatalf("by %q source %s true: outcome %s", by, src, got.Outcome)
+			}
+			in = with(pass, checkState("refund-too-much", 0, domain.CheckFalse))()
+			for i := range in.Scenario.Steps {
+				for j := range in.Scenario.Steps[i].Expect {
+					in.Scenario.Steps[i].Expect[j].By = by
+					in.Scenario.Steps[i].Expect[j].Source = src
+				}
+			}
+			got := verdict.Compute(in)
+			if got.Outcome != domain.OutcomeFailed {
+				t.Fatalf("by %q source %s false: outcome %s", by, src, got.Outcome)
+			}
+			for _, r := range got.Reasons {
+				if strings.Contains(r.Text, "not confirmed") {
+					t.Errorf("reason %q", r.Text)
+				}
+				if strings.Contains(r.Text, ", by model") != (by == "model") {
+					t.Errorf("by %q: reason %q", by, r.Text)
+				}
+			}
+		}
 	}
 }

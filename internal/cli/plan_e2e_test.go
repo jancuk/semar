@@ -345,10 +345,6 @@ authProfiles:
 	contains(t, "plan.md", string(md), "SHOP-482-01", "Confirm each scenario before its result counts", "Attempts: 1 of 3")
 	p.assertNoTempCopy(t)
 
-	first := p.must(t, cli.ExitUndecided, "run", "--all")
-	contains(t, "the first run", first.stdout, "needs review", "not confirmed")
-	confirmed := p.must(t, cli.ExitOK, "review", "--yes")
-	contains(t, "confirm --all", confirmed.stdout, "approved SHOP-482-01", "approved SHOP-483-01")
 	// The service is on this machine and has no build probe, so a run takes the head commit of the repository.
 	local := p.must(t, cli.ExitOK, "run", "--all")
 	contains(t, "a run with no build probe", local.stdout, "passed",

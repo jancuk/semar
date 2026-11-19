@@ -47,14 +47,15 @@ const (
 const SourceInvariant = "invariant"
 
 type CheckResult struct {
-	Step      StepID     `json:"step"`
-	Index     int        `json:"index"`  // position in Step.Expect. -1 for an invariant
-	Source    string     `json:"source"` // a Source, or "invariant"
-	State     CheckState `json:"state"`
-	Expected  string     `json:"expected"`
-	Observed  string     `json:"observed"`
-	Detail    string     `json:"detail,omitempty"`
-	Confirmed bool       `json:"confirmed"`
+	Step     StepID     `json:"step"`
+	Index    int        `json:"index"`  // position in Step.Expect. -1 for an invariant
+	Source   string     `json:"source"` // a Source, or "invariant"
+	State    CheckState `json:"state"`
+	Expected string     `json:"expected"`
+	Observed string     `json:"observed"`
+	Detail   string     `json:"detail,omitempty"`
+	// Confirmed is read from runs stored before Plan 36 and is never written or read now.
+	Confirmed bool `json:"confirmed,omitempty"`
 	// ByModel is true when a model wrote the expected result. A result stored before Plan 36 has no mark.
 	ByModel bool `json:"byModel,omitempty"`
 }

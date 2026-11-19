@@ -19,7 +19,6 @@ import (
 	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/check"
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/api"
@@ -196,8 +195,8 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	}
 	r.runner = New(Deps{
 		Replay: replay.New(replay.Deps{
-			Engine: eng, Builds: prober, Confirm: confirm.NewLocal(root),
-			Trust: []domain.Source{domain.SourceDiff, domain.SourceBaseline}, Run: testRun, Accounts: accounts,
+			Engine: eng, Builds: prober,
+			Run: testRun, Accounts: accounts,
 		}),
 		Accounts:  accounts,
 		Fixtures:  o.fixtures,
@@ -638,7 +637,7 @@ func (f *fakeSingle) RunOne(_ context.Context, in replay.Single) (replay.Replaye
 		f.vars = map[domain.ScenarioID]map[string]string{}
 	}
 	f.vars[in.Scenario.ID] = in.Vars
-	rep := replay.Replayed{Steps: map[domain.StepID]verdict.StepEvidence{}, Captured: map[string]string{}, Confirmed: func(domain.Expectation) bool { return true }}
+	rep := replay.Replayed{Steps: map[domain.StepID]verdict.StepEvidence{}, Captured: map[string]string{}}
 	for _, st := range in.Scenario.Steps {
 		f.n++
 		a := domain.Action{

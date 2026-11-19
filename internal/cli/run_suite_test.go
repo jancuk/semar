@@ -169,9 +169,9 @@ func TestRunCIAsksNoQuestionOnATerminal(t *testing.T) {
 	r.opts.Terminal = func() bool { return true }
 	r.opts.Stdin = failingReader{t}
 
-	res := r.must(t, cli.ExitUndecided, "run", "--all", "--ci")
+	res := r.must(t, cli.ExitOK, "run", "--all", "--ci")
 	if strings.Contains(res.stdout, "?") || strings.Contains(res.stdout, "[Y/n]") {
 		t.Errorf("--ci asked a question:\n%s", res.stdout)
 	}
-	contains(t, "the run", squash(res.stdout), scenarioID+" needs review", "report: ")
+	contains(t, "the run", squash(res.stdout), scenarioID+" passed", "report: ")
 }

@@ -312,14 +312,8 @@ func TestRunEndToEnd(t *testing.T) {
 
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
 
-	first := r.must(t, cli.ExitUndecided, "run", "--scenario", scenarioID)
-	contains(t, "the first summary", first.stdout, "needs review", "not confirmed")
-
-	confirmed := r.must(t, cli.ExitOK, "review", scenarioID, "--yes")
-	contains(t, "the confirmation", confirmed.stdout, "REFUND_EXCEEDS_TOTAL", "(source diff)", "local, unverified identity")
-
 	second := r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
-	contains(t, "the second summary", second.stdout, "passed", "report.md")
+	contains(t, "the summary", second.stdout, "passed", "report.md")
 
 	dir := r.latestRun(t)
 	for _, name := range []string{"run.json", "report.md", "activity.jsonl"} {
@@ -874,4 +868,68 @@ func TestScriptAddStoresTheShapeHash(t *testing.T) {
 	if s.ShapeHash == "" || s.ShapeHash != domain.ShapeHash(sc) {
 		t.Errorf("ShapeHash = %q, want %q", s.ShapeHash, domain.ShapeHash(sc))
 	}
+}
+
+func (r *repo) editFeature(t *testing.T, change func(string) string) {
+	t.Helper()
+	rel := filepath.Join(".semar", "scenarios", "SHOP-482", scenarioID+".feature")
+	data, err := os.ReadFile(r.path(rel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := change(string(data))
+	if edited == string(data) {
+		t.Fatal("the edit changed nothing")
+	}
+	r.writeRel(t, rel, edited)
+}
+
+func TestAModelWrittenResultThatDoesNotHoldExitsOne(t *testing.T) {
+	r := newRepo(t, repoOptions{})
+	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
+	r.editFeature(t, func(s string) string {
+		s = strings.Replace(s, "Then $.data.refunded_total equals 0", "Then $.data.refunded_total equals 5", 1)
+		return strings.Replace(s, "# ticket SHOP-482: the order must stay unchanged", "# ticket SHOP-482: the order must stay unchanged, by model", 1)
+	})
+	res := r.must(t, cli.ExitFailed, "run", "--all", "--ci")
+	contains(t, "stdout", res.stdout, "(source ticket, by model)", "failed")
+}
+
+func TestAnEditedExpectedValueRunsWithNoOtherCommand(t *testing.T) {
+	r := newRepo(t, repoOptions{})
+	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
+	r.must(t, cli.ExitOK, "run", "--all", "--ci")
+	r.editFeature(t, func(s string) string {
+		return strings.Replace(s, "a refund above the order total must be rejected", "a refund above the order total is refused", 1)
+	})
+	r.must(t, cli.ExitOK, "run", "--all", "--ci")
+	r.editFeature(t, func(s string) string {
+		return strings.Replace(s, "Then $.data.refunded_total equals 0", "Then $.data.refunded_total equals 5", 1)
+	})
+	r.must(t, cli.ExitFailed, "run", "--all", "--ci")
+}
+
+func TestAnOldRunWithConfirmedChecksStillLoads(t *testing.T) {
+	r := newRepo(t, repoOptions{})
+	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
+	r.must(t, cli.ExitOK, "run", "--all", "--ci")
+	path := filepath.Join(r.latestRun(t), "run.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"confirmed"`) {
+		t.Error("the new run stores a confirmed key")
+	}
+
+	old := strings.ReplaceAll(string(data), `"state": "true",`, `"state": "true", "confirmed": true,`)
+	if old == string(data) {
+		t.Fatal("no check to mark as confirmed")
+	}
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	id := filepath.Base(r.latestRun(t))
+	r.must(t, cli.ExitOK, "show", id)
+	r.must(t, cli.ExitOK, "export", "junit", id, "--out", filepath.Join(t.TempDir(), "junit.xml"))
 }

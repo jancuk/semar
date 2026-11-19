@@ -36,7 +36,6 @@ func TestAnEditedExpectedValueRunsWithTheScriptOfTheSameShape(t *testing.T) {
 	s := shapedScript(t, sc)
 	r.putScript(t, s)
 	edited := withCite(sc, "SHOP-482: reworded")
-	r.confirmAll(t, edited)
 	res, _, _ := r.run(t, edited)
 	expect(t, res[0], domain.OutcomePassed, "")
 	if res[0].ExpectHash != domain.ExpectHash(edited) || res[0].ScriptHash != s.ExpectHash {
@@ -50,7 +49,6 @@ func TestAChangedRequestHintIsBlockedAndSendsNothing(t *testing.T) {
 	r.putScript(t, shapedScript(t, sc))
 	edited := withCite(sc, "SHOP-482: reworded")
 	edited.Steps[0].Hint = &domain.RequestHint{Method: "POST", Path: "/v1/other"}
-	r.confirmAll(t, edited)
 	res, _, _ := r.run(t, edited)
 	expect(t, res[0], domain.OutcomeBlocked, fmt.Sprintf("no script fits the steps of %s: the steps, the account, or the given changed since its script was stored", edited.ID))
 	if n := r.app.Requests("", "/v1/"); n != 0 {
@@ -64,12 +62,10 @@ func TestAScriptWithoutAShapeHashIsUsedOnlyOnAnExactHash(t *testing.T) {
 	s := loadScript(t)
 	s.ShapeHash = ""
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	res, _, _ := r.run(t, sc)
 	expect(t, res[0], domain.OutcomePassed, "")
 
 	edited := withCite(sc, "SHOP-482: reworded")
-	r.confirmAll(t, edited)
 	before := r.app.Requests("", "/v1/")
 	res, _, _ = r.run(t, edited)
 	expect(t, res[0], domain.OutcomeBlocked, fmt.Sprintf("no script fits the steps of %s", edited.ID))
@@ -93,7 +89,6 @@ func TestTheNewestScriptOfAShapeIsUsed(t *testing.T) {
 	r.putScript(t, so)
 	r.putScript(t, sn)
 	third := withCite(sc, "SHOP-482: third")
-	r.confirmAll(t, third)
 	res, _, _ := r.run(t, third)
 	expect(t, res[0], domain.OutcomePassed, "")
 	if res[0].ScriptHash != sn.ExpectHash {
@@ -104,7 +99,6 @@ func TestTheNewestScriptOfAShapeIsUsed(t *testing.T) {
 func TestAScenarioWithNoScriptKeepsItsReason(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	sc := loadScenario(t)
-	r.confirmAll(t, sc)
 	res, _, _ := r.run(t, sc)
 	expect(t, res[0], domain.OutcomeBlocked, "no script was accepted")
 }

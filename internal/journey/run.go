@@ -438,7 +438,7 @@ func (r *Runner) judge(lr *legRun, start, end []domain.BuildRef) domain.Scenario
 		return verdict.Compute(verdict.Input{Scenario: lr.sc, NotRun: lr.notRun, BuildsStart: start, BuildsEnd: end})
 	}
 	res := verdict.Compute(verdict.Input{
-		Scenario: lr.sc, Steps: lr.rep.Steps, Confirmed: lr.rep.Confirmed,
+		Scenario: lr.sc, Steps: lr.rep.Steps,
 		BuildsStart: start, BuildsEnd: end, Blocked: lr.rep.Blocked,
 	})
 	res.Reasons = append(res.Reasons, lr.rep.Notes...)

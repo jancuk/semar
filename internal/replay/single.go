@@ -28,12 +28,11 @@ type Single struct {
 // Replayed is what one scenario left behind. The caller decides the outcome with verdict.Compute,
 // from the builds that it read.
 type Replayed struct {
-	Steps     map[domain.StepID]verdict.StepEvidence
-	Captured  map[string]string // every capture of every step; raw, never stored
-	Blocked   []string
-	Notes     []domain.Reason
-	Confirmed func(domain.Expectation) bool
-	Last      *api.Call // the call of the last step sent, for a wait
+	Steps    map[domain.StepID]verdict.StepEvidence
+	Captured map[string]string // every capture of every step; raw, never stored
+	Blocked  []string
+	Notes    []domain.Reason
+	Last     *api.Call // the call of the last step sent, for a wait
 }
 
 // reservedHeads are not preset variables: run.id is the Runner's, the date variables are computed from it, and secret and data are refused in a script.
@@ -47,14 +46,13 @@ var presetName = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_]*)\.([A-Za-z0-9_]+)$`
 // that stopped the scenario. Neither Vars nor the script is changed.
 func (r *Runner) RunOne(ctx context.Context, in Single) (Replayed, error) {
 	run := newReplayed()
-	run.confirmed = r.confirmation(in.Scenario, &run)
 	out := func(err error) (Replayed, error) {
 		if run.notRun != "" {
 			run.notes = append(run.notes, domain.Reason{Rule: domain.OutcomeInconclusive, Text: run.notRun})
 		}
 		return Replayed{
 			Steps: run.steps, Captured: run.captured, Blocked: run.blocked, Notes: run.notes,
-			Confirmed: run.confirmed, Last: run.last,
+			Last: run.last,
 		}, errors.Join(err, ctx.Err())
 	}
 

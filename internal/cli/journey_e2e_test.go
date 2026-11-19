@@ -208,33 +208,6 @@ func TestJourneyEndToEndBuildChangeIsStale(t *testing.T) {
 	contains(t, "the list", squash(list.stdout), "checkout critical team-commerce 3 legs stale (was stale in r-test-0001): orders 9f3c2ab then c0ffee1")
 }
 
-func TestJourneyEndToEndConfirmationOfTheExpectedResults(t *testing.T) {
-	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
-	r.editJourney(t, "checkout", func(s string) string { return strings.Replace(s, "source: person", "source: diff", 1) })
-
-	// No one confirmed the expected result of leg place, so the journey is blocked and sends nothing.
-	res := r.must(t, cli.ExitUndecided, "journey", "run", "checkout")
-	contains(t, "the summary", squash(res.stdout), "checkout needs review first failing leg place:")
-	j := singleJourney(t, r)
-	if j.Outcome != domain.JourneyBlocked || j.FirstFailing != "place" || !strings.HasPrefix(j.Reasons[0].Text, "leg place ended inconclusive") {
-		t.Errorf("journey = %+v", j)
-	}
-	if n := r.reached(""); n != 0 {
-		t.Errorf("%d requests were sent", n)
-	}
-
-	confirmed := r.must(t, cli.ExitOK, "review", "checkout", "--yes")
-	contains(t, "the confirmation", confirmed.stdout, "Leg place of journey checkout (scenario checkout.place)", "approved journey checkout", "local, unverified identity")
-	if strings.Contains(confirmed.stdout, "checkout.pay") {
-		t.Errorf("a leg whose expected result is the person's own was listed:\n%s", confirmed.stdout)
-	}
-
-	r.must(t, cli.ExitOK, "journey", "run", "checkout")
-	if j := singleJourney(t, r); j.Outcome != domain.JourneyPassed {
-		t.Errorf("after the confirmation the journey is %s: %+v", j.Outcome, j.Reasons)
-	}
-}
-
 func TestJourneyEndToEndRefusesAnAndroidLeg(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	text := strings.Replace(strings.Replace(r.readJourney(t, "checkout"), "id: checkout", "id: web-flow", 1), "surface: api", "surface: android", 1)

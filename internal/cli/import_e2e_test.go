@@ -80,28 +80,17 @@ func TestImportPostman(t *testing.T) {
 	}
 }
 
-func TestImportPostmanScenariosNeedReview(t *testing.T) {
+func TestImportedScenariosRunWithNoReview(t *testing.T) {
 	r := newRepo(t, repoOptions{})
 	r.must(t, cli.ExitOK, "import", r.importFixture(t, "shop.postman_collection.json"), "--ticket", "SHOP-77")
 
-	ids := []string{"SHOP-77-I01", "SHOP-77-I02", "SHOP-77-I03"}
-	pick := func() []string {
-		var args []string
-		for _, id := range ids {
-			args = append(args, "--scenario", id)
-		}
-		return append([]string{"run"}, args...)
+	var args []string
+	for _, id := range []string{"SHOP-77-I01", "SHOP-77-I02", "SHOP-77-I03"} {
+		args = append(args, "--scenario", id)
 	}
-	first := r.must(t, cli.ExitUndecided, pick()...)
-	contains(t, "the run before a review", first.stdout, "SHOP-77-I01  needs review", "SHOP-77-I02  needs review", "an expected result is not confirmed")
-	writes := r.app.Requests("POST", "/v1/orders")
-
-	for _, id := range ids {
-		r.must(t, cli.ExitOK, "review", id, "--yes")
-	}
-	second := r.must(t, cli.ExitOK, pick()...)
-	contains(t, "the run after a review", second.stdout, "SHOP-77-I01  passed", "SHOP-77-I02  passed", "SHOP-77-I03  passed")
-	if got := r.app.Requests("POST", "/v1/orders") - writes; got != 1 {
+	res := r.must(t, cli.ExitOK, append([]string{"run"}, args...)...)
+	contains(t, "the run", res.stdout, "SHOP-77-I01  passed", "SHOP-77-I02  passed", "SHOP-77-I03  passed")
+	if got := r.app.Requests("POST", "/v1/orders"); got != 1 {
 		t.Errorf("a run sent %d writes of the imported scenarios, want 1", got)
 	}
 	r.assertNoSecret(t, importSecrets)

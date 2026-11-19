@@ -289,8 +289,8 @@ func TestJourneyRunExitCodes(t *testing.T) {
 		{name: "an invariant is false", pay: sampleapp.PaymentOptions{Defects: defects(sampleapp.PaymentAmountWrong)}, code: cli.ExitFailed,
 			want: "checkout failed invariant 1 is false: 1000, 1001, 1000"},
 		{name: "a build changes", app: sampleapp.Options{Defects: defects(sampleapp.BuildChanges)}, code: cli.ExitUndecided, want: "checkout stale a build changed during the journey: orders 9f3c2ab then c0ffee1; first failing leg place"},
-		{name: "the expected results are not confirmed", prepare: func(t *testing.T, r *repo) { r.requireConfirmation(t) }, code: cli.ExitUndecided,
-			want: "checkout needs review first failing leg place: an expected result is not confirmed"},
+		{name: "legs of source diff need no confirmation", prepare: func(t *testing.T, r *repo) { r.requireConfirmation(t) }, code: cli.ExitOK,
+			want: "checkout  passed"},
 		{name: "a build cannot be read", prepare: func(t *testing.T, r *repo) {
 			r.rewriteConfig(t, func(s string) string {
 				return strings.Replace(s, "/version\n          commit: $.commit\nauthProfiles", "/nothing\n          commit: $.commit\nauthProfiles", 1)
@@ -309,26 +309,19 @@ func TestJourneyRunExitCodes(t *testing.T) {
 	}
 }
 
-func TestJourneyRunNeedsAnExpectedResultConfirmedBeforeItSendsAnything(t *testing.T) {
+func TestAJourneyRunsItsLegsWithNoConfirmation(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
-	r.editJourney(t, "checkout", func(s string) string { return strings.Replace(s, "source: person", "source: diff", 1) })
-	res := r.must(t, cli.ExitUndecided, "journey", "run", "checkout")
-	contains(t, "stdout", squash(res.stdout), "checkout needs review first failing leg place: an expected result is not confirmed: run semar review checkout",
-		"place needs review", "pay not_run", "settled not_run")
-	if n := r.reached(""); n != 0 {
-		t.Errorf("%d requests were sent for a journey whose expected results nobody confirmed", n)
+	r.requireConfirmation(t)
+	res := r.must(t, cli.ExitOK, "journey", "run", "checkout")
+	if strings.Contains(res.stdout, "not confirmed") || strings.Contains(res.stdout, "needs review") {
+		t.Errorf("the run mentions a confirmation:\n%s", res.stdout)
+	}
+	if n := r.reached(""); n == 0 {
+		t.Error("no request was sent for a journey of source diff")
 	}
 	run := r.lastRun(t)
-	if len(run.Journeys) != 1 || run.Journeys[0].Outcome != domain.JourneyBlocked || run.Journeys[0].FirstFailing != "place" || len(run.Results) != 3 {
+	if len(run.Journeys) != 1 || run.Journeys[0].Outcome != domain.JourneyPassed {
 		t.Fatalf("run.json: %+v", run.Journeys)
-	}
-	if got := run.Journeys[0].Reasons[0].Text; got != "leg place ended inconclusive: an expected result is not confirmed: run semar review checkout" {
-		t.Errorf("the journey reason is %q", got)
-	}
-	for _, rr := range run.Results {
-		if len(rr.Actions) != 0 {
-			t.Errorf("leg %s names actions although nothing was sent", rr.Scenario)
-		}
 	}
 }
 
@@ -404,7 +397,7 @@ func TestReviewJourneyStoresOnePerLeg(t *testing.T) {
 
 	// A rewritten expected result lapses the confirmation of its leg only.
 	r.editJourney(t, "checkout", func(s string) string { return strings.Replace(s, "status: 202", "status: 200", 1) })
-	again := r.must(t, cli.ExitUndecided, "journey", "run", "checkout")
+	again := r.must(t, cli.ExitFailed, "journey", "run", "checkout")
 	contains(t, "stdout", squash(again.stdout), "first failing leg pay")
 }
 

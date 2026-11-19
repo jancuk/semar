@@ -17,7 +17,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/api"
@@ -107,36 +106,6 @@ func withTrustedScreens(ctx context.Context, app string) context.Context {
 func trustedScreens(ctx context.Context) string {
 	app, _ := ctx.Value(trustedScreensKey{}).(string)
 	return app
-}
-
-// trustedExpectationsKey carries the scenario whose expectations a run treats as confirmed, with no
-// confirmation stored. Only a plan sets it, for the replay of the test that a flow has just written: that
-// replay says whether the page meets what the criterion says, which a person has not read yet.
-type trustedExpectationsKey struct{}
-
-func withTrustedExpectations(ctx context.Context, id domain.ScenarioID) context.Context {
-	return context.WithValue(ctx, trustedExpectationsKey{}, id)
-}
-
-func trustedExpectations(ctx context.Context) domain.ScenarioID {
-	id, _ := ctx.Value(trustedExpectationsKey{}).(domain.ScenarioID)
-	return id
-}
-
-// trustingConfirm confirms every source of one scenario and leaves every other scenario to the store.
-type trustingConfirm struct {
-	confirm.Store
-	id domain.ScenarioID
-}
-
-func (t trustingConfirm) Get(id domain.ScenarioID, h domain.Hash) (confirm.Record, bool, error) {
-	if id != t.id {
-		return t.Store.Get(id, h)
-	}
-	return confirm.Record{
-		Scenario: id, ExpectHash: h, User: "plan", Identity: "this replay only",
-		Sources: []domain.Source{domain.SourceTicket, domain.SourceTestcase, domain.SourceDiff, domain.SourceBaseline},
-	}, true, nil
 }
 
 func recordTest(ctx context.Context, cmd *cobra.Command, o options, f recordTestFlags, id, envArg string) error {
@@ -479,9 +448,8 @@ type replayed struct {
 }
 
 // replayScenario runs the scenario that was just written, with no window, as semar run does, with the
-// screens of its app treated as approved for this one run, and, when trustExpectations is set, the
-// expectations of the scenario treated as confirmed for it.
-func replayScenario(ctx context.Context, o options, dir, envName, app, id string, builds []string, trustExpectations bool) replayed {
+// screens of its app treated as approved for this one run.
+func replayScenario(ctx context.Context, o options, dir, envName, app, id string, builds []string) replayed {
 	var r replayed
 	var stderr bytes.Buffer
 	flags := runFlags{
@@ -493,9 +461,6 @@ func replayScenario(ctx context.Context, o options, dir, envName, app, id string
 		},
 	}
 	ctx = withTrustedScreens(ctx, app)
-	if trustExpectations {
-		ctx = withTrustedExpectations(ctx, domain.ScenarioID(id))
-	}
 	r.err = runDaily(ctx, io.Discard, &stderr, o, flags)
 	r.stderr = stderr.String()
 	return r
@@ -504,7 +469,7 @@ func replayScenario(ctx context.Context, o options, dir, envName, app, id string
 // replayOnce runs the scenario that was just written and says how it ended. A scenario that does not
 // replay stays written, so that the person can fix a step or record again.
 func replayOnce(ctx context.Context, out io.Writer, o options, f recordTestFlags, envName, app, id string) {
-	r := replayScenario(ctx, o, f.dir, envName, app, id, nil, false)
+	r := replayScenario(ctx, o, f.dir, envName, app, id, nil)
 	var exit exitError
 	switch {
 	case r.result == nil && r.err != nil && !errors.As(r.err, &exit):

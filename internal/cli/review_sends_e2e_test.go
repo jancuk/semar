@@ -34,8 +34,8 @@ func TestReviewShowsWhatIsSentAndWhatTheLastRunObserved(t *testing.T) {
 		t.Errorf("the review shows a run before any:\n%s", before)
 	}
 
-	// The scenario is not confirmed, so the run ends inconclusive, and it stores what the service answered.
-	p.must(t, cli.ExitUndecided, "run", "--scenario", refundID)
+	// The expected result does not hold, so the run fails, and it stores what the service answered.
+	p.must(t, cli.ExitFailed, "run", "--scenario", refundID)
 	runID := p.latestRunID(t)
 
 	after := review()

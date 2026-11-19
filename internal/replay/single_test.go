@@ -66,7 +66,7 @@ func (r *rig) runOne(t *testing.T, in replay.Single) replay.Replayed {
 // compute decides a leg as the journey runner will: the builds at the end are the builds at the start.
 func compute(sc domain.Scenario, got replay.Replayed, builds []domain.BuildRef) domain.ScenarioResult {
 	res := verdict.Compute(verdict.Input{
-		Scenario: sc, Steps: got.Steps, Confirmed: got.Confirmed,
+		Scenario: sc, Steps: got.Steps,
 		BuildsStart: builds, BuildsEnd: builds, Blocked: got.Blocked,
 	})
 	res.Reasons = append(res.Reasons, got.Notes...)
@@ -252,28 +252,6 @@ func TestRunOneUsesThePassOfTheCaller(t *testing.T) {
 	}
 }
 
-func TestRunOneConfirmation(t *testing.T) {
-	r := newRig(t, rigOptions{})
-	sc, s := leg("checkout.read",
-		domain.Step{
-			ID: "read", Action: "Read the order",
-			Hint:   &domain.RequestHint{Method: "GET", Path: "/v1/orders/{id}"},
-			Expect: []domain.Expectation{{Check: domain.Check{Status: new(200)}, Source: domain.SourceDiff}},
-		},
-		domain.APIRequest{Service: "orders", Method: "GET", Path: "/v1/orders/{{place.id}}"},
-	)
-	place, ps := placeLeg()
-	r.runOne(t, replay.Single{Scenario: place, Script: ps})
-	in := replay.Single{Scenario: sc, Script: s, Vars: map[string]string{"place.id": "o-1"}}
-	if res := compute(sc, r.runOne(t, in), r.builds(t)); res.Outcome != domain.OutcomeInconclusive || !hasReason(res, "an expected result is not confirmed") {
-		t.Errorf("unconfirmed: %s %+v", res.Outcome, res.Reasons)
-	}
-	r.confirmSources(t, sc, domain.SourceDiff)
-	if res := compute(sc, r.runOne(t, in), r.builds(t)); res.Outcome != domain.OutcomePassed {
-		t.Errorf("confirmed: %s %+v", res.Outcome, res.Reasons)
-	}
-}
-
 func TestResendRecordsAttempt(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	run := replay.New(r.deps)
@@ -398,14 +376,12 @@ func (r *rig) storedActions(t *testing.T, id domain.ScenarioID) []stripped {
 // RunOne on a scenario gives what Run gives: the same outcome, the same reasons and checks, and the same stored actions.
 func TestRunOneEqualsRun(t *testing.T) {
 	cases := []struct {
-		name    string
-		confirm bool
-		mutate  func(*domain.Scenario, *domain.Script)
+		name   string
+		mutate func(*domain.Scenario, *domain.Script)
 	}{
-		{name: "passes", confirm: true},
-		{name: "not confirmed"},
-		{name: "a step has no request", confirm: true, mutate: func(_ *domain.Scenario, s *domain.Script) { s.Steps[1].Request = nil }},
-		{name: "a capture finds nothing", confirm: true, mutate: func(_ *domain.Scenario, s *domain.Script) {
+		{name: "passes"},
+		{name: "a step has no request", mutate: func(_ *domain.Scenario, s *domain.Script) { s.Steps[1].Request = nil }},
+		{name: "a capture finds nothing", mutate: func(_ *domain.Scenario, s *domain.Script) {
 			s.Steps[0].Captures = []domain.Capture{{Name: "order_id", JSONPath: "$.data.nothing"}}
 		}},
 	}
@@ -418,10 +394,6 @@ func TestRunOneEqualsRun(t *testing.T) {
 			viaRun := newRig(t, rigOptions{})
 			viaRun.putScript(t, s)
 			viaOne := newRig(t, rigOptions{})
-			if tc.confirm {
-				viaRun.confirmAll(t, sc)
-				viaOne.confirmAll(t, sc)
-			}
 
 			results, start, end, err := replay.New(viaRun.deps).Run(t.Context(), []domain.Scenario{sc})
 			if err != nil {

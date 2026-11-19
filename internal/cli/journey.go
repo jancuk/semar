@@ -283,7 +283,6 @@ func newJourneyRunCommand(o options) *cobra.Command {
 		Use:   "run (<id>... | --critical | --all)",
 		Short: "Run journeys against an environment, leg by leg, and write a report",
 		Long: "Run each journey one leg at a time in the order of its needs, check its invariants, and read the builds again at the end.\n" +
-			"A journey whose expected results nobody confirmed is blocked, and nothing is sent for it. Review them with semar review <id>.\n" +
 			"Exit 0 when every journey passed, 1 when one failed, and 2 otherwise, including a journey file that was skipped because it is not valid.",
 		Args: func(_ *cobra.Command, args []string) error {
 			n := len(args)
@@ -430,15 +429,14 @@ func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir strin
 	if err != nil {
 		return finishedRun{}, err
 	}
-	confirmations := confirm.NewLocal(rg.store.Root())
 	deps := replay.Deps{
-		Engine: rg.engine, Builds: rg.builds, Confirm: confirmations, Trust: cfg.Policy.Trust.Confirm, Run: rg.id,
+		Engine: rg.engine, Builds: rg.builds, Run: rg.id,
 		Accounts: slices.Sorted(maps.Keys(cfg.AuthProfiles)), NoToken: noTokenAccounts(cfg),
 	}
 	eng := rg.webEngine(o, dir, cfg, envName, env, headed)
 	defer eng.Close()
 	announce()
-	deps.Web, deps.Screens = eng, screenSource{repo: dir, approvals: confirmations}
+	deps.Web, deps.Screens = eng, screenSource{repo: dir, approvals: confirm.NewLocal(rg.store.Root())}
 	jdeps := journey.Deps{Builds: rg.builds, Services: map[string]string{}, Clock: o.Clock, Sleep: o.Sleep, Accounts: deps.Accounts}
 	for _, s := range env.Services {
 		jdeps.Services[s.Name] = s.AuthProfile
@@ -467,12 +465,8 @@ func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir strin
 		if ctx.Err() != nil {
 			break
 		}
-		jr, results, ok := unconfirmedJourney(confirmations, cfg.Policy.Trust.Confirm, env, j)
-		if !ok {
-			var err error
-			jr, results, err = runner.Run(ctx, j)
-			runErr = errors.Join(runErr, err)
-		}
+		jr, results, err := runner.Run(ctx, j)
+		runErr = errors.Join(runErr, err)
 		record.Results = append(record.Results, results...)
 		record.Journeys = append(record.Journeys, jr)
 	}
@@ -580,74 +574,4 @@ func manifestBuilds(js []domain.JourneyResult) (start, end []domain.BuildRef) {
 	slices.SortFunc(start, byService)
 	slices.SortFunc(end, byService)
 	return start, end
-}
-
-// unconfirmedJourney answers a journey that has a leg whose expected results a person must confirm
-// and has not. Such a journey sends nothing, so a flow of writes never starts without the means to
-// judge it. ok is false when every leg is confirmed, and the journey runs.
-func unconfirmedJourney(store confirm.Store, trust []domain.Source, env config.Environment, j domain.Journey) (domain.JourneyResult, []domain.ScenarioResult, bool) {
-	order, err := journey.Order(j)
-	if err != nil {
-		return domain.JourneyResult{}, nil, false
-	}
-	whys := make([]string, len(order))
-	asOf := make([][]string, len(order))
-	first := -1
-	for i, id := range order {
-		leg := j.Legs[slices.IndexFunc(j.Legs, func(l domain.Leg) bool { return l.ID == id })]
-		sc, _ := journey.LegScenario(j, id, legAuth(env, j, leg.Service))
-		asOf[i] = journey.ActedAs(sc)
-		if whys[i] = unconfirmedWhy(store, trust, sc, j.ID); whys[i] != "" && first < 0 {
-			first = i
-		}
-	}
-	if first < 0 {
-		return domain.JourneyResult{}, nil, false
-	}
-
-	legs := make([]domain.LegResult, len(order))
-	results := make([]domain.ScenarioResult, len(order))
-	for i, id := range order {
-		sid := domain.ScenarioID(string(j.ID) + "." + string(id))
-		outcome, reason := domain.OutcomeNotRun, domain.Reason{
-			Rule: domain.OutcomeNotRun, Text: "nothing was sent: the expected results of leg " + string(order[first]) + " are not confirmed",
-		}
-		if whys[i] != "" {
-			outcome, reason = domain.OutcomeInconclusive, domain.Reason{Rule: domain.OutcomeInconclusive, Text: whys[i]}
-		}
-		legs[i] = domain.LegResult{Leg: id, Scenario: sid, Outcome: outcome, Reasons: []domain.Reason{reason}, As: asOf[i]}
-		results[i] = domain.ScenarioResult{Scenario: sid, Outcome: outcome, Reasons: []domain.Reason{reason}, Checks: []domain.CheckResult{}, Actions: []domain.ActionID{}}
-	}
-	// The builds were not read, because nothing was sent: the manifest is empty at both ends.
-	empty := domain.Manifest{Services: []domain.BuildRef{}, Hash: domain.ManifestHash(nil)}
-	in := journey.Outcome{Legs: legs, Start: empty, End: &empty}
-	outcome, firstLeg, reasons := journey.Decide(in)
-	return domain.JourneyResult{
-		Journey: j.ID, Manifest: empty, ManifestEnd: &empty, Outcome: outcome, FirstFailing: firstLeg,
-		Legs: legs, Invariants: []domain.InvariantResult{}, Reasons: reasons,
-	}, results, true
-}
-
-// unconfirmedWhy is why the scenario of a leg cannot be judged, or "" when no person has to
-// confirm its expected results or one has.
-func unconfirmedWhy(store confirm.Store, trust []domain.Source, sc domain.Scenario, id domain.JourneyID) string {
-	var needed []domain.Source
-	for _, st := range sc.Steps {
-		for _, e := range st.Expect {
-			if confirm.NeedsExpectation(e, trust) {
-				needed = append(needed, e.Source)
-			}
-		}
-	}
-	if len(needed) == 0 {
-		return ""
-	}
-	rec, found, err := store.Get(sc.ID, domain.ExpectHash(sc))
-	switch {
-	case err != nil:
-		return "the confirmations could not be read: " + err.Error()
-	case !found || slices.ContainsFunc(needed, func(s domain.Source) bool { return !slices.Contains(rec.Sources, s) }):
-		return "an expected result is not confirmed: run semar review " + string(id)
-	}
-	return ""
 }

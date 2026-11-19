@@ -44,7 +44,6 @@ func TestStepAsSendsThatProfileAndNoOther(t *testing.T) {
 	r.deps.Accounts = []string{"support-agent", "bob"}
 	sc, s := variant(t, func(sc *domain.Scenario, _ *domain.Script) { sc.Steps[2].As = "bob" })
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	r.run(t, sc)
 
 	sn.mu.Lock()
@@ -73,7 +72,6 @@ func TestStepAsAlsoWorksOnASetupStep(t *testing.T) {
 	r.deps.Accounts = []string{"support-agent", "bob"}
 	sc, s := variant(t, func(sc *domain.Scenario, _ *domain.Script) { sc.Steps[0].As = "bob" })
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	r.run(t, sc)
 	sn.mu.Lock()
 	defer sn.mu.Unlock()
@@ -87,7 +85,6 @@ func TestUnknownAccountBlocksBeforeAnyRequest(t *testing.T) {
 	r.deps.Accounts = []string{"support-agent"}
 	sc, s := variant(t, func(sc *domain.Scenario, _ *domain.Script) { sc.Steps[1].As = "dave" })
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	results, _, _ := r.run(t, sc)
 	expect(t, results[0], domain.OutcomeBlocked, "account dave is not in the configuration")
 	if n := r.app.Requests("", "/v1/"); n != 0 {
@@ -99,23 +96,7 @@ func TestAnAccountOfTheScenarioIsKnownWithoutTheList(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	sc, s := variant(t, func(sc *domain.Scenario, _ *domain.Script) { sc.Steps[1].As = "support-agent" })
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	results, _, _ := r.run(t, sc)
-	expect(t, results[0], domain.OutcomePassed, "")
-}
-
-func TestExpectedByModelNeedsConfirmationWhateverTheSource(t *testing.T) {
-	r := newRig(t, rigOptions{})
-	sc, s := variant(t, func(sc *domain.Scenario, _ *domain.Script) { sc.Steps[1].Expect[0].By = "model" })
-	r.putScript(t, s)
-	r.confirmSources(t, sc, domain.SourceDiff, domain.SourceBaseline)
-	results, _, _ := r.run(t, sc)
-	expect(t, results[0], domain.OutcomeInconclusive, "an expected result is not confirmed")
-
-	r = newRig(t, rigOptions{})
-	r.putScript(t, s)
-	r.confirmSources(t, sc, domain.SourceDiff, domain.SourceBaseline, domain.SourceTicket)
-	results, _, _ = r.run(t, sc)
 	expect(t, results[0], domain.OutcomePassed, "")
 }
 
@@ -132,7 +113,6 @@ func TestOperandVariableComparesWithTheCapture(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	sc, s := variant(t, operandScenario("{{order_id}}"))
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	results, _, _ := r.run(t, sc)
 	expect(t, results[0], domain.OutcomePassed, "")
 }
@@ -146,7 +126,6 @@ func TestOperandMayHoldADateVariable(t *testing.T) {
 		})
 	})
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	results, _, _ := r.run(t, sc)
 	expect(t, results[0], domain.OutcomePassed, "")
 }
@@ -155,7 +134,6 @@ func TestOperandVariableShowsTheFilledValueInAFailure(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	sc, s := variant(t, operandScenario("not-{{order_id}}"))
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	results, _, _ := r.run(t, sc)
 	id := r.storedAction(t, sc.ID, "create-order").Captures["order_id"]
 	if id == "" {
@@ -174,7 +152,6 @@ func TestOperandWithAMissingValueIsNotEvaluated(t *testing.T) {
 		s.Steps[2].Captures = []domain.Capture{{Name: "later", JSONPath: "$.data.nothing"}}
 	})
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	results, _, _ := r.run(t, sc)
 	var got domain.CheckState
 	for _, c := range results[0].Checks {
@@ -191,7 +168,6 @@ func TestOperandVariableNeverShowsARedactedCapture(t *testing.T) {
 	r := newRig(t, rigOptions{redact: config.Redact{JSONPaths: []string{"$.data.id"}}})
 	sc, s := variant(t, operandScenario("not-{{order_id}}"))
 	r.putScript(t, s)
-	r.confirmAll(t, sc)
 	results, _, _ := r.run(t, sc)
 	for _, c := range results[0].Checks {
 		if strings.Contains(c.Expected, "o-1") {

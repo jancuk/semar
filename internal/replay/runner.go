@@ -18,7 +18,6 @@ import (
 
 	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/check"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/engine/api"
 	"github.com/jancuk/semar/internal/fixture"
@@ -60,12 +59,10 @@ type Deps struct {
 	Engine   Doer
 	Scripts  Scripts
 	Builds   build.Prober
-	Services []string // names to probe
-	Confirm  confirm.Store
-	Trust    []domain.Source // the sources whose expectations a person must confirm
-	Workers  int             // default 4
-	Fixtures Fixtures        // nil: a scenario with given entries ends blocked
-	Run      domain.RunID    // the value of {{run.id}}
+	Services []string     // names to probe
+	Workers  int          // default 4
+	Fixtures Fixtures     // nil: a scenario with given entries ends blocked
+	Run      domain.RunID // the value of {{run.id}}
 	// Accounts are the auth profiles of the configuration that a step may act as (steps[].as).
 	// The profile of a scenario itself is always known.
 	Accounts []string
@@ -95,7 +92,6 @@ func New(d Deps) *Runner {
 		d.Workers = defaultWorkers
 	}
 	d.Services = slices.Clone(d.Services)
-	d.Trust = slices.Clone(d.Trust)
 	d.Accounts = slices.Clone(d.Accounts)
 	d.NoToken = slices.Clone(d.NoToken)
 	return &Runner{d: d}
@@ -106,7 +102,6 @@ type replayed struct {
 	steps      map[domain.StepID]verdict.StepEvidence
 	blocked    []string
 	notRun     string
-	confirmed  func(domain.Expectation) bool
 	scriptHash domain.Hash     // the expectation hash that the script that ran was stored under
 	notes      []domain.Reason // why the scenario stopped early, when no recorded action says it
 	fixtures   []domain.FixtureRecord
@@ -201,7 +196,6 @@ func judge(sc domain.Scenario, run replayed, start, end []domain.BuildRef) domai
 	return verdict.Compute(verdict.Input{
 		Scenario:    sc,
 		Steps:       run.steps,
-		Confirmed:   run.confirmed,
 		BuildsStart: start,
 		BuildsEnd:   end,
 		NotRun:      run.notRun,
@@ -240,11 +234,7 @@ func retriable(sc domain.Scenario, run replayed) bool {
 	case domain.OutcomeFailed:
 		return true
 	case domain.OutcomeInconclusive:
-		texts := make([]string, len(res.Reasons))
-		for i, reason := range res.Reasons {
-			texts[i] = reason.Text
-		}
-		return words.Of(string(res.Outcome), texts) != "needs review"
+		return true
 	case domain.OutcomeBlocked:
 		return !slices.ContainsFunc(res.Reasons, func(reason domain.Reason) bool {
 			return reason.Rule == domain.OutcomeBlocked && !strings.HasPrefix(reason.Text, verdict.SetupFailedPrefix)
@@ -256,7 +246,6 @@ func retriable(sc domain.Scenario, run replayed) bool {
 // unsent is a scenario that was decided before any of its steps could be sent.
 func (r *Runner) unsent(sc domain.Scenario, notRun string, blocked []string) replayed {
 	run := replayed{notRun: notRun, blocked: blocked}
-	run.confirmed = r.confirmation(sc, &run)
 	return run
 }
 
@@ -272,23 +261,6 @@ func (r *Runner) probe(ctx context.Context) (builds []domain.BuildRef, failed []
 	return builds, failed
 }
 
-// confirmation reads the store once per scenario. An expectation counts as confirmed when its
-// source needs no person, or when a record names its source. A store that cannot be read confirms nothing.
-func (r *Runner) confirmation(sc domain.Scenario, run *replayed) func(domain.Expectation) bool {
-	needs := func(e domain.Expectation) bool { return confirm.NeedsExpectation(e, r.d.Trust) }
-	var sources []domain.Source
-	if r.d.Confirm != nil && slices.ContainsFunc(sc.Steps, func(st domain.Step) bool { return slices.ContainsFunc(st.Expect, needs) }) {
-		rec, found, err := r.d.Confirm.Get(sc.ID, domain.ExpectHash(sc))
-		switch {
-		case err != nil:
-			run.notes = append(run.notes, domain.Reason{Rule: domain.OutcomeInconclusive, Text: "the confirmations could not be read: " + err.Error()})
-		case found:
-			sources = rec.Sources
-		}
-	}
-	return func(e domain.Expectation) bool { return !needs(e) || slices.Contains(sources, e.Source) }
-}
-
 // replay sends the steps in order and never sends one twice. It stops at the first
 // step that has no request in the script, was refused, failed, has no response, or captured no value: a later
 // step then has no action. A response with any status lets the scenario go on.
@@ -297,7 +269,6 @@ func (r *Runner) confirmation(sc domain.Scenario, run *replayed) func(domain.Exp
 // Their cleanup runs when the scenario ends, also after a failure or an interrupt.
 func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (run replayed, doErr error) {
 	run = newReplayed()
-	run.confirmed = r.confirmation(sc, &run)
 
 	if blocked := r.unknownAccounts(sc); len(blocked) > 0 {
 		run.blocked = blocked

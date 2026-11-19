@@ -18,7 +18,6 @@ func webInput(action domain.Action, result check.Result) verdict.Input {
 	return verdict.Input{
 		Scenario:    sc,
 		Steps:       map[domain.StepID]verdict.StepEvidence{"read": {Action: &action, Checks: []check.Result{result}}},
-		Confirmed:   func(domain.Expectation) bool { return true },
 		BuildsStart: []domain.BuildRef{{Service: "board", Commit: "c1"}},
 		BuildsEnd:   []domain.BuildRef{{Service: "board", Commit: "c1"}},
 	}

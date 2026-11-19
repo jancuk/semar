@@ -262,8 +262,6 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 		Scripts:  rg.store,
 		Builds:   rg.builds,
 		Services: rg.probed,
-		Confirm:  confirmations(ctx, rg.store.Root()),
-		Trust:    cfg.Policy.Trust.Confirm,
 		Workers:  cfg.Replay.Workers,
 		Retries:  cfg.Replay.Retries,
 		Once:     rg.once,
@@ -511,14 +509,4 @@ func loadSessions(ctx context.Context, cfg config.Config, r secret.Resolver, nee
 		sessions[name] = session{header: p.Session.Header, value: value}
 	}
 	return sessions, nil
-}
-
-// confirmations is the store of what a person confirmed. A replay that a plan asks for treats the
-// expectations of its one scenario as confirmed, and stores nothing.
-func confirmations(ctx context.Context, root string) confirm.Store {
-	local := confirm.NewLocal(root)
-	if id := trustedExpectations(ctx); id != "" {
-		return trustingConfirm{Store: local, id: id}
-	}
-	return local
 }

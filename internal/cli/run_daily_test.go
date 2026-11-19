@@ -39,15 +39,14 @@ func TestRunRunsTheChangeAndEndsWithTheStatus(t *testing.T) {
 	r := dailyRepo(t)
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
 
-	// Nobody confirmed the expected results, so the first run asks for a review.
-	first := r.must(t, cli.ExitUndecided, "run")
+	first := r.must(t, cli.ExitOK, "run")
 	out := squash(first.stdout)
 	contains(t, "the first run", out,
 		"Change feature/refund-limit against main: SHOP-482",
 		"Target local (test), orders at 9f3c2ab",
 		"Selected 1 scenario",
-		scenarioID+" needs review", "not confirmed → semar review "+scenarioID,
-		"1 use case of SHOP-482", "needs review 1 → semar review\n SHOP-482/1 A refund above the paid amount is refused", "Ship: no. 1 open.")
+		scenarioID+" passed",
+		"1 use case of SHOP-482", "verified 1", "Ship: yes.")
 	if strings.Contains(first.stdout, "SHOP-480-01") {
 		t.Errorf("a scenario of another ticket ran:\n%s", first.stdout)
 	}
@@ -55,7 +54,6 @@ func TestRunRunsTheChangeAndEndsWithTheStatus(t *testing.T) {
 		t.Errorf("the header does not come before the results:\n%s", first.stdout)
 	}
 
-	r.must(t, cli.ExitOK, "review", "--yes")
 	second := r.must(t, cli.ExitOK, "run")
 	contains(t, "the second run", squash(second.stdout), scenarioID+" passed", "verified 1", "Ship: yes.")
 	if n := r.app.Requests("", "/"); n == 0 {

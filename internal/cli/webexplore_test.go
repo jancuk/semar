@@ -113,9 +113,6 @@ func TestAnExplorerWritesATestThatReplaysAndRunsLikeARecordedOne(t *testing.T) {
 	if !exists(t, r.path(".semar", "screens", "orders.yaml")) {
 		t.Error("no screens file")
 	}
-	// Nothing is approved: a person reads the screens and the scenario first, as for a recorded test.
-	unconfirmed := r.run(t, cli.WithTrustedScreens(t.Context(), "orders"), cli.ExitUndecided, "--scenario", "SHOP-482-05")
-	contains(t, "the run", squash(unconfirmed.stdout), "SHOP-482-05 needs review an expected result is not confirmed")
 }
 
 func TestACheckThatThePageDoesNotMeetIsWrittenWithItsClaimAndFailsOnReplay(t *testing.T) {
