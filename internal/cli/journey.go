@@ -16,7 +16,6 @@ import (
 
 	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/fixture"
@@ -436,7 +435,7 @@ func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir strin
 	eng := rg.webEngine(o, dir, cfg, envName, env, headed)
 	defer eng.Close()
 	announce()
-	deps.Web, deps.Screens = eng, screenSource{repo: dir, approvals: confirm.NewLocal(rg.store.Root())}
+	deps.Web, deps.Screens = eng, screenSource{repo: dir}
 	jdeps := journey.Deps{Builds: rg.builds, Services: map[string]string{}, Clock: o.Clock, Sleep: o.Sleep, Accounts: deps.Accounts}
 	for _, s := range env.Services {
 		jdeps.Services[s.Name] = s.AuthProfile

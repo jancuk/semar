@@ -19,10 +19,9 @@ type WebDoer interface {
 	NewScenario()
 }
 
-// ScreenSource gives the screens file of an app, and says whether a person approved it as it is now.
+// ScreenSource gives the screens file of an app.
 type ScreenSource interface {
 	Load(app string) (domain.Screens, error)
-	Approved(app string, h domain.Hash) (bool, error)
 }
 
 // webRun holds what the web steps of one scenario share: the screens of each app that they name.
@@ -94,19 +93,6 @@ func (r *Runner) prepareWeb(sc domain.Scenario, s domain.Script, run *replayed) 
 	}
 	if len(run.blocked) > 0 {
 		return nil, false
-	}
-	for _, app := range apps {
-		approved, err := r.d.Screens.Approved(app, domain.ScreensHash(wr.screens[app]))
-		switch {
-		case err != nil:
-			run.notes = append(run.notes, domain.Reason{Rule: domain.OutcomeInconclusive, Step: first,
-				Text: fmt.Sprintf("the approval of the screens of %s could not be read: %v", app, err)})
-			return nil, false
-		case !approved:
-			run.notes = append(run.notes, domain.Reason{Rule: domain.OutcomeInconclusive, Step: first,
-				Text: fmt.Sprintf("the screens of %s are not approved: semar review %s", app, app)})
-			return nil, false
-		}
 	}
 	return wr, true
 }

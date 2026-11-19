@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/engine/web"
 	"github.com/jancuk/semar/internal/screens"
@@ -32,23 +31,10 @@ func (rg *envRig) webEngine(o options, repo string, cfg config.Config, envName s
 	})
 }
 
-// screenSource gives the replay the screens files of the repository and their approvals.
-type screenSource struct {
-	repo      string
-	approvals *confirm.Local
-	// trusted is an app whose screens count as approved in this run, with no approval stored. Only
-	// the replay that semar record makes of its own recording sets it.
-	trusted string
-}
+// screenSource gives the replay the screens files of the repository.
+type screenSource struct{ repo string }
 
 func (s screenSource) Load(app string) (domain.Screens, error) { return screens.Load(s.repo, app) }
-
-func (s screenSource) Approved(app string, h domain.Hash) (bool, error) {
-	if s.trusted != "" && app == s.trusted {
-		return true, nil
-	}
-	return s.approvals.ScreensApproved(app, h)
-}
 
 // webSignIns is the web sign-in of each account that has one.
 func webSignIns(cfg config.Config) map[string]config.WebSignIn {

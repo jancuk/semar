@@ -1188,7 +1188,7 @@ Cleanup never changes an outcome. A record that cleanup could not remove is list
 
 A scenario with the tag `@surface:web`, or a journey leg with `surface: web`, drives Chrome on a profile of Semar's own. A step names an element of a screen, and the screens file `.semar/screens/<app>.yaml` holds how each element is found. A person approves that file in `semar review`. Nobody has to write it: `semar record` and `semar plan` do.
 
-When a redesign moves an element, the run says which element it did not find. `semar screens repair latest` then prints up to three candidates that the browser found by role, by name, or by text, with no model, and `--apply <screen>.<element>=<n>` rewrites that one locator. The file then needs a new approval.
+When a redesign moves an element, the run says which element it did not find. `semar screens repair latest` then prints up to three candidates that the browser found by role, by name, or by text, with no model, and `--apply <screen>.<element>=<n>` rewrites that one locator, and the next run uses it.
 
 `semar run --headed` shows the browser window of a web step.
 
@@ -2343,9 +2343,7 @@ semar journey run (<id>... | --critical | --all)
 
 Read a stored run, and for each element that a web step did not find, print its locator beside up to three candidates that the browser found by role, by name, or by text. No model is used.
 
-With --apply \<screen>.\<element>=\<n>, rewrite that element of the screens file with candidate n. Nothing else is touched: not a scenario, an expected result, or a step.
-
-The file then has another hash, so a person must approve it again with semar review \<app>.
+With --apply \<screen>.\<element>=\<n>, rewrite that element of the screens file with candidate n. Nothing else is touched: not a scenario, an expected result, or a step. The next run uses the file.
 
 ```text
 semar screens repair <run id|latest> [--apply <screen>.<element>=<n>]...

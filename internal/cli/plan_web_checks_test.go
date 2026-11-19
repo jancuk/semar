@@ -113,11 +113,7 @@ func TestPlanDraftsEveryFormOfAWebCheckAndRepairsAnElementThatTheLocatorDoesNotP
 	must(t, err)
 	contains(t, "plan.md", string(md), "SHOP-482-01", "Replay: passed")
 
-	// A plan approves nothing: the checks need a person before a run counts them, and then they pass.
-	unconfirmed := p.must(t, cli.ExitUndecided, "run", "--scenario", "SHOP-482-01", "--build", p.head(t))
-	contains(t, "the run", squash(unconfirmed.stdout), "SHOP-482-01 needs review")
-	p.must(t, cli.ExitOK, "review", "SHOP-482-01", "--yes")
-	p.must(t, cli.ExitOK, "review", "orders", "--yes")
+	// The checks count as soon as they are written, and they pass.
 	run := p.must(t, cli.ExitOK, "run", "--scenario", "SHOP-482-01", "--build", p.head(t))
 	contains(t, "the run", run.stdout, "SHOP-482-01  passed")
 }

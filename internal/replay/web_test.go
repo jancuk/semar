@@ -50,10 +50,9 @@ func (f *fakeWeb) Do(_ context.Context, c web.Call) (web.Result, error) {
 }
 
 type fakeScreens struct {
-	text     string
-	missing  bool
-	approved bool
-	asked    []string
+	text    string
+	missing bool
+	asked   []string
 }
 
 func (f *fakeScreens) Load(app string) (domain.Screens, error) {
@@ -63,8 +62,6 @@ func (f *fakeScreens) Load(app string) (domain.Screens, error) {
 	}
 	return screens.Parse([]byte(f.text), screens.Path(app), app)
 }
-
-func (f *fakeScreens) Approved(string, domain.Hash) (bool, error) { return f.approved, nil }
 
 func webScenario() domain.Scenario {
 	return domain.Scenario{
@@ -105,7 +102,7 @@ func TestWebScenarioRunsThroughTheRunner(t *testing.T) {
 	sc := webScenario()
 	sc.Steps[0].Expect = nil
 	s := webScript(sc)
-	fw, fs := &fakeWeb{}, &fakeScreens{text: boardScreens, approved: true}
+	fw, fs := &fakeWeb{}, &fakeScreens{text: boardScreens}
 	res := r.runWeb(t, sc, s, fw, fs)
 	if res.Outcome != domain.OutcomePassed {
 		t.Fatalf("outcome = %s: %+v", res.Outcome, res.Reasons)
@@ -128,26 +125,25 @@ func TestWebScenarioRunsThroughTheRunner(t *testing.T) {
 	}
 }
 
-func TestWebStepsOfAnUnapprovedScreensFileEndInconclusive(t *testing.T) {
+func TestWebStepsUseTheScreensFileAsItIs(t *testing.T) {
 	r := newRig(t, rigOptions{})
-	sc, s := webScenario(), webScript(webScenario())
-	fw, fs := &fakeWeb{}, &fakeScreens{text: boardScreens, approved: false}
+	sc := webScenario()
+	sc.Steps[0].Expect = nil
+	s := webScript(sc)
+	fw, fs := &fakeWeb{}, &fakeScreens{text: boardScreens}
 	res := r.runWeb(t, sc, s, fw, fs)
-	if res.Outcome != domain.OutcomeInconclusive {
+	if res.Outcome != domain.OutcomePassed {
 		t.Fatalf("outcome = %s: %+v", res.Outcome, res.Reasons)
 	}
-	if !hasReason(res, "the screens of kanban are not approved: semar review kanban") {
-		t.Errorf("reasons = %+v", res.Reasons)
-	}
-	if len(fw.calls) != 0 {
-		t.Errorf("the browser was used %d times before the screens were approved", len(fw.calls))
+	if len(fw.calls) != 2 {
+		t.Errorf("the browser got %d calls, want 2", len(fw.calls))
 	}
 }
 
 func TestWebStepsNeedTheirScreensFile(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	sc, s := webScenario(), webScript(webScenario())
-	res := r.runWeb(t, sc, s, &fakeWeb{}, &fakeScreens{missing: true, approved: true})
+	res := r.runWeb(t, sc, s, &fakeWeb{}, &fakeScreens{missing: true})
 	if res.Outcome != domain.OutcomeBlocked || !hasReason(res, "the screens of kanban were not found: .semar/screens/kanban.yaml") {
 		t.Errorf("outcome = %s, reasons = %+v", res.Outcome, res.Reasons)
 	}
@@ -161,7 +157,7 @@ func TestWebStepNamesAnElementThatTheFileLacks(t *testing.T) {
 	sc.Steps[1].Expect[0].Check.Element = "gone"
 	s.ExpectHash = domain.ExpectHash(sc)
 	fw := &fakeWeb{}
-	res := r.runWeb(t, sc, s, fw, &fakeScreens{text: boardScreens, approved: true})
+	res := r.runWeb(t, sc, s, fw, &fakeScreens{text: boardScreens})
 	if res.Outcome != domain.OutcomeBlocked {
 		t.Fatalf("outcome = %s: %+v", res.Outcome, res.Reasons)
 	}
@@ -199,7 +195,7 @@ func TestAnElementThatIsNotFoundStopsTheScenarioInconclusive(t *testing.T) {
 		}
 		return web.Result{Action: a}, nil
 	}}
-	fs := &fakeScreens{text: boardScreens, approved: true}
+	fs := &fakeScreens{text: boardScreens}
 	res := r.runWeb(t, sc, s, fw, fs)
 	if res.Outcome != domain.OutcomeInconclusive {
 		t.Fatalf("outcome = %s: %+v", res.Outcome, res.Reasons)
@@ -221,7 +217,7 @@ func TestNoChromeBlocksTheScenario(t *testing.T) {
 	fw := &fakeWeb{reply: func(c web.Call, n int) (web.Result, error) {
 		return web.Result{}, fmt.Errorf("web open: %w", web.ErrChromeNotFound)
 	}}
-	res := r.runWeb(t, sc, s, fw, &fakeScreens{text: boardScreens, approved: true})
+	res := r.runWeb(t, sc, s, fw, &fakeScreens{text: boardScreens})
 	if res.Outcome != domain.OutcomeBlocked {
 		t.Fatalf("outcome = %s: %+v", res.Outcome, res.Reasons)
 	}
@@ -239,7 +235,7 @@ func TestALocatorWithAnUnknownVariableStopsTheStep(t *testing.T) {
 	s.ExpectHash = domain.ExpectHash(sc)
 	fw := &fakeWeb{}
 	// The screens name {{leg.other}}, which no earlier step captured and no preset holds.
-	res := r.runWeb(t, sc, s, fw, &fakeScreens{text: strings.Replace(boardScreens, "leg.title", "leg.other", 1), approved: true})
+	res := r.runWeb(t, sc, s, fw, &fakeScreens{text: strings.Replace(boardScreens, "leg.title", "leg.other", 1)})
 	if res.Outcome != domain.OutcomeInconclusive || !hasReason(res, "the locator of element card") {
 		t.Errorf("outcome = %s: %+v", res.Outcome, res.Reasons)
 	}
@@ -264,7 +260,7 @@ func TestOneWebScenarioAtATime(t *testing.T) {
 		defer func() { mu.Lock(); active--; mu.Unlock() }()
 		return web.Result{Action: domain.Action{ID: domain.ActionID(fmt.Sprintf("a-%d", n)), Surface: domain.SurfaceWeb, Use: c.Use, Web: &domain.WebRecord{}}}, nil
 	}}
-	r.deps.Web, r.deps.Screens = fw, &fakeScreens{text: boardScreens, approved: true}
+	r.deps.Web, r.deps.Screens = fw, &fakeScreens{text: boardScreens}
 	var scs []domain.Scenario
 	for i := range 6 {
 		c, ss := copyWeb(sc, s, domain.ScenarioID(fmt.Sprintf("board-%d", i)))
@@ -305,7 +301,7 @@ func TestAMissedTargetDecidesNoOtherCheck(t *testing.T) {
 		}
 		return web.Result{Action: a}, nil
 	}}
-	res := r.runWeb(t, sc, s, fw, &fakeScreens{text: strings.Replace(boardScreens, "card:", "done:", 0), approved: true})
+	res := r.runWeb(t, sc, s, fw, &fakeScreens{text: strings.Replace(boardScreens, "card:", "done:", 0)})
 	if res.Outcome != domain.OutcomeInconclusive {
 		t.Fatalf("outcome = %s: %+v", res.Outcome, res.Reasons)
 	}
@@ -327,7 +323,7 @@ func TestTheChecksOfAWebStepGoToTheEngineToWaitFor(t *testing.T) {
 	}
 	s := webScript(sc)
 	s.Steps[1].Captures = nil
-	fw, fs := &fakeWeb{}, &fakeScreens{text: boardScreens, approved: true}
+	fw, fs := &fakeWeb{}, &fakeScreens{text: boardScreens}
 	r.runWeb(t, sc, s, fw, fs)
 	read := fw.calls[1]
 	if len(read.Until) != 4 {

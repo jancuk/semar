@@ -95,19 +95,6 @@ func recordingOf(ctx context.Context) recordingHooks {
 	return h
 }
 
-// trustedScreensKey carries the app whose screens a run treats as approved, with no approval stored.
-// Only semar record sets it, for the replay of what it has just written.
-type trustedScreensKey struct{}
-
-func withTrustedScreens(ctx context.Context, app string) context.Context {
-	return context.WithValue(ctx, trustedScreensKey{}, app)
-}
-
-func trustedScreens(ctx context.Context) string {
-	app, _ := ctx.Value(trustedScreensKey{}).(string)
-	return app
-}
-
 func recordTest(ctx context.Context, cmd *cobra.Command, o options, f recordTestFlags, id, envArg string) error {
 	out := cmd.OutOrStdout()
 	if err := idcheck.Scenario(id); err != nil {
@@ -447,9 +434,8 @@ type replayed struct {
 	err     error
 }
 
-// replayScenario runs the scenario that was just written, with no window, as semar run does, with the
-// screens of its app treated as approved for this one run.
-func replayScenario(ctx context.Context, o options, dir, envName, app, id string, builds []string) replayed {
+// replayScenario runs the scenario that was just written, with no window, as semar run does.
+func replayScenario(ctx context.Context, o options, dir, envName, id string, builds []string) replayed {
 	var r replayed
 	var stderr bytes.Buffer
 	flags := runFlags{
@@ -460,7 +446,6 @@ func replayScenario(ctx context.Context, o options, dir, envName, app, id string
 			}
 		},
 	}
-	ctx = withTrustedScreens(ctx, app)
 	r.err = runDaily(ctx, io.Discard, &stderr, o, flags)
 	r.stderr = stderr.String()
 	return r
@@ -469,7 +454,7 @@ func replayScenario(ctx context.Context, o options, dir, envName, app, id string
 // replayOnce runs the scenario that was just written and says how it ended. A scenario that does not
 // replay stays written, so that the person can fix a step or record again.
 func replayOnce(ctx context.Context, out io.Writer, o options, f recordTestFlags, envName, app, id string) {
-	r := replayScenario(ctx, o, f.dir, envName, app, id, nil)
+	r := replayScenario(ctx, o, f.dir, envName, id, nil)
 	var exit exitError
 	switch {
 	case r.result == nil && r.err != nil && !errors.As(r.err, &exit):

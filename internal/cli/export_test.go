@@ -30,11 +30,6 @@ func WithLogin(ctx context.Context, drive func(tab context.Context)) context.Con
 	return withLogin(ctx, loginHooks{hidden: true, drive: drive})
 }
 
-// WithTrustedScreens makes a run treat the screens of an app as approved, without storing an approval.
-func WithTrustedScreens(ctx context.Context, app string) context.Context {
-	return withTrustedScreens(ctx, app)
-}
-
 // NewWebExplorer is the explorer of a plan for the one service of the environment in dir, as planChange
 // builds it.
 func NewWebExplorer(o Options, dir, service, as string) (plan.WebExplorer, error) {

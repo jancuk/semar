@@ -164,7 +164,7 @@ func (w *webExplorer) write(ctx context.Context, req plan.WebRequest, end plan.F
 		return plan.WebOutcome{}, err
 	}
 	remove := func() error { return w.remove(written, req.ID) }
-	r := replayScenario(ctx, w.o, w.dir, w.envName, w.app, string(req.ID), w.builds)
+	r := replayScenario(ctx, w.o, w.dir, w.envName, string(req.ID), w.builds)
 	if ctx.Err() != nil {
 		_ = remove()
 		return plan.WebOutcome{}, ctx.Err()

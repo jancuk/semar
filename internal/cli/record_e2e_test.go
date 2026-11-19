@@ -229,18 +229,12 @@ func TestRecordWritesATestThatReplaysAndFailsWhenACheckIsWrong(t *testing.T) {
 		"total: { css: \"#total\" }",
 	)
 
-	// Nothing that record wrote is approved: a run of it asks for the approval, and the replay inside record did not store one.
-	unapproved := r.run(t, ctx, cli.ExitUndecided, "--scenario", "SHOP-482-07")
-	contains(t, "the run", squash(unapproved.stdout), "SHOP-482-07 needs review the screens of orders are not approved: semar review orders\n")
-	contains(t, "the report", r.lastReport(t), "the screens of orders are not approved")
-
-	trusted := cli.WithTrustedScreens(ctx, "orders")
-	passed := r.run(t, trusted, cli.ExitOK, "--scenario", "SHOP-482-07")
+	passed := r.run(t, ctx, cli.ExitOK, "--scenario", "SHOP-482-07")
 	contains(t, "the run", passed.stdout, "SHOP-482-07  passed")
 
 	// The page changes so that a check is wrong: the run fails, and does not end undecided.
 	pages.refund.Store(true)
-	failed := r.run(t, trusted, cli.ExitFailed, "--scenario", "SHOP-482-07")
+	failed := r.run(t, ctx, cli.ExitFailed, "--scenario", "SHOP-482-07")
 	contains(t, "the run", failed.stdout, "SHOP-482-07  failed")
 	contains(t, "the report", r.lastReport(t), "6.00")
 }
@@ -263,7 +257,7 @@ func TestRecordWritesADateFieldAsOneFillThatReplays(t *testing.T) {
 	if !regexp.MustCompile(`When Type "\d{4}-\d{2}-\d{2}" in due-date\n\s+# step: fill-due-date\n\s+And Click save\n`).Match(feature) {
 		t.Errorf("the scenario has no single fill of the date field before the click:\n%s", feature)
 	}
-	passed := r.run(t, cli.WithTrustedScreens(ctx, "orders"), cli.ExitOK, "--scenario", "SHOP-482-08")
+	passed := r.run(t, ctx, cli.ExitOK, "--scenario", "SHOP-482-08")
 	contains(t, "the run", passed.stdout, "SHOP-482-08  passed")
 }
 
@@ -281,7 +275,7 @@ func TestTwoWebScenariosOfOneRunDoNotShareTheStateOfATab(t *testing.T) {
 	r.record(t, ctx, cli.ExitOK, signIn("ana@example.com"), "SHOP-482-21", "--open", "/desk", "--service", "orders")
 	r.record(t, ctx, cli.ExitOK, signIn("ben@example.com"), "SHOP-482-22", "--open", "/desk", "--service", "orders")
 
-	both := r.semar(t, cli.WithTrustedScreens(ctx, "orders"), "run", "--scenario", "SHOP-482-21", "--scenario", "SHOP-482-22")
+	both := r.semar(t, ctx, "run", "--scenario", "SHOP-482-21", "--scenario", "SHOP-482-22")
 	contains(t, "the run", both.stdout, "SHOP-482-21  passed", "SHOP-482-22  passed")
 }
 

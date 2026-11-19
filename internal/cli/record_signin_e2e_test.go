@@ -105,7 +105,7 @@ func TestTwoRecordedScenariosOfOneRunBothSignInByThemselves(t *testing.T) {
 	ctx := t.Context()
 	r.record(t, ctx, cli.ExitOK, ping(t), "SHOP-482-32", "--open", "/portal", "--service", "orders")
 	r.record(t, ctx, cli.ExitOK, ping(t), "SHOP-482-33", "--open", "/portal", "--service", "orders")
-	both := r.semar(t, cli.WithTrustedScreens(ctx, "orders"), "run", "--scenario", "SHOP-482-32", "--scenario", "SHOP-482-33")
+	both := r.semar(t, ctx, "run", "--scenario", "SHOP-482-32", "--scenario", "SHOP-482-33")
 	contains(t, "the run", both.stdout, "SHOP-482-32  passed", "SHOP-482-33  passed")
 	if strings.Contains(both.stdout+both.stderr, portalPassword) {
 		t.Error("an output holds the password")
@@ -120,7 +120,7 @@ func TestAWrongPasswordNamesTheAccountAndTheVariableAndIsNoFailure(t *testing.T)
 
 	const wrong = "not-the-password-5"
 	t.Setenv(portalPassVar, wrong)
-	res := r.semar(t, cli.WithTrustedScreens(ctx, "orders"), "run", "--scenario", "SHOP-482-34")
+	res := r.semar(t, ctx, "run", "--scenario", "SHOP-482-34")
 	if res.code == cli.ExitFailed || res.code == cli.ExitOK {
 		t.Fatalf("exit %d, want a run that is neither passed nor failed\nstdout:\n%s\nstderr:\n%s", res.code, res.stdout, res.stderr)
 	}
