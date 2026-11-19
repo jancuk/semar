@@ -89,7 +89,8 @@ ul { padding-left: 1.25rem; margin: .25rem 0; }
 {{ range .Scenarios }}<details{{ if .Open }} open{{ end }}>
 <summary><span class="{{ .Class }}{{ if .Flaky }} flaky{{ end }}">{{ .Outcome }}{{ if .Flaky }}, flaky{{ end }}</span> {{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}</summary>
 <div class="body">
-{{ if .Attempts }}<p>{{ .Attempts }}</p>
+{{ if .Models }}<p>{{ .Models }}</p>
+{{ end }}{{ if .Attempts }}<p>{{ .Attempts }}</p>
 {{ end }}{{ if .Reasons }}<ul>{{ range .Reasons }}<li>Reason: {{ .Text }}{{ if .Step }} (step {{ .Step }}){{ end }}</li>{{ end }}</ul>
 {{ else if .Lead }}<p>{{ .Lead }}</p>
 {{ end }}{{ if .Tries }}<ul>{{ range .Tries }}<li>{{ . }}</li>{{ end }}</ul>
@@ -97,7 +98,7 @@ ul { padding-left: 1.25rem; margin: .25rem 0; }
 {{ end }}{{ range .Steps }}<details{{ if .Open }} open{{ end }}>
 <summary>Step {{ .ID }}{{ if .Action }}: {{ .Action }}{{ end }}</summary>
 <div class="body">
-{{ range .Checks }}<p>Check {{ .Label }}: <strong class="{{ if eq .State "true" }}ok{{ else }}bad{{ end }}">{{ .State }}</strong>{{ if .Source }} <span class="muted">({{ .Source }}{{ if .Cite }}, cite: {{ .Cite }}{{ end }})</span>{{ end }}<br>
+{{ range .Checks }}<p>Check {{ .Label }}: <strong class="{{ if eq .State "true" }}ok{{ else }}bad{{ end }}">{{ .State }}</strong>{{ if .Source }} <span class="muted">({{ .Source }}{{ if .Cite }}, cite: {{ .Cite }}{{ end }}{{ if .ByModel }}, by model{{ end }})</span>{{ end }}<br>
 Expected: <code>{{ .Expected }}</code><br>
 Received: <code>{{ .Observed }}</code>{{ if .Detail }}<br>{{ .Detail }}{{ end }}</p>
 {{ end }}{{ range .Docs }}<p class="warn">{{ .Operation }}: {{ .Text }} ({{ .Effect }})</p>

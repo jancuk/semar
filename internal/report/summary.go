@@ -105,6 +105,28 @@ func attemptNote(r domain.ScenarioResult) string {
 	return words.Attempts(string(r.Outcome), r.Flaky, len(r.Attempts), r.AttemptsAllowed)
 }
 
+// modelNote says how many expected results of the result a model wrote, or "" when none.
+func modelNote(r domain.ScenarioResult) string {
+	byModel, results := r.ModelCount()
+	if byModel == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d of %d results by model", byModel, results)
+}
+
+// runModelCount sums ModelCount over the scenarios of the run. A journey run counts nothing: its
+// legs are not expected results that a model wrote (Plan 36, D13a).
+func runModelCount(run domain.Run) (byModel, results int) {
+	if len(run.Journeys) > 0 {
+		return 0, 0
+	}
+	for _, r := range run.Results {
+		b, n := r.ModelCount()
+		byModel, results = byModel+b, results+n
+	}
+	return byModel, results
+}
+
 // Summary writes one line per scenario, one line with the count of each outcome, the coverage
 // line when there is one, and one line for each build that was declared rather than read from
 // the service.
@@ -157,6 +179,9 @@ func Lines(w io.Writer, run domain.Run) error {
 				} else {
 					line += " (" + note + ")"
 				}
+			}
+			if note := modelNote(r); note != "" {
+				line += "  (" + note + ")"
 			}
 			line += nextMark(line, word, string(r.Scenario))
 			if _, err := fmt.Fprintln(tw, line); err != nil {

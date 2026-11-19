@@ -55,7 +55,7 @@ A declared build cannot show that the service was redeployed during the run.
 {{ range .Attention -}}
 ### {{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}
 
-Outcome: **{{ .Outcome }}**{{ if .Next }} Next: `{{ .Next }}`{{ end }}{{ if .Attempts }} ({{ .Attempts }}){{ end }}
+Outcome: **{{ .Outcome }}**{{ if .Next }} Next: `{{ .Next }}`{{ end }}{{ if .Attempts }} ({{ .Attempts }}){{ end }}{{ if .Models }} ({{ .Models }}){{ end }}
 
 {{ range .Reasons -}}
 - Reason: {{ .Text }}{{ if .Step }} (step {{ .Step }}){{ end }}
@@ -68,7 +68,7 @@ Outcome: **{{ .Outcome }}**{{ if .Next }} Next: `{{ .Next }}`{{ end }}{{ if .Att
 {{ end }}{{ range .Checks -}}
 - Check {{ .Label }}: {{ .State }}
   - Expected: {{ .Expected }}
-  - Source: {{ .Source }}{{ if .Cite }}, cite: {{ .Cite }}{{ end }}
+  - Source: {{ .Source }}{{ if .Cite }}, cite: {{ .Cite }}{{ end }}{{ if .ByModel }}, by model{{ end }}
   - Observed: {{ .Observed }}
 {{ if .Detail }}  - Detail: {{ .Detail }}
 {{ end }}{{ end }}{{ range .Shots }}- Screenshot of step {{ .Step }}: [Screenshot]({{ .Path }})
@@ -81,7 +81,7 @@ Outcome: **{{ .Outcome }}**{{ if .Next }} Next: `{{ .Next }}`{{ end }}{{ if .Att
 <summary>Passed ({{ len .Passed }})</summary>
 
 {{ range .Passed -}}
-- {{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}{{ if .Attempts }} ({{ .Attempts }}){{ end }}
+- {{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}{{ if .Attempts }} ({{ .Attempts }}){{ end }}{{ if .Models }} ({{ .Models }}){{ end }}
 {{ range .Tries }}  - {{ . }}
 {{ end }}{{ range .Fixtures }}  - {{ . }}
 {{ end }}{{ end }}

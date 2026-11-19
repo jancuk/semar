@@ -54,6 +54,7 @@ type reasonView struct{ Text, Step string }
 
 type checkView struct {
 	Label, State, Expected, Source, Cite, Observed, Detail string
+	ByModel                                                bool
 }
 
 type scenarioView struct {
@@ -70,7 +71,9 @@ type scenarioView struct {
 	Shots []shotView
 	// Class is the stored outcome. Ticket is the ticket of the scenario file. Lead is the reason that a
 	// result line shows. Flaky marks a scenario that passed after an attempt that did not.
-	Class  domain.Outcome
+	Class domain.Outcome
+	// Models is modelNote of the result: how many expected results a model wrote.
+	Models string
 	Ticket string
 	Lead   string
 	Flaky  bool
@@ -140,6 +143,7 @@ func (vw viewer) buildView(d Data) markdownView {
 			Class:   r.Outcome,
 			Ticket:  vw.show(d.Scenarios[r.Scenario].Ticket),
 			Flaky:   r.Flaky,
+			Models:  modelNote(r),
 		}
 		if len(r.Reasons) > 0 {
 			sv.Lead = vw.show(shownReason(r.Reasons))
@@ -263,6 +267,7 @@ func (vw viewer) checkViewOf(c domain.CheckResult, s domain.Scenario) checkView 
 		Source:   vw.show(c.Source),
 		Observed: vw.valueOrEmpty(c.Observed),
 		Detail:   vw.show(c.Detail),
+		ByModel:  c.ByModel,
 	}
 	for _, step := range s.Steps {
 		if step.ID == c.Step && c.Index >= 0 && c.Index < len(step.Expect) {

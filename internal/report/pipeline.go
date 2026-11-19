@@ -30,6 +30,9 @@ func PipelineSummary(w io.Writer, d Data, htmlPath string) error {
 		fmt.Fprintf(&b, "Environment: %s\n\n", env)
 	}
 	fmt.Fprintf(&b, "Outcomes: %s\n\n", v.Counts)
+	if byModel, results := runModelCount(d.Run); byModel > 0 {
+		fmt.Fprintf(&b, "Results written by a model: %d of %d\n\n", byModel, results)
+	}
 	head, more := cut(v.BuildsEnd, 400)
 	if more > 0 {
 		head += cutMark(more)
