@@ -519,8 +519,7 @@ func writeInitConfig(dir string, data []byte) (path string, err error) {
 }
 
 // gitignoreText keeps on the machine what must not be published: the evidence, the key that makes a
-// redacted value unguessable, and the health of fixtures. Approvals and confirmations stay in the
-// repository, so the team shares them.
+// redacted value unguessable, and the health of fixtures.
 const gitignoreText = `# Written by semar init. These stay on this machine.
 runs/
 store/redact.key

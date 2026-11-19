@@ -272,7 +272,7 @@ func TestPlanFromADiffEndToEnd(t *testing.T) {
 	contains(t, "stdout", res.stdout,
 		"SHOP-482 (behaviour): 1 scenario", "SHOP-483 (behaviour): 1 scenario", "not drafted: 1",
 		"plan: "+p.path(".semar", "plans", p.head(t)[:12], "plan.md"),
-		"next:\n  semar run   run the tests against the service\n  the run asks you to review what the plan drafted, and runs the approved tests again\n")
+		"next:\n  semar run   run the tests against the service\n")
 	if strings.Contains(res.stdout, "--build") || strings.Contains(res.stdout, "semar status") {
 		t.Errorf("the next step of a local service names a build or the status:\n%s", res.stdout)
 	}

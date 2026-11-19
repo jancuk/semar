@@ -22,7 +22,7 @@ type Draft struct {
 	// that both places exist, and cannot check that they disagree.
 	Differences []Difference `json:"differences,omitempty"`
 	// FixturesNeeded proposes a fixture for a scenario that the catalogue cannot serve. A
-	// person writes and approves it; the planner never writes a flow.
+	// person writes it; the planner never writes a flow.
 	FixturesNeeded []FixtureNeeded `json:"fixturesNeeded,omitempty"`
 	// ManualChecks are criteria of a ticket that only a person can check. Each becomes an
 	// obligation that needs a person.

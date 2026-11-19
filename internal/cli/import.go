@@ -40,7 +40,7 @@ func newImportCommand(o options) *cobra.Command {
 		Long: "Read a Postman collection (format 2.1) or a HAR file and write one scenario and one script for each request that goes to a host of the environment. The format is found from the content.\n" +
 			"The session is never imported: Authorization, Cookie, and every header that the redaction rules name are dropped, and the scenario uses the account of the service. A request that holds a password or a token in its address or its body is left out. A HAR file gives only the requests whose response is JSON, and a repeated request once.\n" +
 			"The expected status is the status of the recorded response, or of the first saved example of Postman. When there is none, a read is tried once when the rules of the environment allow it. Test scripts of Postman are not read.\n" +
-			"A write request is imported and never sent by the import. Nothing that import writes is approved: each scenario goes through a review, and the rules of the environment decide at semar run whether a write is sent.",
+			"A write request is imported and never sent by the import. The rules of the environment decide at semar run whether a write is sent.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return importFile(cmd, o, f, args[0])
@@ -123,9 +123,6 @@ func importFile(cmd *cobra.Command, o options, f importFlags, path string) error
 	}
 	if file.WithTests > 0 {
 		fmt.Fprintf(out, "%s had a test script. Semar does not read the test scripts of Postman.\n", plural(file.WithTests, "request"))
-	}
-	if len(scs) > 0 {
-		fmt.Fprintln(out, "Nobody approved these scenarios: each needs a review before its expected result counts.")
 	}
 	fmt.Fprintf(out, "Wrote %s, left out %d.\n", plural(len(scs), "scenario"), len(built.Left))
 	if len(scs) > 0 {

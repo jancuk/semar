@@ -185,7 +185,7 @@ func TestPromptNamesTheFixturesWhenThereAreSome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	section := "## Fixtures you may name\n\nA fixture prepares data that a scenario needs, such as a paid order, and a person reviewed how it does that. " +
+	section := "## Fixtures you may name\n\nA fixture prepares data that a scenario needs, such as a paid order. " +
 		"Name a fixture in a scenario's `given` instead of drafting steps that create the data. You see what each fixture gives, not how it works.\n\n" +
 		d.Fixtures + "\n\n" +
 		"- `given` is a list of `{\"fixture\": \"<id>\", \"as\": \"<name>\", \"with\": {\"<parameter>\": \"<value>\"}}`. A step then uses `{{<name>.<output>}}`, for example `{{order.id}}` in a path.\n" +

@@ -25,7 +25,7 @@ const (
 	SourceBaseline Source = "baseline"
 	// SourceRule is an expected result that a fixed rule of Semar wrote from the API document. No model took part.
 	SourceRule Source = "rule"
-	// SourceImport is an expected result that semar import took from a file. Nobody approved it, so it always needs a review.
+	// SourceImport is an expected result that semar import took from a file. It counts as soon as it is written.
 	SourceImport Source = "import"
 )
 
@@ -50,7 +50,7 @@ type Scenario struct {
 	Given       []Given    `yaml:"given,omitempty"`
 	Steps       []Step     `yaml:"steps"`
 	// Suites names the sets that semar run --suite picks the scenario by. It is no part of ExpectHash,
-	// so a person can regroup an approved scenario with no new review.
+	// so a person can regroup a scenario without changing what it expects.
 	Suites []string `yaml:"suites,omitempty"`
 	// Edge is set on an edge case that a plan drafted from the API document, and is nil on every other scenario.
 	Edge *Edge `yaml:"edge,omitempty"`
@@ -83,7 +83,7 @@ type Expectation struct {
 	Check  Check  `yaml:"check"`
 	Source Source `yaml:"source"`
 	Cite   string `yaml:"cite,omitempty"`
-	// By is "model" when a model wrote the expectation; such an expectation always needs confirmation.
+	// By is "model" when a model wrote the expectation; the run, the reports and the status count such results.
 	By string `yaml:"by,omitempty"`
 }
 

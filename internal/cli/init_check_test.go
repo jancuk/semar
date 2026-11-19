@@ -127,13 +127,17 @@ func TestInitCheckNamesChromeWhenAScenarioHasWebSteps(t *testing.T) {
 	contains(t, "stdout", res.stdout, "  missing  Chrome was not found: 1 scenario has web steps\n")
 }
 
-func TestInitCheckListsWhatIsNotApprovedAsOneReviewLine(t *testing.T) {
+func TestTheMachineCheckSaysNothingOfApprovals(t *testing.T) {
 	p, _ := setUpRepo(t)
 	t.Setenv("ORDERS_TOKEN_SUPPORT", "tok-support")
 	p.write(t, ".semar/fixtures/order.paid.yaml", unapprovedFixture)
 	p.write(t, ".semar/scenarios/SHOP-482/WEB-1.feature", strings.Replace(unapprovedWebScenario, "@surface:web", "@surface:api", 1))
 	res := p.must(t, cli.ExitOK, "init")
-	contains(t, "stdout", res.stdout, "  review   1 scenario and 1 fixture are not approved → semar review\n")
+	for _, word := range []string{"approved", "review"} {
+		if strings.Contains(res.stdout, word) {
+			t.Errorf("the machine check says %q:\n%s", word, res.stdout)
+		}
+	}
 }
 
 func TestInitWithFlagsStillComparesWithTheFile(t *testing.T) {

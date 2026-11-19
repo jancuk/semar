@@ -64,6 +64,9 @@ func TestImportPostman(t *testing.T) {
 		"Wrote 3 scenarios, left out 4.",
 		"Next: semar run",
 	)
+	if strings.Contains(res.stdout, "semar review") || strings.Contains(res.stdout, "Nobody approved") {
+		t.Errorf("the import points to a review:\n%s", res.stdout)
+	}
 	if r.app.Requests("POST", "/v1/orders") != 0 {
 		t.Error("the import sent a write")
 	}

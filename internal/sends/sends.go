@@ -1,5 +1,5 @@
-// Package sends says in words what a step of a stored script sends. A person who approves a test
-// reads these lines in semar review and in plan.md, and so they hold the values as the script does:
+// Package sends says in words what a step of a stored script sends. A person who reads a test
+// reads these lines in plan.md, and so they hold the values as the script does:
 // a variable stays {{name}}, and nothing is cut or escaped. The caller makes the text safe for where
 // it prints it.
 package sends

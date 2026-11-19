@@ -189,7 +189,7 @@ func TestThePlanListsTheWebTestsAndWhatTheWebPartDid(t *testing.T) {
 	}
 	got := render(t, in, out)
 	for _, want := range []string{
-		"Web tests that a model wrote, replayed once, and not approved: read each one with semar review:",
+		"Web tests that a model wrote and replayed once. Each counts as soon as it is written; edit it to change what it expects:",
 		"1. SHOP-482-01: A board is saved. Cite: " + ticket482 + ":10 ",
 		`Fails now: e3 should show "Saved", and the page shows "Nothing".`,
 		"- Web: 2 criteria explored in a browser, 2 tests written (2 checks fail on this build), 0 left for a person, 8 turns with 8 calls,",

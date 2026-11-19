@@ -130,7 +130,7 @@ func TestASecondPlanWritesATestOnlyForACriterionThatHasNone(t *testing.T) {
 	if jobs.Load() != 2 {
 		t.Fatalf("the first plan ran %d jobs, want 2", jobs.Load())
 	}
-	const firstEnd = "  the run asks you to review what the plan drafted, and runs the approved tests again\n"
+	const firstEnd = "  semar run   run the tests against the service\n"
 	if !strings.HasSuffix(first.stdout, firstEnd) {
 		t.Errorf("the first plan ends with\n%s", lastLines(first.stdout, 3))
 	}

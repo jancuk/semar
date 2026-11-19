@@ -715,7 +715,7 @@ func printPlanDone(w io.Writer, envName string, out plan.Output, listed bool, tr
 		fmt.Fprintln(w, modelUse)
 	}
 	if len(out.Scenarios) > 0 || len(out.WebTests) > 0 {
-		fmt.Fprintf(w, "next:\n  %s   run the tests against the service\n  the run asks you to review what the plan drafted, and runs the approved tests again\n", run)
+		fmt.Fprintf(w, "next:\n  %s   run the tests against the service\n", run)
 	}
 	for _, line := range againLines(out.Again) {
 		fmt.Fprintln(w, line)

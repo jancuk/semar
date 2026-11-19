@@ -27,7 +27,7 @@ func newScenariosCommand() *cobra.Command {
 		Short: "Convert every YAML scenario file to a Gherkin .feature file, in place",
 		Long: "Scenarios were YAML files and are Gherkin .feature files now. convert writes the .feature file beside each\n" +
 			".yaml or .yml scenario file under .semar/scenarios and deletes the YAML file. The scenario is the same: its\n" +
-			"expectation hash does not change, so every confirmation and every stored script stays valid. convert never\n" +
+			"expectation hash does not change, so every stored script stays valid. convert never\n" +
 			"overwrites a .feature file, and it writes nothing when any file cannot be converted.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -129,7 +129,7 @@ func convertFile(repo, path, rel string) (conversion, error) {
 	}
 	out, err := scenario.Render(sc, "")
 	if err != nil {
-		return conversion{}, fmt.Errorf("%w\n  Gherkin cannot hold this text exactly, and changing it changes the expectation hash, which needs a new confirmation: edit the YAML file, then run semar scenarios convert again", err)
+		return conversion{}, fmt.Errorf("%w\n  Gherkin cannot hold this text exactly, and changing it changes the expectation hash: edit the YAML file, then run semar scenarios convert again", err)
 	}
 	return conversion{
 		from: rel,

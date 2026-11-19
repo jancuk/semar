@@ -45,7 +45,7 @@ type edgeSource struct {
 // planEdge adds the edge cases to the plan and returns the line that says what it did. It drafts from
 // each API step of a new draft whose operation the API document has and whose trial did not fail, with
 // no model. It tries each case once, as a trial does, so a request that the rules of the environment
-// refuse is never sent. It approves nothing: a case is a scenario that a person has to confirm.
+// refuse is never sent. A case is a scenario like any other: it counts as soon as the plan writes it.
 func planEdge(ctx context.Context, f planFlags, cfg config.Config, in plan.Input, out *plan.Output, rig *trialRig, known map[domain.ScenarioID]bool, dropped map[string]bool) (string, error) {
 	if !edgeOn(f, cfg) || rig == nil || out.Trial == nil || out.Trial.Skipped != "" {
 		return "", nil

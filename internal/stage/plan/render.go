@@ -380,7 +380,7 @@ func writeWebTests(b *strings.Builder, tests []WebTestDraft, ticket string) {
 	if len(mine) == 0 {
 		return
 	}
-	b.WriteString("\nWeb tests that a model wrote, replayed once, and not approved: read each one with semar review:\n")
+	b.WriteString("\nWeb tests that a model wrote and replayed once. Each counts as soon as it is written; edit it to change what it expects:\n")
 	for i, w := range mine {
 		fmt.Fprintf(b, "\n%d. %s: %s. Cite: %s. Replay: %s.\n", i+1, shown(w.ID, maxValueShown), shown(strings.TrimRight(strings.TrimSpace(w.Title), "."), maxTextShown), shown(w.Cite, maxTextShown), shown(w.Replay, maxValueShown))
 		if w.Unproved != "" {

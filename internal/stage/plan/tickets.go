@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	// byModel marks every expectation that the planner drafts: a person confirms it (D2).
+	// byModel marks every expectation that the planner drafts: a reader sees it as "by model".
 	byModel = "model"
 
 	sourceTicket = "ticket"

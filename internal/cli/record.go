@@ -52,8 +52,7 @@ func newRecordCommand(o options) *cobra.Command {
 		Short: "Record a web test by doing the flow once in Chrome",
 		Long: "Open a Chrome window on Semar's own profile of the environment and the account, and record what you do until you close it. Semar then writes the screens file, the scenario, and the script, and replays the scenario once.\n" +
 			"Click, type, press Enter or Escape, and drag as a user does. Hold Option and click what must be true: that is a check, it does nothing on the page, and the text that the element shows becomes the expected result. A recording with no check writes nothing.\n" +
-			"A password field is never read: the test types the value of an environment variable, named with --secret-env.\n" +
-			"Nothing that record writes is approved. The screens file and the scenario go through a review.",
+			"A password field is never read: the test types the value of an environment variable, named with --secret-env.",
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			env := ""
@@ -232,7 +231,7 @@ func recordTest(ctx context.Context, cmd *cobra.Command, o options, f recordTest
 	if !f.noReplay {
 		replayOnce(ctx, out, o, f, envName, app, id)
 	}
-	fmt.Fprintf(out, "\nNext: semar review %s\n", id)
+	fmt.Fprint(out, "\nNext: semar run\n")
 	if f.covers != "" {
 		fmt.Fprintf(out, "      semar check %s --by %s\n", f.covers, id)
 	}

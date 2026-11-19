@@ -203,8 +203,11 @@ func TestRecordWritesATestThatReplaysAndFailsWhenACheckIsWrong(t *testing.T) {
 		".semar/scenarios/SHOP-482/SHOP-482-07.feature",
 		"the script of SHOP-482-07",
 		"Replayed once: passed.",
-		"Next: semar review SHOP-482-07",
+		"Next: semar run",
 	)
+	if strings.Contains(res.stdout, "semar review") {
+		t.Errorf("the output points to semar review:\n%s", res.stdout)
+	}
 
 	feature, err := os.ReadFile(r.path(".semar", "scenarios", "SHOP-482", "SHOP-482-07.feature"))
 	must(t, err)

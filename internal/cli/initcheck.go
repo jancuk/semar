@@ -6,25 +6,20 @@ import (
 	"io"
 	"maps"
 	"net/http"
-	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/engine/web"
-	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/journey"
-	"github.com/jancuk/semar/internal/screens"
 )
 
 // The state of one line of the check of a machine.
 const (
 	stateOK      = "ok"
 	stateMissing = "missing"
-	stateReview  = "review"
 )
 
 type checkItem struct{ state, text string }
@@ -60,7 +55,6 @@ func checkMachine(ctx context.Context, o options, stdout io.Writer, dir string) 
 	m.services(ctx, o, cfg)
 	m.provider(ctx, o, dir, cfg)
 	m.chrome(dir, cfg)
-	m.approvals(dir, cfg)
 	for _, it := range m.items {
 		fmt.Fprintf(stdout, "  %-7s  %s\n", it.state, it.text)
 	}
@@ -217,77 +211,4 @@ func webStepsWords(n int) string {
 		return "1 scenario has web steps"
 	}
 	return fmt.Sprintf("%d scenarios have web steps", n)
-}
-
-// approvals counts what a person has not approved yet: scenarios with an expected result that needs a
-// person, fixtures, and screens files.
-func (m *machineCheck) approvals(dir string, cfg config.Config) {
-	approvals := confirm.NewLocal(semarDir(dir))
-	var parts []string
-	scs, _ := loadAllScenarios(dir)
-	n := 0
-	for _, sc := range scs {
-		if !slices.ContainsFunc(sc.Steps, func(st domain.Step) bool {
-			return slices.ContainsFunc(st.Expect, func(e domain.Expectation) bool { return confirm.NeedsExpectation(e, cfg.Policy.Trust.Confirm) })
-		}) {
-			continue
-		}
-		rec, found, err := approvals.Get(sc.ID, domain.ExpectHash(sc))
-		if err != nil || !found || !confirmedAll(sc, rec, cfg) {
-			n++
-		}
-	}
-	if n > 0 {
-		parts = append(parts, plural(n, "scenario"))
-	}
-	if cat, err := fixture.Load(dir, allServices(cfg), fixtureAccounts(cfg)); err == nil {
-		n = 0
-		for _, fx := range cat.Fixtures {
-			if ok, err := approvals.FixtureApproved(fx.ID, domain.FixtureHash(fx)); err != nil || !ok {
-				n++
-			}
-		}
-		if n > 0 {
-			parts = append(parts, plural(n, "fixture"))
-		}
-	}
-	n = 0
-	files, _ := filepath.Glob(filepath.Join(dir, filepath.FromSlash(screens.RelDir), "*.yaml"))
-	for _, f := range files {
-		app := strings.TrimSuffix(filepath.Base(f), ".yaml")
-		scr, err := screens.Load(dir, app)
-		if err != nil {
-			continue
-		}
-		if ok, err := approvals.ScreensApproved(app, domain.ScreensHash(scr)); err != nil || !ok {
-			n++
-		}
-	}
-	if n > 0 {
-		parts = append(parts, plural(n, "screens file"))
-	}
-	if len(parts) == 0 {
-		return
-	}
-	list := strings.Join(parts, ", ")
-	if i := strings.LastIndex(list, ", "); i >= 0 {
-		list = list[:i] + " and " + list[i+2:]
-	}
-	verb := "are"
-	if len(parts) == 1 && strings.HasPrefix(parts[0], "1 ") {
-		verb = "is"
-	}
-	m.add(stateReview, "%s %s not approved → semar review", list, verb)
-}
-
-// confirmedAll says whether the record holds every source that the scenario's expected results need.
-func confirmedAll(sc domain.Scenario, rec confirm.Record, cfg config.Config) bool {
-	for _, st := range sc.Steps {
-		for _, e := range st.Expect {
-			if confirm.NeedsExpectation(e, cfg.Policy.Trust.Confirm) && !slices.Contains(rec.Sources, e.Source) {
-				return false
-			}
-		}
-	}
-	return true
 }
