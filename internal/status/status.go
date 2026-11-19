@@ -108,6 +108,9 @@ type Report struct {
 	Open       int
 	Deferred   int
 	ShipReason string
+	// ByModel and Results count the expected results that a model wrote, and all of them, over the
+	// distinct scenarios that the items cover.
+	ByModel, Results int
 }
 
 // Ship is true when the exit code is 0.
@@ -136,7 +139,26 @@ func Build(in Input) Report {
 		r.Open += r.Counts[g]
 	}
 	r.ShipReason = shipReason(r)
+	counted := map[domain.ScenarioID]bool{}
+	for _, e := range in.Entries {
+		for _, c := range e.Covers {
+			if c.Scenario == "" || counted[c.Scenario] {
+				continue
+			}
+			counted[c.Scenario] = true
+			r.ByModel += c.ByModel
+			r.Results += c.Results
+		}
+	}
 	return r
+}
+
+// ModelLine says how many expected results a model wrote, or "" when none.
+func (r Report) ModelLine() string {
+	if r.ByModel == 0 {
+		return ""
+	}
+	return fmt.Sprintf("results written by a model: %d of %d", r.ByModel, r.Results)
 }
 
 func next(g Group, e obligation.Entry) string {

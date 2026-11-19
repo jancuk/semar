@@ -28,6 +28,7 @@ type htmlCheck struct {
 
 type htmlPage struct {
 	Lead, Count, Verdict string
+	Models               string
 	Ship                 bool
 	Groups               []htmlGroup
 	NotPlanned           []string
@@ -39,7 +40,7 @@ type htmlPage struct {
 // checks with their steps. Every text is escaped, and the page holds no script and no outside
 // resource.
 func HTML(w io.Writer, r Report) error {
-	p := htmlPage{Lead: line(r.Lead()), Count: line(r.Count()), Verdict: line(r.Verdict()), Ship: r.Ship(), NotPlanned: lines(r.NotPlanned), NoTicket: lines(r.NoTicket)}
+	p := htmlPage{Lead: line(r.Lead()), Count: line(r.Count()), Verdict: line(r.Verdict()), Models: line(r.ModelLine()), Ship: r.Ship(), NotPlanned: lines(r.NotPlanned), NoTicket: lines(r.NoTicket)}
 	for _, g := range Groups {
 		if r.Counts[g] == 0 {
 			continue
@@ -132,6 +133,7 @@ code { font: .9em ui-monospace, monospace; }
 {{ end }}</li>
 {{ end }}</ul>
 </section>
+{{ end }}{{ if .Models }}<p class="count">{{ .Models }}</p>
 {{ end }}{{ if .NotPlanned }}<section>
 <h2>not planned ({{ len .NotPlanned }})</h2>
 <ul>{{ range .NotPlanned }}<li>{{ . }} <code>semar plan</code></li>{{ end }}</ul>

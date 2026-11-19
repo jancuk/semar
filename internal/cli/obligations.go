@@ -302,6 +302,7 @@ func reasonWord(outcome string, reasons []domain.Reason) string {
 // run has none, and counts as it always did.
 func coverOf(repo string, run domain.Run, r domain.ScenarioResult) obligation.Cover {
 	c := obligation.Cover{Scenario: r.Scenario, Found: true, Outcome: string(r.Outcome), Run: run.ID, Builds: run.BuildsEnd, Word: reasonWord(string(r.Outcome), r.Reasons), Attempts: words.Attempts(string(r.Outcome), r.Flaky, len(r.Attempts), r.AttemptsAllowed)}
+	c.ByModel, c.Results = r.ModelCount()
 	if r.ExpectHash != "" {
 		sc, err := loadScenario(repo, r.Scenario)
 		c.ScenarioChanged = err != nil || domain.ExpectHash(sc) != r.ExpectHash

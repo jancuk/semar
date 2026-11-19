@@ -752,3 +752,14 @@ func TestLedgerRefusesHostileBuildsOnRead(t *testing.T) {
 	r.plantManual(t, "passed", "")
 	r.must(t, cli.ExitUndecided, "status")
 }
+
+func TestStatusAfterARunCountsTheModelResults(t *testing.T) {
+	r := newRepo(t, repoOptions{})
+	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]")))
+	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
+	// the edit keeps the shape, so the stored script still runs
+	r.editScenario(t, "# ticket SHOP-482: the order must stay unchanged", "# ticket SHOP-482: the order must stay unchanged, by model")
+	r.must(t, cli.ExitOK, "review", scenarioID, "--yes")
+	r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
+	contains(t, "the status", r.semar(t, t.Context(), "status").stdout, "results written by a model: 1 of 3")
+}

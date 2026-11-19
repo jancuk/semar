@@ -46,6 +46,9 @@ func Text(w io.Writer, r Report) error {
 		groupLine(&b, string(g), r.Counts[g], countWidth, shared)
 		writeItems(&b, items, shared != "")
 	}
+	if m := r.ModelLine(); m != "" {
+		fmt.Fprintf(&b, "\n%s\n", m)
+	}
 	if len(r.NotPlanned) > 0 {
 		groupLine(&b, "not planned", len(r.NotPlanned), countWidth, "semar plan")
 		fmt.Fprintf(&b, "    %s\n", line(strings.Join(r.NotPlanned, ", ")))

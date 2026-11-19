@@ -34,6 +34,9 @@ type Cover struct {
 	// 2 of 3". Empty for a result with one attempt.
 	Attempts string
 	Builds   []domain.BuildRef
+	// ByModel and Results are ModelCount of the stored result: the expected results that a model wrote,
+	// and all of them. Both are 0 for a journey and for a result stored before Plan 36.
+	ByModel, Results int
 	// ScenarioChanged is true when the result stored the expectation hash of its scenario and the
 	// scenario file has another one now, or cannot be read: the pass judged something else.
 	ScenarioChanged bool

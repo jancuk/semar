@@ -396,3 +396,37 @@ func TestTheLeadNamesWhatARunPickedWhenItReadNoChange(t *testing.T) {
 		t.Errorf("lead = %q", got)
 	}
 }
+
+func TestTheStatusCountsTheResultsAModelWrote(t *testing.T) {
+	covers := func(c ...obligation.Cover) func(*obligation.Entry) {
+		return func(e *obligation.Entry) { e.Covers = c }
+	}
+	a := obligation.Cover{Scenario: "A", Found: true, ByModel: 1, Results: 2}
+	b := obligation.Cover{Scenario: "B", Found: true, ByModel: 0, Results: 1}
+	in := status.Input{Entries: []obligation.Entry{
+		entry("SHOP-482/1", obligation.Verified, covers(a)),
+		entry("SHOP-482/2", obligation.Verified, covers(a, b)),
+	}}
+	r := status.Build(in)
+	if r.ByModel != 1 || r.Results != 3 {
+		t.Fatalf("ByModel %d Results %d, want 1 and 3: A counts once", r.ByModel, r.Results)
+	}
+	var out bytes.Buffer
+	if err := status.Text(&out, r); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "results written by a model: 1 of 3\n") {
+		t.Errorf("text lacks the line:\n%s", out.String())
+	}
+
+	none := status.Build(status.Input{Entries: []obligation.Entry{
+		entry("SHOP-482/1", obligation.Verified, covers(obligation.Cover{Scenario: "A", Found: true})),
+	}})
+	out.Reset()
+	if err := status.Text(&out, none); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "written by a model") {
+		t.Errorf("the line is there with no model result:\n%s", out.String())
+	}
+}
