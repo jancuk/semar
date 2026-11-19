@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -39,6 +38,8 @@ type runFlags struct {
 	suites    []string
 	all       bool
 	ci        bool
+	// reportDir is the value of --report-dir: where the four report files are copied.
+	reportDir string
 	// retries is the value of --retries. retriesSet is false when the flag was not given, so that
 	// replay.retries stands.
 	retries    int
@@ -67,6 +68,7 @@ func newRunCommand(o options) *cobra.Command {
 			"When a test of the run needs a person to review it, on a terminal, run offers the review once the tests ran. A yes runs the review of semar review for those tests, then runs the tests that were approved again, and ends with the status of that second run. With no terminal, or with --no-review, it never asks.\n" +
 			"--suite <name> runs every scenario whose @suite: tag names it, whatever the change is, and no journey; repeat it for more suites. --retries <n> runs a scenario that failed or was inconclusive again, up to n more times, with a clean browser and session; a scenario that passes on a later attempt passes and is marked flaky. A scenario that sent a request of effects.once is never run again.\n" +
 			"--ci asks no question, plans nothing, offers no review, and prints where the report is.\n" +
+			"Every run writes report.md, report.html, junit.xml and summary.md in its run directory. --report-dir <dir> copies the four files to <dir>, which a pipeline can keep as an artifact; a run of journeys that follows a run of scenarios goes to <dir>/journeys. When GITHUB_STEP_SUMMARY names a file, run appends summary.md to it.\n" +
 			"Exit 0 when everything that ran passed, 1 when something failed, and 2 otherwise.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -97,6 +99,7 @@ func newRunCommand(o options) *cobra.Command {
 	cmd.Flags().StringArrayVar(&f.suites, "suite", nil, "run every scenario of this suite, and no journey; repeat for more")
 	cmd.Flags().IntVar(&f.retries, "retries", 0, "run a scenario that failed or was inconclusive again, up to this many more times, from 0 to 5 (default: replay.retries, else 0)")
 	cmd.Flags().BoolVar(&f.ci, "ci", false, "ask no question, plan nothing, and offer no review, as on a machine with no terminal")
+	cmd.Flags().StringVar(&f.reportDir, "report-dir", "", "copy report.md, report.html, junit.xml and summary.md of the run to this directory, which is created when it is missing")
 	cmd.Flags().BoolVar(&f.all, "all", false, "run every scenario and every critical journey, not only those of the change")
 	cmd.Flags().BoolVar(&f.noJourneys, "no-journeys", false, "leave the critical journeys out")
 	cmd.Flags().BoolVar(&f.noPlan, "no-plan", false, "never offer to plan a ticket that has no use cases")
@@ -117,6 +120,7 @@ type finishedRun struct {
 	coverage    string // the use case line of the report
 	blocked     []report.BlockedHost
 	docs        []report.DocFinding
+	reports     reportSet
 }
 
 // executeScenarios replays the scenarios against one environment, writes the report, and closes the
@@ -153,12 +157,10 @@ func executeScenarios(ctx context.Context, stderr io.Writer, o options, dir stri
 		byID[sc.ID] = sc
 	}
 	coverage, tickets := runCoverage(stderr, o, dir, scenarios, record)
-	writeReport := func(rec domain.Run) error {
-		var md bytes.Buffer
-		if err := report.Markdown(&md, report.Data{Run: rec, Scenarios: byID, Activity: acts, Coverage: coverage, CoverageTickets: tickets}); err != nil {
-			return err
-		}
-		return r.run.WriteFile(reportFile, md.Bytes())
+	var set reportSet
+	writeReport := func(rec domain.Run) (err error) {
+		set, err = writeReports(stderr, r.store, dir, r.run, report.Data{Run: rec, Scenarios: byID, Activity: acts, Coverage: coverage, CoverageTickets: tickets})
+		return err
 	}
 	if err := writeReport(record); err != nil {
 		return finishedRun{}, err
@@ -175,7 +177,7 @@ func executeScenarios(ctx context.Context, stderr io.Writer, o options, dir stri
 			return finishedRun{}, err
 		}
 	}
-	return finishedRun{record: record, reportPath: filepath.Join(r.store.Root(), "runs", string(r.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts), docs: report.DocFindings(acts)}, nil
+	return finishedRun{record: record, reportPath: filepath.Join(r.store.Root(), "runs", string(r.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts), docs: report.DocFindings(acts), reports: set}, nil
 }
 
 // effectsWords says what a test may change in an environment of this effects mode.

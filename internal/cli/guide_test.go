@@ -74,7 +74,7 @@ func documentedFlags(c *cobra.Command) map[string]bool {
 }
 
 // awaitingTheGuide are flags that unit C1 of plan 35 writes into the guide. Remove an entry when it does.
-var awaitingTheGuide = map[string][]string{"semar run": {"suite", "retries", "ci"}}
+var awaitingTheGuide = map[string][]string{"semar run": {"suite", "retries", "ci", "report-dir"}}
 
 // guideDue names commands whose section of the guide is written by unit C1 of plan 35, after the merge.
 var guideDue = map[string]bool{"semar import": true}

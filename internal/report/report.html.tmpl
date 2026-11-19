@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
+<title>{{ .Title }}</title>
+<style>
+:root { color-scheme: light dark; --bg: #fff; --fg: #1f2328; --muted: #656d76; --line: #d0d7de; --soft: #f6f8fa; --ok: #1a7f37; --bad: #cf222e; --warn: #9a6700; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --line: #30363d; --soft: #161b22; --ok: #3fb950; --bad: #f85149; --warn: #d29922; } }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 60rem; padding: 1rem; overflow-wrap: anywhere; }
+h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+h2 { font-size: 1.05rem; margin: 1.75rem 0 .5rem; border-bottom: 1px solid var(--line); padding-bottom: .25rem; }
+h3 { font-size: .95rem; margin: 1rem 0 .25rem; color: var(--muted); }
+.muted { color: var(--muted); }
+.note { background: var(--soft); border: 1px solid var(--line); border-radius: 6px; padding: .5rem .75rem; margin: .75rem 0; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: .15rem 1rem; margin: .5rem 0; }
+dt { color: var(--muted); }
+dd { margin: 0; }
+table { border-collapse: collapse; margin: .5rem 0; }
+th, td { border: 1px solid var(--line); padding: .25rem .6rem; text-align: left; vertical-align: top; }
+td.n { text-align: right; }
+.failed, .bad { color: var(--bad); }
+.passed, .ok { color: var(--ok); }
+.flaky, .inconclusive, .blocked, .stale, .not_run, .warn { color: var(--warn); }
+details { border: 1px solid var(--line); border-radius: 6px; margin: .5rem 0; }
+details > summary { cursor: pointer; padding: .5rem .75rem; font-weight: 600; }
+details > .body { padding: 0 .75rem .75rem; }
+details details { margin: .4rem 0; }
+details details > summary { font-weight: 500; }
+pre { background: var(--soft); border: 1px solid var(--line); border-radius: 6px; margin: .25rem 0; padding: .5rem; font: .85rem/1.4 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; max-height: 24rem; overflow: auto; }
+code { font: .9em ui-monospace, monospace; }
+img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); margin: .25rem 0; }
+ul { padding-left: 1.25rem; margin: .25rem 0; }
+</style>
+</head>
+<body>
+<h1>{{ .Title }}</h1>
+{{ if .Interrupted }}<p class="note bad">This run did not finish: no end time was recorded. Scenarios without a result are missing from this report.</p>
+{{ end }}{{ if .Coverage }}<p>{{ .Coverage }}<br><span class="muted">Details: <code>{{ .CoverageDetail }}</code></span></p>
+{{ end }}<dl>
+{{ if .Environment }}<dt>Environment</dt><dd>{{ .Environment }}{{ if .EnvironmentKind }} ({{ .EnvironmentKind }}){{ end }}</dd>
+{{ end }}<dt>Started</dt><dd>{{ .Started }}</dd>
+<dt>Ended</dt><dd>{{ .Ended }}</dd>
+<dt>Builds at the start</dt><dd>{{ .BuildsStart }}</dd>
+<dt>Builds at the end</dt><dd>{{ .BuildsEnd }}</dd>
+<dt>Exit code</dt><dd><strong class="{{ if eq .Exit 0 }}ok{{ else if eq .Exit 1 }}bad{{ else }}warn{{ end }}">{{ .Exit }}</strong>. {{ .ExitMeaning }}</dd>
+</dl>
+{{ if .OnlyDeclared }}<p class="muted">A declared build cannot show that the service was redeployed during the run.</p>
+{{ end }}<table>
+<thead><tr><th>Outcome</th><th>Scenarios</th></tr></thead>
+<tbody>
+{{ range .CountRows }}<tr><td class="{{ .Class }}">{{ .Word }}</td><td class="n">{{ .N }}</td></tr>
+{{ else }}<tr><td colspan="2">No scenario has a result in this run.</td></tr>
+{{ end }}</tbody>
+</table>
+{{ if .ShotsLeftOut }}<p class="note">{{ .ShotsLeftOut }} screenshot(s) are not in this file, to keep it small. Only the screenshots of failed, inconclusive and flaky scenarios, and the last one of each passed web scenario, are embedded.{{ if .ShotsDir }} All of them are in <code>{{ .ShotsDir }}/screenshots</code>.{{ end }}</p>
+{{ end }}{{ if .Journeys }}<h2>Journeys</h2>
+{{ range .Journeys }}<details{{ if ne .Outcome "passed" }} open{{ end }}>
+<summary>{{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}: <span class="{{ .Outcome }}">{{ .Outcome }}</span></summary>
+<div class="body">
+{{ if .First }}<p>First failing leg: {{ .First }}.</p>{{ end }}
+<ul>
+{{ range .Reasons }}<li>Reason: {{ . }}</li>
+{{ end }}{{ range .Legs }}<li>Leg {{ .Leg }}: {{ .Outcome }}{{ if .As }} (as {{ .As }}){{ end }}{{ if .Reason }}: {{ .Reason }}{{ end }}</li>
+{{ end }}{{ range .Invariants }}<li>Invariant {{ .Number }}: {{ .State }}{{ if .Values }}: {{ .Values }}{{ end }}{{ if .Detail }} ({{ .Detail }}){{ end }}</li>
+{{ end }}</ul>
+<p class="muted">Reproduce: <code>{{ .Reproduce }}</code></p>
+</div>
+</details>
+{{ end }}{{ end }}{{ if .Attention }}<h2>Needs attention ({{ .AttentionN }})</h2>
+{{ template "groups" .Attention }}{{ end }}{{ if .Passed }}<h2>Passed ({{ .PassedN }})</h2>
+{{ template "groups" .Passed }}{{ end }}<h2>Data touched</h2>
+{{ if .Ledger }}<ul>
+{{ range .Ledger }}<li>{{ .Verb }} {{ .Object }}{{ if .Scenario }}, by {{ .Scenario }}{{ if .Step }} step {{ .Step }}{{ end }}{{ end }}: {{ .Status }}</li>
+{{ end }}</ul>
+{{ else }}<p>Nothing was written in the environment.</p>
+{{ end }}{{ if .StillExists }}<h2>Still exists</h2>
+<ul>{{ range .StillExists }}<li>{{ . }}</li>{{ end }}</ul>
+{{ end }}{{ if .Blocked }}<h2>Blocked hosts</h2>
+<p>The browser did not reach these hosts, because <code>environments.{{ .Environment }}.hosts</code> does not list them. A page that misses data can pass or fail for the wrong reason. No outcome was changed. Add a host under <code>environments.{{ .Environment }}.hosts</code> in <code>.semar/semar.yaml</code>, or run <code>semar login</code>, which offers to add them.</p>
+<ul>{{ range .Blocked }}<li>{{ .Host }}{{ if .Met }}: {{ .Met }}{{ end }}</li>{{ end }}</ul>
+{{ end }}{{ if .DocChecks }}<h2>Checks against the API document</h2>
+<ul>{{ range .DocChecks }}<li>{{ .Scenario }}, step {{ .Step }}, {{ .Operation }}: {{ .Text }} ({{ .Effect }})</li>{{ end }}</ul>
+{{ end }}</body>
+</html>
+{{ define "groups" }}{{ range . }}<h3>{{ .Ticket }}</h3>
+{{ range .Scenarios }}<details{{ if .Open }} open{{ end }}>
+<summary><span class="{{ .Class }}{{ if .Flaky }} flaky{{ end }}">{{ .Outcome }}{{ if .Flaky }}, flaky{{ end }}</span> {{ .ID }}{{ if .Title }} {{ .Title }}{{ end }}</summary>
+<div class="body">
+{{ if .Attempts }}<p>{{ .Attempts }}</p>
+{{ end }}{{ if .Reasons }}<ul>{{ range .Reasons }}<li>Reason: {{ .Text }}{{ if .Step }} (step {{ .Step }}){{ end }}</li>{{ end }}</ul>
+{{ else if .Lead }}<p>{{ .Lead }}</p>
+{{ end }}{{ if .Tries }}<ul>{{ range .Tries }}<li>{{ . }}</li>{{ end }}</ul>
+{{ end }}{{ if .Fixtures }}<ul>{{ range .Fixtures }}<li>{{ . }}</li>{{ end }}</ul>
+{{ end }}{{ range .Steps }}<details{{ if .Open }} open{{ end }}>
+<summary>Step {{ .ID }}{{ if .Action }}: {{ .Action }}{{ end }}</summary>
+<div class="body">
+{{ range .Checks }}<p>Check {{ .Label }}: <strong class="{{ if eq .State "true" }}ok{{ else }}bad{{ end }}">{{ .State }}</strong>{{ if .Source }} <span class="muted">({{ .Source }}{{ if .Cite }}, cite: {{ .Cite }}{{ end }})</span>{{ end }}<br>
+Expected: <code>{{ .Expected }}</code><br>
+Received: <code>{{ .Observed }}</code>{{ if .Detail }}<br>{{ .Detail }}{{ end }}</p>
+{{ end }}{{ range .Docs }}<p class="warn">{{ .Operation }}: {{ .Text }} ({{ .Effect }})</p>
+{{ end }}{{ range .Exchanges }}<h3>Request {{ .N }}</h3>
+<pre>{{ .Request }}</pre>
+<h3>Response {{ .N }}</h3>
+<pre>{{ .Response }}</pre>
+{{ end }}{{ range .Web }}<p>{{ if .Why }}{{ .Why }} ({{ .Target }}){{ else }}{{ .Target }}{{ end }}: {{ .Result }}</p>
+{{ with .Shot }}{{ if .Src }}<img alt="Screenshot of the step" src="{{ .Src }}">{{ else }}<p class="muted">Screenshot left out: <code>{{ .Path }}</code></p>{{ end }}{{ end }}
+{{ end }}</div>
+</details>
+{{ end }}{{ if .Next }}<p>Next: <code>{{ .Next }}</code></p>
+{{ end }}<p class="muted">Reproduce: <code>{{ .Reproduce }}</code></p>
+</div>
+</details>
+{{ end }}{{ end }}{{ end }}

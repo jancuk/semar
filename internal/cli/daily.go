@@ -99,6 +99,7 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 		if err := printScenarioRun(stdout, envName, fin); err != nil {
 			return err
 		}
+		deliverReports(stdout, stderr, o, f.reportDir, "", fin)
 		scenarioExit = scenarioCode(fin)
 	}
 	if len(sel.journeys) > 0 && ctx.Err() == nil {
@@ -116,6 +117,11 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 		report.WriteBlocked(stdout, envName, "scenario", fin.blocked)
 		report.WriteDocWarnings(stdout, envName, fin.docs)
 		fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
+		sub := ""
+		if len(sel.scenarios) > 0 {
+			sub = "journeys"
+		}
+		deliverReports(stdout, stderr, o, f.reportDir, sub, fin)
 		code = max(code, report.JourneyExitCode(fin.record.Journeys))
 		if fin.interrupted {
 			code = max(code, ExitUndecided)

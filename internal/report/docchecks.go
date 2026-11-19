@@ -78,14 +78,14 @@ func WriteDocWarnings(w io.Writer, env string, findings []DocFinding) {
 // docView is one finding in the section of the report.
 type docView struct{ Scenario, Step, Operation, Text, Effect string }
 
-func docViews(acts []domain.Activity) []docView {
+func (vw viewer) docViews(acts []domain.Activity) []docView {
 	var out []docView
 	for _, f := range DocFindings(acts) {
 		effect := "warning, no outcome changed"
 		if f.Failed {
 			effect = "failed the step"
 		}
-		out = append(out, docView{Scenario: shown(f.Scenario), Step: shown(f.Step), Operation: shown(f.Operation), Text: shown(f.Text), Effect: effect})
+		out = append(out, docView{Scenario: vw.show(f.Scenario), Step: vw.show(f.Step), Operation: vw.show(f.Operation), Text: vw.show(f.Text), Effect: effect})
 	}
 	return out
 }

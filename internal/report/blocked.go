@@ -87,10 +87,10 @@ func WriteBlocked(w io.Writer, env, noun string, hosts []BlockedHost) {
 // blockedView is the section of the report about blocked hosts.
 type blockedView struct{ Host, Met string }
 
-func blockedViews(acts []domain.Activity) []blockedView {
+func (vw viewer) blockedViews(acts []domain.Activity) []blockedView {
 	var out []blockedView
 	for _, h := range BlockedHosts(acts) {
-		out = append(out, blockedView{Host: shown(h.Host), Met: shown(metText(h.Met, "scenario"))})
+		out = append(out, blockedView{Host: vw.show(h.Host), Met: vw.show(metText(h.Met, "scenario"))})
 	}
 	return out
 }

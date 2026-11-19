@@ -44,49 +44,49 @@ func JourneyExitCode(journeys []domain.JourneyResult) int {
 	return code
 }
 
-func journeyViews(d Data) []journeyView {
+func (vw viewer) journeyViews(d Data) []journeyView {
 	var out []journeyView
 	for _, j := range d.Journeys {
 		v := journeyView{
-			ID:        shown(string(j.Journey)),
-			Title:     shown(d.JourneyTitles[j.Journey]),
-			Outcome:   shown(resultWord(string(j.Outcome), j.Reasons)),
-			First:     shown(string(j.FirstFailing)),
-			Manifest:  manifestText(j.Manifest),
-			Hash:      shown(string(j.Manifest.Hash[:min(len(j.Manifest.Hash), 12)])),
-			Reproduce: journeyCommand(j.Journey, d.Run.Environment),
+			ID:        vw.show(string(j.Journey)),
+			Title:     vw.show(d.JourneyTitles[j.Journey]),
+			Outcome:   vw.show(resultWord(string(j.Outcome), j.Reasons)),
+			First:     vw.show(string(j.FirstFailing)),
+			Manifest:  vw.manifestText(j.Manifest),
+			Hash:      vw.show(string(j.Manifest.Hash[:min(len(j.Manifest.Hash), 12)])),
+			Reproduce: vw.journeyCommand(j.Journey, d.Run.Environment),
 			Next:      words.Next(resultWord(string(j.Outcome), j.Reasons), string(j.Journey)),
 		}
 		for _, r := range j.Reasons {
-			v.Reasons = append(v.Reasons, shown(r.Text))
+			v.Reasons = append(v.Reasons, vw.show(r.Text))
 		}
 		switch {
 		case j.ManifestEnd == nil:
 			v.ManifestEnd = "not read"
 		case j.ManifestEnd.Hash != j.Manifest.Hash:
-			v.ManifestEnd = manifestText(*j.ManifestEnd)
+			v.ManifestEnd = vw.manifestText(*j.ManifestEnd)
 		}
 		for _, l := range j.Legs {
-			lv := journeyLegView{Leg: shown(string(l.Leg)), Outcome: shown(string(l.Outcome))}
+			lv := journeyLegView{Leg: vw.show(string(l.Leg)), Outcome: vw.show(string(l.Outcome))}
 			if len(l.As) > 0 {
-				lv.As = shown(strings.Join(l.As, ", "))
+				lv.As = vw.show(strings.Join(l.As, ", "))
 			}
 			if len(l.Reasons) > 0 {
-				lv.Reason = shown(l.Reasons[0].Text)
+				lv.Reason = vw.show(l.Reasons[0].Text)
 			}
 			v.Legs = append(v.Legs, lv)
 		}
 		for _, inv := range j.Invariants {
-			iv := invariantView{Number: fmt.Sprint(inv.Index + 1), State: shown(string(inv.State)), Detail: shown(inv.Detail)}
+			iv := invariantView{Number: fmt.Sprint(inv.Index + 1), State: vw.show(string(inv.State)), Detail: vw.show(inv.Detail)}
 			shownValues := make([]string, len(inv.Values))
 			for i, x := range inv.Values {
-				shownValues[i] = shown(x)
+				shownValues[i] = vw.show(x)
 			}
 			iv.Values = strings.Join(shownValues, ", ")
 			v.Invariants = append(v.Invariants, iv)
 		}
 		for _, rec := range j.Fixtures {
-			v.Fixtures = append(v.Fixtures, fixtureLine(rec))
+			v.Fixtures = append(v.Fixtures, vw.fixtureLine(rec))
 		}
 		out = append(out, v)
 	}
@@ -94,26 +94,26 @@ func journeyViews(d Data) []journeyView {
 }
 
 // manifestText is each service with its commit, in the order of the manifest.
-func manifestText(m domain.Manifest) string {
+func (vw viewer) manifestText(m domain.Manifest) string {
 	if len(m.Services) == 0 {
 		return "none recorded"
 	}
 	parts := make([]string, len(m.Services))
 	for i, b := range m.Services {
 		if b.Declared {
-			parts[i] = shown(declaredBuild(b))
+			parts[i] = vw.show(declaredBuild(b))
 		} else {
-			parts[i] = shown(fmt.Sprintf("%s %s config %s", b.Service, b.Commit, b.ConfigHash))
+			parts[i] = vw.show(fmt.Sprintf("%s %s config %s", b.Service, b.Commit, b.ConfigHash))
 		}
 	}
 	return strings.Join(parts, "; ")
 }
 
 // journeyCommand reruns a journey. The environment is left out when the run has none.
-func journeyCommand(id domain.JourneyID, env string) string {
-	cmd := "semar journey run " + shown(string(id))
+func (vw viewer) journeyCommand(id domain.JourneyID, env string) string {
+	cmd := "semar journey run " + vw.show(string(id))
 	if env != "" {
-		cmd += " --env " + shown(env)
+		cmd += " --env " + vw.show(env)
 	}
 	return cmd
 }
@@ -131,12 +131,12 @@ func legJourneys(journeys []domain.JourneyResult) map[domain.ScenarioID]domain.J
 }
 
 // journeyStillExists names what a journey's fixtures left behind.
-func journeyStillExists(journeys []domain.JourneyResult) []string {
+func (vw viewer) journeyStillExists(journeys []domain.JourneyResult) []string {
 	var out []string
 	for _, j := range journeys {
 		for _, rec := range j.Fixtures {
 			for _, left := range rec.Left {
-				out = append(out, shown(string(j.Journey))+": "+shown(left))
+				out = append(out, vw.show(string(j.Journey))+": "+vw.show(left))
 			}
 		}
 	}

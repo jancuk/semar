@@ -66,11 +66,19 @@ func Load(store *evidence.Store, repo string, id domain.RunID, version string) (
 		return Run{}, fmt.Errorf("run %s has no scenario result: a trial run or a fixture check has nothing to export", id)
 	}
 
+	return Build(store, repo, run, acts, version)
+}
+
+// Build makes the Run of a run that is already in memory, with the labels and the action times that
+// Load reads. It does not verify the evidence, so the caller that writes a run calls it before the run
+// is closed.
+func Build(store *evidence.Store, repo string, run domain.Run, acts []domain.Activity, version string) (Run, error) {
 	paths := scenarioPaths(repo)
 	out := Run{Run: run, Version: version, Scenarios: make([]Scenario, len(run.Results))}
 	for i, res := range run.Results {
 		sc := Scenario{Result: res}
-		sc.DurationMS, sc.Unknown, err = actionTime(store, id, acts, res.Scenario)
+		var err error
+		sc.DurationMS, sc.Unknown, err = actionTime(store, run.ID, acts, res.Scenario)
 		if err != nil {
 			return Run{}, err
 		}

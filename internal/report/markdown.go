@@ -21,8 +21,19 @@ var markdownSource string
 
 var markdownTemplate = template.Must(template.New("report.md.tmpl").Option("missingkey=error").Parse(markdownSource))
 
-// Data is everything the report reads. It holds no request body and no response body.
+// Files reads the stored evidence of the run that the report is about, so that the HTML report can show
+// an exchange and a screenshot. Both reads are bounded and stay inside the run directory.
+type Files interface {
+	Action(rel string) (domain.Action, error)
+	File(rel string, limit int64) ([]byte, error)
+}
+
+// Data is everything the report reads. The Markdown report holds no request body and no response body.
 type Data struct {
+	// Files and RunDir are used by the HTML report only. With no Files it shows no exchange and no
+	// screenshot. RunDir is the path that the report names for the screenshots that it leaves out.
+	Files     Files
+	RunDir    string
 	Run       domain.Run
 	Scenarios map[domain.ScenarioID]domain.Scenario
 	Activity  []domain.Activity
@@ -57,6 +68,12 @@ type scenarioView struct {
 	Tries    []string
 	// Shots are the screenshots of the browser steps that a reason or a check names.
 	Shots []shotView
+	// Class is the stored outcome. Ticket is the ticket of the scenario file. Lead is the reason that a
+	// result line shows. Flaky marks a scenario that passed after an attempt that did not.
+	Class  domain.Outcome
+	Ticket string
+	Lead   string
+	Flaky  bool
 }
 
 type shotView struct{ Step, Path string }
@@ -87,52 +104,58 @@ type markdownView struct {
 
 // Markdown writes the report: scenarios that need attention first, passed scenarios in one details block.
 func Markdown(w io.Writer, d Data) error {
-	if err := markdownTemplate.Execute(w, buildView(d)); err != nil {
+	if err := markdownTemplate.Execute(w, markdownViewer.buildView(d)); err != nil {
 		return fmt.Errorf("render report %s: %w", d.Run.ID, err)
 	}
 	return nil
 }
 
-func buildView(d Data) markdownView {
+func (vw viewer) buildView(d Data) markdownView {
 	run := d.Run
 	v := markdownView{
-		RunID:           shown(string(run.ID)),
-		Environment:     shown(run.Environment),
-		EnvironmentKind: shown(run.EnvironmentKind),
+		RunID:           vw.show(string(run.ID)),
+		Environment:     vw.show(run.Environment),
+		EnvironmentKind: vw.show(run.EnvironmentKind),
 		Started:         utc(run.StartedAt),
 		Ended:           utc(run.EndedAt),
-		BuildsStart:     builds(run.BuildsStart),
-		BuildsEnd:       builds(run.BuildsEnd),
+		BuildsStart:     vw.builds(run.BuildsStart),
+		BuildsEnd:       vw.builds(run.BuildsEnd),
 		Counts:          countLine(run.Results),
 		Interrupted:     run.EndedAt.IsZero(),
 		OnlyDeclared:    onlyDeclared(run),
 	}
 	if d.Coverage != "" {
-		v.Coverage = shown(d.Coverage)
+		v.Coverage = vw.show(d.Coverage)
 		v.CoverageDetail = statusCommand(d.CoverageTickets)
 	}
-	v.Journeys = journeyViews(d)
+	v.Journeys = vw.journeyViews(d)
 	legs := legJourneys(d.Journeys)
 	for _, r := range ordered(run.Results) {
 		word := resultWord(string(r.Outcome), r.Reasons)
 		sv := scenarioView{
-			ID:      shown(string(r.Scenario)),
-			Title:   shown(d.Scenarios[r.Scenario].Title),
-			Outcome: shown(word),
-			Next:    words.Next(word, shown(string(r.Scenario))),
+			ID:      vw.show(string(r.Scenario)),
+			Title:   vw.show(d.Scenarios[r.Scenario].Title),
+			Outcome: vw.show(word),
+			Next:    words.Next(word, vw.show(string(r.Scenario))),
+			Class:   r.Outcome,
+			Ticket:  vw.show(d.Scenarios[r.Scenario].Ticket),
+			Flaky:   r.Flaky,
 		}
-		sv.Attempts = shown(attemptNote(r))
+		if len(r.Reasons) > 0 {
+			sv.Lead = vw.show(shownReason(r.Reasons))
+		}
+		sv.Attempts = vw.show(attemptNote(r))
 		for i, a := range r.Attempts {
-			sv.Tries = append(sv.Tries, fmt.Sprintf("Attempt %d: %s%s", i+1, a.Outcome, shownAttemptReason(a)))
+			sv.Tries = append(sv.Tries, fmt.Sprintf("Attempt %d: %s%s", i+1, a.Outcome, vw.shownAttemptReason(a)))
 		}
 		sv.Reproduce = "semar run --scenario " + sv.ID
 		if j, ok := legs[r.Scenario]; ok {
-			sv.Reproduce = journeyCommand(j, run.Environment)
+			sv.Reproduce = vw.journeyCommand(j, run.Environment)
 		}
 		for _, rec := range r.Fixtures {
-			sv.Fixtures = append(sv.Fixtures, fixtureLine(rec))
+			sv.Fixtures = append(sv.Fixtures, vw.fixtureLine(rec))
 			for _, left := range rec.Left {
-				v.StillExists = append(v.StillExists, shown(string(r.Scenario))+": "+shown(left))
+				v.StillExists = append(v.StillExists, vw.show(string(r.Scenario))+": "+vw.show(left))
 			}
 		}
 		if r.Outcome == domain.OutcomePassed {
@@ -140,38 +163,38 @@ func buildView(d Data) markdownView {
 			continue
 		}
 		for _, reason := range r.Reasons {
-			sv.Reasons = append(sv.Reasons, reasonView{Text: shown(reason.Text), Step: shown(string(reason.Step))})
+			sv.Reasons = append(sv.Reasons, reasonView{Text: vw.show(reason.Text), Step: vw.show(string(reason.Step))})
 		}
 		for _, c := range r.Checks {
 			if c.State == domain.CheckTrue {
 				continue
 			}
-			sv.Checks = append(sv.Checks, checkViewOf(c, d.Scenarios[r.Scenario]))
+			sv.Checks = append(sv.Checks, vw.checkViewOf(c, d.Scenarios[r.Scenario]))
 		}
-		sv.Shots = failedShots(d.Activity, r)
+		sv.Shots = vw.failedShots(d.Activity, r)
 		v.Attention = append(v.Attention, sv)
 	}
-	v.StillExists = append(v.StillExists, journeyStillExists(d.Journeys)...)
+	v.StillExists = append(v.StillExists, vw.journeyStillExists(d.Journeys)...)
 	for _, row := range activity.Ledger(d.Activity) {
-		v.Ledger = append(v.Ledger, ledgerViewOf(row))
+		v.Ledger = append(v.Ledger, vw.ledgerViewOf(row))
 	}
-	v.Browser = browserSteps(d.Activity)
-	v.Blocked = blockedViews(d.Activity)
-	v.DocChecks = docViews(d.Activity)
+	v.Browser = vw.browserSteps(d.Activity)
+	v.Blocked = vw.blockedViews(d.Activity)
+	v.DocChecks = vw.docViews(d.Activity)
 	return v
 }
 
 // shownAttemptReason is ": " and the first reason of an attempt that did not pass, or nothing.
-func shownAttemptReason(a domain.Attempt) string {
+func (vw viewer) shownAttemptReason(a domain.Attempt) string {
 	if a.Outcome == domain.OutcomePassed || len(a.Reasons) == 0 {
 		return ""
 	}
-	return ": " + shown(shownReason(a.Reasons))
+	return ": " + vw.show(shownReason(a.Reasons))
 }
 
 // failedShots gives the screenshot of each browser step that a reason or a failed check of the result
 // names, in the order of the steps that name them.
-func failedShots(acts []domain.Activity, r domain.ScenarioResult) []shotView {
+func (vw viewer) failedShots(acts []domain.Activity, r domain.ScenarioResult) []shotView {
 	var steps []domain.StepID
 	add := func(id domain.StepID) {
 		if id != "" && !slices.Contains(steps, id) {
@@ -191,7 +214,7 @@ func failedShots(acts []domain.Activity, r domain.ScenarioResult) []shotView {
 		for i := len(acts) - 1; i >= 0; i-- {
 			e := acts[i]
 			if e.Surface == domain.SurfaceWeb && e.Use.Scenario == r.Scenario && e.Use.Step == id && screenshotPath.MatchString(e.Screenshot) {
-				out = append(out, shotView{Step: shown(string(id)), Path: e.Screenshot})
+				out = append(out, shotView{Step: vw.show(string(id)), Path: e.Screenshot})
 				break
 			}
 		}
@@ -213,13 +236,13 @@ func statusCommand(tickets []string) string {
 
 // fixtureLine says what one given entry did: which fixture, in which version, how it gave its
 // state, and what became of what it made.
-func fixtureLine(r domain.FixtureRecord) string {
-	line := "Given " + shown(r.As) + ": " + shown(string(r.Fixture))
+func (vw viewer) fixtureLine(r domain.FixtureRecord) string {
+	line := "Given " + vw.show(r.As) + ": " + vw.show(string(r.Fixture))
 	if r.Version != "" {
-		line += " " + shown(r.Version)
+		line += " " + vw.show(r.Version)
 	}
 	if r.Hash != "" {
-		line += " (hash " + shown(string(r.Hash[:min(len(r.Hash), 12)])) + ")"
+		line += " (hash " + vw.show(string(r.Hash[:min(len(r.Hash), 12)])) + ")"
 	}
 	switch r.Via {
 	case "find":
@@ -229,21 +252,21 @@ func fixtureLine(r domain.FixtureRecord) string {
 	default:
 		line += ", no state was given"
 	}
-	return line + "; cleanup " + shown(strings.ReplaceAll(r.Cleanup, "_", " "))
+	return line + "; cleanup " + vw.show(strings.ReplaceAll(r.Cleanup, "_", " "))
 }
 
-func checkViewOf(c domain.CheckResult, s domain.Scenario) checkView {
+func (vw viewer) checkViewOf(c domain.CheckResult, s domain.Scenario) checkView {
 	cv := checkView{
-		Label:    shown(checkLabel(c)),
-		State:    shown(string(c.State)),
-		Expected: valueOrEmpty(c.Expected),
-		Source:   shown(c.Source),
-		Observed: valueOrEmpty(c.Observed),
-		Detail:   shown(c.Detail),
+		Label:    vw.show(checkLabel(c)),
+		State:    vw.show(string(c.State)),
+		Expected: vw.valueOrEmpty(c.Expected),
+		Source:   vw.show(c.Source),
+		Observed: vw.valueOrEmpty(c.Observed),
+		Detail:   vw.show(c.Detail),
 	}
 	for _, step := range s.Steps {
 		if step.ID == c.Step && c.Index >= 0 && c.Index < len(step.Expect) {
-			cv.Cite = shown(step.Expect[c.Index].Cite)
+			cv.Cite = vw.show(step.Expect[c.Index].Cite)
 		}
 	}
 	return cv
@@ -256,37 +279,37 @@ func checkLabel(c domain.CheckResult) string {
 	return fmt.Sprintf("%s, check %d", c.Step, c.Index+1)
 }
 
-func valueOrEmpty(s string) string {
+func (vw viewer) valueOrEmpty(s string) string {
 	if s == "" {
 		return "(empty)"
 	}
-	return shown(s)
+	return vw.show(s)
 }
 
-func ledgerViewOf(row activity.LedgerRow) ledgerView {
+func (vw viewer) ledgerViewOf(row activity.LedgerRow) ledgerView {
 	status := "left in place"
 	if row.CleanedUp {
 		status = "cleaned up"
 	}
 	return ledgerView{
-		Verb:     shown(string(row.Verb)),
-		Object:   shown(row.Object.Type + " " + row.Object.ID),
-		Scenario: shown(string(row.Use.Scenario)),
-		Step:     shown(string(row.Use.Step)),
+		Verb:     vw.show(string(row.Verb)),
+		Object:   vw.show(row.Object.Type + " " + row.Object.ID),
+		Scenario: vw.show(string(row.Use.Scenario)),
+		Step:     vw.show(string(row.Use.Step)),
 		Status:   status,
 	}
 }
 
-func builds(bs []domain.BuildRef) string {
+func (vw viewer) builds(bs []domain.BuildRef) string {
 	if len(bs) == 0 {
 		return "none recorded"
 	}
 	parts := make([]string, len(bs))
 	for i, b := range bs {
 		if b.Declared {
-			parts[i] = shown(declaredBuild(b))
+			parts[i] = vw.show(declaredBuild(b))
 		} else {
-			parts[i] = shown(fmt.Sprintf("%s %s config %s", b.Service, b.Commit, b.ConfigHash))
+			parts[i] = vw.show(fmt.Sprintf("%s %s config %s", b.Service, b.Commit, b.ConfigHash))
 		}
 	}
 	return strings.Join(parts, "; ")
@@ -320,18 +343,18 @@ func utc(t time.Time) string {
 // path is linked only when it has this form.
 var screenshotPath = regexp.MustCompile(`^screenshots/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.(png|jpg)$`)
 
-func browserSteps(acts []domain.Activity) []browserStep {
+func (vw viewer) browserSteps(acts []domain.Activity) []browserStep {
 	var out []browserStep
 	for _, e := range acts {
 		if e.Surface != domain.SurfaceWeb {
 			continue
 		}
 		b := browserStep{
-			Scenario: shown(string(e.Use.Scenario)),
-			Step:     shown(string(e.Use.Step)),
-			Why:      shown(e.Why),
-			Target:   shown(e.Target),
-			Result:   shown(e.Result),
+			Scenario: vw.show(string(e.Use.Scenario)),
+			Step:     vw.show(string(e.Use.Step)),
+			Why:      vw.show(e.Why),
+			Target:   vw.show(e.Target),
+			Result:   vw.show(e.Result),
 		}
 		if screenshotPath.MatchString(e.Screenshot) {
 			b.Screenshot = e.Screenshot

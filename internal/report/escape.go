@@ -75,3 +75,35 @@ func shown(s string) string {
 }
 
 func isWordRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
+
+// viewer fills a view with text. The Markdown report escapes every text for one line of Markdown, and
+// the HTML report keeps it as it is, because html/template escapes it when it is written.
+type viewer struct{ show func(string) string }
+
+var markdownViewer = viewer{show: shown}
+
+// rawViewer cuts a text like the Markdown report does and leaves it unescaped.
+var rawViewer = viewer{show: func(s string) string {
+	head, more := cut(s, maxShown)
+	if more > 0 {
+		head += cutMark(more)
+	}
+	return plainLine(head)
+}}
+
+// plainLine keeps text on one line and drops format characters, as escape does.
+func plainLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case unicode.Is(unicode.Cf, r):
+		case r == '\n' || r == '\r' || r == ' ' || r == ' ':
+			b.WriteString("↵")
+		case unicode.IsControl(r):
+			b.WriteByte(' ')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}

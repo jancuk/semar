@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -494,13 +493,10 @@ func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir strin
 		return finishedRun{}, err
 	}
 	coverage, tickets := runCoverage(stderr, o, dir, nil, record)
-	writeReport := func(rec domain.Run) error {
-		var md bytes.Buffer
-		data := report.Data{Run: rec, Scenarios: scenarios, Activity: acts, Coverage: coverage, CoverageTickets: tickets, Journeys: rec.Journeys, JourneyTitles: titles}
-		if err := report.Markdown(&md, data); err != nil {
-			return err
-		}
-		return rg.run.WriteFile(reportFile, md.Bytes())
+	var set reportSet
+	writeReport := func(rec domain.Run) (err error) {
+		set, err = writeReports(stderr, rg.store, dir, rg.run, report.Data{Run: rec, Scenarios: scenarios, Activity: acts, Coverage: coverage, CoverageTickets: tickets, Journeys: rec.Journeys, JourneyTitles: titles})
+		return err
 	}
 	if err := writeReport(record); err != nil {
 		return finishedRun{}, err
@@ -516,7 +512,7 @@ func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir strin
 			return finishedRun{}, err
 		}
 	}
-	return finishedRun{record: record, reportPath: filepath.Join(rg.store.Root(), "runs", string(rg.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts), docs: report.DocFindings(acts)}, nil
+	return finishedRun{record: record, reportPath: filepath.Join(rg.store.Root(), "runs", string(rg.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts), docs: report.DocFindings(acts), reports: set}, nil
 }
 
 // legStepAccounts is the as of each step of a leg that has one.

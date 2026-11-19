@@ -138,7 +138,7 @@ func newShowCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show [run]",
 		Short: "Print the report of a run, or what it did",
-		Long:  "Print the report of a run, and of the newest run when none is named. With --activity, print what the run did, in order.",
+		Long:  "Print the report of a run, and of the newest run when none is named, then the path of its report.html when it has one. With --activity, print what the run did, in order.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			arg := latestRun
@@ -193,8 +193,16 @@ func showRun(ctx context.Context, stdout io.Writer, f showFlags, arg string) err
 	if err != nil {
 		return err
 	}
-	_, err = stdout.Write([]byte(terminalSafe(string(data))))
-	return err
+	if _, err := stdout.Write([]byte(terminalSafe(string(data)))); err != nil {
+		return err
+	}
+	// A run stored before report.html existed has none, and nothing is said about it.
+	page := filepath.Join(store.Root(), "runs", string(id), reportHTMLFile)
+	if info, err := os.Stat(page); err == nil && info.Mode().IsRegular() {
+		_, err = fmt.Fprintf(stdout, "\nHTML report: %s\n", terminalSafe(oneLine(page)))
+		return err
+	}
+	return nil
 }
 
 func printActivity(stdout io.Writer, store *evidence.Store, f showFlags, id domain.RunID) error {
