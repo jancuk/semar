@@ -46,4 +46,13 @@ type Event struct {
 	To     *Element `json:"to,omitempty"`
 	Value  string   `json:"value,omitempty"`
 	Secret bool     `json:"secret,omitempty"`
+	// Probe is set on a check that the explorer of a plan decided itself, on the page as it was then.
+	Probe *Probe `json:"-"`
+}
+
+// Probe is what the explorer found when it decided a check of a form that reads more than the text of an
+// element: whether the check held, and the words for what the page showed.
+type Probe struct {
+	Held  bool
+	Shown string
 }

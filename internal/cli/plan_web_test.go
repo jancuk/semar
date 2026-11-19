@@ -34,6 +34,9 @@ type webModel struct {
 	mu    sync.Mutex
 	turns int
 	jobs  []provider.Job
+	// script, when it is set, answers each turn of a flow in the place of the refund flow. It gets the
+	// number of the turn, from 1, and the prompt.
+	script func(n int, prompt string) string
 }
 
 func (m *webModel) answer(j provider.Job) (provider.Result, error) {
@@ -56,6 +59,9 @@ func (m *webModel) answer(j provider.Job) (provider.Result, error) {
 }
 
 func (m *webModel) turn(prompt string) string {
+	if m.script != nil {
+		return m.script(m.turns, prompt)
+	}
 	refs := map[string]string{}
 	for _, r := range refPattern.FindAllStringSubmatch(prompt, -1) {
 		refs[r[2]+" "+r[3]] = r[1]
@@ -71,7 +77,16 @@ func (m *webModel) turn(prompt string) string {
 
 func planWithWeb(t *testing.T, m *webModel, extra ...string) (*planRepo, result) {
 	t.Helper()
+	return planWithWebPage(t, m, "", extra...)
+}
+
+// planWithWebPage is planWithWeb on a refund page that holds the extra HTML at its end.
+func planWithWebPage(t *testing.T, m *webModel, html string, extra ...string) (*planRepo, result) {
+	t.Helper()
 	p := newPlanRepo(t, sampleapp.Options{})
+	if html != "" {
+		p.refundExtra.Store(&html)
+	}
 	p.git.Commit("SHOP-482 write the ticket and the API", map[string]*string{
 		"docs/tickets/SHOP-482.md": gittest.S(webTicket),
 		"docs/openapi.yaml":        gittest.S(criterionAPI),

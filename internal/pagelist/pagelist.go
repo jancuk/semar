@@ -19,7 +19,14 @@ const (
 	MaxOptions = 12
 	// MaxText is the most characters of a name or a value. A longer text is cut and ends with an ellipsis.
 	MaxText = 80
+	// MaxHidden is the most elements that the page marks for tests or roles and that are not shown, which
+	// a check of "hidden" or "visible" may name.
+	MaxHidden = 10
 )
+
+// Attributes are the attributes that a check may read, in the order that the list shows them. The value
+// of a password field is never one of them.
+var Attributes = []string{"placeholder", "href", "aria-label", "title", "alt", "name", "type", "value"}
 
 // Item is one element as the page reader found it, before the list is chosen. Index is the place of
 // the element in the reader's own array of the page, which the browser needs to act on it. Acts
@@ -34,6 +41,11 @@ type Item struct {
 	Disabled bool   `json:"disabled"`
 	Secret   bool   `json:"secret"` // a password field: its value is never read into the list
 	Acts     bool   `json:"acts"`
+	// Hidden is an element that the page does not show: it has a test ID or a role of its own, so that
+	// a check can name it before or after an action shows it.
+	Hidden bool `json:"hidden"`
+	// Attrs holds the attributes of Attributes that the element has.
+	Attrs map[string]string `json:"attrs,omitempty"`
 	// Options are the labels of the options of a select list, up to MaxOptions.
 	Options []string `json:"options,omitempty"`
 }
@@ -47,7 +59,11 @@ type Element struct {
 	Value    string
 	State    string
 	Disabled bool
-	Options  []string
+	Hidden   bool
+	// Secret is a password field. A check never reads an attribute of it.
+	Secret  bool
+	Attrs   map[string]string
+	Options []string
 }
 
 // List is the page as a model sees it.
@@ -64,12 +80,17 @@ type List struct {
 func Build(rawURL, title string, items []Item) List {
 	l := List{URL: withoutQuery(rawURL), Title: Cut(title)}
 	keep := make([]bool, len(items))
-	n := 0
-	for _, acts := range []bool{true, false} {
+	n, hidden := 0, 0
+	// Shown elements first, the ones that act before the others, then the hidden ones that a check may name.
+	for _, pass := range []struct{ hidden, acts bool }{{false, true}, {false, false}, {true, true}, {true, false}} {
 		for i, it := range items {
-			if it.Acts == acts && n < MaxLines {
-				keep[i] = true
-				n++
+			if it.Hidden != pass.hidden || it.Acts != pass.acts || n >= MaxLines || (it.Hidden && hidden >= MaxHidden) {
+				continue
+			}
+			keep[i] = true
+			n++
+			if it.Hidden {
+				hidden++
 			}
 		}
 	}
@@ -80,7 +101,15 @@ func Build(rawURL, title string, items []Item) List {
 		}
 		e := Element{
 			Ref: "e" + strconv.Itoa(len(l.Elements)+1), Index: it.Index, Role: roleOf(it.Role), Name: Cut(it.Name),
-			Value: Cut(it.Value), State: it.State, Disabled: it.Disabled,
+			Value: Cut(it.Value), State: it.State, Disabled: it.Disabled, Hidden: it.Hidden, Secret: it.Secret,
+		}
+		for _, name := range Attributes {
+			if v, ok := it.Attrs[name]; ok && !(it.Secret && name == "value") && !repeats(name, v, it) {
+				if e.Attrs == nil {
+					e.Attrs = map[string]string{}
+				}
+				e.Attrs[name] = Cut(v)
+			}
 		}
 		for _, o := range it.Options[:min(len(it.Options), MaxOptions)] {
 			e.Options = append(e.Options, Cut(o))
@@ -91,6 +120,22 @@ func Build(rawURL, title string, items []Item) List {
 		l.Elements = append(l.Elements, e)
 	}
 	return l
+}
+
+// repeats says that a line already tells what the attribute holds: its name, its value, or the kind of
+// field that its role is. The list stays short that way, and a check can still name the attribute.
+func repeats(name, v string, it Item) bool {
+	switch name {
+	case "value":
+		return v == it.Value
+	case "type":
+		switch strings.ToLower(v) {
+		case "text", "checkbox", "radio", "button", "submit", "reset":
+			return true
+		}
+		return false
+	}
+	return v != "" && Cut(v) == it.Name
 }
 
 // roleOf keeps a role that a page wrote to lower-case letters and hyphens, so that it cannot add a
@@ -161,6 +206,14 @@ func (l List) String() string {
 		}
 		if e.Disabled {
 			b.WriteString(" disabled")
+		}
+		if e.Hidden {
+			b.WriteString(" hidden")
+		}
+		for _, name := range Attributes {
+			if v, ok := e.Attrs[name]; ok {
+				fmt.Fprintf(&b, " %s=%s", name, strconv.Quote(v))
+			}
 		}
 		b.WriteByte('\n')
 	}

@@ -43,6 +43,8 @@ type Explorer struct {
 	rec  *Recorder
 	mu   sync.Mutex
 	list pagelist.List
+	// known holds what Prepare read of the elements of the last list that checks name.
+	known map[string]probe
 	// used holds the date variables that a text has had filled in, with the text each gave.
 	used map[string]string
 }
@@ -67,6 +69,7 @@ func (x *Explorer) List(ctx context.Context) (pagelist.List, error) {
 	l := pagelist.Build(raw.URL, raw.Title, raw.Items)
 	x.mu.Lock()
 	x.list = l
+	x.known = nil
 	x.mu.Unlock()
 	return l, nil
 }
@@ -91,7 +94,11 @@ const stateJS = `function(){
   return { connected: this.isConnected, disabled: this.disabled === true || aria === 'true' };
 }`
 
-func (x *Explorer) find(ref string) (found, error) {
+func (x *Explorer) find(ref string) (found, error) { return x.locate(ref, false) }
+
+// locate finds an element of the last list again. An action refuses an element that is disabled, and a
+// check that reads one does not.
+func (x *Explorer) locate(ref string, allowDisabled bool) (found, error) {
 	x.mu.Lock()
 	e, ok := x.list.Find(ref)
 	x.mu.Unlock()
@@ -120,7 +127,7 @@ func (x *Explorer) find(ref string) (found, error) {
 	if st.Result == nil || json.Unmarshal(st.Result.Value, &state) != nil || !state.Connected {
 		return found{}, gone
 	}
-	if state.Disabled {
+	if state.Disabled && !allowDisabled {
 		return found{}, fmt.Errorf("%s is disabled", name)
 	}
 	d, err := chromedp.Call(tab, dom.DescribeNode, dom.DescribeNodeParams{ObjectID: res.Result.ObjectID})
@@ -414,6 +421,9 @@ func (x *Explorer) Check(ctx context.Context, ref string) (shown string, err err
 		case "empty":
 			return "", fmt.Errorf("%s shows no text, so there is nothing to check: check an element that shows the result", t.name)
 		}
+	}
+	if err := x.refuseMany(t); err != nil {
+		return "", err
 	}
 	var pt []float64
 	if json.Unmarshal(res.Result.Value, &pt) != nil || len(pt) != 2 {

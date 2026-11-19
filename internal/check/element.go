@@ -55,14 +55,21 @@ func evalElement(res *Result, c domain.Check, op string, w *domain.WebRecord) {
 	}
 }
 
+// ManyReason is the reason of a check of one element whose locator matches count elements, with the
+// names of up to a few of them when there are any. A run and a plan give the same words.
+func ManyReason(count int, names string) string {
+	reason := fmt.Sprintf(matchesMany, count)
+	if names != "" {
+		reason += ": " + names
+	}
+	return reason
+}
+
 // alone says whether the locator picked out one element. When it did not, it sets the reason.
 func alone(res *Result, c domain.Check, st domain.ElementState, w *domain.WebRecord) bool {
 	switch {
 	case st.Count > 1:
-		reason := fmt.Sprintf(matchesMany, st.Count)
-		if names := namesOf(w, c.Element); names != "" {
-			reason += ": " + names
-		}
+		reason := ManyReason(st.Count, namesOf(w, c.Element))
 		notEvaluated(res, reason+". Make the locator of element "+c.Element+" match one element")
 		return false
 	case st.Count == 0:

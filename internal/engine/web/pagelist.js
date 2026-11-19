@@ -77,6 +77,22 @@
     return { value: '', state: '' };
   }
 
+  // The attributes that a check may read. The value of a password field is never one of them.
+  const ATTRS = ['placeholder', 'href', 'aria-label', 'title', 'alt', 'name', 'type', 'value'];
+  function attrsOf(el) {
+    const out = {};
+    for (const n of ATTRS) {
+      if (!el.hasAttribute(n) || (n === 'value' && isSecret(el))) continue;
+      out[n] = norm(el.getAttribute(n)).slice(0, 300);
+    }
+    return out;
+  }
+
+  // An element that the page does not show is listed only when its author gave it a handle for tests or a
+  // role, so that a check can name it before an action shows it or after an action hides it.
+  const HANDLES = ['data-testid', 'data-test', 'data-qa', 'role'];
+  const marked = el => HANDLES.some(a => el.hasAttribute(a));
+
   function ownText(el) {
     let t = '';
     for (const n of el.childNodes) if (n.nodeType === 3) t += n.nodeValue;
@@ -91,12 +107,16 @@
   const listed = new Map();
   for (const el of document.body ? document.body.querySelectorAll('*') : []) {
     if (SKIP.has(el.tagName.toUpperCase()) || el.closest('svg, datalist')) continue;
-    if (!visible(el)) continue;
+    const shown = visible(el);
+    if (!shown && !marked(el)) continue;
     const cs = getComputedStyle(el);
-    const role = roleOf(el, cs);
+    const role = roleOf(el, cs) || (shown ? '' : 'generic');
     let name = '';
     let rest = { value: '', state: '' };
-    if (role) {
+    if (!shown) {
+      name = nameOf(el, role) || norm(el.textContent) || norm(el.getAttribute('data-testid') || el.getAttribute('data-test') || el.getAttribute('data-qa'));
+      rest = valueOf(el);
+    } else if (role) {
       name = nameOf(el, role);
       rest = valueOf(el);
     } else {
@@ -118,7 +138,9 @@
       index: idx, role: role || 'text', name, value: rest.value, state: rest.state,
       disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
       secret: isSecret(el),
-      acts: !!role,
+      acts: !!role && shown,
+      hidden: !shown,
+      attrs: role ? attrsOf(el) : undefined,
       options: el.tagName === 'SELECT' ? Array.from(el.options).map(o => norm(o.text)).filter(Boolean) : undefined,
     });
   }

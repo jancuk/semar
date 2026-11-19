@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/jancuk/semar/internal/datevar"
+	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/pagelist"
 	"github.com/jancuk/semar/internal/prompt"
@@ -45,13 +47,22 @@ type turnWire struct {
 }
 
 type actionWire struct {
-	Kind   string `json:"kind"`
-	Ref    string `json:"ref"`
-	Text   string `json:"text,omitempty"`
-	Key    string `json:"key,omitempty"`
-	To     string `json:"to,omitempty"`
-	Expect string `json:"expect,omitempty"`
+	Kind      string `json:"kind"`
+	Ref       string `json:"ref"`
+	Text      string `json:"text,omitempty"`
+	Key       string `json:"key,omitempty"`
+	To        string `json:"to,omitempty"`
+	Expect    string `json:"expect,omitempty"`
+	State     string `json:"state,omitempty"`
+	Attribute string `json:"attribute,omitempty"`
+	Match     string `json:"match,omitempty"`
+	Page      string `json:"page,omitempty"`
+	Count     *int   `json:"count,omitempty"`
 }
+
+// maxCount is the most elements that a check of a number may name: a page of more is not a list that a
+// test counts.
+const maxCount = 1000
 
 // DecodeTurn reads the output of a job strictly: an unknown field and data after the object are
 // errors, and an unknown kind is one. What the page and the catalogue can say is checked against them,
@@ -106,7 +117,11 @@ func actTurn(w turnWire, page pagelist.List, ps *problems) Turn {
 	var out []Action
 	for i, a := range w.Actions {
 		path := fmt.Sprintf("turn.actions[%d]", i)
-		act := Action{Kind: ActionKind(a.Kind), Ref: a.Ref, Text: a.Text, Key: a.Key, To: a.To, Expect: a.Expect}
+		act := Action{Kind: ActionKind(a.Kind), Ref: a.Ref, Text: a.Text, Key: a.Key, To: a.To, Expect: a.Expect,
+			State: a.State, Attribute: a.Attribute, Match: a.Match, Page: a.Page}
+		if a.Count != nil {
+			act.Count = *a.Count
+		}
 		ref := func(field, r string, optional bool) {
 			if _, ok := page.Find(r); !ok && !(optional && r == "") {
 				ps.add(path+"."+field, "%s is not in the list of the page: use a reference of the list", r)
@@ -148,12 +163,60 @@ func actTurn(w turnWire, page pagelist.List, ps *problems) Turn {
 			} else {
 				checkTextVariables(path+".expect", "expect", a.Expect, ps)
 			}
+		case ActionAbsent:
+			ref("ref", a.Ref, false)
+		case ActionCount:
+			ref("ref", a.Ref, false)
+			if a.Count == nil || *a.Count < 1 || *a.Count > maxCount {
+				ps.add(path+".count", "a count check needs count, a number from 1 to %d: use absent for none", maxCount)
+			}
+		case ActionState:
+			ref("ref", a.Ref, false)
+			if domain.ElementStates[a.State] == "" {
+				ps.add(path+".state", "the state %q must be one of %s", a.State, strings.Join(slices.Sorted(maps.Keys(domain.ElementStates)), ", "))
+			}
+		case ActionAttribute:
+			ref("ref", a.Ref, false)
+			if e, ok := page.Find(a.Ref); ok && e.Secret {
+				ps.add(path+".ref", "%s is a password field, and an attribute of it is never read", a.Ref)
+			}
+			if !slices.Contains(pagelist.Attributes, a.Attribute) {
+				ps.add(path+".attribute", "the attribute %q must be one of %s", a.Attribute, strings.Join(pagelist.Attributes, ", "))
+			}
+			matchProblem(path, a.Match, a.Expect, "an attribute check", ps)
+		case ActionPage:
+			if a.Ref != "" {
+				ps.add(path+".ref", "a page check names no element: leave ref empty")
+			}
+			switch a.Page {
+			case domain.PagePath:
+				if a.Match == MatchEquals && !strings.HasPrefix(a.Expect, "/") {
+					ps.add(path+".expect", "the path of a page starts with /, such as /orders")
+				}
+			case domain.PageTitle:
+			default:
+				ps.add(path+".page", "the page %q must be path or title", a.Page)
+			}
+			matchProblem(path, a.Match, a.Expect, "a page check", ps)
 		default:
-			ps.add(path+".kind", "the action kind %q must be one of click, fill, select, hover, tick, untick, press, drag, check", a.Kind)
+			ps.add(path+".kind", "the action kind %q must be one of click, fill, select, hover, tick, untick, press, drag, check, absent, count, state, attribute, page", a.Kind)
 		}
 		out = append(out, act)
 	}
 	return TurnAct{Actions: out}
+}
+
+// matchProblem refuses a check of an attribute or of the page whose match or expected text is not one that a
+// run can compare.
+func matchProblem(path, match, expect, what string, ps *problems) {
+	if match != MatchEquals && match != MatchContains {
+		ps.add(path+".match", "the match %q must be %s or %s", match, MatchEquals, MatchContains)
+	}
+	if blank(expect) {
+		ps.add(path+".expect", "%s needs expect, the text that it must read", what)
+		return
+	}
+	checkTextVariables(path+".expect", "expect", expect, ps)
 }
 
 var textVariable = regexp.MustCompile(`\{\{([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*)\}\}`)
@@ -186,7 +249,7 @@ func turnDates(t Turn, rule dateRule, ticket string, ps *problems) {
 			if msg := rule.problemInWords(a.Text, ticket); msg != "" {
 				ps.add(path+".text", "the text %s", msg)
 			}
-		case ActionCheck:
+		case ActionCheck, ActionAttribute, ActionPage:
 			if msg := rule.problemInWords(a.Expect, ticket); msg != "" {
 				ps.add(path+".expect", "expect %s", msg)
 			}
@@ -252,6 +315,11 @@ func TurnSchema(page pagelist.List, first bool, catalogue []fixture.Entry) json.
 		object(map[string]any{"kind": enum("string", "tick"), "ref": ref}),
 		object(map[string]any{"kind": enum("string", "untick"), "ref": ref}),
 		object(map[string]any{"kind": enum("string", "check"), "ref": ref, "expect": text("The text that the element must show, written from the criterion. {{run.id}} and the date variables are filled in as in a text.")}),
+		object(map[string]any{"kind": enum("string", string(ActionAbsent)), "ref": ref}),
+		object(map[string]any{"kind": enum("string", string(ActionCount)), "ref": ref, "count": map[string]any{"type": "integer", "minimum": 1, "maximum": maxCount, "description": "How many elements look like the element: the same tag below the same parent."}}),
+		object(map[string]any{"kind": enum("string", string(ActionState)), "ref": ref, "state": enum("string", slices.Sorted(maps.Keys(domain.ElementStates))...)}),
+		object(map[string]any{"kind": enum("string", string(ActionAttribute)), "ref": ref, "attribute": enum("string", pagelist.Attributes...), "match": enum("string", MatchEquals, MatchContains), "expect": text("The text that the attribute must hold.")}),
+		object(map[string]any{"kind": enum("string", string(ActionPage)), "page": enum("string", domain.PagePath, domain.PageTitle), "match": enum("string", MatchEquals, MatchContains), "expect": text("The path or the title that the page must have.")}),
 	}
 	branches := []any{
 		object(map[string]any{"kind": enum("string", turnAct), "actions": array(map[string]any{"anyOf": actions}, "1 to 5 actions, done in order.")}),

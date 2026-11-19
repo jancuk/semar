@@ -32,12 +32,14 @@ func (m *scriptedModel) turn(_ context.Context, in TurnInput) (Turn, error) {
 // scriptedBrowser lists a page of three elements, does what it is told, and fails the actions that
 // name a reference in fail.
 type scriptedBrowser struct {
-	acted   []Action
-	given   [][]AnswerGiven
-	fail    map[string]string // a reference to why its action cannot be done
-	shown   map[string]string // a reference to what a check reads
-	listErr error
-	outputs []GivenOutput
+	acted    []Action
+	prepared []Action
+	unmet    map[string]string // a reference to what the page shows when a check of another form on it does not hold
+	given    [][]AnswerGiven
+	fail     map[string]string // a reference to why its action cannot be done
+	shown    map[string]string // a reference to what a check reads
+	listErr  error
+	outputs  []GivenOutput
 }
 
 func (b *scriptedBrowser) List(context.Context) (pagelist.List, error) {
@@ -57,11 +59,19 @@ func (b *scriptedBrowser) Act(_ context.Context, a Action) (string, error) {
 	return b.shown[a.Ref], nil
 }
 
-func (b *scriptedBrowser) Compare(_ context.Context, ref, expect string) (string, bool, error) {
-	if why, ok := b.fail[ref]; ok {
+func (b *scriptedBrowser) Prepare(_ context.Context, checks []Action) {
+	b.prepared = append(b.prepared, checks...)
+}
+
+func (b *scriptedBrowser) Compare(_ context.Context, a Action) (string, bool, error) {
+	if why, ok := b.fail[a.Ref]; ok {
 		return "", false, errors.New(why)
 	}
-	return b.shown[ref], b.shown[ref] == expect, nil
+	if a.Kind != ActionCheck {
+		why, unmet := b.unmet[a.Ref]
+		return why, !unmet, nil
+	}
+	return b.shown[a.Ref], b.shown[a.Ref] == a.Expect, nil
 }
 
 func (b *scriptedBrowser) Given(_ context.Context, g []AnswerGiven) ([]GivenOutput, error) {

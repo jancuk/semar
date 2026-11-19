@@ -1,6 +1,7 @@
 package record_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,5 +136,75 @@ func TestUndoRemovesTheFilesAndFoldersThatTheWriteMade(t *testing.T) {
 	entries, _ := os.ReadDir(repo)
 	if len(entries) != 0 {
 		t.Errorf("the repository holds %v after the undo", entries)
+	}
+}
+
+func no() *bool { v := false; return &v }
+
+// A flow that decides a check of another form itself gives it as a claim, and the scenario holds the
+// check in the words of its form.
+func TestAClaimOfAnotherFormMakesATicketExpectationInTheWordsOfItsForm(t *testing.T) {
+	page := onPage("/orders/o_4471", "Order o_4471")
+	three := 3
+	events := []record.Event{
+		{Kind: record.KindOpen, Page: record.Page{URL: base + "/orders/o_4471"}},
+		{Kind: record.KindClick, Page: page, Target: el("button", "Remove")},
+		{Kind: record.KindCheck, Page: page, Target: el("button", "Remove row"), Probe: &record.Probe{Held: true}},
+		{Kind: record.KindCheck, Page: page, Target: css("#rows > li", "li-items"), Probe: &record.Probe{Held: true}},
+		{Kind: record.KindCheck, Page: page, Target: el("button", "Save"), Probe: &record.Probe{Held: false, Shown: "shown, enabled, not checked"}},
+		{Kind: record.KindCheck, Page: page, Target: el("textbox", "Search"), Probe: &record.Probe{Held: true}},
+		{Kind: record.KindCheck, Page: page, Probe: &record.Probe{Held: true}},
+	}
+	o := options()
+	o.Claims = []record.Claim{
+		{Cite: criterionCite, Check: &domain.Check{Exists: no()}},
+		{Cite: criterionCite, Check: &domain.Check{Count: &three}},
+		{Cite: criterionCite, Check: &domain.Check{State: "disabled"}},
+		{Cite: criterionCite, Check: &domain.Check{Attribute: "placeholder", Equals: "Search orders"}},
+		{Cite: criterionCite, Check: &domain.Check{Page: "path", Equals: "/orders/o_4471"}},
+	}
+	d := build(t, events, o)
+	text := feature(t, d)
+	for _, want := range []string{
+		"the element remove-row does not exist",
+		"the element li-items has 3 items",
+		"the element save is disabled",
+		`the element search attribute placeholder equals "Search orders"`,
+		`the page path equals "/orders/o_4471"`,
+		"# ticket " + criterionCite + ", by model",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the scenario lacks %q:\n%s", want, text)
+		}
+	}
+	if len(d.FailsNow) != 1 || d.FailsNow[0].Rule != "element save is disabled" || d.FailsNow[0].Shown != "shown, enabled, not checked" {
+		t.Errorf("fails now = %+v", d.FailsNow)
+	}
+	if d.Checks != 5 {
+		t.Errorf("checks = %d", d.Checks)
+	}
+	// The check of an element that may be gone waits for the page, and never for the element.
+	for i, st := range d.Script.Steps {
+		if st.Web.Do == domain.WebWait && st.Web.Element != "" {
+			t.Errorf("step %d waits for the element %s", i, st.Web.Element)
+		}
+	}
+}
+
+func TestAClaimOfAnotherFormKeepsTheVariablesOfTheFixtures(t *testing.T) {
+	o := options()
+	o.Values = record.NewValues(map[string]string{"run.id": "r-test-0001"})
+	events := []record.Event{
+		{Kind: record.KindOpen, Page: record.Page{URL: base + "/orders"}},
+		{Kind: record.KindCheck, Page: onPage("/orders", "Orders r-test-0001"), Probe: &record.Probe{Held: true}},
+	}
+	o.Claims = []record.Claim{{Cite: criterionCite, Check: &domain.Check{Page: "title", Contains: "r-test-0001"}}}
+	d := build(t, events, o)
+	if text := feature(t, d); !strings.Contains(text, `the page title contains "{{run.id}}"`) {
+		t.Errorf("scenario:\n%s", text)
+	}
+	o.Claims = []record.Claim{{Cite: criterionCite, Check: &domain.Check{Page: "title", Contains: "Orders r-20261118T004030Z-96e2"}}}
+	if _, err := record.Build(events, o); err == nil || !errors.Is(err, record.ErrOtherRun) {
+		t.Errorf("a claim that names a record of another run: %v", err)
 	}
 }

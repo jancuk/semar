@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jancuk/semar/internal/check"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/screens"
 )
@@ -55,12 +56,18 @@ type Options struct {
 }
 
 // Claim is what a check is meant to prove: the text that the element must show, which comes from the
-// criterion, and the cite of the criterion.
-type Claim struct{ Expect, Cite string }
+// criterion, and the cite of the criterion. Check, when it is set, is the claim of a check of another
+// form, such as a state, an attribute, or the page, and Expect is not used. Its Element is empty: the
+// recording names the element.
+type Claim struct {
+	Expect, Cite string
+	Check        *domain.Check
+}
 
 // FailNow is a check whose claim differs from what the page showed when the flow read it: the test
 // that the recording makes fails on this build. Element is the name that the test gives the element.
-type FailNow struct{ Element, Expect, Shown, Cite string }
+// Rule is the words of a claim that is not a text, such as "element save is disabled", and Expect is then empty.
+type FailNow struct{ Element, Expect, Shown, Cite, Rule string }
 
 // NamedLocator is an element of a screen.
 type NamedLocator = screens.Element
@@ -254,6 +261,11 @@ func (b *builder) action(it item, setup bool, id, text string, w domain.WebActio
 // screen. Otherwise the page is not the one that the last step knows, and a wait for the first
 // element of the check stands between them.
 func (b *builder) check(it item) {
+	if len(b.o.Claims) > 0 && b.o.Claims[b.claimed].Check != nil {
+		b.formCheck(it, b.o.Claims[b.claimed])
+		b.claimed++
+		return
+	}
 	name := b.element(it.screen, it.ev.Target)
 	last := len(b.steps) - 1
 	if last < 0 || b.steps[last].Setup || b.script[last].Web.Screen != it.screen {
@@ -274,6 +286,52 @@ func (b *builder) check(it item) {
 		}
 	}
 	b.steps[last].Expect = append(b.steps[last].Expect, ex)
+}
+
+// formCheck puts a check of a form that reads more than the text. A check that an element is not there,
+// is hidden, or has a number needs no element to be found, so the step that carries it waits for the page
+// and not for the element. A check of the page carries no element at all.
+func (b *builder) formCheck(it item, c Claim) {
+	ck := *c.Check
+	ck.Equals, ck.NotEquals, ck.Contains = b.operand(ck.Equals), b.operand(ck.NotEquals), b.operand(ck.Contains)
+	if it.ev.Target != nil {
+		ck.Element = b.element(it.screen, it.ev.Target)
+	}
+	last := len(b.steps) - 1
+	needsElement := ck.Element != "" && !(ck.Exists != nil || ck.Count != nil || ck.State == "hidden")
+	sameScreen := last >= 0 && b.script[last].Web.Screen == it.screen
+	switch {
+	case last >= 0 && !b.steps[last].Setup && (ck.Element == "" || sameScreen):
+	case needsElement:
+		b.wait("wait-"+ck.Element, "Wait for "+ck.Element, it.screen, ck.Element)
+		last++
+	case ck.Element == "":
+		b.wait("wait-page", "Wait for the page", "", "")
+		last++
+	default:
+		b.wait("wait-"+it.screen, "Wait for the page "+it.screen, it.screen, "")
+		last++
+	}
+	b.steps[last].Expect = append(b.steps[last].Expect, domain.Expectation{Check: ck, Source: domain.SourceTicket, Cite: c.Cite, By: "model"})
+	if p := it.ev.Probe; p != nil && !p.Held {
+		b.draft.FailsNow = append(b.draft.FailsNow, FailNow{Element: ck.Element, Shown: p.Shown, Cite: c.Cite, Rule: check.Describe(ck)})
+	}
+}
+
+// operand keeps the text of an operand as a sentence of the scenario shows it, with the values of the
+// fixtures as variables.
+func (b *builder) operand(v any) any {
+	if s, ok := v.(string); ok {
+		return oneLine(b.o.Values.Replace(s))
+	}
+	return v
+}
+
+func (b *builder) wait(id, text, screen, element string) {
+	sid := b.unique(id)
+	w := domain.WebAction{Service: b.o.Service, App: b.o.App, Do: domain.WebWait, Screen: screen, Element: element}
+	b.steps = append(b.steps, domain.Step{ID: domain.StepID(sid), Action: text})
+	b.script = append(b.script, domain.ScriptStep{Step: domain.StepID(sid), Web: &w})
 }
 
 func (b *builder) unique(id string) string {
@@ -412,8 +470,18 @@ func otherRun(items []item, o Options) error {
 		}
 	}
 	for i, c := range o.Claims {
-		if err := found(fmt.Sprintf("check %d", i+1), o.Values.Replace(c.Expect)); err != nil {
-			return err
+		texts := []string{c.Expect}
+		if c.Check != nil {
+			for _, v := range []any{c.Check.Equals, c.Check.NotEquals, c.Check.Contains} {
+				if s, ok := v.(string); ok {
+					texts = append(texts, s)
+				}
+			}
+		}
+		for _, t := range texts {
+			if err := found(fmt.Sprintf("check %d", i+1), o.Values.Replace(t)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

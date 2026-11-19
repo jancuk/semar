@@ -137,3 +137,65 @@ func TestASelectListShowsItsOptionsAndAtMostTwelve(t *testing.T) {
 		t.Errorf("the list lacks %q:\n%s", want, l)
 	}
 }
+
+func TestAListShowsTheStateAndTheAttributesThatACheckMayRead(t *testing.T) {
+	l := pagelist.Build("http://shop.example.com/orders", "Orders", []pagelist.Item{
+		{Role: "textbox", Name: "Search", Acts: true, Attrs: map[string]string{"placeholder": "Search orders", "name": "q", "type": "search", "title": "not listed twice"}},
+		{Role: "link", Name: "Docs", Acts: true, Attrs: map[string]string{"href": "/docs", "aria-label": "Docs", "class": "x"}},
+		{Role: "button", Name: "Save", Acts: true, Disabled: true, Attrs: map[string]string{"type": "submit"}},
+		{Role: "textbox", Name: "Amount", Value: "5", Acts: true, Attrs: map[string]string{"value": "5", "type": "text"}},
+		{Role: "generic", Name: "Banner", Hidden: true, Attrs: map[string]string{"title": "A banner"}},
+	})
+	want := `Page: http://shop.example.com/orders
+Title: Orders
+e1 textbox "Search" placeholder="Search orders" title="not listed twice" name="q" type="search"
+e2 link "Docs" href="/docs"
+e3 button "Save" disabled
+e4 textbox "Amount" value="5"
+e5 generic "Banner" hidden title="A banner"
+`
+	// The attributes come in the order of the list of attributes, and what a line says already is not said twice.
+	if got := l.String(); got != want {
+		t.Errorf("list:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestTheValueOfAPasswordFieldNeverReachesTheList(t *testing.T) {
+	l := pagelist.Build("http://shop.example.com/login", "Sign in", []pagelist.Item{
+		{Role: "textbox", Name: "Password", Value: "hunter2-secret", Secret: true, Acts: true,
+			Attrs: map[string]string{"value": "hunter2-secret", "type": "password", "placeholder": "Your password"}},
+	})
+	got := l.String()
+	if strings.Contains(got, "hunter2") {
+		t.Errorf("the list holds the password:\n%s", got)
+	}
+	if !l.Elements[0].Secret || l.Elements[0].Value != "" || l.Elements[0].Attrs["value"] != "" {
+		t.Errorf("element = %+v", l.Elements[0])
+	}
+	if !strings.Contains(got, `placeholder="Your password"`) {
+		t.Errorf("the other attributes of the field are listed:\n%s", got)
+	}
+}
+
+func TestAttributesAreCutAndHiddenElementsAreFewAndNeverCrowdOutAShownOne(t *testing.T) {
+	items := []pagelist.Item{{Role: "link", Name: "Long", Acts: true, Attrs: map[string]string{"href": "/" + strings.Repeat("a", 200)}}}
+	for i := range 15 {
+		items = append(items, pagelist.Item{Index: 1 + i, Role: "generic", Name: fmt.Sprintf("panel %d", i), Hidden: true})
+	}
+	items = append(items, pagelist.Item{Index: 20, Role: "text", Name: "after"})
+	l := pagelist.Build("http://x/", "", items)
+	if n := len([]rune(l.Elements[0].Attrs["href"])); n != pagelist.MaxText {
+		t.Errorf("href has %d characters", n)
+	}
+	hidden, shown := 0, 0
+	for _, e := range l.Elements {
+		if e.Hidden {
+			hidden++
+		} else if e.Name == "after" {
+			shown++
+		}
+	}
+	if hidden != pagelist.MaxHidden || shown != 1 || l.Omitted != 5 {
+		t.Errorf("%d hidden, %d omitted, %d shown", hidden, l.Omitted, shown)
+	}
+}

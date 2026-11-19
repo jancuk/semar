@@ -124,6 +124,10 @@ func (w *webExplorer) Explore(ctx context.Context, req plan.WebRequest, drive pl
 func (w *webExplorer) write(ctx context.Context, req plan.WebRequest, end plan.FlowEnd, events []record.Event, fx *flowFixtures) (plan.WebOutcome, error) {
 	claims := make([]record.Claim, len(end.Checks))
 	for i, c := range end.Checks {
+		if c.Check != nil {
+			claims[i] = record.Claim{Check: c.Check, Cite: req.Cite}
+			continue
+		}
 		expect, err := fx.x.Expand(c.Expect)
 		if err != nil {
 			return manual("the check of %s cannot be filled in: %s", c.Ref, terminalSafe(oneLine(err.Error()))), nil
@@ -186,7 +190,7 @@ func (w *webExplorer) write(ctx context.Context, req plan.WebRequest, end plan.F
 		Replay: string(r.result.Outcome), Cite: req.Cite, Remove: remove,
 	}
 	for _, f := range draft.FailsNow {
-		t.FailsNow = append(t.FailsNow, plan.FailsNow{Element: f.Element, Expect: f.Expect, Shown: f.Shown, Cite: f.Cite})
+		t.FailsNow = append(t.FailsNow, plan.FailsNow{Element: f.Element, Expect: f.Expect, Shown: f.Shown, Cite: f.Cite, Rule: f.Rule})
 	}
 	return plan.WebOutcome{Test: t}, nil
 }
@@ -313,16 +317,30 @@ func (b *flowBrowser) Act(ctx context.Context, a plan.Action) (string, error) {
 		return "", b.x.Drag(ctx, a.Ref, a.To)
 	case plan.ActionCheck:
 		return b.x.Check(ctx, a.Ref)
+	case plan.ActionAbsent, plan.ActionCount, plan.ActionState, plan.ActionAttribute, plan.ActionPage:
+		return b.x.Assert(ctx, a.Claim())
 	}
 	return "", fmt.Errorf("the action %q is not one that a flow does", a.Kind)
 }
 
-func (b *flowBrowser) Compare(ctx context.Context, ref, expect string) (string, bool, error) {
-	shown, err := b.x.Shows(ctx, ref)
+func (b *flowBrowser) Prepare(ctx context.Context, checks []plan.Action) {
+	claims := make([]domain.Check, len(checks))
+	for i, a := range checks {
+		claims[i] = a.Claim()
+	}
+	b.x.Prepare(ctx, claims)
+}
+
+func (b *flowBrowser) Compare(ctx context.Context, a plan.Action) (string, bool, error) {
+	if a.Kind != plan.ActionCheck {
+		r, err := b.x.Test(ctx, a.Claim())
+		return r.Shown, r.Held, err
+	}
+	shown, err := b.x.Shows(ctx, a.Ref)
 	if err != nil {
 		return "", false, err
 	}
-	want, err := b.x.Expand(expect)
+	want, err := b.x.Expand(a.Expect)
 	if err != nil {
 		return "", false, err
 	}
@@ -457,6 +475,10 @@ func printWebPart(w io.Writer, envName string, out plan.Output) {
 	}
 	for _, t := range out.WebTests {
 		for _, f := range t.FailsNow {
+			if f.Rule != "" {
+				fmt.Fprintf(w, "web: %s fails now: the test expects the %s, and the page shows %s\n", t.Scenario.ID, terminalSafe(f.Rule), terminalSafe(f.Shown))
+				continue
+			}
 			fmt.Fprintf(w, "web: %s fails now: %s should show %q and the page shows %q\n", t.Scenario.ID, terminalSafe(f.Element), terminalSafe(f.Expect), terminalSafe(f.Shown))
 		}
 	}

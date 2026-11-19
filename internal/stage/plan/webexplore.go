@@ -42,6 +42,9 @@ type FailsNow struct {
 	Expect  string `json:"expect"`
 	Shown   string `json:"shown"`
 	Cite    string `json:"cite"`
+	// Rule is what the check expects in words, such as "element save is disabled", when it reads more than
+	// a text. Expect is then empty.
+	Rule string `json:"rule,omitempty"`
 }
 
 // WebTest is a test that a flow wrote, and the replay confirmed as the recording predicted.

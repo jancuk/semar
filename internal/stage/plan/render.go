@@ -391,6 +391,10 @@ func writeWebTests(b *strings.Builder, tests []WebTestDraft, ticket string) {
 			fmt.Fprintf(b, "   - Not proved by the test, left to a person: %s\n", shown(w.Unproved, maxTextShown))
 		}
 		for _, f := range w.FailsNow {
+			if f.Rule != "" {
+				fmt.Fprintf(b, "   - Fails now: the test expects the %s, and the page shows %s.\n", shown(f.Rule, maxValueShown), shown(f.Shown, maxValueShown))
+				continue
+			}
 			fmt.Fprintf(b, "   - Fails now: %s should show %s, and the page shows %s.\n", shown(f.Element, maxValueShown), strconv.Quote(shown(f.Expect, maxValueShown)), strconv.Quote(shown(f.Shown, maxValueShown)))
 		}
 	}

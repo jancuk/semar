@@ -117,13 +117,24 @@
   // ID, the role with the name, the text, and a path. A role with a name, and a text, are used only
   // when this element is the one that they pick. A check reads the text of its element, so it never
   // finds the element by that text.
+  // groupPath picks the elements that look like this one: the same tag below the same parent. A check of
+  // how many items there are reads it.
+  function groupPath(el) {
+    const parent = el.parentElement;
+    const tag = el.tagName.toLowerCase();
+    return parent && parent !== document.body ? cssPath(parent) + ' > ' + tag : tag;
+  }
+
   function describe(el, purpose) {
+    if (purpose === 'group') return { locator: { css: groupPath(el) }, hint: (roleOf(el) || el.tagName.toLowerCase()) + '-items' };
     const reading = purpose === 'check';
     const role = roleOf(el);
     const acc = accName(el, role);
     const named = NAMED_ROLES.has(role) ? acc : { name: '', fromContent: false };
     const text = reading || el.tagName === 'SELECT' ? '' : norm(el.innerText);
-    const attrs = TEST_ID_ATTRS.map(a => [a, el.getAttribute(a)]).filter(([a, v]) => v && byTestId(a, v).length === 1);
+    // An element that is not shown cannot be told from the others by what is visible, so its test ID must be the only one.
+    const only = (a, v) => (visible(el) ? byTestId(a, v) : document.querySelectorAll('[' + a + '=' + JSON.stringify(v) + ']')).length === 1;
+    const attrs = TEST_ID_ATTRS.map(a => [a, el.getAttribute(a)]).filter(([a, v]) => v && only(a, v));
     // What the element is called by: a check never calls its element by the text that it reads.
     const label = reading ? (acc.fromContent ? '' : acc.name) : acc.name || (text.length <= 40 ? text : '');
     const hint = (attrs[0] && attrs[0][1]) || label || el.id || el.getAttribute('name') || el.tagName.toLowerCase();
@@ -142,6 +153,9 @@
     }
     return { locator: { css: cssPath(el) }, hint };
   }
+
+  // The explorer of a plan asks for the locator of an element, before an action may take it off the page.
+  window.__semarDescribe = describe;
 
   const TEXT_TYPES = ['text', 'search', 'email', 'tel', 'url', 'password', 'number', ''];
   const PICKER_TYPES = ['date', 'datetime-local', 'time', 'month', 'week'];

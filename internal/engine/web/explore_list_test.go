@@ -38,7 +38,7 @@ func TestThePageListNamesRolesNamesValuesAndStates(t *testing.T) {
 		"Title: Board\n",
 		`heading "Orders"`,
 		`textbox "Amount" value="5"`,
-		`textbox "Password"` + "\n",
+		`textbox "Password" type="password"` + "\n",
 		`button "Refund" disabled`,
 		`button "Save now"`,
 		`link "Boards"`,
@@ -94,5 +94,43 @@ func TestThePageListHolds150LinesAndCutsTextsAt80Characters(t *testing.T) {
 	}
 	if buttons != 40 {
 		t.Errorf("%d buttons are listed, want all 40", buttons)
+	}
+}
+
+const attrPage = `<!doctype html><html><head><title>Account</title></head><body>
+<label>Email <input id="e" type="email" name="email" placeholder="you@shop.example"></label>
+<label>Password <input id="p" type="password" name="pw" placeholder="Your password" value="hunter2-secret" autocomplete="current-password"></label>
+<input type="text" aria-label="Pass" autocomplete="current-password" value="also-secret">
+<a href="/orders?id=1" title="All orders">Orders</a>
+<img alt="Logo" src="/x.png">
+<div data-testid="drawer" style="display:none">Drawer</div>
+<div role="dialog" style="display:none">Dialog text</div>
+<div style="display:none"><button>Buried</button></div>
+</body></html>`
+
+func TestThePageListCarriesTheAttributesOfACheckAndTheHiddenElementsOfAuthors(t *testing.T) {
+	r := newRecRig(t, map[string]string{"/account": attrPage})
+	r.open("/account")
+	l, err := web.NewExplorer(r.rec).List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := l.String()
+	for _, want := range []string{
+		`textbox "Email" placeholder="you@shop.example" name="email" type="email"`,
+		`textbox "Password" placeholder="Your password" name="pw" type="password"` + "\n",
+		`link "Orders" href="/orders?id=1" title="All orders"`,
+		`img "Logo"` + "\n",
+		`generic "Drawer" hidden`,
+		`dialog "Dialog text" hidden`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the list lacks %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"hunter2", "also-secret", "Buried"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("the list holds %q:\n%s", unwanted, got)
+		}
 	}
 }
