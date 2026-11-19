@@ -2045,11 +2045,9 @@ The change is the commits from the base branch to HEAD. --all runs every scenari
 
 A ticket of the change that has a ticket file and no use cases is not planned. On a terminal, run offers to plan it and asks first. With no terminal, or with --no-plan, it never plans, and its exit code is at least 2.
 
-When a test of the run needs a person to review it, on a terminal, run offers the review once the tests ran. A yes runs the review of semar review for those tests, then runs the tests that were approved again, and ends with the status of that second run. With no terminal, or with --no-review, it never asks.
-
 --suite \<name> runs every scenario whose @suite: tag names it, whatever the change is, and no journey; repeat it for more suites. --retries \<n> runs a scenario that failed or was inconclusive again, up to n more times, with a clean browser and session; a scenario that passes on a later attempt passes and is marked flaky. A scenario that sent a request of effects.once is never run again.
 
---ci asks no question, plans nothing, offers no review, and prints where the report is.
+--ci asks no question, plans nothing, and prints where the report is.
 
 Every run writes report.md, report.html, junit.xml and summary.md in its run directory. --report-dir \<dir> copies the four files to \<dir>, which a pipeline can keep as an artifact; a run of journeys that follows a run of scenarios goes to \<dir>/journeys. When GITHUB_STEP_SUMMARY names a file, run appends summary.md to it.
 
@@ -2064,12 +2062,11 @@ semar run [environment]
 | `--all` | Run every scenario and every critical journey, not only those of the change |
 | `--base <text>` | The branch that the change is measured against (default: change.base, else the default branch of origin, else main) |
 | `--build <text>` | The commit that a service with no build probe runs, as \<commit> or \<service>=\<commit>; repeat for more |
-| `--ci` | Ask no question, plan nothing, and offer no review, as on a machine with no terminal |
+| `--ci` | Ask no question and plan nothing, as on a machine with no terminal |
 | `--env <text>` | The environment of semar.yaml to run against (the same as the argument); needed when there are several, and always for a production environment |
 | `--headed` | Show the browser window of a web step |
 | `--no-journeys` | Leave the critical journeys out |
 | `--no-plan` | Never offer to plan a ticket that has no use cases |
-| `--no-review` | Never offer to review the tests that need a person after the run |
 | `--report-dir <text>` | Copy report.md, report.html, junit.xml and summary.md of the run to this directory, which is created when it is missing |
 | `--retries <n>` | Run a scenario that failed or was inconclusive again, up to this many more times, from 0 to 5 (default: replay.retries, else 0) |
 | `--scenario <text>` | Run the scenario with this ID, and no journey; repeat for more |

@@ -46,7 +46,6 @@ type runFlags struct {
 	retriesSet bool
 	noJourneys bool
 	noPlan     bool
-	noReview   bool
 	env        string
 	builds     []string
 	base       string
@@ -65,9 +64,8 @@ func newRunCommand(o options) *cobra.Command {
 		Long: "Run every scenario whose ticket is a ticket of the change, then every journey with criticality critical, and end with the status of the change.\n" +
 			"The change is the commits from the base branch to HEAD. --all runs every scenario and every critical journey, and --scenario <id> runs the scenarios named and no journey.\n" +
 			"A ticket of the change that has a ticket file and no use cases is not planned. On a terminal, run offers to plan it and asks first. With no terminal, or with --no-plan, it never plans, and its exit code is at least 2.\n" +
-			"When a test of the run needs a person to review it, on a terminal, run offers the review once the tests ran. A yes runs the review of semar review for those tests, then runs the tests that were approved again, and ends with the status of that second run. With no terminal, or with --no-review, it never asks.\n" +
 			"--suite <name> runs every scenario whose @suite: tag names it, whatever the change is, and no journey; repeat it for more suites. --retries <n> runs a scenario again that failed, was inconclusive, or was blocked by a failed setup step, up to n more times, with a clean browser and session; a scenario that passes on a later attempt passes and is marked flaky. A scenario that sent a request of effects.once is never run again.\n" +
-			"--ci asks no question, plans nothing, offers no review, and prints where the report is.\n" +
+			"--ci asks no question, plans nothing, and prints where the report is.\n" +
 			"Every run writes report.md, report.html, junit.xml and summary.md in its run directory. --report-dir <dir> copies the four files to <dir>, which a pipeline can keep as an artifact; a run of journeys that follows a run of scenarios goes to <dir>/journeys. When GITHUB_STEP_SUMMARY names a file, run appends summary.md to it.\n" +
 			"Exit 0 when everything that ran passed, 1 when something failed, and 2 otherwise.",
 		Args: cobra.MaximumNArgs(1),
@@ -90,7 +88,7 @@ func newRunCommand(o options) *cobra.Command {
 				}
 			}
 			if f.ci {
-				f.noPlan, f.noReview = true, true
+				f.noPlan = true
 			}
 			return runDaily(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
 		},
@@ -98,12 +96,11 @@ func newRunCommand(o options) *cobra.Command {
 	cmd.Flags().StringArrayVar(&f.scenarios, "scenario", nil, "run the scenario with this ID, and no journey; repeat for more")
 	cmd.Flags().StringArrayVar(&f.suites, "suite", nil, "run every scenario of this suite, and no journey; repeat for more")
 	cmd.Flags().IntVar(&f.retries, "retries", 0, "run a scenario that failed or was inconclusive again, up to this many more times, from 0 to 5 (default: replay.retries, else 0)")
-	cmd.Flags().BoolVar(&f.ci, "ci", false, "ask no question, plan nothing, and offer no review, as on a machine with no terminal")
+	cmd.Flags().BoolVar(&f.ci, "ci", false, "ask no question and plan nothing, as on a machine with no terminal")
 	cmd.Flags().StringVar(&f.reportDir, "report-dir", "", "copy report.md, report.html, junit.xml and summary.md of the run to this directory, which is created when it is missing")
 	cmd.Flags().BoolVar(&f.all, "all", false, "run every scenario and every critical journey, not only those of the change")
 	cmd.Flags().BoolVar(&f.noJourneys, "no-journeys", false, "leave the critical journeys out")
 	cmd.Flags().BoolVar(&f.noPlan, "no-plan", false, "never offer to plan a ticket that has no use cases")
-	cmd.Flags().BoolVar(&f.noReview, "no-review", false, "never offer to review the tests that need a person after the run")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to run against (the same as the argument); needed when there are several, and always for a production environment")
 	cmd.Flags().StringArrayVar(&f.builds, "build", nil, "the commit that a service with no build probe runs, as <commit> or <service>=<commit>; repeat for more")
 	cmd.Flags().StringVar(&f.base, "base", "", "the branch that the change is measured against (default: change.base, else the default branch of origin, else main)")

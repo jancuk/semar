@@ -127,26 +127,6 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 			code = max(code, ExitUndecided)
 		}
 	}
-	// The review comes after the whole run, and a scenario that the person settles runs once more, so
-	// that the status and the exit code are those of the final state.
-	if len(runs) > 0 && len(sel.scenarios) > 0 && !f.noReview && o.Terminal() && ctx.Err() == nil && !runs[0].interrupted {
-		first := runs[0]
-		if again := reviewAfterRun(ctx, stdout, stderr, o, f, envName, answers, first.record.Results); len(again) > 0 {
-			rerun := slices.DeleteFunc(slices.Clone(sel.scenarios), func(sc domain.Scenario) bool { return !slices.Contains(again, sc.ID) })
-			fin, err := executeScenarios(ctx, stderr, o, f.dir, cfg, envName, env, declared, rerun, f.headed, announce)
-			if err != nil {
-				return err
-			}
-			runs = append(runs, fin)
-			if err := printScenarioRun(stdout, envName, fin); err != nil {
-				return err
-			}
-			scenarioExit = ExitUndecided
-			if !fin.interrupted {
-				scenarioExit = report.ExitCode(mergeResults(first.record.Results, fin.record.Results))
-			}
-		}
-	}
 	code = max(code, scenarioExit)
 	if sel.skipped > 0 {
 		fmt.Fprintf(stderr, "semar: %s was skipped, so this run does not cover every journey\n", plural(sel.skipped, "journey file"))

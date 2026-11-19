@@ -159,3 +159,37 @@ func TestRunRunsTheCriticalJourneysAfterTheScenarios(t *testing.T) {
 	res = r.must(t, cli.ExitUndecided, "run", "--all", "--no-journeys")
 	contains(t, "--no-journeys", res.stdout, "no scenario ran")
 }
+
+type failingReader struct{ t *testing.T }
+
+func (f failingReader) Read([]byte) (int, error) {
+	f.t.Error("run read a line from standard input")
+	return 0, os.ErrClosed
+}
+
+func TestRunHasNoNoReviewFlag(t *testing.T) {
+	r := dailyRepo(t)
+	res := r.semar(t, t.Context(), "run", "--no-review")
+	if res.code != cli.ExitError {
+		t.Fatalf("exit %d, want %d", res.code, cli.ExitError)
+	}
+	contains(t, "stderr", res.stderr, "unknown flag: --no-review")
+}
+
+func TestRunOnATerminalAsksNothingAfterTheTests(t *testing.T) {
+	r := dailyRepo(t)
+	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
+	r.opts.Terminal = func() bool { return true }
+	r.opts.Stdin = failingReader{t}
+	res := r.semar(t, t.Context(), "run", "--scenario", scenarioID)
+	if n := strings.Count(res.stdout, "report:"); n != 1 {
+		t.Errorf("%d report lines, want 1:\n%s", n, res.stdout)
+	}
+	if strings.Contains(res.stdout, "Review") || strings.Contains(res.stdout, "review them") {
+		t.Errorf("run offered a review:\n%s", res.stdout)
+	}
+	runs, err := os.ReadDir(r.path(".semar", "runs"))
+	if err != nil || len(runs) != 1 {
+		t.Errorf("run directories: %v, %v", len(runs), err)
+	}
+}

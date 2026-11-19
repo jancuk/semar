@@ -485,7 +485,7 @@ func replayScenario(ctx context.Context, o options, dir, envName, app, id string
 	var r replayed
 	var stderr bytes.Buffer
 	flags := runFlags{
-		scenarios: []string{id}, env: envName, dir: dir, builds: builds, noReview: true,
+		scenarios: []string{id}, env: envName, dir: dir, builds: builds,
 		done: func(fin finishedRun) {
 			if len(fin.record.Results) == 1 {
 				r.result, r.report, r.blocked = &fin.record.Results[0], fin.reportPath, fin.blocked

@@ -167,18 +167,11 @@ func TestRunCIAsksNoQuestionOnATerminal(t *testing.T) {
 	r := newRepo(t, repoOptions{})
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
 	r.opts.Terminal = func() bool { return true }
+	r.opts.Stdin = failingReader{t}
 
-	r.opts.Stdin = strings.NewReader("n\n")
-	res := r.must(t, cli.ExitUndecided, "run", "--all")
-	contains(t, "the run with no --ci", res.stdout, "Review it now? [Y/n]")
-
-	r.opts.Stdin = strings.NewReader("y\ny\ny\n")
-	res = r.must(t, cli.ExitUndecided, "run", "--all", "--ci")
+	res := r.must(t, cli.ExitUndecided, "run", "--all", "--ci")
 	if strings.Contains(res.stdout, "?") || strings.Contains(res.stdout, "[Y/n]") {
 		t.Errorf("--ci asked a question:\n%s", res.stdout)
 	}
 	contains(t, "the run", squash(res.stdout), scenarioID+" needs review", "report: ")
-	if got := r.must(t, cli.ExitUndecided, "run", "--all", "--ci").stdout; !strings.Contains(squash(got), scenarioID+" needs review") {
-		t.Errorf("--ci approved something:\n%s", got)
-	}
 }
