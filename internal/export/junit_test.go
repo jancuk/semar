@@ -279,3 +279,30 @@ func TestJUnitDeterministic(t *testing.T) {
 		t.Error("two writes of the same run differ")
 	}
 }
+
+func modelChecks(r export.Run, byModel int) export.Run {
+	var cs []domain.CheckResult
+	for i := range 3 {
+		cs = append(cs, domain.CheckResult{Step: "s", Index: i, Source: "ticket", State: domain.CheckTrue, ByModel: i < byModel})
+	}
+	cs = append(cs, domain.CheckResult{Step: "s", Index: -1, Source: domain.SourceInvariant, State: domain.CheckTrue})
+	r.Scenarios[0].Result.Checks = cs
+	return r
+}
+
+func TestJUnitCarriesTheModelCount(t *testing.T) {
+	has := func(r export.Run) (string, bool) {
+		for _, p := range decodeJUnit(t, render(t, writeJUnit, r)).Suites[0].Cases[0].Properties {
+			if p.Name == "semar.byModel" {
+				return p.Value, true
+			}
+		}
+		return "", false
+	}
+	if v, ok := has(modelChecks(oneOutcome(domain.OutcomePassed), 2)); !ok || v != "2" {
+		t.Errorf("semar.byModel = %q, %v; want 2", v, ok)
+	}
+	if v, ok := has(modelChecks(oneOutcome(domain.OutcomePassed), 0)); ok {
+		t.Errorf("semar.byModel = %q with no model result", v)
+	}
+}

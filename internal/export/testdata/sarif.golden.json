@@ -10,7 +10,7 @@
             {
               "id": "semar/expected-result-not-met",
               "shortDescription": {
-                "text": "A confirmed expected result was not met"
+                "text": "An expected result was not met"
               }
             },
             {
@@ -53,6 +53,34 @@
           ],
           "partialFingerprints": {
             "semar/v1": "2532763b96845c51e6cf92da414d62d67bf3f01bcaab4c07b2f41999e2067976"
+          },
+          "properties": {
+            "semarRun": "r-20261117T090000Z-1a2b",
+            "semarScenario": "SHOP-482-01",
+            "semarStep": "refund-too-much"
+          }
+        },
+        {
+          "ruleId": "semar/expected-result-not-met",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {
+            "text": "SHOP-482-01 step refund-too-much: expected $.error.code equals REFUND_EXCEEDS_TOTAL, observed $.error.code is missing (source diff)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".semar/scenarios/SHOP-482/SHOP-482-01.feature"
+                },
+                "region": {
+                  "startLine": 14
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "semar/v1": "0d045b756f52bf13615e304e97946bd08d9c2ebdfabf1a4265f9b1292a7c0aa3"
           },
           "properties": {
             "semarRun": "r-20261117T090000Z-1a2b",

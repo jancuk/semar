@@ -105,6 +105,9 @@ func CTRF(w io.Writer, r Run) error {
 			t.Retries, t.Flaky = n-1, sc.Result.Flaky
 			t.Extra["semarAttempts"] = attemptOutcomes(sc.Result.Attempts)
 		}
+		if n, _ := sc.Result.ModelCount(); n > 0 {
+			t.Extra["semarByModel"] = fmt.Sprint(n)
+		}
 		if sc.Result.Outcome != domain.OutcomePassed {
 			t.Message, t.Trace = reasonTexts(sc.Result.Reasons)
 		}

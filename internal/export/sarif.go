@@ -22,7 +22,7 @@ const (
 )
 
 var sarifRules = []sarifRule{
-	{ID: "semar/expected-result-not-met", ShortDescription: sarifText{Text: "A confirmed expected result was not met"}},
+	{ID: "semar/expected-result-not-met", ShortDescription: sarifText{Text: "An expected result was not met"}},
 	{ID: "semar/invariant-broken", ShortDescription: sarifText{Text: "A built-in invariant was broken"}},
 	{ID: "semar/journey-failed", ShortDescription: sarifText{Text: "A journey failed"}},
 }
@@ -148,8 +148,8 @@ func sarifJourneyResult(r Run, jc journeyCase) sarifResult {
 	}
 }
 
-// findingRule says which rule a check result breaks. A false check that nobody confirmed
-// is not a finding, and neither is a check that was not evaluated.
+// findingRule says which rule a check result breaks. Every false check is a finding, whoever
+// wrote the expected result. A check that was not evaluated is not.
 func findingRule(c domain.CheckResult) (int, bool) {
 	if c.State != domain.CheckFalse {
 		return 0, false
@@ -157,7 +157,7 @@ func findingRule(c domain.CheckResult) (int, bool) {
 	switch {
 	case c.Source == domain.SourceInvariant:
 		return ruleInvariant, true
-	case c.Confirmed && c.Index >= 0:
+	case c.Index >= 0:
 		return ruleExpectedNotMet, true
 	}
 	return 0, false
@@ -169,7 +169,11 @@ func sarifResultFor(r Run, sc Scenario, c domain.CheckResult, rule int) sarifRes
 	if rule == ruleInvariant {
 		msg = fmt.Sprintf("%s step %s broke an invariant: expected %s, observed %s", id, c.Step, c.Expected, c.Observed)
 	} else {
-		msg = fmt.Sprintf("%s step %s: expected %s, observed %s (source %s)", id, c.Step, c.Expected, c.Observed, c.Source)
+		by := ""
+		if c.ByModel {
+			by = ", by model"
+		}
+		msg = fmt.Sprintf("%s step %s: expected %s, observed %s (source %s%s)", id, c.Step, c.Expected, c.Observed, c.Source, by)
 	}
 	if c.Detail != "" {
 		msg += ": " + c.Detail

@@ -194,3 +194,15 @@ func TestCTRFDeterministic(t *testing.T) {
 		t.Error("two writes of the same run differ")
 	}
 }
+
+func TestCTRFCarriesTheModelCount(t *testing.T) {
+	extra := func(r export.Run) map[string]string {
+		return decodeCTRF(t, render(t, func(b *bytes.Buffer, r export.Run) error { return export.CTRF(b, r) }, r)).Results.Tests[0].Extra
+	}
+	if got := extra(modelChecks(oneOutcome(domain.OutcomePassed), 2))["semarByModel"]; got != "2" {
+		t.Errorf("semarByModel = %q, want 2", got)
+	}
+	if v, ok := extra(modelChecks(oneOutcome(domain.OutcomePassed), 0))["semarByModel"]; ok {
+		t.Errorf("semarByModel = %q with no model result", v)
+	}
+}

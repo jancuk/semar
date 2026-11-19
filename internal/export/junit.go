@@ -112,6 +112,9 @@ func JUnit(w io.Writer, r Run) error {
 			c.Properties = addProperty(c.Properties, "semar.flaky", fmt.Sprint(sc.Result.Flaky))
 			c.addAttempts(sc.Result)
 		}
+		if n, _ := sc.Result.ModelCount(); n > 0 {
+			c.Properties = addProperty(c.Properties, "semar.byModel", fmt.Sprint(n))
+		}
 		message, detail := reasonTexts(sc.Result.Reasons)
 		message, detail = xmlText(message), xmlText(detail)
 		outcome := xmlText(cutMessage(string(sc.Result.Outcome)))

@@ -86,8 +86,8 @@ func TestSARIFShape(t *testing.T) {
 		t.Errorf("automationDetails = %+v", run.AutomationDetails)
 	}
 	results := *run.Results
-	if len(results) != 3 {
-		t.Fatalf("%d results, want 3: the confirmed false check and the invariant of SHOP-482-01, and the check of LEGACY-1", len(results))
+	if len(results) != 4 {
+		t.Fatalf("%d results, want 4: the two false checks and the invariant of SHOP-482-01, and the check of LEGACY-1", len(results))
 	}
 	for _, res := range results {
 		if res.RuleIndex == nil || *res.RuleIndex < 0 || *res.RuleIndex > 1 || rules[*res.RuleIndex].ID != res.RuleID {
@@ -121,10 +121,14 @@ func TestSARIFShape(t *testing.T) {
 		t.Errorf("properties = %v", first.Properties)
 	}
 	second := results[1]
-	if second.RuleID != "semar/invariant-broken" || *second.RuleIndex != 1 {
+	if second.RuleID != "semar/expected-result-not-met" || !strings.HasSuffix(second.Message.Text, "(source diff)") {
 		t.Errorf("second = %+v", second)
 	}
-	gone := results[2]
+	third := results[2]
+	if third.RuleID != "semar/invariant-broken" || *third.RuleIndex != 1 {
+		t.Errorf("third = %+v", third)
+	}
+	gone := results[3]
 	if len(gone.Locations) != 0 || !strings.HasPrefix(gone.Message.Text, "LEGACY-1 ") {
 		t.Errorf("a scenario with no file: %+v", gone)
 	}
@@ -152,17 +156,28 @@ func TestSARIFOnlyFailed(t *testing.T) {
 	}
 }
 
-func TestSARIFUnconfirmedFalseNotAFinding(t *testing.T) {
-	r := oneOutcome(domain.OutcomeFailed)
-	r.Scenarios[0].Result.Checks = []domain.CheckResult{
-		{Step: "s", Index: 0, Source: "diff", State: domain.CheckFalse, Expected: "a", Observed: "b", Confirmed: false},
-		{Step: "s", Index: 1, Source: "ticket", State: domain.CheckTrue, Expected: "a", Observed: "a", Confirmed: true},
-		{Step: "s", Index: 2, Source: "ticket", State: domain.CheckNotEvaluated, Expected: "a", Confirmed: true},
-		{Step: "s", Index: -1, Source: domain.SourceInvariant, State: domain.CheckTrue, Expected: "no server error", Observed: "status 200", Confirmed: true},
-	}
-	m := decodeSARIF(t, render(t, writeSARIF, r))
-	if n := len(*m.Runs[0].Results); n != 0 {
-		t.Errorf("%d results, want none", n)
+func TestSARIFReportsEveryExpectedResultThatDoesNotHold(t *testing.T) {
+	for _, confirmed := range []bool{false, true} {
+		r := oneOutcome(domain.OutcomeFailed)
+		r.Scenarios[0].Result.Checks = []domain.CheckResult{
+			{Step: "s", Index: 0, Source: "diff", State: domain.CheckFalse, Expected: "a", Observed: "b", Confirmed: confirmed},
+			{Step: "s", Index: 1, Source: "ticket", State: domain.CheckTrue, Expected: "a", Observed: "a", Confirmed: true},
+			{Step: "s", Index: 2, Source: "ticket", State: domain.CheckNotEvaluated, Expected: "a", Confirmed: true},
+			{Step: "s", Index: -1, Source: domain.SourceInvariant, State: domain.CheckTrue, Expected: "no server error", Observed: "status 200", Confirmed: true},
+		}
+		res := *decodeSARIF(t, render(t, writeSARIF, r)).Runs[0].Results
+		if len(res) != 1 || res[0].RuleID != "semar/expected-result-not-met" {
+			t.Fatalf("confirmed %v: results = %+v, want one expected-result-not-met", confirmed, res)
+		}
+		if strings.Contains(res[0].Message.Text, "by model") {
+			t.Errorf("a person's result says by model: %q", res[0].Message.Text)
+		}
+
+		r.Scenarios[0].Result.Checks[0].ByModel = true
+		res = *decodeSARIF(t, render(t, writeSARIF, r)).Runs[0].Results
+		if got := res[0].Message.Text; !strings.HasSuffix(got, "(source diff, by model)") {
+			t.Errorf("message = %q, want it to end with (source diff, by model)", got)
+		}
 	}
 }
 
@@ -242,11 +257,15 @@ func TestSARIFFingerprintStable(t *testing.T) {
 		return out
 	}
 	a, b := fp(first), fp(second)
-	if len(a) != 3 || strings.Join(a, ",") != strings.Join(b, ",") {
+	if len(a) != 4 || strings.Join(a, ",") != strings.Join(b, ",") {
 		t.Errorf("fingerprints changed with the run:\n%v\n%v", a, b)
 	}
-	if a[0] == a[1] || a[1] == a[2] || a[0] == a[2] {
-		t.Errorf("two findings share a fingerprint: %v", a)
+	seen := map[string]bool{}
+	for _, f := range a {
+		if seen[f] {
+			t.Errorf("two findings share a fingerprint: %v", a)
+		}
+		seen[f] = true
 	}
 
 	// two invariants of one step are two findings
