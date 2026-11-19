@@ -204,7 +204,7 @@ func printAskedDone(w io.Writer, f initFlags, lookup func(string) (string, bool)
 		}
 	}
 	if len(missing) == 0 && !f.noToken {
-		fmt.Fprintln(w, " Next: semar run")
+		fmt.Fprintln(w, " "+initNext(f))
 		return
 	}
 	fmt.Fprintln(w)
@@ -214,7 +214,16 @@ func printAskedDone(w io.Writer, f initFlags, lookup func(string) (string, bool)
 	for _, m := range missing {
 		fmt.Fprintln(w, m)
 	}
-	fmt.Fprintln(w, "Next: semar run")
+	fmt.Fprintln(w, initNext(f))
+}
+
+// initNext is the command that follows init. A web application has no token, so its tests need the
+// sign-in of semar login first.
+func initNext(f initFlags) string {
+	if f.noToken {
+		return "Next: semar login"
+	}
+	return "Next: semar run"
 }
 
 const (

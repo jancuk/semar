@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 
@@ -42,14 +41,16 @@ func guideCommands(t *testing.T) map[string]string {
 	return out
 }
 
-// leafCommands gives each command that a person can run, by its full name.
+// leafCommands gives each command that a person can run, by its full name. A command that the help
+// hides still runs, so the guide describes it. A removed command only names its successor.
 func leafCommands(root *cobra.Command) map[string]*cobra.Command {
 	out := map[string]*cobra.Command{}
 	var walk func(*cobra.Command)
 	walk = func(c *cobra.Command) {
 		for _, sub := range c.Commands() {
+			_, removed := sub.Annotations[removedAnnotation]
 			switch {
-			case sub.Hidden, sub.Name() == "help", sub.Name() == "completion":
+			case removed, sub.Name() == "help", sub.Name() == "completion":
 			case sub.HasSubCommands():
 				walk(sub)
 			default:
@@ -73,12 +74,6 @@ func documentedFlags(c *cobra.Command) map[string]bool {
 	return out
 }
 
-// awaitingTheGuide are flags that unit C1 of plan 35 writes into the guide. Remove an entry when it does.
-var awaitingTheGuide = map[string][]string{"semar run": {"suite", "retries", "ci", "report-dir"}}
-
-// guideDue names commands whose section of the guide is written by unit C1 of plan 35, after the merge.
-var guideDue = map[string]bool{"semar import": true}
-
 func TestTheGuideListsEveryCommandWithEveryFlag(t *testing.T) {
 	guide := guideCommands(t)
 	commands := leafCommands(newRoot(io.Discard, io.Discard, options{}.withDefaults()))
@@ -88,18 +83,12 @@ func TestTheGuideListsEveryCommandWithEveryFlag(t *testing.T) {
 
 	for name, c := range commands {
 		body, ok := guide[name]
-		if guideDue[name] && !ok {
-			continue
-		}
 		if !ok {
 			t.Errorf("docs/GUIDE.md has no heading #### `%s`", name)
 			continue
 		}
 		flags := documentedFlags(c)
 		for flag := range flags {
-			if slices.Contains(awaitingTheGuide[name], flag) {
-				continue
-			}
 			if !strings.Contains(body, "`--"+flag+"`") && !strings.Contains(body, "`--"+flag+" ") {
 				t.Errorf("docs/GUIDE.md: %s does not list --%s", name, flag)
 			}

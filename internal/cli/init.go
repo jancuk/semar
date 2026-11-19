@@ -170,12 +170,14 @@ func printInitDone(w io.Writer, path string, f initFlags) {
 		printAccounts(w, f)
 		return
 	}
-	if f.noToken {
-		fmt.Fprintln(w, noTokenLine)
-	} else {
+	if !f.noToken {
 		fmt.Fprintf(w, "export %s=<the token of the test account> before semar run\n", f.tokenEnv)
+		printAccounts(w, f)
+		return
 	}
+	fmt.Fprintln(w, noTokenLine)
 	printAccounts(w, f)
+	fmt.Fprintln(w, initNext(f))
 }
 
 // printAccounts tells the person which variable each extra account needs.

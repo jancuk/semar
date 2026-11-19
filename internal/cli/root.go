@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"os/user"
+	"strings"
 	"syscall"
 	"time"
 
@@ -186,9 +187,7 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 	}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.AddGroup(&cobra.Group{ID: groupDaily, Title: "Every day"}, &cobra.Group{ID: groupMore, Title: "More"})
-	root.SetHelpCommandGroupID(groupMore)
-	root.SetCompletionCommandGroupID(groupMore)
+	root.AddGroup(&cobra.Group{ID: groupDaily, Title: "Every day"}, &cobra.Group{ID: groupAlso, Title: "Also"})
 	version := &cobra.Command{
 		Use:   "version",
 		Short: "Print the semar version",
@@ -204,10 +203,22 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 			root.AddCommand(c)
 		}
 	}
-	grouped(groupDaily, newInitCommand(o), newLoginCommand(o), newPlanCommand(o), newRunCommand(o), newRecordCommand(o), newCheckCommand(o),
-		newDeferCommand(o), newLogCommand(), newShowCommand(), newRmCommand(o))
-	grouped(groupMore, newImportCommand(o), newReviewCommand(o), newStatusCommand(o), newChangesCommand(), newExportCommand(), newFixtureCommand(o), newJourneyCommand(o), newProvidersCommand(o),
-		newDashboardCmd(o), newScenariosCommand(), newScreensCommand(o), newScriptCommand(), version)
+	grouped(groupDaily, newInitCommand(o), newLoginCommand(o), newPlanCommand(o), newRunCommand(o), newShowCommand())
+	grouped(groupAlso, newCheckCommand(o), newRecordCommand(o), newImportCommand(o), newRmCommand(o), newLogCommand())
+	// The help shows the commands of a normal day. The others still work, and the guide describes them.
+	for _, c := range []*cobra.Command{newDeferCommand(o), newReviewCommand(o), newStatusCommand(o), newChangesCommand(), newExportCommand(),
+		newFixtureCommand(o), newJourneyCommand(o), newProvidersCommand(o), newDashboardCmd(o), newScenariosCommand(), newScreensCommand(o),
+		newScriptCommand(), version} {
+		c.Hidden = true
+		root.AddCommand(c)
+	}
+	root.CompletionOptions.HiddenDefaultCmd = true
+	root.InitDefaultHelpCmd()
+	if help, _, err := root.Find([]string{"help"}); err == nil && help != root {
+		help.Hidden, help.GroupID = true, groupAlso
+	}
+	// The template of cobra lists the help command even when it is hidden.
+	root.SetUsageTemplate(strings.ReplaceAll(root.UsageTemplate(), `(or .IsAvailableCommand (eq .Name "help"))`, ".IsAvailableCommand"))
 	root.AddCommand(removedCommand("confirm", "use semar review"), removedCommand("ledger", "use semar status, semar check, or semar defer"),
 		removedCommand("activity", "use semar show --activity"))
 	return root
@@ -215,8 +226,11 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 
 const (
 	groupDaily = "daily"
-	groupMore  = "more"
+	groupAlso  = "also"
 )
+
+// removedAnnotation marks a command that only says what replaced it.
+const removedAnnotation = "removed"
 
 // removedCommand answers a name that Semar no longer has with one line that names the new command.
 // It has no alias: the old arguments mean something else now.
@@ -224,6 +238,7 @@ func removedCommand(name, instead string) *cobra.Command {
 	return &cobra.Command{
 		Use:                name,
 		Hidden:             true,
+		Annotations:        map[string]string{removedAnnotation: instead},
 		DisableFlagParsing: true,
 		Args:               cobra.ArbitraryArgs,
 		RunE: func(*cobra.Command, []string) error {

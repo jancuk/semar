@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -27,30 +28,42 @@ func TestUnknownCommandIsAUsageError(t *testing.T) {
 	}
 }
 
-func TestHelpGroupsTheEverydayCommandsFirst(t *testing.T) {
+func TestHelpListsTheCommandsOfANormalDay(t *testing.T) {
 	var out, errw bytes.Buffer
 	if code := cli.Run(context.Background(), []string{"--help"}, &out, &errw); code != cli.ExitOK {
 		t.Fatalf("exit %d, stderr %q", code, errw.String())
 	}
 	help := out.String()
-	every, more := strings.Index(help, "Every day"), strings.Index(help, "More")
-	if every < 0 || more < every {
-		t.Fatalf("the help has no Every day group before More:\n%s", help)
+	every, also := strings.Index(help, "\nEvery day\n"), strings.Index(help, "\nAlso\n")
+	if every < 0 || also < every {
+		t.Fatalf("the help has no Every day group before Also:\n%s", help)
 	}
-	for _, name := range []string{"init", "login", "plan", "run", "check", "defer", "record", "log", "show", "rm"} {
-		at := strings.Index(help, "\n  "+name+" ")
-		if at < every || at > more {
-			t.Errorf("%s is not in the Every day group:\n%s", name, help)
+	listed := regexp.MustCompile(`(?m)^  ([a-z]+) `).FindAllStringSubmatchIndex(help, -1)
+	var daily, more []string
+	for _, m := range listed {
+		name := help[m[2]:m[3]]
+		if m[0] < every {
+			continue
+		}
+		if m[0] < also {
+			daily = append(daily, name)
+		} else if m[0] < strings.Index(help, "\nFlags:") {
+			more = append(more, name)
 		}
 	}
-	for _, name := range []string{"review", "status", "changes", "export", "fixture", "journey", "providers", "dashboard", "scenarios", "screens", "script", "version", "completion"} {
-		if at := strings.Index(help, "\n  "+name+" "); at < more {
-			t.Errorf("%s is not in the More group:\n%s", name, help)
-		}
+	if got := strings.Join(daily, " "); got != "init login plan run show" {
+		t.Errorf("Every day lists %q, want init login plan run show:\n%s", got, help)
 	}
-	for _, gone := range []string{"confirm", "ledger", "activity"} {
-		if strings.Contains(help, "\n  "+gone+" ") {
-			t.Errorf("the removed command %s is in the help", gone)
+	if got := strings.Join(more, " "); got != "check import log record rm" {
+		t.Errorf("Also lists %q, want check import log record rm:\n%s", got, help)
+	}
+}
+
+func TestACommandThatTheHelpHidesStillRuns(t *testing.T) {
+	for _, args := range [][]string{{"version"}, {"status", "--help"}, {"review", "--help"}, {"defer", "--help"}, {"help", "run"}, {"completion", "bash"}} {
+		var out, errw bytes.Buffer
+		if code := cli.Run(context.Background(), args, &out, &errw); code != cli.ExitOK || out.Len() == 0 {
+			t.Errorf("semar %v: exit %d, stdout %d bytes, stderr %q", args, code, out.Len(), errw.String())
 		}
 	}
 }

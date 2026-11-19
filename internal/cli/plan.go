@@ -86,8 +86,6 @@ func newPlanCommand(o options) *cobra.Command {
 	cmd.Flags().BoolVar(&f.noTrial, "no-trial", false, "do not send the read-only steps of the draft to the environment before the plan is written, for this run")
 	cmd.Flags().BoolVar(&f.noWeb, "no-web", false, "do not explore the web criteria in a browser: each stays a manual check, for this run")
 	cmd.Flags().BoolVar(&f.noEdge, "no-edge", false, "do not draft edge cases and cases as another account from the API document, for this run (default: plan.maxEdgeCases)")
-	// Hidden until docs/GUIDE.md lists it: the guide test refuses a visible flag that the guide lacks.
-	_ = cmd.Flags().MarkHidden("no-edge")
 	cmd.Flags().IntVar(&f.maxScenarios, "max-scenarios", 0, "the most scenarios to draft (default: plan.maxScenarios)")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to plan for; needed when there are several. With --base-url, the name of the new environment (default uat, or production with --kind production)")
 	cmd.Flags().StringVar(&f.authProfile, "auth-profile", "", "the auth profile of the scenarios; needed when there are several and none is named default")

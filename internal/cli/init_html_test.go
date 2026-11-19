@@ -57,6 +57,9 @@ func TestInitWritesAnAccountWithNoTokenForAWebAddress(t *testing.T) {
 	p := noTokenRepo(t)
 	res := p.must(t, cli.ExitOK, "init", "--base-url", srv.URL, "--service", "orders")
 	contains(t, "stdout", res.stdout, "wrote ", "The address answers with a web page, so the account default has no token. To add one later, add session and secrets to authProfiles.default in .semar/semar.yaml.\n")
+	if !strings.HasSuffix(res.stdout, "\nNext: semar login\n") {
+		t.Errorf("init of a web address does not end with semar login as the next step:\n%s", res.stdout)
+	}
 	if strings.Contains(res.stdout, "export SEMAR_TOKEN") {
 		t.Errorf("init asks for a token variable:\n%s", res.stdout)
 	}
@@ -166,6 +169,9 @@ func TestInitQuestionAcceptsNoTokenForAWebAddress(t *testing.T) {
 	p.opts.HTTP = http.DefaultClient
 	res := p.must(t, cli.ExitOK, "init", "--service", "orders")
 	contains(t, "stdout", res.stdout, "Environment variable that holds the token, or Enter for none: ", "the account default has no token")
+	if !strings.HasSuffix(res.stdout, "\nNext: semar login\n") || strings.Contains(res.stdout, "semar run") {
+		t.Errorf("init of a web address does not end with semar login as the next step:\n%s", res.stdout)
+	}
 	if strings.Contains(res.stdout, "export SEMAR_TOKEN") {
 		t.Errorf("init asks for a token variable:\n%s", res.stdout)
 	}
