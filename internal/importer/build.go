@@ -329,6 +329,7 @@ func (d Draft) Finalize(id domain.ScenarioID, status int) (domain.Scenario, doma
 	s := d.Script
 	s.Scenario = id
 	s.ExpectHash = domain.ExpectHash(sc)
+	s.ShapeHash = domain.ShapeHash(sc)
 	if _, err := scenario.Render(sc, ""); err != nil {
 		return sc, s, fmt.Errorf("it cannot be written as a scenario: %w", err)
 	}

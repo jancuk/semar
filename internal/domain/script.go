@@ -1,10 +1,17 @@
 package domain
 
+import "time"
+
 type Script struct {
-	APIVersion string       `yaml:"apiVersion"`
-	Kind       string       `yaml:"kind"`
-	Scenario   ScenarioID   `yaml:"scenario"`
-	ExpectHash Hash         `yaml:"expectHash"`
+	APIVersion string     `yaml:"apiVersion"`
+	Kind       string     `yaml:"kind"`
+	Scenario   ScenarioID `yaml:"scenario"`
+	ExpectHash Hash       `yaml:"expectHash"`
+	// ShapeHash is the ShapeHash of the scenario the script was stored for. Empty in a script stored
+	// before Plan 36, which is used only on an exact expectation hash.
+	ShapeHash Hash `yaml:"shapeHash,omitempty"`
+	// StoredAt is when PutScript stored the script. Zero before Plan 36.
+	StoredAt   time.Time    `yaml:"storedAt,omitempty"`
 	AuthoredBy ProviderRef  `yaml:"authoredBy"`
 	Steps      []ScriptStep `yaml:"steps"`
 }

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -49,6 +50,14 @@ func Marshal(s domain.Script) ([]byte, error) {
 	put(root, "kind", e.str("kind", s.Kind))
 	put(root, "scenario", e.str("scenario", string(s.Scenario)))
 	put(root, "expectHash", e.quoted("expectHash", string(s.ExpectHash)))
+	if s.ShapeHash != "" {
+		put(root, "shapeHash", e.quoted("shapeHash", string(s.ShapeHash)))
+	}
+	if !s.StoredAt.IsZero() {
+		s.StoredAt = s.StoredAt.UTC()
+		want.StoredAt = s.StoredAt
+		put(root, "storedAt", plain(s.StoredAt.Format(time.RFC3339Nano)))
+	}
 	ref := mapping()
 	put(ref, "instance", e.str("authoredBy.instance", s.AuthoredBy.Instance))
 	put(ref, "model", e.str("authoredBy.model", s.AuthoredBy.Model))

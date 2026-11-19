@@ -65,6 +65,7 @@ func storeScript(repo string, s domain.Script) (domain.Scenario, domain.Script, 
 	}
 	want := domain.ExpectHash(sc)
 	var problems []string
+	s.ShapeHash = domain.ShapeHash(sc)
 	switch s.ExpectHash {
 	case "":
 		s.ExpectHash = want

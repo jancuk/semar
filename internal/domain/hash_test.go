@@ -2,6 +2,7 @@ package domain_test
 
 import (
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/jancuk/semar/internal/domain"
@@ -206,5 +207,70 @@ func TestExpectHashCoversAsAndByOnlyWhenSet(t *testing.T) {
 	empty.Steps[1].Expect[0].By = ""
 	if domain.ExpectHash(empty) != h {
 		t.Error("empty as and by must hash as before")
+	}
+}
+
+func shapeBase() domain.Scenario {
+	s := base()
+	s.Given = []domain.Given{{Fixture: "order.paid", As: "order"}}
+	return s
+}
+
+func cloneShape(s domain.Scenario) domain.Scenario {
+	s.Given = slices.Clone(s.Given)
+	s.Steps = slices.Clone(s.Steps)
+	for i := range s.Steps {
+		s.Steps[i].Expect = slices.Clone(s.Steps[i].Expect)
+		if h := s.Steps[i].Hint; h != nil {
+			c := *h
+			s.Steps[i].Hint = &c
+		}
+	}
+	return s
+}
+
+func TestShapeHashLeavesOutIntentAndExpectations(t *testing.T) {
+	b := shapeBase()
+	same := []func(*domain.Scenario){
+		func(s *domain.Scenario) { s.Intent = "other" },
+		func(s *domain.Scenario) { s.Title = "other" },
+		func(s *domain.Scenario) { s.Steps[0].Action = "other words" },
+		func(s *domain.Scenario) { s.Steps[1].Expect[0].Check.Equals = "changed" },
+		func(s *domain.Scenario) { s.Steps[1].Expect[0].By = "" },
+		func(s *domain.Scenario) {
+			s.Steps[1].Expect = append(s.Steps[1].Expect, domain.Expectation{Check: domain.Check{JSONPath: "$.x", Equals: 1}, Source: domain.SourceDiff})
+		},
+	}
+	want := domain.ShapeHash(b)
+	for i, f := range same {
+		c := cloneShape(b)
+		f(&c)
+		if got := domain.ShapeHash(c); got != want {
+			t.Errorf("edit %d changed the shape hash", i)
+		}
+	}
+}
+
+func TestShapeHashCoversWhatAScriptFits(t *testing.T) {
+	b := shapeBase()
+	differs := []func(*domain.Scenario){
+		func(s *domain.Scenario) { s.AuthProfile = "other" },
+		func(s *domain.Scenario) { s.Given[0].As = "other" },
+		func(s *domain.Scenario) { s.Steps[0].ID = "other" },
+		func(s *domain.Scenario) { s.Steps[0].Setup = !s.Steps[0].Setup },
+		func(s *domain.Scenario) { s.Steps[1].As = "auditor" },
+		func(s *domain.Scenario) { s.Steps[1].Hint.Path = "/v1/other" },
+		func(s *domain.Scenario) { s.Steps = s.Steps[:1] },
+	}
+	want := domain.ShapeHash(b)
+	if want == "" || want == domain.ExpectHash(b) || domain.ExpectHash(b) == "" {
+		t.Fatalf("shape hash %q and expectation hash %q must be set and differ", want, domain.ExpectHash(b))
+	}
+	for i, f := range differs {
+		c := cloneShape(b)
+		f(&c)
+		if got := domain.ShapeHash(c); got == want {
+			t.Errorf("edit %d left the shape hash unchanged", i)
+		}
 	}
 }

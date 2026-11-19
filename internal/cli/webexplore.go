@@ -155,6 +155,7 @@ func (w *webExplorer) write(ctx context.Context, req plan.WebRequest, end plan.F
 	draft.Scenario.Title = oneLine(end.Done.Title)
 	draft.Scenario.Intent = oneLine(end.Done.Intent)
 	draft.Script.ExpectHash = domain.ExpectHash(draft.Scenario)
+	draft.Script.ShapeHash = domain.ShapeHash(draft.Scenario)
 	if err := checkDraft(draft); err != nil {
 		return manual("%s", strings.TrimPrefix(err.Error(), "nothing was written: ")), nil
 	}

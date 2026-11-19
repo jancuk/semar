@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	yaml "go.yaml.in/yaml/v4"
 
@@ -127,6 +128,9 @@ func (s *Store) PutScript(sc domain.Script) error {
 	if err != nil {
 		return fmt.Errorf("store script: %w", err)
 	}
+	if sc.StoredAt.IsZero() {
+		sc.StoredAt = time.Now().UTC().Truncate(time.Second)
+	}
 	var buf strings.Builder
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
@@ -172,6 +176,48 @@ func (s *Store) Script(id domain.ScenarioID, h domain.Hash) (domain.Script, bool
 		return domain.Script{}, false, fmt.Errorf("script %s holds scenario %q and hash %q, want %q and %q", p, sc.Scenario, sc.ExpectHash, id, h)
 	}
 	return sc, true, nil
+}
+
+// ScriptsOf returns every stored script of a scenario that parses and names that scenario,
+// in no set order. A missing directory gives nil and no error. A file that does not parse is skipped.
+func (s *Store) ScriptsOf(id domain.ScenarioID) ([]domain.Script, error) {
+	rel, err := ScriptPath(id, "x")
+	if err != nil {
+		return nil, fmt.Errorf("list scripts: %w", err)
+	}
+	root, err := s.openScripts(rel, false)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list scripts of %s: %w", id, err)
+	}
+	defer root.Close()
+	dir := filepath.Dir(rel)
+	entries, err := fs.ReadDir(root.FS(), dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list scripts of %s: %w", id, err)
+	}
+	var out []domain.Script
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
+			continue
+		}
+		name := filepath.Join(dir, e.Name())
+		data, err := root.ReadFile(name)
+		if err != nil {
+			continue
+		}
+		sc, err := script.Parse(data, filepath.Join(s.root, name))
+		if err != nil || sc.Scenario != id {
+			continue
+		}
+		out = append(out, sc)
+	}
+	return out, nil
 }
 
 // RedactKey returns the 32-byte key that redaction uses, and creates it on first use.

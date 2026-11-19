@@ -114,6 +114,7 @@ func Build(base domain.Scenario, bs domain.Script, step domain.StepID, c Case, i
 	ts.Request = &req
 	out.Steps = append(out.Steps, ts)
 	out.ExpectHash = domain.ExpectHash(sc)
+	out.ShapeHash = domain.ShapeHash(sc)
 	return sc, out, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jancuk/semar/internal/domain"
@@ -373,4 +374,16 @@ func FuzzMarshal(f *testing.F) {
 			t.Fatalf("Parse(Marshal(x)) = %+v, want %+v\n%q", got, want, data)
 		}
 	})
+}
+
+func TestMarshalKeepsTheShapeHashAndTheStoredTime(t *testing.T) {
+	s := withBody(nil)
+	s.ShapeHash = "9a1f6b0c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c"
+	s.StoredAt = time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	roundTrip(t, s, s)
+
+	plain := roundTrip(t, withBody(nil), withBody(nil))
+	if strings.Contains(string(plain), "shapeHash") || strings.Contains(string(plain), "storedAt") {
+		t.Errorf("a script with neither field wrote one:\n%s", plain)
+	}
 }

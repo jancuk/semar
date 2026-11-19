@@ -92,3 +92,39 @@ func ExpectHash(s Scenario) Hash {
 	sum := sha256.Sum256(b)
 	return Hash(hex.EncodeToString(sum[:]))
 }
+
+type hashedShapeStep struct {
+	ID    StepID      `json:"id"`
+	Setup bool        `json:"setup,omitempty"`
+	Hint  *hashedHint `json:"hint,omitempty"`
+	As    string      `json:"as,omitempty"`
+}
+
+type hashedShape struct {
+	AuthProfile string            `json:"authProfile"`
+	Steps       []hashedShapeStep `json:"steps"`
+	Given       []hashedGiven     `json:"given,omitempty"`
+}
+
+// ShapeHash covers what a script must fit: the auth profile, the given entries, and each step's
+// ID, setup flag, as, and request hint. Intent, title, action text and expectations are left out.
+// When encoding fails it returns the empty Hash, which no script records.
+func ShapeHash(s Scenario) Hash {
+	h := hashedShape{AuthProfile: s.AuthProfile, Steps: make([]hashedShapeStep, len(s.Steps))}
+	for i, st := range s.Steps {
+		hs := hashedShapeStep{ID: st.ID, Setup: st.Setup, As: st.As}
+		if st.Hint != nil {
+			hs.Hint = &hashedHint{Method: st.Hint.Method, Path: st.Hint.Path}
+		}
+		h.Steps[i] = hs
+	}
+	for _, g := range s.Given {
+		h.Given = append(h.Given, hashedGiven(g))
+	}
+	b, err := json.Marshal(h)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return Hash(hex.EncodeToString(sum[:]))
+}

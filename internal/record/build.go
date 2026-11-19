@@ -134,7 +134,7 @@ func Build(events []Event, o Options) (Draft, error) {
 		Surface: domain.SurfaceWeb, AuthProfile: o.AuthProfile, Given: o.Given, Steps: b.steps,
 	}
 	b.draft.Script = domain.Script{
-		APIVersion: "semar/v1", Kind: "Script", Scenario: o.ID, ExpectHash: domain.ExpectHash(b.draft.Scenario),
+		APIVersion: "semar/v1", Kind: "Script", Scenario: o.ID, ExpectHash: domain.ExpectHash(b.draft.Scenario), ShapeHash: domain.ShapeHash(b.draft.Scenario),
 		AuthoredBy: domain.ProviderRef{Instance: "person", Harness: "record"}, Steps: b.script,
 	}
 	return b.draft, nil

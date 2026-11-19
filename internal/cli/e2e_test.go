@@ -20,6 +20,7 @@ import (
 
 	"github.com/jancuk/semar/internal/cli"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/keychain"
 	"github.com/jancuk/semar/internal/sampleapp"
 	"github.com/jancuk/semar/internal/scenario"
@@ -853,4 +854,24 @@ func TestRunWithADeclaredBuild(t *testing.T) {
 			t.Errorf("the service was asked for its build %d times", n)
 		}
 	})
+}
+
+func TestScriptAddStoresTheShapeHash(t *testing.T) {
+	r := newRepo(t, repoOptions{})
+	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
+	sc, err := scenario.Load(r.path(".semar", "scenarios", "SHOP-482", scenarioID+".feature"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := evidence.Open(r.path(".semar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, found, err := store.Script(sc.ID, domain.ExpectHash(sc))
+	if err != nil || !found {
+		t.Fatalf("Script = %v, %v", found, err)
+	}
+	if s.ShapeHash == "" || s.ShapeHash != domain.ShapeHash(sc) {
+		t.Errorf("ShapeHash = %q, want %q", s.ShapeHash, domain.ShapeHash(sc))
+	}
 }

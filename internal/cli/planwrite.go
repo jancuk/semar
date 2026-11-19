@@ -90,6 +90,7 @@ func writePlan(dir string, in plan.Input, out plan.Output, known map[domain.Scen
 		scenarioFiles = append(scenarioFiles, f)
 		s := out.Scripts[i]
 		s.ExpectHash = domain.ExpectHash(sc)
+		s.ShapeHash = domain.ShapeHash(sc)
 		if s.AuthoredBy == (domain.ProviderRef{}) { // the criteria pipeline names the model of each script
 			s.AuthoredBy = domain.ProviderRef{Instance: out.PlannerID, Model: out.Result.Model, Harness: out.PlannerKind}
 		}
