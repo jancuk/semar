@@ -31,6 +31,7 @@ const (
 	defaultWorkers = 4
 
 	reasonNoScript    = "no script was accepted"
+	reasonNoFit       = "no script fits the steps of %s: the steps, the account, or the given changed since its script was stored"
 	reasonInterrupted = "the run was interrupted"
 	reasonNoFixtures  = "the scenario names fixtures, and this run has no fixture catalogue"
 
@@ -44,6 +45,8 @@ type Doer interface {
 
 type Scripts interface {
 	Script(id domain.ScenarioID, h domain.Hash) (domain.Script, bool, error)
+	// ScriptsOf returns every stored script of the scenario, in no set order.
+	ScriptsOf(id domain.ScenarioID) ([]domain.Script, error)
 }
 
 // Fixtures gives the state that the given entries of a scenario name, and removes it afterwards.
@@ -100,16 +103,17 @@ func New(d Deps) *Runner {
 
 // replayed is what one scenario left behind. Its outcome waits for the builds at the end of the run.
 type replayed struct {
-	steps     map[domain.StepID]verdict.StepEvidence
-	blocked   []string
-	notRun    string
-	confirmed func(domain.Expectation) bool
-	notes     []domain.Reason // why the scenario stopped early, when no recorded action says it
-	fixtures  []domain.FixtureRecord
-	captured  map[string]string // every capture of every step, raw. Never stored
-	last      *api.Call         // the call of the last step that was sent
-	sentOnce  bool              // a request of the once list was sent, or may have been
-	earlier   []replayed        // the attempts before this one, oldest first
+	steps      map[domain.StepID]verdict.StepEvidence
+	blocked    []string
+	notRun     string
+	confirmed  func(domain.Expectation) bool
+	scriptHash domain.Hash     // the expectation hash that the script that ran was stored under
+	notes      []domain.Reason // why the scenario stopped early, when no recorded action says it
+	fixtures   []domain.FixtureRecord
+	captured   map[string]string // every capture of every step, raw. Never stored
+	last       *api.Call         // the call of the last step that was sent
+	sentOnce   bool              // a request of the once list was sent, or may have been
+	earlier    []replayed        // the attempts before this one, oldest first
 }
 
 // Run replays each scenario and returns one result per scenario, in input order.
@@ -184,6 +188,7 @@ func (r *Runner) decide(scenarios []domain.Scenario, runs []replayed, start, end
 		deciding, flaky := domain.Settle(attempts)
 		res.Outcome, res.Reasons, res.Checks, res.Actions = deciding.Outcome, deciding.Reasons, deciding.Checks, deciding.Actions
 		res.Flaky, res.Fixtures = flaky, fixtures
+		res.ScriptHash = run.scriptHash
 		if len(attempts) > 1 {
 			res.Attempts, res.AttemptsAllowed = attempts, r.d.Retries+1
 		}
@@ -298,16 +303,17 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (run replayed, 
 		run.blocked = blocked
 		return run, nil
 	}
-	s, found, err := r.d.Scripts.Script(sc.ID, domain.ExpectHash(sc))
-	switch {
-	case err != nil:
-		run.blocked = []string{"the script could not be read: " + err.Error()}
-		return run, nil
-	case !found:
-		run.blocked = []string{reasonNoScript}
+	s, byShape, blocked := r.findScript(sc)
+	if len(blocked) > 0 {
+		run.blocked = blocked
 		return run, nil
 	}
-	if blocked := scriptBlocked(script.ValidateWith(sc, s, r.outputs(sc))); len(blocked) > 0 {
+	run.scriptHash = s.ExpectHash
+	validate := script.ValidateWith
+	if byShape {
+		validate = script.ValidateShapeWith
+	}
+	if blocked := scriptBlocked(validate(sc, s, r.outputs(sc))); len(blocked) > 0 {
 		run.blocked = blocked
 		return run, nil
 	}
@@ -343,6 +349,41 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (run replayed, 
 		maps.Copy(vars, res.Vars)
 	}
 	return run, r.steps(ctx, sc, s, &run, vars, domain.PassScenario)
+}
+
+// findScript takes the script of the scenario's expectation hash. Without one it takes the newest
+// script stored for the same shape, which a script stored before Plan 36 never has. It reports
+// why when there is none.
+func (r *Runner) findScript(sc domain.Scenario) (s domain.Script, byShape bool, blocked []string) {
+	s, found, err := r.d.Scripts.Script(sc.ID, domain.ExpectHash(sc))
+	switch {
+	case err != nil:
+		return s, false, []string{"the script could not be read: " + err.Error()}
+	case found:
+		return s, false, nil
+	}
+	all, err := r.d.Scripts.ScriptsOf(sc.ID)
+	switch {
+	case err != nil:
+		return s, false, []string{"the script could not be read: " + err.Error()}
+	case len(all) == 0:
+		return s, false, []string{reasonNoScript}
+	}
+	shape := domain.ShapeHash(sc)
+	best := -1
+	for i, c := range all {
+		if shape == "" || c.ShapeHash != shape {
+			continue
+		}
+		if best < 0 || c.StoredAt.After(all[best].StoredAt) ||
+			(c.StoredAt.Equal(all[best].StoredAt) && c.ExpectHash > all[best].ExpectHash) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return s, false, []string{fmt.Sprintf(reasonNoFit, sc.ID)}
+	}
+	return all[best], true, nil
 }
 
 // unknownAccounts gives one reason for each auth profile that a step acts as and the configuration

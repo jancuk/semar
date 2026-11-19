@@ -94,6 +94,10 @@ type ScenarioResult struct {
 	// ExpectHash is the ExpectHash of the scenario that was judged. It is empty, and not encoded,
 	// in a result stored before it was recorded.
 	ExpectHash Hash `json:"expectHash,omitempty"`
+	// ScriptHash is the expectation hash that the script that ran was stored under. It differs from
+	// ExpectHash when the script was found by its shape hash. Empty when no script ran, and in a
+	// result stored before Plan 36.
+	ScriptHash Hash `json:"scriptHash,omitempty"`
 	// Fixtures is what each given entry did. It is empty for a scenario without given.
 	Fixtures []FixtureRecord `json:"fixtures,omitempty"`
 }

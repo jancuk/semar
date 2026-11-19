@@ -704,3 +704,22 @@ func TestValidateOperandVariables(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateShapeWithIgnoresTheExpectationHash(t *testing.T) {
+	sc, s := loadPair(t)
+	s.ShapeHash = domain.ShapeHash(sc)
+	s.ExpectHash = "another"
+	if ps := script.ValidateShapeWith(sc, s, nil); len(ps) != 0 {
+		t.Errorf("a script of the same shape has problems: %+v", ps)
+	}
+	s.ShapeHash = "other"
+	ps := script.ValidateShapeWith(sc, s, nil)
+	if len(ps) != 1 || ps[0].Message != "the script was written for other steps" {
+		t.Errorf("problems = %+v", ps)
+	}
+	s.ShapeHash = domain.ShapeHash(sc)
+	s.Steps = append(s.Steps, domain.ScriptStep{Step: "nope"})
+	if ps := script.ValidateShapeWith(sc, s, nil); len(ps) == 0 {
+		t.Error("a structural problem went unreported")
+	}
+}

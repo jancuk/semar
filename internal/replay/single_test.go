@@ -435,6 +435,7 @@ func TestRunOneEqualsRun(t *testing.T) {
 				t.Fatalf("builds start %v end %v", start, end)
 			}
 			res := compute(sc, got, start)
+			results[0].ScriptHash = "" // only Run looks a script up, and records which one it found
 			if !reflect.DeepEqual(results[0], res) {
 				t.Errorf("Run gave\n%+v\nRunOne gave\n%+v", results[0], res)
 			}

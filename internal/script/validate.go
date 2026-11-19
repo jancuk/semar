@@ -38,6 +38,16 @@ func Validate(sc domain.Scenario, s domain.Script) []Problem {
 // output names of its fixture. With nil outputs, any <as>.<name> of a declared alias is accepted.
 // run.id is always known. An alias counts as an earlier capture for every step.
 func ValidateWith(sc domain.Scenario, s domain.Script, outputs map[string][]string) []Problem {
+	return validate(sc, s, outputs, false)
+}
+
+// ValidateShapeWith is ValidateWith for a script found by its shape hash: it requires
+// s.ShapeHash == domain.ShapeHash(sc) in place of the expectation-hash check.
+func ValidateShapeWith(sc domain.Scenario, s domain.Script, outputs map[string][]string) []Problem {
+	return validate(sc, s, outputs, true)
+}
+
+func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, byShape bool) []Problem {
 	var ps []Problem
 	add := func(step domain.StepID, format string, args ...any) {
 		ps = append(ps, Problem{Step: step, Message: fmt.Sprintf(format, args...)})
@@ -52,14 +62,25 @@ func ValidateWith(sc domain.Scenario, s domain.Script, outputs map[string][]stri
 	if s.Scenario != sc.ID {
 		add("", "the script is for scenario %s and not %s", s.Scenario, sc.ID)
 	}
-	want := domain.ExpectHash(sc)
-	switch {
-	case want == "":
-		add("", "the scenario has no expectation hash")
-	case s.ExpectHash == "":
-		add("", "the script has no expectation hash")
-	case s.ExpectHash != want:
-		add("", "the script was written for other expected results")
+	if byShape {
+		switch want := domain.ShapeHash(sc); {
+		case want == "":
+			add("", "the scenario has no shape hash")
+		case s.ShapeHash == "":
+			add("", "the script has no shape hash")
+		case s.ShapeHash != want:
+			add("", "the script was written for other steps")
+		}
+	} else {
+		want := domain.ExpectHash(sc)
+		switch {
+		case want == "":
+			add("", "the scenario has no expectation hash")
+		case s.ExpectHash == "":
+			add("", "the script has no expectation hash")
+		case s.ExpectHash != want:
+			add("", "the script was written for other expected results")
+		}
 	}
 
 	index := make(map[domain.StepID]int, len(sc.Steps))
