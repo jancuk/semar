@@ -68,13 +68,6 @@ func (t target) set(r *domain.APIRequest, v any) {
 	}
 }
 
-func (t target) where() string {
-	if t.inBody {
-		return "field " + t.name
-	}
-	return "parameter " + t.name
-}
-
 func requiredFields(op openapi.Operation, base domain.APIRequest) []change {
 	m, ok := base.JSON.(map[string]any)
 	if !ok {

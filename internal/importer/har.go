@@ -58,7 +58,7 @@ func readHAR(data []byte, drop func(string) bool) (File, error) {
 			if hd.Name == "" || strings.HasPrefix(hd.Name, ":") || drop(hd.Name) {
 				continue
 			}
-			imp.Headers = append(imp.Headers, Header{hd.Name, hd.Value})
+			imp.Headers = append(imp.Headers, Header(hd))
 		}
 		if pd := req.PostData; pd != nil && (pd.Text != "" || len(pd.Params) > 0) {
 			if pd.Text == "" {
