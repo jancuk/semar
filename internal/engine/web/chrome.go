@@ -117,8 +117,15 @@ func allocator(chrome, profile string, headed bool) (context.Context, context.Ca
 	if headed {
 		opts = append(opts, chromedp.VisibleWindow)
 	}
+	if rootOnLinux(runtime.GOOS, os.Geteuid()) {
+		opts = append(opts, chromedp.NoSandbox)
+	}
 	return chromedp.NewExecAllocator(context.Background(), opts...)
 }
+
+// rootOnLinux says whether Chrome must start with no sandbox. Chrome refuses to start as root on
+// Linux with its sandbox, and a job of a pipeline in a container runs as root.
+func rootOnLinux(goos string, euid int) bool { return goos == "linux" && euid == 0 }
 
 func ensureProfile(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {

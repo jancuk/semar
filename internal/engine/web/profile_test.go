@@ -38,3 +38,15 @@ func TestAProfileNeverSavesOrFillsInSignIns(t *testing.T) {
 		t.Errorf("other settings were lost: %s", raw)
 	}
 }
+
+func TestChromeStartsWithNoSandboxOnlyAsRootOnLinux(t *testing.T) {
+	for _, c := range []struct {
+		goos string
+		euid int
+		want bool
+	}{{"linux", 0, true}, {"linux", 1000, false}, {"darwin", 0, false}, {"windows", -1, false}} {
+		if got := rootOnLinux(c.goos, c.euid); got != c.want {
+			t.Errorf("%s as %d: %v", c.goos, c.euid, got)
+		}
+	}
+}

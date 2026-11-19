@@ -75,7 +75,8 @@ func ExitCode(entries []obligation.Entry, buildsRead bool) int {
 
 // Input is what status reads. Entries are in the order that obligation.Derive gives.
 type Input struct {
-	Branch, Base string // empty Branch: the directory is not in a git repository
+	Branch, Base string // empty Branch: the directory is not in a git repository, or Scope says what was run
+	Scope        string // what a run picked when it did not read a change, such as "the smoke suite"
 	Environment  string // empty: no environment, so no build was read
 	Builds       []domain.BuildRef
 	BuildsRead   bool
@@ -227,9 +228,12 @@ func shipReason(r Report) string {
 // Lead is the first line.
 func (r Report) Lead() string {
 	var parts []string
-	if r.Branch == "" {
+	switch {
+	case r.Scope != "":
+		parts = append(parts, strings.ToUpper(r.Scope[:1])+r.Scope[1:])
+	case r.Branch == "":
 		parts = append(parts, "Not in a git repository")
-	} else {
+	default:
 		parts = append(parts, fmt.Sprintf("On %s against %s", r.Branch, r.Base))
 	}
 	switch {

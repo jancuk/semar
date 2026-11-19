@@ -88,3 +88,32 @@ func TestSetWebSignInRefusesWhatItCannotPlace(t *testing.T) {
 		}
 	}
 }
+
+func TestSetWebSignInFillsAnAccountThatInitWroteWithNoToken(t *testing.T) {
+	const text = `version: 1
+environments:
+  local:
+    kind: test
+    hosts: ["localhost:3000"]
+    methods: [GET]
+    effects: {mode: read_only}
+    services:
+      - {name: shop, baseUrl: "http://localhost:3000"}
+authProfiles:
+  default: {}  # no token: a web page
+  viewer: {}
+`
+	got, err := config.SetWebSignIn([]byte(text), "default", config.WebSignIn{User: "ana@example.com", Password: "env:SHOP_PASSWORD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(text, "  default: {}  # no token: a web page\n",
+		"  default:  # no token: a web page\n    web: {user: ana@example.com, password: \"env:SHOP_PASSWORD\"}\n", 1)
+	if string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+	again, err := config.SetWebSignIn(got, "default", config.WebSignIn{User: "bo@example.com", Password: "env:SHOP_PASSWORD"})
+	if err != nil || !strings.Contains(string(again), "user: bo@example.com") || strings.Contains(string(again), "ana@example.com") {
+		t.Fatalf("a second sign-in replaces the block: %v\n%s", err, again)
+	}
+}

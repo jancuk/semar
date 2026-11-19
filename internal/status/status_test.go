@@ -389,3 +389,10 @@ func TestAFlakyPassIsNamedUnderTheVerifiedUseCase(t *testing.T) {
 		t.Errorf("a steady use case is listed under verified:\n%s", out)
 	}
 }
+
+func TestTheLeadNamesWhatARunPickedWhenItReadNoChange(t *testing.T) {
+	r := status.Build(status.Input{Scope: "the smoke suite", Environment: "local"})
+	if got := r.Lead(); !strings.HasPrefix(got, "The smoke suite") || strings.Contains(got, "git repository") {
+		t.Errorf("lead = %q", got)
+	}
+}

@@ -1233,7 +1233,7 @@ It does not sign in through another site, with a second factor, with a captcha, 
 
 **In a pipeline** no window can open, and the browser profile of your machine is not there. Give the account a user and a password variable, as above, so that Semar signs in by itself in every run. See [Run in a pipeline](#run-in-a-pipeline).
 
-`semar login --user` adds the `web` block to an account that `semar.yaml` writes as a block. An account that is written on one line, such as `default: {}` from `semar init` for a web address, is refused with `the account default is written on one line in semar.yaml; add its web block by hand`. Answer the question of `semar init` for the web user instead, or write the block by hand.
+`semar login --user` adds the `web` block to an account that `semar.yaml` writes as a block, and to the empty account `default: {}` that `semar init` writes for a web address. An account that is written on one line with settings in it, such as `default: {description: A customer}`, is refused with `the account default is written on one line in semar.yaml; add its web block by hand`.
 
 **A window, for any application.** `semar login` with no flag opens Chrome on the browser profile of the account, at the address of the service. With one service in the environment it takes no argument. With several it names them and asks for one, as in `semar login orders`. Sign in once, in any way that the application allows. The command ends when the last page of the window is closed, on every system, and a page that you or the application opened keeps it going. Chrome is then ended in the way that saves the profile.
 
@@ -1843,7 +1843,7 @@ The run then prints the full path of the report directory and the status of the 
 
 * The token of the test account, from a secret of the pipeline, in the variable that `semar.yaml` names. Never use a personal account.
 * The build that the environment runs. A service in a test environment is not on the runner, so give it a build probe in `semar.yaml`, or pass `--build <commit>`. Without one, every result is `inconclusive`. See [Configuration](#configuration).
-* For a web application, Chrome on the runner, and a sign-in that needs no window. Give the account a user and a password variable, as in [Sign in to a web application](#sign-in-to-a-web-application), and the password from a secret. Run the job as a user that is not root: Semar starts Chrome with its sandbox, and Chrome does not start as root with its sandbox.
+* For a web application, Chrome on the runner, and a sign-in that needs no window. Give the account a user and a password variable, as in [Sign in to a web application](#sign-in-to-a-web-application), and the password from a secret. A job in a container often runs as root. Chrome does not start as root on Linux with its sandbox, so Semar starts it with no sandbox there. Run the tests of your own application only in such a job.
 
 ### GitHub Actions
 
@@ -1911,7 +1911,7 @@ semar:
 
 Add `ORDERS_TOKEN`, and `SHOP_PASSWORD` for a web application, as masked variables under **Settings**, **CI/CD**, **Variables**. GitLab gives each one to the job as an environment variable.
 
-The image `golang:1.26` has no Chrome, and its jobs run as root. For a web application, use an image that has Go and Chrome, and a user that is not root.
+The image `golang:1.26` has no Chrome. For a web application, use an image that has Go and Chrome.
 
 ## Command reference
 

@@ -229,6 +229,7 @@ func chooseRun(ctx context.Context, stdout, stderr io.Writer, o options, in *lin
 			sel.scenarios = append(sel.scenarios, sc)
 		}
 		sel.change = "the scenarios named"
+		sel.input.Scope = sel.change
 		sel.input.Tickets = ticketsOf(sel.scenarios)
 	case len(f.suites) > 0:
 		scs, err := loadAllScenarios(f.dir)
@@ -239,6 +240,7 @@ func chooseRun(ctx context.Context, stdout, stderr io.Writer, o options, in *lin
 			return sel, 0, err
 		}
 		sel.change = "the " + strings.Join(slices.Compact(slices.Sorted(slices.Values(f.suites))), ", ") + " suite"
+		sel.input.Scope = sel.change
 		sel.input.Tickets = ticketsOf(sel.scenarios)
 	case f.all:
 		scs, err := loadAllScenarios(f.dir)
@@ -246,6 +248,7 @@ func chooseRun(ctx context.Context, stdout, stderr io.Writer, o options, in *lin
 			return sel, 0, err
 		}
 		sel.scenarios, sel.change = scs, "every scenario"
+		sel.input.Scope = sel.change
 		if err := addCriticalJourneys(stderr, f, &sel); err != nil {
 			return sel, 0, err
 		}

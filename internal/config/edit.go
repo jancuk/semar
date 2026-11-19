@@ -23,11 +23,11 @@ func SetWebSignIn(data []byte, account string, w WebSignIn) ([]byte, error) {
 	if err := yamlfile.Decode(data, fileName, &doc); err != nil {
 		return nil, err
 	}
-	profile := valueOf(valueOf(doc.Content[0], "authProfiles"), account)
+	key, profile := entryOf(valueOf(doc.Content[0], "authProfiles"), account)
 	switch {
 	case profile == nil || profile.Kind != yaml.MappingNode:
 		return nil, fmt.Errorf("%s has no account %s under authProfiles", fileName, account)
-	case profile.Style&yaml.FlowStyle != 0 || len(profile.Content) == 0:
+	case len(profile.Content) > 0 && profile.Style&yaml.FlowStyle != 0:
 		return nil, fmt.Errorf("the account %s is written on one line in %s; add its web block by hand", account, fileName)
 	}
 	block, err := yaml.Marshal(&yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle, Content: []*yaml.Node{
@@ -37,10 +37,28 @@ func SetWebSignIn(data []byte, account string, w WebSignIn) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	lines := strings.SplitAfter(string(data), "\n")
+	if len(profile.Content) == 0 {
+		// semar init writes an account with no token as "name: {}". The web block becomes its first line.
+		at := key.Line - 1
+		open := strings.Index(lines[at][key.Column-1:], "{")
+		shut := strings.Index(lines[at], "}")
+		if profile.Line != key.Line || open < 0 || shut < 0 {
+			return nil, fmt.Errorf("the account %s is written on one line in %s; add its web block by hand", account, fileName)
+		}
+		open += key.Column - 1
+		rest := strings.TrimRight(lines[at][shut+1:], "\n")
+		lines[at] = strings.TrimRight(lines[at][:open], " ") + rest + "\n" +
+			strings.Repeat(" ", key.Column+1) + "web: " + strings.TrimSpace(string(block)) + "\n"
+		out := strings.Join(lines, "")
+		if _, err := parse([]byte(out), fileName); err != nil {
+			return nil, errors.New("the web block is not valid: " + strings.TrimPrefix(err.Error(), fileName+": "))
+		}
+		return []byte(out), nil
+	}
 	indent := strings.Repeat(" ", profile.Content[0].Column-1)
 	line := indent + "web: " + strings.TrimSpace(string(block)) + "\n"
 
-	lines := strings.SplitAfter(string(data), "\n")
 	first, last := len(lines), len(lines)
 	for i := 0; i+1 < len(profile.Content); i += 2 {
 		key, value := profile.Content[i], profile.Content[i+1]
@@ -58,6 +76,19 @@ func SetWebSignIn(data []byte, account string, w WebSignIn) ([]byte, error) {
 		return nil, errors.New("the web block is not valid: " + strings.TrimPrefix(err.Error(), fileName+": "))
 	}
 	return []byte(out), nil
+}
+
+// entryOf gives the key and the value of one entry of a mapping, or nil for both.
+func entryOf(m *yaml.Node, name string) (key, value *yaml.Node) {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == name {
+			return m.Content[i], resolveAlias(m.Content[i+1])
+		}
+	}
+	return nil, nil
 }
 
 func valueOf(m *yaml.Node, key string) *yaml.Node {
