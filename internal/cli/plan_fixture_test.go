@@ -119,7 +119,7 @@ func TestPlanDraftsTheFixtureACriterionNeedsRunsItOnceAndPlansTheCriterionAgain(
 	}
 	contains(t, "plan.md", string(md), "## Fixtures drafted\n",
 		"- order.open: An open order of the default account. 2 requests, cleans up. Ran once: ok.\n",
-		"  Used by SHOP-482-01. Not approved → semar review order.open\n",
+		"  Used by SHOP-482-01, SHOP-482-E01, SHOP-482-E02. Not approved → semar review order.open\n",
 		"1 fixture drafted")
 
 	list := p.must(t, cli.ExitOK, "fixture", "list")

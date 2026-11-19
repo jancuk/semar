@@ -205,10 +205,24 @@ type Plan struct {
 	Timeout      time.Duration `yaml:"timeout"`
 	// Trial is false when the person turned the trial run off. Nil means on.
 	Trial *bool `yaml:"trial"`
+	// MaxEdgeCases is the most edge cases that one plan drafts from the API document, and 0 turns them off.
+	// Nil means DefaultMaxEdgeCases.
+	MaxEdgeCases *int `yaml:"maxEdgeCases"`
 }
 
 // TrialOn reports whether semar plan sends the read-only steps of a draft once.
 func (p Plan) TrialOn() bool { return p.Trial == nil || *p.Trial }
+
+// DefaultMaxEdgeCases is the most edge cases that one plan drafts when plan.maxEdgeCases is not set.
+const DefaultMaxEdgeCases = 20
+
+// EdgeLimit is the most edge cases that one plan drafts. 0 turns them off.
+func (p Plan) EdgeLimit() int {
+	if p.MaxEdgeCases == nil {
+		return DefaultMaxEdgeCases
+	}
+	return *p.MaxEdgeCases
+}
 
 const (
 	fileName             = "semar.yaml"

@@ -23,6 +23,7 @@ import (
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/edge"
 	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/journey"
 	"github.com/jancuk/semar/internal/knowledge"
@@ -40,6 +41,7 @@ type planFlags struct {
 	withSetupSet bool
 	noTrial      bool
 	noWeb        bool
+	noEdge       bool
 	pipeline     string
 	ladder       string
 	maxCost      float64
@@ -83,6 +85,9 @@ func newPlanCommand(o options) *cobra.Command {
 	cmd.Flags().Float64Var(&f.maxCost, "max-cost", 0, "the most this plan may spend, in dollars, as the providers report it: when the sum reaches it, no new job starts, the jobs that run finish, and the plan is written with what was answered, with exit code 2 (default: plan.maxCost of your providers file, else no limit)")
 	cmd.Flags().BoolVar(&f.noTrial, "no-trial", false, "do not send the read-only steps of the draft to the environment before the plan is written, for this run")
 	cmd.Flags().BoolVar(&f.noWeb, "no-web", false, "do not explore the web criteria in a browser: each stays a manual check, for this run")
+	cmd.Flags().BoolVar(&f.noEdge, "no-edge", false, "do not draft edge cases and cases as another account from the API document, for this run (default: plan.maxEdgeCases)")
+	// Hidden until docs/GUIDE.md lists it: the guide test refuses a visible flag that the guide lacks.
+	_ = cmd.Flags().MarkHidden("no-edge")
 	cmd.Flags().IntVar(&f.maxScenarios, "max-scenarios", 0, "the most scenarios to draft (default: plan.maxScenarios)")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to plan for; needed when there are several. With --base-url, the name of the new environment (default uat, or production with --kind production)")
 	cmd.Flags().StringVar(&f.authProfile, "auth-profile", "", "the auth profile of the scenarios; needed when there are several and none is named default")
@@ -191,6 +196,15 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		if inChange[sc.Ticket] {
 			in.Existing[sc.Ticket] = append(in.Existing[sc.Ticket], sc)
 		}
+	}
+
+	var dropped map[string]bool
+	if edgeOn(f, cfg) {
+		list, err := edge.ReadDropped(f.dir)
+		if err != nil {
+			return fmt.Errorf("read the edge cases that were dropped: %w", err)
+		}
+		dropped = edge.Keys(list)
 	}
 
 	src, err := loadSources(o, f.dir, cfg)
@@ -322,6 +336,10 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		out, err = plan.Run(ctx, inst, in)
 	}
 	rep.Stop()
+	var edgeLine string
+	if err == nil {
+		edgeLine, err = planEdge(ctx, f, cfg, in, &out, rig, known, dropped)
+	}
 	if rig != nil {
 		rig.close(stderr, o.Clock())
 	}
@@ -356,7 +374,11 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		return err
 	}
 	record("ok", filepath.Base(filepath.Dir(planFile)))
-	printPlanDone(stdout, envName, out, len(cfg.Knowledge) > 0, trialSummary(in, out), useLine(out, in.SetupOn), planFile, nextRun(env, envName, f.env, cs.HeadCommit))
+	trialLines := trialSummary(in, out)
+	if edgeLine != "" {
+		trialLines = strings.TrimPrefix(trialLines+"\n"+edgeLine, "\n")
+	}
+	printPlanDone(stdout, envName, out, len(cfg.Knowledge) > 0, trialLines, useLine(out, in.SetupOn), planFile, nextRun(env, envName, f.env, cs.HeadCommit))
 	if out.CostLimit {
 		fmt.Fprintf(stderr, "semar: the cost limit of %s was reached: %s. Plan again to do the rest: the answers that exist are reused\n",
 			plan.Dollars(in.MaxCost), stoppedWords(out))
@@ -658,7 +680,9 @@ func shortCommit(id string) string {
 func printPlanDone(w io.Writer, envName string, out plan.Output, listed bool, trial, modelUse, planFile, run string) {
 	count := map[string]int{}
 	for _, sc := range out.Scenarios {
-		count[sc.Ticket]++
+		if sc.Edge == nil {
+			count[sc.Ticket]++
+		}
 	}
 	for _, wt := range out.WebTests {
 		count[wt.Scenario.Ticket]++

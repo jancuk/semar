@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/edge"
 	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/idcheck"
@@ -72,6 +73,11 @@ func retireScenario(stdout io.Writer, o options, f rmFlags, id string) error {
 	if err != nil {
 		return err
 	}
+	// A dropped edge case is remembered, so that a later plan does not draft the same case again.
+	var edgeKey string
+	if sc, err := loadScenario(f.dir, sid); err == nil {
+		edgeKey = edge.KeyOf(sc)
+	}
 
 	uses, problems, err := obligation.Load(f.dir)
 	if err != nil {
@@ -121,6 +127,12 @@ func retireScenario(stdout io.Writer, o options, f rmFlags, id string) error {
 	}
 
 	fmt.Fprintf(stdout, "retired scenario %s as %s: removed its file and %s\n", sid, terminalSafe(oneLine(name)), plural(scripts, "stored script"))
+	if edgeKey != "" {
+		if err := edge.AddDropped(f.dir, edge.Dropped{Key: edgeKey, Scenario: sid, Reason: f.reason, User: name, Day: day}); err != nil {
+			return fmt.Errorf("the scenario was retired, but the edge case could not be remembered: %w", err)
+		}
+		fmt.Fprintf(stdout, "a later plan does not draft this edge case again: %s\n", edge.DroppedFile)
+	}
 	if len(left) == 0 {
 		fmt.Fprintln(stdout, "no use case covered it")
 		return nil

@@ -23,6 +23,8 @@ const (
 	SourcePerson   Source = "person"
 	SourceDiff     Source = "diff"
 	SourceBaseline Source = "baseline"
+	// SourceRule is an expected result that a fixed rule of Semar wrote from the API document. No model took part.
+	SourceRule Source = "rule"
 )
 
 const (
@@ -48,6 +50,16 @@ type Scenario struct {
 	// Suites names the sets that semar run --suite picks the scenario by. It is no part of ExpectHash,
 	// so a person can regroup an approved scenario with no new review.
 	Suites []string `yaml:"suites,omitempty"`
+	// Edge is set on an edge case that a plan drafted from the API document, and is nil on every other scenario.
+	Edge *Edge `yaml:"edge,omitempty"`
+}
+
+// Edge says what an edge case changes. Kind is one of the kinds of package edge, Base is the scenario
+// of which the case is a copy with one change, and On is the field, parameter or account that changes.
+type Edge struct {
+	Kind string     `yaml:"kind"`
+	Base ScenarioID `yaml:"base"`
+	On   string     `yaml:"on,omitempty"`
 }
 
 type Step struct {

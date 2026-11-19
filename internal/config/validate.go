@@ -298,6 +298,9 @@ func validatePlan(c Config, add func(string, ...any)) {
 	if c.Plan.MaxScenarios < 0 {
 		add("plan.maxScenarios must be positive")
 	}
+	if c.Plan.MaxEdgeCases != nil && *c.Plan.MaxEdgeCases < 0 {
+		add("plan.maxEdgeCases must not be negative")
+	}
 	if c.Plan.MaxTurns < 0 {
 		add("plan.maxTurns must be positive")
 	}

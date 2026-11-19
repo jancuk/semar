@@ -22,6 +22,7 @@ type Param struct {
 	Type     string   // "string", "integer", "number", "boolean", "array", or "" when the document says none
 	Format   string   // the format of the value, such as "date", "date-time", or "uuid", or "" when the document says none
 	Enum     []string // the allowed values, when the document lists them
+	Limits
 }
 
 // Field is a property of a JSON body. In Operation.Body, Name is the property of the top level.
@@ -33,6 +34,7 @@ type Field struct {
 	Nullable bool
 	Enum     []string
 	Format   string // as Param.Format
+	Limits
 	// Open is set on an object that the document leaves open: it lists no property, or it allows
 	// others. A name below an open field cannot be called wrong.
 	Open bool
@@ -266,7 +268,7 @@ func readParams(root map[string]any, lists ...any) []Param {
 			if schema == nil {
 				schema = m // Swagger 2 writes the type on the parameter
 			}
-			p.Type, p.Format, p.Enum = str(schema["type"]), str(schema["format"]), enumOf(schema)
+			p.Type, p.Format, p.Enum, p.Limits = str(schema["type"]), str(schema["format"]), enumOf(schema), limitsOf(schema)
 			if p.In == "path" {
 				p.Required = true
 			}
@@ -432,7 +434,7 @@ func properties(root map[string]any, schema any, seen *[]string) (props map[stri
 
 func fieldOf(root map[string]any, name string, schema any) Field {
 	m, _ := deref(root, schema).(map[string]any)
-	f := Field{Name: name, Type: str(m["type"]), Format: str(m["format"]), Nullable: isTrue(m["nullable"]), Enum: enumOf(m)}
+	f := Field{Name: name, Type: str(m["type"]), Format: str(m["format"]), Nullable: isTrue(m["nullable"]), Enum: enumOf(m), Limits: limitsOf(m)}
 	if t, ok := m["type"].([]any); ok { // OpenAPI 3.1: type: [string, "null"]
 		f.Type = ""
 		for _, x := range t {

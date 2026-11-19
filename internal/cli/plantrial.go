@@ -43,6 +43,10 @@ type trialRig struct {
 	env     string
 	kind    string
 	started time.Time
+	// policy and others are for the edge cases: the rules that say which requests are reads, and the
+	// accounts besides the plan's that have a session to try a read with.
+	policy *effects.Policy
+	others []string
 }
 
 // trialRunner keeps the builds of the latest trial, so that the run of a plan that no draft survived
@@ -107,6 +111,18 @@ func planTrial(ctx context.Context, stderr io.Writer, o options, f planFlags, cf
 		}
 		maps.Copy(sessions, got)
 	}
+	if edgeOn(f, cfg) {
+		// An account whose secret cannot be read is only left out of the edge cases: it never stops the trial.
+		for _, name := range slices.Sorted(maps.Keys(cfg.AuthProfiles)) {
+			if _, have := sessions[name]; have || !cfg.AuthProfiles[name].HasToken() {
+				continue
+			}
+			if got, err := loadSessions(ctx, cfg, secrets, map[string]string{name: "an edge case as another account"}); err == nil {
+				maps.Copy(sessions, got)
+			}
+		}
+	}
+	otherSessions := slices.DeleteFunc(slices.Sorted(maps.Keys(sessions)), func(n string) bool { return n == in.AuthProfile })
 	known := sessionSecrets(sessions)
 
 	store, err := evidence.Open(semarDir(f.dir))
@@ -194,7 +210,7 @@ func planTrial(ctx context.Context, stderr io.Writer, o options, f planFlags, cf
 			Run:         id,
 		})
 	}
-	rig := &trialRig{runner: &trialRunner{Runner: trial.New(deps)}, run: run, id: id, env: envName, kind: env.Kind, started: o.Clock()}
+	rig := &trialRig{runner: &trialRunner{Runner: trial.New(deps)}, run: run, id: id, env: envName, kind: env.Kind, started: o.Clock(), policy: policy, others: otherSessions}
 	in.Trial = rig.runner
 	return rig
 }

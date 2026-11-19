@@ -78,6 +78,18 @@ func Render(s domain.Scenario, subject string) ([]byte, error) {
 		}
 		tags = append(tags, "@suite:"+strings.Join(s.Suites, ","))
 	}
+	if e := s.Edge; e != nil {
+		if e.Kind == "" || e.Base == "" {
+			r.fail("edge", "kind and base are required")
+		}
+		r.word("edge.kind", e.Kind)
+		r.word("edge.base", string(e.Base))
+		tags = append(tags, "@edge", "@edge-kind:"+e.Kind, "@edge-base:"+string(e.Base))
+		if e.On != "" {
+			r.word("edge.on", e.On)
+			tags = append(tags, "@edge-on:"+e.On)
+		}
+	}
 	body, newline := strings.CutSuffix(s.Intent, "\n")
 	if newline {
 		tags = append(tags, "@intent-newline")

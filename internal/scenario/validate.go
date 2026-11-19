@@ -116,6 +116,10 @@ func validateExpectation(path string, e domain.Expectation, origin Origin) []Pro
 
 	switch e.Source {
 	case domain.SourceTicket, domain.SourceTestcase, domain.SourceDiff, domain.SourceBaseline:
+	case domain.SourceRule:
+		if origin == FromAgent {
+			add(path+".source", "an agent cannot use the source rule")
+		}
 	case domain.SourcePerson:
 		if origin == FromAgent {
 			add(path+".source", "an agent cannot use the source person")
@@ -123,7 +127,7 @@ func validateExpectation(path string, e domain.Expectation, origin Origin) []Pro
 	case domain.SourceInvariant:
 		add(path+".source", "invariants are fixed in Semar and cannot appear in a file")
 	default:
-		add(path+".source", "source must be one of ticket, testcase, person, diff, baseline")
+		add(path+".source", "source must be one of ticket, testcase, person, diff, baseline, rule")
 	}
 	switch e.By {
 	case "", "model":

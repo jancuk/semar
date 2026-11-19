@@ -60,6 +60,9 @@ type reviewItem struct {
 	show     func(w io.Writer, n, total int)
 	details  func(w io.Writer)
 	approve  func(store *confirm.Local, a approver) error
+	// drop retires the item instead of approving it. Only an edge case has it: a person who finds a
+	// case not worth keeping drops it, and a later plan does not draft it again.
+	drop func(w io.Writer, o options, dir string) error
 }
 
 func runReview(ctx context.Context, stdout, stderr io.Writer, o options, f reviewFlags, args []string) error {
@@ -125,7 +128,7 @@ func approveItems(ctx context.Context, stdout io.Writer, o options, f reviewFlag
 		return nil
 	}
 
-	approved, skipped, stopped := 0, 0, false
+	approved, skipped, dropped, stopped := 0, 0, 0, false
 loop:
 	for i, it := range items {
 		it.show(stdout, i+1, len(items))
@@ -137,7 +140,11 @@ loop:
 			continue
 		}
 		for {
-			fmt.Fprint(stdout, "\n  [y] approve  [n] skip  [d] details  [q] stop\n> ")
+			menu := "[y] approve  [n] skip  [d] details  [q] stop"
+			if it.drop != nil {
+				menu = "[y] approve  [n] skip  [x] drop  [d] details  [q] stop"
+			}
+			fmt.Fprintf(stdout, "\n  %s\n> ", menu)
 			line, ok := in.read(ctx)
 			if !ok {
 				fmt.Fprintln(stdout)
@@ -152,6 +159,15 @@ loop:
 				approved++
 			case "n", "no":
 				skipped++
+			case "x", "drop":
+				if it.drop == nil {
+					fmt.Fprintln(stdout, "answer y, n, d, or q")
+					continue
+				}
+				if err := it.drop(stdout, o, f.dir); err != nil {
+					return 0, err
+				}
+				dropped++
 			case "d", "details":
 				it.details(stdout)
 				continue
@@ -166,8 +182,11 @@ loop:
 			break
 		}
 	}
-	left := len(items) - approved
+	left := len(items) - approved - dropped
 	fmt.Fprintf(stdout, "approved %d of %s", approved, plural(len(items), "item"))
+	if dropped > 0 {
+		fmt.Fprintf(stdout, ", dropped %d", dropped)
+	}
 	if left > 0 {
 		fmt.Fprintf(stdout, "; %d left", left)
 		if skipped > 0 || stopped {
@@ -536,12 +555,48 @@ func scenarioItems(dir string, uses []obligation.Located, todo []unconfirmed, fi
 					if err := putConfirmation(store, a, u); err != nil {
 						return err
 					}
+					if err := coverEdgeCase(dir, uses, u.sc); err != nil {
+						return err
+					}
 				}
 				return nil
 			},
+			drop: dropOf(us),
 		})
 	}
 	return out
+}
+
+// coverEdgeCase makes an approved edge case one more test of every use case that its base covers. Until a
+// person approves it, no use case holds it, so it cannot change the state of one.
+func coverEdgeCase(dir string, uses []obligation.Located, sc domain.Scenario) error {
+	if sc.Edge == nil {
+		return nil
+	}
+	for _, l := range uses {
+		if !slices.Contains(l.Covers, sc.Edge.Base) || slices.Contains(l.Covers, sc.ID) {
+			continue
+		}
+		err := obligation.Edit(dir, l.ID, func(ob *obligation.Obligation) error {
+			ob.Covers = append(ob.Covers, sc.ID)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dropOf is the drop of an item that holds one edge case, and nil for any other item.
+func dropOf(us []unconfirmed) func(io.Writer, options, string) error {
+	if len(us) != 1 || us[0].sc.Edge == nil {
+		return nil
+	}
+	id := us[0].sc.ID
+	return func(w io.Writer, o options, dir string) error {
+		return retireScenario(w, o, rmFlags{reason: "dropped in the review", dir: dir}, string(id))
+	}
 }
 
 func putConfirmation(store *confirm.Local, a approver, u unconfirmed) error {

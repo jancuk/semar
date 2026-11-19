@@ -155,12 +155,13 @@ func TestTrialEndToEnd(t *testing.T) {
 	}
 
 	// Only reads reached the service: find, the typo, and the summary on the first try, the same
-	// on the second with the repaired path, and one read of the build.
+	// on the second with the repaired path, one read of the build, and the edge case of an unknown ID.
 	got := r.requests(before)
 	want := []string{
 		"GET /version",
 		"GET /v1/orders", "GET /v1/order/o-1", "GET /v1/orders/o-1/summary",
 		"GET /v1/orders", "GET /v1/orders/o-1", "GET /v1/orders/o-1/summary",
+		"GET /v1/orders/semar-no-such-id",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("the service received:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

@@ -140,6 +140,10 @@ func (p *reader) read(sc *messages.Scenario) (domain.Scenario, error) {
 	s := domain.Scenario{APIVersion: apiVersion, Kind: kind, Title: sc.Name, Intent: intentOf(sc.Description)}
 	var have struct{ id, ticket, surface, auth, suite bool }
 	newline := false
+	var edge struct {
+		marked, kind, base, on bool
+		mark                   domain.Edge
+	}
 	for _, t := range sc.Tags {
 		tl := t.Location.Line
 		key, value, _ := strings.Cut(strings.TrimPrefix(t.Name, "@"), ":")
@@ -193,8 +197,25 @@ func (p *reader) read(sc *messages.Scenario) (domain.Scenario, error) {
 			default:
 				have.auth = true
 			}
+		case "edge":
+			switch {
+			case hasValue:
+				err = p.fail(tl, "the tag @edge takes no value")
+			case edge.marked:
+				err = p.fail(tl, "the tag @edge appears twice")
+			default:
+				edge.marked = true
+			}
+		case "edge-kind":
+			err = set(&edge.kind, &edge.mark.Kind)
+		case "edge-base":
+			var v string
+			err = set(&edge.base, &v)
+			edge.mark.Base = domain.ScenarioID(v)
+		case "edge-on":
+			err = set(&edge.on, &edge.mark.On)
 		default:
-			err = p.fail(tl, "the tag %s is not used. A Scenario takes @id:<id>, @ticket:<key>, @surface:api|web, @auth:<profile>, @noauth, @suite:<name>, and @intent-newline", t.Name)
+			err = p.fail(tl, "the tag %s is not used. A Scenario takes @id:<id>, @ticket:<key>, @surface:api|web, @auth:<profile>, @noauth, @suite:<name>, @intent-newline, and for an edge case @edge, @edge-kind:<kind>, @edge-base:<id>, and @edge-on:<name>", t.Name)
 		}
 		if err != nil {
 			return domain.Scenario{}, err
@@ -202,6 +223,15 @@ func (p *reader) read(sc *messages.Scenario) (domain.Scenario, error) {
 	}
 	if !have.auth {
 		s.AuthProfile = defaultProfile
+	}
+	switch {
+	case edge.marked && (!edge.kind || !edge.base):
+		return domain.Scenario{}, p.fail(line, "an edge case needs the tags @edge-kind:<kind> and @edge-base:<scenario id> next to @edge")
+	case !edge.marked && (edge.kind || edge.base || edge.on):
+		return domain.Scenario{}, p.fail(line, "the tags @edge-kind, @edge-base, and @edge-on belong to an edge case: add @edge")
+	case edge.marked:
+		e := edge.mark
+		s.Edge = &e
 	}
 	if newline {
 		s.Intent += "\n"

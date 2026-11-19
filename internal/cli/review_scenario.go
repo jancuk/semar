@@ -83,6 +83,11 @@ func showScenarioItem(w io.Writer, dir string, n, total int, use *obligation.Loc
 		if title := terminalSafe(oneLine(sc.Title)); title != opening {
 			fmt.Fprintf(w, "    %s\n", title)
 		}
+		if sc.Edge != nil {
+			for _, line := range strings.Split(sc.Intent, "\n") {
+				fmt.Fprintf(w, "    %s\n", listed(line))
+			}
+		}
 		v := view(sc)
 		const detail = "          "
 		for _, l := range scenario.Lines(sc) {

@@ -298,8 +298,12 @@ func (r *Runner) find(ctx context.Context, run *scenarioRun, tr *plan.Trial) err
 }
 
 // authProfile is the one account of the plan. A scenario that needs another account is tried as
-// this one, and a 403 may be the reason (Plan 16, open point 5).
+// this one, and a 403 may be the reason (Plan 16, open point 5). An edge case is the exception: it
+// changes the account on purpose, to another one or to none, so it is tried as the account it names.
 func (r *Runner) authProfile(sc domain.Scenario) string {
+	if sc.Edge != nil {
+		return sc.AuthProfile
+	}
 	if r.d.AuthProfile != "" {
 		return r.d.AuthProfile
 	}

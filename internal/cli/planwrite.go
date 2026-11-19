@@ -345,7 +345,8 @@ func obligationsOf(root *os.Root, in plan.Input, out plan.Output) (files []planF
 	for _, m := range d.ManualChecks {
 		tickets[m.Ticket] = true
 	}
-	scenarios := slices.Clone(out.Scenarios)
+	// An edge case is no obligation: it counts for its base only after a person approves it.
+	scenarios := slices.DeleteFunc(slices.Clone(out.Scenarios), func(sc domain.Scenario) bool { return sc.Edge != nil })
 	for _, wt := range out.WebTests {
 		tickets[wt.Scenario.Ticket] = true
 		scenarios = append(scenarios, wt.Scenario)

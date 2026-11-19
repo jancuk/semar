@@ -50,12 +50,14 @@ func Needs(src domain.Source, trust []domain.Source) bool {
 
 // NeedsExpectation is Needs for one expectation. An expectation that a model wrote (by: model)
 // always needs a person, whatever its source and whatever trust lists, because a model translated
-// the source into the check. A person's own expectation never needs one.
+// the source into the check. An expectation of the source rule, which a plan drafts from the API
+// document, always needs a person too, because no person or ticket said it. A person's own
+// expectation never needs one.
 func NeedsExpectation(e domain.Expectation, trust []domain.Source) bool {
 	if e.Source == domain.SourcePerson {
 		return false
 	}
-	return e.By == "model" || Needs(e.Source, trust)
+	return e.By == "model" || e.Source == domain.SourceRule || Needs(e.Source, trust)
 }
 
 // Local keeps one file per user at <root>/store/confirmations/<scenario>/<hash>/<user>.json.
