@@ -140,8 +140,33 @@ func (s *session) location(ctx context.Context) (string, error) {
 	return chromedp.Run(ctx, chromedp.Location())
 }
 
-func capturePNG(ctx context.Context) ([]byte, error) {
-	res, err := chromedp.Call(ctx, page.CaptureScreenshot, page.CaptureScreenshotParams{Format: page.CaptureScreenshotFormatPng})
+func (s *session) title(ctx context.Context) (string, error) {
+	return chromedp.Run(ctx, chromedp.Title())
+}
+
+// maxShotWidth is the widest screenshot that the engine stores, in pixels.
+const maxShotWidth = 1280
+
+// captureJPEG takes a screenshot of what the tab shows, as JPEG and at most maxShotWidth pixels wide.
+func captureJPEG(ctx context.Context) ([]byte, error) {
+	m, err := chromedp.Call(ctx, page.GetLayoutMetrics, cdp.Empty{})
+	if err != nil {
+		return nil, err
+	}
+	vp := m.CSSVisualViewport
+	if vp == nil || vp.ClientWidth <= 0 || vp.ClientHeight <= 0 {
+		return nil, errors.New("the page has no size")
+	}
+	ratio := 1.0
+	if r, err := chromedp.Run(ctx, chromedp.Evaluate[float64](`window.devicePixelRatio`)); err == nil && r > 0 {
+		ratio = r
+	}
+	scale := min(1, maxShotWidth/(vp.ClientWidth*ratio))
+	res, err := chromedp.Call(ctx, page.CaptureScreenshot, page.CaptureScreenshotParams{
+		Format:  page.CaptureScreenshotFormatJpeg,
+		Quality: ptr(int64(80)),
+		Clip:    &page.Viewport{X: vp.PageX, Y: vp.PageY, Width: vp.ClientWidth, Height: vp.ClientHeight, Scale: scale},
+	})
 	if err != nil {
 		return nil, err
 	}

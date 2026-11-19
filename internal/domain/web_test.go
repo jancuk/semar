@@ -55,6 +55,7 @@ func TestWebWrites(t *testing.T) {
 	for op, want := range map[domain.WebOp]bool{
 		domain.WebOpen: false, domain.WebWait: false,
 		domain.WebClick: true, domain.WebFill: true, domain.WebPress: true, domain.WebDrag: true,
+		domain.WebSelect: true, domain.WebCheck: true, domain.WebUncheck: true, domain.WebUpload: true, domain.WebHover: false,
 	} {
 		if op.Writes() != want {
 			t.Errorf("%s.Writes() = %v, want %v", op, !want, want)
@@ -81,3 +82,62 @@ func TestWebActionVariables(t *testing.T) {
 		t.Errorf("Variables = %s", got)
 	}
 }
+
+func TestNewWebActionsAreWellFormed(t *testing.T) {
+	ok := func(w domain.WebAction) {
+		t.Helper()
+		if ps := w.Problems(); len(ps) > 0 {
+			t.Errorf("%+v: %v", w, ps)
+		}
+	}
+	bad := func(w domain.WebAction, want string) {
+		t.Helper()
+		if ps := strings.Join(w.Problems(), "; "); !strings.Contains(ps, want) {
+			t.Errorf("%+v: problems = %q, want %q", w, ps, want)
+		}
+	}
+	ok(domain.WebAction{Do: domain.WebSelect, Screen: "S", Element: "status", Value: "Paid"})
+	ok(domain.WebAction{Do: domain.WebHover, Screen: "S", Element: "menu"})
+	ok(domain.WebAction{Do: domain.WebCheck, Screen: "S", Element: "agree"})
+	ok(domain.WebAction{Do: domain.WebUncheck, Screen: "S", Element: "agree"})
+	ok(domain.WebAction{Do: domain.WebUpload, Screen: "S", Element: "file", Value: "docs/invoice.pdf"})
+	ok(domain.WebAction{Do: domain.WebUpload, Screen: "S", Element: "file", Value: "{{run.id}}.pdf"})
+	bad(domain.WebAction{Do: domain.WebSelect, Screen: "S", Element: "status"}, "select needs the value")
+	bad(domain.WebAction{Do: domain.WebHover, Screen: "S", Element: "menu", Value: "x"}, "hover takes no value")
+	bad(domain.WebAction{Do: domain.WebCheck, Screen: "S"}, "check needs the element")
+	upload := func(value string) string {
+		return domain.WebAction{Do: domain.WebUpload, Screen: "S", Element: "file", Value: value}.UploadProblem()
+	}
+	for value, want := range map[string]string{
+		"../x.pdf": "must stay below .semar/files/", "a/../../x": "must stay below", "/etc/passwd": "no absolute part",
+		`a\b`: "no absolute part", "~/x": "no absolute part",
+	} {
+		if got := upload(value); !strings.Contains(got, want) {
+			t.Errorf("upload %q: problem = %q, want %q", value, got, want)
+		}
+	}
+	for _, fine := range []string{"invoice.pdf", "docs/a b.pdf", "{{run.id}}/../x"} {
+		if got := upload(fine); got != "" {
+			t.Errorf("upload %q: %s", fine, got)
+		}
+	}
+}
+
+func TestWebChecksKeepOldHashesAndChangeWithTheirFields(t *testing.T) {
+	sc := func(c domain.Check) domain.Hash {
+		return domain.ExpectHash(domain.Scenario{ID: "a", Intent: "i", Steps: []domain.Step{{ID: "s", Expect: []domain.Expectation{{Check: c, Source: domain.SourcePerson}}}}})
+	}
+	base := sc(domain.Check{Element: "card", Exists: ptr(true)})
+	for _, c := range []domain.Check{
+		{Element: "card", State: "hidden"}, {Element: "card", Attribute: "href", Equals: "x"}, {Page: "path", Equals: "/x"},
+	} {
+		if sc(c) == base {
+			t.Errorf("%+v hashes as an element check that exists", c)
+		}
+	}
+	if sc(domain.Check{Element: "card", State: "hidden"}) == sc(domain.Check{Element: "card", State: "visible"}) {
+		t.Error("two states hash alike")
+	}
+}
+
+func ptr[T any](v T) *T { return &v }

@@ -6,8 +6,8 @@ import (
 )
 
 func TestWebVersion(t *testing.T) {
-	if got := WebVersion(); got != "5" {
-		t.Errorf("WebVersion() = %q, want 5", got)
+	if got := WebVersion(); got != "6" {
+		t.Errorf("WebVersion() = %q, want 6", got)
 	}
 }
 

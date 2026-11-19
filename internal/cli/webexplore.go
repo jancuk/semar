@@ -299,6 +299,14 @@ func (b *flowBrowser) Act(ctx context.Context, a plan.Action) (string, error) {
 		return "", b.x.Click(ctx, a.Ref)
 	case plan.ActionFill:
 		return "", b.x.Fill(ctx, a.Ref, a.Text)
+	case plan.ActionSelect:
+		return "", b.x.Select(ctx, a.Ref, a.Text)
+	case plan.ActionHover:
+		return "", b.x.Hover(ctx, a.Ref)
+	case plan.ActionTick:
+		return "", b.x.SetChecked(ctx, a.Ref, true)
+	case plan.ActionUntick:
+		return "", b.x.SetChecked(ctx, a.Ref, false)
 	case plan.ActionPress:
 		return "", b.x.Press(ctx, a.Ref, a.Key)
 	case plan.ActionDrag:

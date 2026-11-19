@@ -122,7 +122,7 @@ func TestWebScenarioRunsThroughTheRunner(t *testing.T) {
 	if read.Locators["card"].Name != "Buy milk" {
 		t.Errorf("the locator was not rendered: %+v", read.Locators["card"])
 	}
-	if len(read.Watch) != 1 || read.Watch[0] != (web.Watched{Element: "card", Presence: false}) {
+	if len(read.Watch) != 1 || read.Watch[0].Element != "card" || read.Watch[0].Presence || len(read.Watch[0].Attrs) != 0 {
 		t.Errorf("watch = %+v", read.Watch)
 	}
 	if read.Why != "Read the card" {
@@ -318,5 +318,38 @@ func TestAMissedTargetDecidesNoOtherCheck(t *testing.T) {
 		if c.State == domain.CheckFalse {
 			t.Errorf("a check was decided: %+v", c)
 		}
+	}
+}
+
+func TestTheChecksOfAWebStepGoToTheEngineToWaitFor(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	sc := webScenario()
+	sc.Steps[1].Expect = []domain.Expectation{
+		{Check: domain.Check{Element: "card", Equals: "{{leg.title}}"}, Source: domain.SourcePerson},
+		{Check: domain.Check{Element: "card", Attribute: "href", Contains: "/boards"}, Source: domain.SourcePerson},
+		{Check: domain.Check{Element: "done", State: "hidden"}, Source: domain.SourcePerson},
+		{Check: domain.Check{Page: "title", Contains: "Board"}, Source: domain.SourcePerson},
+	}
+	s := webScript(sc)
+	s.Steps[1].Captures = nil
+	fw, fs := &fakeWeb{}, &fakeScreens{text: boardScreens, approved: true}
+	r.confirm.Put(confirm.Record{Scenario: sc.ID, ExpectHash: domain.ExpectHash(sc), User: "u", Identity: "x", Sources: []domain.Source{domain.SourcePerson}})
+	r.runWeb(t, sc, s, fw, fs)
+	read := fw.calls[1]
+	if len(read.Until) != 4 {
+		t.Fatalf("until = %+v", read.Until)
+	}
+	if read.Until[0].Equals != domain.CapturedText("Buy milk") && read.Until[0].Equals != "Buy milk" {
+		t.Errorf("the variable of the first check was not filled in: %#v", read.Until[0].Equals)
+	}
+	got := map[string]web.Watched{}
+	for _, w := range read.Watch {
+		got[w.Element] = w
+	}
+	if w := got["card"]; w.Presence || len(w.Attrs) != 1 || w.Attrs[0] != "href" {
+		t.Errorf("card = %+v: a text and an attribute are read", w)
+	}
+	if w := got["done"]; !w.Presence {
+		t.Errorf("done = %+v: a hidden element that is absent is an answer, and no reason for a repair", w)
 	}
 }

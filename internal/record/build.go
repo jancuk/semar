@@ -208,6 +208,20 @@ func (b *builder) walk(items []item) {
 				w.Value = ev.Value
 			}
 			b.action(it, false, "fill-"+name, text, w)
+		case KindSelect:
+			name := b.element(it.screen, ev.Target)
+			b.action(it, false, "select-"+name, "Choose "+strconv.Quote(oneLine(ev.Value))+" in "+name,
+				domain.WebAction{Do: domain.WebSelect, Screen: it.screen, Element: name, Value: ev.Value})
+		case KindTick, KindUntick, KindHover:
+			name := b.element(it.screen, ev.Target)
+			do, verb := domain.WebCheck, "Check "
+			switch ev.Kind {
+			case KindUntick:
+				do, verb = domain.WebUncheck, "Uncheck "
+			case KindHover:
+				do, verb = domain.WebHover, "Hover over "
+			}
+			b.action(it, false, string(do)+"-"+name, verb+name, domain.WebAction{Do: do, Screen: it.screen, Element: name})
 		case KindPress:
 			w := domain.WebAction{Do: domain.WebPress, Value: ev.Value}
 			text := "Press " + ev.Value

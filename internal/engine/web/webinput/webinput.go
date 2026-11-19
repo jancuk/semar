@@ -38,3 +38,8 @@ func Drag(tab context.Context, fromX, fromY, toX, toY float64) error {
 func Keys(tab context.Context, keys string) error {
 	return chromedp.Do(tab, chromedp.KeyEvent(keys))
 }
+
+// Hover moves the pointer to a point of the page, with no button held.
+func Hover(tab context.Context, x, y float64) error {
+	return chromedp.Do(tab, chromedp.MouseEvent(chromedp.MouseMoved, x, y))
+}

@@ -29,7 +29,7 @@ const (
 // inspectJS reads what a check needs of one element: whether a person could see it, and its text. A
 // field takes its value, and a password field takes none. root is optional, and says whether the
 // element is inside it.
-const inspectJS = `function(root){
+const inspectJS = `function(root, names){
   const el = this;
   const cs = getComputedStyle(el);
   let visible = cs.visibility !== 'hidden' && cs.display !== 'none' && el.getClientRects().length > 0;
@@ -40,7 +40,18 @@ const inspectJS = `function(root){
   else if (tag === 'SELECT') { t = Array.from(el.selectedOptions).map(o => o.text).join(', '); }
   else { t = visible ? (el.innerText || '') : (el.textContent || ''); }
   t = t.replace(/\s+/g, ' ').trim();
-  return { v: visible, t: t, in: root ? root.contains(el) : true };
+  const at = {};
+  for (const n of (names || [])) {
+    if (!el.hasAttribute(n)) continue;
+    if (n.toLowerCase() === 'value' && tag === 'INPUT' && el.type === 'password') continue;
+    at[n] = el.getAttribute(n);
+  }
+  const aria = el.getAttribute('aria-disabled');
+  return {
+    v: visible, t: t, in: root ? root.contains(el) : true, tag: tag.toLowerCase(), tid: el.getAttribute('data-testid') || '', at: at,
+    en: !el.matches(':disabled') && aria !== 'true',
+    ch: el.checked === true || el.getAttribute('aria-checked') === 'true',
+  };
 }`
 
 // searchJS finds elements by test ID, by css, or by exact visible text, below this (a document or an
@@ -66,7 +77,12 @@ const searchJS = `function(kind, arg){
 type resolved struct {
 	state domain.ElementState
 	id    cdp.BackendNodeID
+	// others names up to maxNamed of the elements that a locator matched when it matched several.
+	others []domain.Candidate
 }
+
+// maxNamed is how many of the elements that one locator matched are named for a person.
+const maxNamed = 3
 
 type axEntry struct {
 	id         cdp.BackendNodeID
@@ -82,6 +98,8 @@ type reader struct {
 	axOK bool
 	doc  runtime.RemoteObjectID
 	memo map[string]resolved
+	// attrs holds the attributes that checks read, by the name of the element.
+	attrs map[string][]string
 }
 
 func newReader(ctx context.Context, locs map[string]domain.Locator) *reader {
@@ -141,8 +159,9 @@ func (r *reader) resolveDepth(name string, depth int) (resolved, error) {
 		ids = ids[:maxMatches]
 	}
 	var seen []cdp.BackendNodeID
+	var matched []match
 	for _, id := range ids {
-		info, err := r.inspect(id, scope)
+		info, err := r.inspect(id, scope, r.attrs[name])
 		if err != nil {
 			return resolved{}, err
 		}
@@ -150,6 +169,7 @@ func (r *reader) resolveDepth(name string, depth int) (resolved, error) {
 			continue
 		}
 		res.state.Count++
+		matched = append(matched, match{id, info})
 		if info.Visible {
 			res.state.Visible = true
 			seen = append(seen, id)
@@ -160,6 +180,20 @@ func (r *reader) resolveDepth(name string, depth int) (resolved, error) {
 		res.state.Found, res.id = true, seen[0]
 	} else {
 		res.state.Text = ""
+	}
+	switch len(matched) {
+	case 1:
+		only := matched[0].info
+		res.state.Enabled, res.state.Checked = only.Enabled, only.Checked
+		if len(only.Attrs) > 0 {
+			res.state.Attrs = map[string]string{}
+			for k, v := range only.Attrs {
+				res.state.Attrs[k] = clip(v)
+			}
+		}
+	case 0:
+	default:
+		res.others = r.name(name, matched)
 	}
 	r.memo[name] = res
 	return res, nil
@@ -357,20 +391,66 @@ func (r *reader) handle(id cdp.BackendNodeID) (runtime.RemoteObjectID, error) {
 }
 
 type inspected struct {
-	Visible bool   `json:"v"`
-	Text    string `json:"t"`
-	In      bool   `json:"in"`
+	Visible bool              `json:"v"`
+	Text    string            `json:"t"`
+	In      bool              `json:"in"`
+	Tag     string            `json:"tag"`
+	TestID  string            `json:"tid"`
+	Attrs   map[string]string `json:"at"`
+	Enabled bool              `json:"en"`
+	Checked bool              `json:"ch"`
 }
 
-func (r *reader) inspect(id cdp.BackendNodeID, scope runtime.RemoteObjectID) (inspected, error) {
+type match struct {
+	id   cdp.BackendNodeID
+	info inspected
+}
+
+// name proposes a locator for each of the first elements that a locator matched, as the repair
+// proposes one for an element that is gone: a test ID, a role with a name, or a text.
+func (r *reader) name(element string, matched []match) []domain.Candidate {
+	tree, _ := r.tree()
+	byID := map[cdp.BackendNodeID]axEntry{}
+	for _, n := range tree {
+		byID[n.id] = n
+	}
+	why := fmt.Sprintf("one of the %d elements that the locator matches", len(matched))
+	var out []domain.Candidate
+	for _, m := range matched {
+		if len(out) == maxNamed {
+			break
+		}
+		var loc domain.Locator
+		switch ax := byID[m.id]; {
+		case m.info.TestID != "":
+			loc = domain.Locator{TestID: m.info.TestID}
+		case meaningful(ax.role) && ax.name != "":
+			loc = domain.Locator{Role: ax.role, Name: ax.name}
+		case m.info.Text != "" && len([]rune(m.info.Text)) <= 60:
+			loc = domain.Locator{Text: m.info.Text}
+		default:
+			loc = domain.Locator{CSS: m.info.Tag}
+		}
+		out = append(out, domain.Candidate{Element: element, Locator: loc, Why: why})
+	}
+	return out
+}
+
+func (r *reader) inspect(id cdp.BackendNodeID, scope runtime.RemoteObjectID, attrs []string) (inspected, error) {
 	h, err := r.handle(id)
 	if err != nil {
 		// An element that went away while it was read is not on the page.
 		return inspected{}, nil
 	}
 	call := runtime.CallFunctionOnParams{FunctionDeclaration: inspectJS, ObjectID: h, ReturnByValue: ptr(true)}
+	names, _ := json.Marshal(attrs)
+	if attrs == nil {
+		names = []byte("null")
+	}
 	if scope != "" {
-		call.Arguments = []*runtime.CallArgument{{ObjectID: scope}}
+		call.Arguments = []*runtime.CallArgument{{ObjectID: scope}, {Value: names}}
+	} else {
+		call.Arguments = []*runtime.CallArgument{{Value: []byte("null")}, {Value: names}}
 	}
 	res, err := chromedp.Call(r.ctx, runtime.CallFunctionOn, call)
 	if err != nil {

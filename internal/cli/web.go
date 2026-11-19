@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"path/filepath"
+
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
@@ -10,21 +12,23 @@ import (
 
 // webEngine makes the browser engine of a run. It starts no Chrome until the first web step needs it,
 // so a run with no web step costs nothing. Without a Semar home, a web step ends with that reason.
-func (rg *envRig) webEngine(o options, cfg config.Config, envName string, env config.Environment, headed bool) *web.Engine {
+func (rg *envRig) webEngine(o options, repo string, cfg config.Config, envName string, env config.Environment, headed bool) *web.Engine {
 	home, _ := o.home()
 	return web.New(web.Options{
-		Policy:      rg.policy,
-		Recorder:    rg.recorder,
-		Files:       rg.run,
-		Services:    rg.services,
-		Secrets:     rg.secrets,
-		Accounts:    webSignIns(cfg),
-		Home:        home,
-		Environment: envName,
-		Chrome:      env.Web.Chrome,
-		Headed:      headed,
-		Run:         rg.id,
-		Clock:       o.Clock,
+		Policy:       rg.policy,
+		Recorder:     rg.recorder,
+		Files:        rg.run,
+		Services:     rg.services,
+		Secrets:      rg.secrets,
+		Accounts:     webSignIns(cfg),
+		Home:         home,
+		Environment:  envName,
+		Chrome:       env.Web.Chrome,
+		Headed:       headed,
+		Run:          rg.id,
+		Clock:        o.Clock,
+		CheckTimeout: env.Web.Timeout,
+		Uploads:      filepath.Join(repo, filepath.FromSlash(domain.UploadDir)),
 	})
 }
 

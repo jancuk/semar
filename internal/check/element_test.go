@@ -35,7 +35,7 @@ func TestElementChecks(t *testing.T) {
 		{"count", `{element: card, count: 3}`, many, "true", ""},
 		{"count differs", `{element: card, count: 1}`, many, "false", ""},
 		{"text of an element that is not found", `{element: card, equals: Buy milk}`, gone, "not_evaluated", check.NotFound},
-		{"text of several elements", `{element: card, equals: Buy milk}`, many, "not_evaluated", "matched 3"},
+		{"text of several elements", `{element: card, equals: Buy milk}`, many, "not_evaluated", "the locator matches 3 elements"},
 		{"text of a hidden element", `{element: card, contains: milk}`, hidden, "not_evaluated", check.NotFound},
 		{"redacted text", `{element: card, equals: x}`, domain.ElementState{Found: true, Count: 1, Text: "[redacted:ab12cd34]"}, "not_evaluated", "redacted"},
 	}
@@ -65,7 +65,7 @@ func TestElementCheckNeedsAWebAction(t *testing.T) {
 
 func TestElementCheckIsMalformedWithTwoSubjects(t *testing.T) {
 	res := check.Eval(yamlCheck(t, `{element: card, jsonpath: "$.a", exists: true}`), page(nil))
-	if res.State != domain.CheckNotEvaluated || !strings.Contains(res.Detail, "exactly one of status, jsonpath, header, or element") {
+	if res.State != domain.CheckNotEvaluated || !strings.Contains(res.Detail, "exactly one of status, jsonpath, header, element, or page") {
 		t.Errorf("result = %+v", res)
 	}
 }

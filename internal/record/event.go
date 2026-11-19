@@ -15,6 +15,12 @@ const (
 	KindPress Kind = "press"
 	KindDrag  Kind = "drag"
 	KindCheck Kind = "check"
+	// KindSelect is the choice of an option in a list, and Value is its label. KindTick and KindUntick
+	// are a checkbox that a person checked or cleared. KindHover is a pointer held over an element.
+	KindSelect Kind = "select"
+	KindTick   Kind = "tick"
+	KindUntick Kind = "untick"
+	KindHover  Kind = "hover"
 )
 
 // Page is the page that a person was on when the event happened.

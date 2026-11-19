@@ -159,10 +159,31 @@ func (wr *webRun) webCall(sc domain.Scenario, step domain.Step, ss domain.Script
 		Action:      w,
 		Locators:    locs,
 		Watch:       watched(step, ss),
+		Until:       until(step, vars),
 		Captures:    ss.Captures,
 		AuthProfile: profile,
 		Why:         step.Action,
 	}, nil
+}
+
+// until lists the checks of the step that the browser can wait for, with the variables of their
+// operands filled in. A check with a variable that has no value is left out: it ends inconclusive.
+func until(step domain.Step, vars map[string]string) []domain.Check {
+	var out []domain.Check
+	for _, e := range step.Expect {
+		c := e.Check
+		if c.Element == "" && c.Page == "" {
+			continue
+		}
+		if len(domain.OperandVariables(c)) > 0 {
+			var missing []string
+			if c, missing = domain.FillOperands(c, script.Lookup(vars)); len(missing) > 0 {
+				continue
+			}
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // watched lists the elements that the engine reads after the action. An element that a check asks
@@ -182,16 +203,20 @@ func watched(step domain.Step, ss domain.ScriptStep) []web.Watched {
 		}
 		presence[name] = presence[name] && onlyPresence
 	}
+	attrs := map[string][]string{}
 	for _, e := range step.Expect {
 		c := e.Check
-		use(c.Element, c.Equals == nil && c.NotEquals == nil && c.Contains == nil)
+		use(c.Element, c.PresenceOnly())
+		if c.Attribute != "" && !slices.Contains(attrs[c.Element], c.Attribute) {
+			attrs[c.Element] = append(attrs[c.Element], c.Attribute)
+		}
 	}
 	for _, c := range ss.Captures {
 		use(c.Element, false)
 	}
 	out := make([]web.Watched, len(order))
 	for i, name := range order {
-		out[i] = web.Watched{Element: name, Presence: presence[name]}
+		out[i] = web.Watched{Element: name, Presence: presence[name], Attrs: attrs[name]}
 	}
 	return out
 }

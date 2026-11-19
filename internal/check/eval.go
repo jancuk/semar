@@ -46,7 +46,7 @@ func Eval(c domain.Check, a domain.Action) (res Result) {
 		return Result{State: domain.CheckNotEvaluated, Detail: "the check is malformed: " + problem}
 	}
 	res.Expected = short(describe(c, ops))
-	if c.Element != "" {
+	if c.Element != "" || c.Page != "" {
 		evalElement(&res, c, ops[0], a.Web)
 		res.Observed = short(res.Observed)
 		return res
@@ -84,26 +84,23 @@ func DescribeFull(c domain.Check) string {
 }
 
 func malformed(c domain.Check, ops []string) string {
-	kinds := 0
-	if c.Status != nil {
-		kinds++
-	}
-	if c.JSONPath != "" {
-		kinds++
-	}
-	if c.Header != "" {
-		kinds++
-	}
-	if c.Element != "" {
-		kinds++
-	}
 	switch {
-	case kinds != 1:
-		return "it must name exactly one of status, jsonpath, header, or element"
+	case c.SubjectCount() != 1:
+		return "it must name exactly one of status, jsonpath, header, element, or page"
 	case c.Status != nil && len(ops) > 0:
 		return "a status check takes no operator"
 	case c.Status == nil && len(ops) != 1:
-		return "a jsonpath, header, or element check needs exactly one operator"
+		return "a jsonpath, header, element, or page check needs exactly one operator"
+	case c.Page != "" && c.Page != domain.PagePath && c.Page != domain.PageTitle:
+		return "a page check reads the path or the title"
+	case c.Page != "" && ops[0] != "equals" && ops[0] != "notEquals" && ops[0] != "contains":
+		return "a page check takes equals, notEquals, or contains"
+	case c.State != "" && c.Element == "":
+		return "a state is a check of an element"
+	case c.State != "" && domain.ElementStates[c.State] == "":
+		return "the state " + c.State + " is not one that a check reads"
+	case c.Attribute != "" && (c.Element == "" || (ops[0] != "equals" && ops[0] != "notEquals" && ops[0] != "contains")):
+		return "an attribute is read by equals, notEquals, or contains on an element"
 	}
 	return ""
 }
@@ -124,6 +121,7 @@ func operators(c domain.Check) []string {
 	add(c.Less != nil, "less")
 	add(c.Count != nil, "count")
 	add(c.EqualsPath != "", "equalsPath")
+	add(c.State != "", "state")
 	return ops
 }
 
@@ -133,8 +131,15 @@ func describe(c domain.Check, ops []string) string {
 	}
 	subject := c.JSONPath
 	switch {
+	case c.Page != "":
+		subject = "page " + c.Page
+	case c.Element != "" && c.State != "":
+		return "element " + c.Element + " " + domain.ElementStates[c.State]
 	case c.Element != "":
 		subject = "element " + c.Element
+		if c.Attribute != "" {
+			subject += " attribute " + c.Attribute
+		}
 	case subject == "":
 		subject = "header " + c.Header
 	}

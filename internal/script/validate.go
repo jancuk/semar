@@ -95,6 +95,9 @@ func ValidateWith(sc domain.Scenario, s domain.Script, outputs map[string][]stri
 			for _, m := range ss.Web.Problems() {
 				add(ss.Step, "web: %s", m)
 			}
+			if m := ss.Web.UploadProblem(); m != "" {
+				add(ss.Step, "web: %s", m)
+			}
 			for _, name := range ss.Web.Variables() {
 				if msg := unknown(name); msg != "" {
 					add(ss.Step, "web: %s", msg)
@@ -146,6 +149,9 @@ func ValidateWith(sc domain.Scenario, s domain.Script, outputs map[string][]stri
 			for j, e := range sc.Steps[i].Expect {
 				if e.Check.Element != "" && ss.Web == nil {
 					add(ss.Step, "expect[%d] checks element %s, so the step needs a web action", j, e.Check.Element)
+				}
+				if e.Check.Page != "" && ss.Web == nil {
+					add(ss.Step, "expect[%d] checks the page %s, so the step needs a web action", j, e.Check.Page)
 				}
 				if ss.Web != nil && (e.Check.Status != nil || e.Check.JSONPath != "" || e.Check.Header != "") {
 					add(ss.Step, "expect[%d] reads a response, and a web step has none: check an element", j)

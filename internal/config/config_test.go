@@ -655,3 +655,23 @@ func TestReplayRetriesDefaultToZeroAndStayWithinFive(t *testing.T) {
 		}
 	}
 }
+
+func TestTheWebTimeoutOfAnEnvironmentIsADurationUpToOneMinute(t *testing.T) {
+	body := envHead + envBody + "    services:\n      - {name: orders, baseUrl: \"https://api.uat.example.com\"}\n"
+	cfg, err := loadText(t, body+"    web: {timeout: 8s}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Environments["uat"].Web.Timeout; got != 8*time.Second {
+		t.Errorf("timeout = %s", got)
+	}
+	cfg, err = loadText(t, body)
+	if err != nil || cfg.Environments["uat"].Web.Timeout != 0 {
+		t.Errorf("no timeout means the engine default: %v", err)
+	}
+	for _, bad := range []string{"-1s", "2m"} {
+		if _, err := loadText(t, body+"    web: {timeout: "+bad+"}\n"); err == nil || !strings.Contains(err.Error(), "web.timeout must be a duration from 0 to 1 minute") {
+			t.Errorf("timeout %s: %v", bad, err)
+		}
+	}
+}

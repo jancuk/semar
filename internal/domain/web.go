@@ -22,9 +22,36 @@ const (
 	WebPress WebOp = "press"
 	WebDrag  WebOp = "drag"
 	WebWait  WebOp = "wait"
+	// WebSelect chooses the option of a list whose label is the Value.
+	WebSelect  WebOp = "select"
+	WebHover   WebOp = "hover"
+	WebCheck   WebOp = "check"
+	WebUncheck WebOp = "uncheck"
+	// WebUpload puts the file at the Value, a path below .semar/files/ of the repository, in a file field.
+	WebUpload WebOp = "upload"
 )
 
-var webOps = []WebOp{WebOpen, WebClick, WebFill, WebPress, WebDrag, WebWait}
+var webOps = []WebOp{WebOpen, WebClick, WebFill, WebPress, WebDrag, WebWait, WebSelect, WebHover, WebCheck, WebUncheck, WebUpload}
+
+// UploadDir is where the file of an upload is, below the repository.
+const UploadDir = ".semar/files"
+
+// UploadPathProblem says in plain words why a path is not one below UploadDir, or "". It looks at the
+// text only: the engine also checks the file and the links on the disk.
+func UploadPathProblem(p string) string {
+	switch {
+	case p == "":
+		return "an upload needs the path of a file below " + UploadDir + "/"
+	case strings.ContainsAny(p, "\\\x00") || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "~"):
+		return "the path of an upload is relative to " + UploadDir + "/ and has no absolute part"
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return "the path of an upload must stay below " + UploadDir + "/"
+		}
+	}
+	return ""
+}
 
 // WebAction is the one browser action of a step. Path and Value may hold {{variables}}. Service and
 // App are set from the leg of a journey, or written in the script of a web scenario.
@@ -45,10 +72,19 @@ type WebAction struct {
 // Writes reports whether the operation can change what the service holds. A click may submit a form.
 func (o WebOp) Writes() bool {
 	switch o {
-	case WebClick, WebFill, WebPress, WebDrag:
+	case WebClick, WebFill, WebPress, WebDrag, WebSelect, WebCheck, WebUncheck, WebUpload:
 		return true
 	}
 	return false
+}
+
+// UploadProblem says why the path of an upload that a script holds is not one below UploadDir, or "". A
+// path with a variable is checked by the engine, which refuses the step with the same words.
+func (w WebAction) UploadProblem() string {
+	if w.Do != WebUpload || strings.Contains(w.Value, "{{") {
+		return ""
+	}
+	return UploadPathProblem(w.Value)
 }
 
 // Elements lists the screen elements that the action acts on, in order.
@@ -96,12 +132,19 @@ func (w WebAction) Problems() []string {
 		forbid("to", w.To)
 		forbid("value", w.Value)
 		forbid("secret", w.Secret)
-	case WebClick:
+	case WebClick, WebHover, WebCheck, WebUncheck:
 		need("screen", w.Screen)
 		need("element", w.Element)
 		forbid("path", w.Path)
 		forbid("to", w.To)
 		forbid("value", w.Value)
+		forbid("secret", w.Secret)
+	case WebSelect, WebUpload:
+		need("screen", w.Screen)
+		need("element", w.Element)
+		need("value", w.Value)
+		forbid("path", w.Path)
+		forbid("to", w.To)
 		forbid("secret", w.Secret)
 	case WebFill:
 		need("screen", w.Screen)
@@ -302,6 +345,11 @@ type ElementState struct {
 	Count   int    `json:"count"`
 	Text    string `json:"text,omitempty"`
 	Visible bool   `json:"visible"`
+	// Enabled and Checked are read from the one element that matched. Attrs holds the attributes that
+	// a check named, and only those the element has. A password field gives no value.
+	Enabled bool              `json:"enabled,omitempty"`
+	Checked bool              `json:"checked,omitempty"`
+	Attrs   map[string]string `json:"attrs,omitempty"`
 	// Presence is true when a check asked only whether the element is there, or how many are. Its
 	// absence is then an answer and no reason for a repair.
 	Presence bool `json:"presence,omitempty"`
@@ -319,7 +367,9 @@ type Candidate struct {
 // WebRecord is what a web action leaves in the Action.
 type WebRecord struct {
 	URL string `json:"url,omitempty"`
-	Op  string `json:"op"`
+	// Title is the title of the page after the action settled.
+	Title string `json:"title,omitempty"`
+	Op    string `json:"op"`
 	// App and Screen say which screens file and which screen the step used.
 	App    string `json:"app,omitempty"`
 	Screen string `json:"screen,omitempty"`
@@ -328,7 +378,8 @@ type WebRecord struct {
 	Elements map[string]ElementState `json:"elements,omitempty"`
 	// Screenshot is a path relative to the run directory.
 	Screenshot string `json:"screenshot,omitempty"`
-	// Repair holds up to three candidates for each element that was not found.
+	// Repair holds up to three candidates for each element that was not found, and up to three names for
+	// the elements of a locator that matched several.
 	Repair []Candidate `json:"repair,omitempty"`
 	// Blocked lists the hosts that the browser refused to reach during the action.
 	Blocked []string `json:"blocked,omitempty"`

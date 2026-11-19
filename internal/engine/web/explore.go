@@ -227,6 +227,67 @@ func (x *Explorer) Fill(ctx context.Context, ref, text string) error {
 	return nil
 }
 
+// hear asks the recorder to file an event of the page that a script did, as it files one of a person.
+func (x *Explorer) hear(t found, hook string) error {
+	_, err := chromedp.Call(x.rec.tab, runtime.CallFunctionOn, runtime.CallFunctionOnParams{
+		FunctionDeclaration: `function(){ if (window.` + hook + `) window.` + hook + `(this); }`, ObjectID: t.obj,
+	})
+	return err
+}
+
+// Select chooses the option of a list by its label.
+func (x *Explorer) Select(ctx context.Context, ref, label string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	label, err := x.Expand(label)
+	if err != nil {
+		return err
+	}
+	t, err := x.find(ref)
+	if err != nil {
+		return err
+	}
+	defer t.release()
+	if err := t.rd.selectOption(t.id, label); err != nil {
+		return fmt.Errorf("%s: %w", t.name, err)
+	}
+	return x.hear(t, "__semarSelect")
+}
+
+// Hover holds the pointer over the element.
+func (x *Explorer) Hover(ctx context.Context, ref string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	t, err := x.find(ref)
+	if err != nil {
+		return err
+	}
+	defer t.release()
+	if err := t.rd.hover(t.id); err != nil {
+		return fmt.Errorf("%s: %w", t.name, err)
+	}
+	return x.hear(t, "__semarHover")
+}
+
+// SetChecked checks or clears a box with a click. A box that is in the state already is not clicked, and
+// the recording has nothing to say of it.
+func (x *Explorer) SetChecked(ctx context.Context, ref string, want bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	t, err := x.find(ref)
+	if err != nil {
+		return err
+	}
+	defer t.release()
+	if err := t.rd.setChecked(t.id, want); err != nil {
+		return fmt.Errorf("%s: %w", t.name, err)
+	}
+	return nil
+}
+
 // Press sends Enter or Escape, to the element when there is a reference, and to the page when there
 // is none.
 func (x *Explorer) Press(ctx context.Context, ref, key string) error {

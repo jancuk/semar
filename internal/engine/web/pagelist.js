@@ -119,6 +119,7 @@
       disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
       secret: isSecret(el),
       acts: !!role,
+      options: el.tagName === 'SELECT' ? Array.from(el.options).map(o => norm(o.text)).filter(Boolean) : undefined,
     });
   }
   window.__semarRefs = els;

@@ -36,3 +36,25 @@ func TestMarkdownListsBrowserStepsWithTheirScreenshots(t *testing.T) {
 		t.Errorf("an API action is listed as a browser step")
 	}
 }
+
+func TestMarkdownLinksTheScreenshotOfTheStepThatFailed(t *testing.T) {
+	acts := []domain.Activity{
+		{Seq: 1, Surface: domain.SurfaceWeb, Use: domain.UseCase{Scenario: "board", Step: "open"}, Target: "open /b", Result: "done", Screenshot: "screenshots/board/0001-open.jpg"},
+		{Seq: 2, Surface: domain.SurfaceWeb, Use: domain.UseCase{Scenario: "board", Step: "read"}, Target: "wait Board", Result: "done", Screenshot: "screenshots/board/0002-read.jpg"},
+	}
+	run := domain.Run{ID: "r-1", Environment: "local", Results: []domain.ScenarioResult{{
+		Scenario: "board", Outcome: domain.OutcomeFailed,
+		Checks: []domain.CheckResult{{Step: "read", Index: 0, State: domain.CheckFalse, Expected: "element card equals x", Observed: "y"}},
+	}}}
+	var buf bytes.Buffer
+	if err := report.Markdown(&buf, report.Data{Run: run, Activity: acts}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "- Screenshot of step read: [Screenshot](screenshots/board/0002-read.jpg)\n") {
+		t.Errorf("the report lacks the screenshot of the failed step:\n%s", out)
+	}
+	if strings.Contains(out, "Screenshot of step open") {
+		t.Errorf("the report links a step that did not fail:\n%s", out)
+	}
+}

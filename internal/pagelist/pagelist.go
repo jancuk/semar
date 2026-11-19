@@ -15,6 +15,8 @@ import (
 const (
 	// MaxLines is the most elements that a list holds.
 	MaxLines = 150
+	// MaxOptions is the most option labels of a select list that the list shows.
+	MaxOptions = 12
 	// MaxText is the most characters of a name or a value. A longer text is cut and ends with an ellipsis.
 	MaxText = 80
 )
@@ -32,6 +34,8 @@ type Item struct {
 	Disabled bool   `json:"disabled"`
 	Secret   bool   `json:"secret"` // a password field: its value is never read into the list
 	Acts     bool   `json:"acts"`
+	// Options are the labels of the options of a select list, up to MaxOptions.
+	Options []string `json:"options,omitempty"`
 }
 
 // Element is one line of a list.
@@ -43,6 +47,7 @@ type Element struct {
 	Value    string
 	State    string
 	Disabled bool
+	Options  []string
 }
 
 // List is the page as a model sees it.
@@ -76,6 +81,9 @@ func Build(rawURL, title string, items []Item) List {
 		e := Element{
 			Ref: "e" + strconv.Itoa(len(l.Elements)+1), Index: it.Index, Role: roleOf(it.Role), Name: Cut(it.Name),
 			Value: Cut(it.Value), State: it.State, Disabled: it.Disabled,
+		}
+		for _, o := range it.Options[:min(len(it.Options), MaxOptions)] {
+			e.Options = append(e.Options, Cut(o))
 		}
 		if it.Secret {
 			e.Value = ""
@@ -137,6 +145,13 @@ func (l List) String() string {
 		fmt.Fprintf(&b, "%s %s %s", e.Ref, e.Role, strconv.Quote(e.Name))
 		if e.Value != "" {
 			fmt.Fprintf(&b, " value=%s", strconv.Quote(e.Value))
+		}
+		if len(e.Options) > 0 {
+			quoted := make([]string, len(e.Options))
+			for i, o := range e.Options {
+				quoted[i] = strconv.Quote(o)
+			}
+			b.WriteString(" options=[" + strings.Join(quoted, ", ") + "]")
 		}
 		if form, ok := valueForms[e.Role]; ok {
 			b.WriteString(" form=" + form)

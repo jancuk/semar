@@ -25,6 +25,12 @@ const (
 	ActionPress ActionKind = "press"
 	ActionDrag  ActionKind = "drag"
 	ActionCheck ActionKind = "check"
+	// ActionSelect chooses the option of a select list by its label, which is Text. ActionHover holds the
+	// pointer over an element. ActionTick and ActionUntick check and clear a box.
+	ActionSelect ActionKind = "select"
+	ActionHover  ActionKind = "hover"
+	ActionTick   ActionKind = "tick"
+	ActionUntick ActionKind = "untick"
 )
 
 // Action is one thing that a turn does, on an element of the page list. Only the fields of its kind
@@ -52,6 +58,8 @@ func (a Action) String() string {
 		return fmt.Sprintf("drag %s to %s", a.Ref, a.To)
 	case ActionCheck:
 		return fmt.Sprintf("check %s equals %s", a.Ref, strconv.Quote(a.Expect))
+	case ActionSelect:
+		return fmt.Sprintf("select %s in %s", strconv.Quote(a.Text), a.Ref)
 	}
 	return string(a.Kind) + " " + a.Ref
 }

@@ -282,3 +282,34 @@ func TestAFillRefusesAVariableThatHasNoValue(t *testing.T) {
 		t.Errorf("a run ID with no time: %v", err)
 	}
 }
+
+const optionsPage = `<!doctype html><title>Orders</title>
+<select id="status" aria-label="Status"><option>All</option><option>Refunded</option></select>
+<label><input type="checkbox" id="agree"> Agree</label>
+<button id="menu">Menu</button>`
+
+func TestSelectTickAndHoverAreHeardAsEventsOfAPerson(t *testing.T) {
+	r := newRecRig(t, map[string]string{"/options": optionsPage})
+	x, l := r.explore("/options")
+	ctx := t.Context()
+	r.must(x.Select(ctx, refOf(t, l, "combobox", "Status"), "Refunded"))
+	r.must(x.SetChecked(ctx, refOf(t, l, "checkbox", "Agree"), true))
+	r.must(x.SetChecked(ctx, refOf(t, l, "checkbox", "Agree"), true))
+	r.must(x.SetChecked(ctx, refOf(t, l, "checkbox", "Agree"), false))
+	r.must(x.Hover(ctx, refOf(t, l, "button", "Menu")))
+	got := r.events(4)
+	var kinds []record.Kind
+	for _, e := range got {
+		kinds = append(kinds, e.Kind)
+	}
+	if want := []record.Kind{record.KindSelect, record.KindTick, record.KindUntick, record.KindHover}; !reflect.DeepEqual(kinds, want) {
+		t.Fatalf("the recorder heard %v, want %v\n%s", kinds, want, describeEvents(got))
+	}
+	if got[0].Value != "Refunded" || got[0].Target == nil || got[0].Target.Locator.Role != "combobox" || got[0].Target.Locator.Name != "Status" {
+		t.Errorf("the select was heard as %+v", got[0])
+	}
+	if got[1].Target == nil || got[1].Target.Locator.Role != "checkbox" || got[1].Target.Locator.Name != "Agree" {
+		t.Errorf("the tick was heard on %+v", got[1].Target)
+	}
+	r.quiet()
+}

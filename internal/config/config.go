@@ -65,9 +65,11 @@ type ResponseTime struct {
 	On    string        `yaml:"on"`
 }
 
-// Web's Chrome is the path of the Chrome program. Empty finds one on the machine.
+// Web's Chrome is the path of the Chrome program. Empty finds one on the machine. Timeout is how long a
+// check of a page waits for its condition before it fails. Zero means 5 seconds.
 type Web struct {
-	Chrome string `yaml:"chrome"`
+	Chrome  string        `yaml:"chrome"`
+	Timeout time.Duration `yaml:"timeout"`
 }
 
 type Effects struct {

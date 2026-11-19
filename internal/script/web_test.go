@@ -56,7 +56,10 @@ func TestWebScriptProblems(t *testing.T) {
 			s.Steps[0].Request = &domain.APIRequest{Service: "x", Method: "GET", Path: "/"}
 		}, "a request or a web action, and not both"},
 		"an action that is not valid": {func(s *domain.Script) { s.Steps[0].Web.Path = "" }, "web: open needs the path"},
-		"an unknown variable":         {func(s *domain.Script) { s.Steps[0].Web.Path = "/{{nobody}}" }, "nobody is used before any step captures it"},
+		"an upload that leaves the files folder": {func(s *domain.Script) {
+			s.Steps[1].Web = &domain.WebAction{Service: "board", App: "kanban", Do: domain.WebUpload, Screen: "Board", Element: "card", Value: "../secret.txt"}
+		}, "web: the path of an upload must stay below .semar/files/"},
+		"an unknown variable": {func(s *domain.Script) { s.Steps[0].Web.Path = "/{{nobody}}" }, "nobody is used before any step captures it"},
 		"a jsonpath capture on a web step": {func(s *domain.Script) {
 			s.Steps[1].Captures = []domain.Capture{{Name: "x", JSONPath: "$.a"}}
 		}, "a web step has no response to read: use an element"},

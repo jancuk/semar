@@ -30,7 +30,7 @@
 
   // The roles whose accessible name is certain here, and so can be matched the way the engine matches
   // the accessibility tree. Another role is found by its test ID, its text, or its path.
-  const NAMED_ROLES = new Set(['button', 'link', 'textbox', 'searchbox', 'checkbox', 'radio', 'heading', 'tab', 'menuitem', 'switch', 'spinbutton']);
+  const NAMED_ROLES = new Set(['button', 'link', 'textbox', 'searchbox', 'checkbox', 'radio', 'heading', 'tab', 'menuitem', 'switch', 'spinbutton', 'combobox']);
   const FROM_CONTENT = new Set(['button', 'link', 'heading', 'tab', 'menuitem', 'switch', 'checkbox', 'radio']);
 
   function roleOf(el) {
@@ -40,6 +40,7 @@
       case 'BUTTON': return 'button';
       case 'A': return el.hasAttribute('href') ? 'link' : '';
       case 'TEXTAREA': return 'textbox';
+      case 'SELECT': return 'combobox';
       case 'H1': case 'H2': case 'H3': case 'H4': case 'H5': case 'H6': return 'heading';
       case 'INPUT': {
         const type = (el.getAttribute('type') || 'text').toLowerCase();
@@ -121,7 +122,7 @@
     const role = roleOf(el);
     const acc = accName(el, role);
     const named = NAMED_ROLES.has(role) ? acc : { name: '', fromContent: false };
-    const text = reading ? '' : norm(el.innerText);
+    const text = reading || el.tagName === 'SELECT' ? '' : norm(el.innerText);
     const attrs = TEST_ID_ATTRS.map(a => [a, el.getAttribute(a)]).filter(([a, v]) => v && byTestId(a, v).length === 1);
     // What the element is called by: a check never calls its element by the text that it reads.
     const label = reading ? (acc.fromContent ? '' : acc.name) : acc.name || (text.length <= 40 ? text : '');
@@ -186,6 +187,17 @@
     if (el.tagName === 'SELECT') return norm(Array.from(el.selectedOptions).map(o => o.text).join(', '));
     return norm(visible(el) ? el.innerText : el.textContent);
   }
+
+  // The choice in a list is heard at the change of a person, and the explorer asks for it, because the
+  // events of a script are not trusted.
+  window.__semarSelect = el => { flush(); send({ kind: 'select', target: describe(el, 'act'), value: textOf(el) }); };
+  window.__semarHover = el => { flush(); send({ kind: 'hover', target: describe(el, 'act') }); };
+  on('change', e => {
+    if (!isTrusted(e)) return;
+    const el = e.target;
+    if (el.tagName === 'SELECT' && !el.multiple) window.__semarSelect(el);
+    else if (el.tagName === 'INPUT' && typeOf(el) === 'checkbox') { flush(); send({ kind: el.checked ? 'tick' : 'untick', target: describe(el, 'act') }); }
+  });
 
   function flash(el) {
     const was = [el.style.outline, el.style.outlineOffset];
@@ -281,6 +293,8 @@
     flush();
     // A click that puts the cursor in a text field is part of typing: a fill focuses its field itself.
     if (isField(el)) return;
+    // A checkbox is heard at its change, as the state that the click gave it.
+    if (el.tagName === 'INPUT' && typeOf(el) === 'checkbox') return;
     send({ kind: 'click', target: describe(el, 'act') });
   });
 

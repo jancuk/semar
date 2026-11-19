@@ -26,6 +26,9 @@ type hashedCheck struct {
 	Less       *float64 `json:"less,omitempty"`
 	Count      *int     `json:"count,omitempty"`
 	EqualsPath string   `json:"equalsPath,omitempty"`
+	Page       string   `json:"page,omitempty"`
+	Attribute  string   `json:"attribute,omitempty"`
+	State      string   `json:"state,omitempty"`
 }
 
 type hashedExpectation struct {

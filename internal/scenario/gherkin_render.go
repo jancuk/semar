@@ -420,10 +420,26 @@ func (r *renderer) check(path string, c domain.Check) (string, domain.Check) {
 		if strings.ContainsAny(c.Element, " \t\n\r") {
 			r.fail(path+".element", "%q must be one word", c.Element)
 		}
+		if c.Attribute != "" {
+			if !attributeName.MatchString(c.Attribute) {
+				r.fail(path+".attribute", "%q is not the name of an attribute", c.Attribute)
+			}
+			subject += " attribute " + c.Attribute
+		}
+	}
+	if c.Page != "" {
+		kinds++
+		subject = "the page " + c.Page
+		if c.Page != domain.PagePath && c.Page != domain.PageTitle {
+			r.fail(path+".page", "%q must be path or title", c.Page)
+		}
 	}
 	if kinds != 1 {
-		r.fail(path, "a check needs exactly one of status, jsonpath, header, element")
+		r.fail(path, "a check needs exactly one of status, jsonpath, header, element, page")
 		return "", want
+	}
+	if c.Attribute != "" && c.Element == "" {
+		r.fail(path+".attribute", "an attribute belongs to an element check")
 	}
 	if subject != strings.TrimSpace(subject) || strings.ContainsAny(subject, "\n\r") {
 		r.fail(path, "the subject %q must be one line without spaces at its ends", subject)
@@ -450,6 +466,13 @@ func (r *renderer) check(path string, c domain.Check) (string, domain.Check) {
 		text, norm := r.literal(path+"."+o.key, *o.val, 0)
 		*o.val = norm
 		add(true, fmt.Sprintf(o.fmt, text))
+	}
+	if c.State != "" {
+		words, known := domain.ElementStates[c.State]
+		if !known || c.Element == "" {
+			r.fail(path+".state", "%q is not a state of an element", c.State)
+		}
+		add(true, words)
 	}
 	if c.Exists != nil {
 		if *c.Exists {

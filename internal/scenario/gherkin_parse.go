@@ -33,7 +33,10 @@ const AcceptedThen = `A Then or And line after a When step is one of these. A va
   <$.json.path> has 3 items
   <$.json.path> equals the value at <$.other.path>
   the header <Name> equals "text"   (a header takes the operators of a JSON path)
-  the element <id> equals "text"    (an element takes equals, does not equal, contains, exists, and has N items)`
+  the element <id> equals "text"    (an element takes equals, does not equal, contains, exists, and has N items)
+  the element <id> is hidden        (or is visible, is enabled, is disabled, is checked, is not checked)
+  the element <id> attribute href contains "/orders"   (an attribute takes equals, does not equal, and contains)
+  the page path equals "/orders"    (the page takes path or title, with equals, does not equal, and contains)`
 
 // Load reads the Gherkin file at path.
 func Load(path string) (domain.Scenario, error) {
@@ -445,6 +448,14 @@ func parseThen(text string) (domain.Check, error) {
 		}
 		return domain.Check{Status: &n}, nil
 	}
+	if rest, ok := strings.CutPrefix(text, "the page "); ok {
+		name, op, ok := strings.Cut(rest, " ")
+		if !ok || name == "" {
+			return domain.Check{}, errNotASentence
+		}
+		c := domain.Check{Page: name}
+		return c, operator(&c, op)
+	}
 	for _, s := range []struct {
 		prefix string
 		set    func(*domain.Check, string)
@@ -459,6 +470,9 @@ func parseThen(text string) (domain.Check, error) {
 			}
 			var c domain.Check
 			s.set(&c, name)
+			if c.Element != "" {
+				return c, elementOperator(&c, op)
+			}
 			return c, operator(&c, op)
 		}
 	}
@@ -485,6 +499,29 @@ func parseThen(text string) (domain.Check, error) {
 	}
 	return domain.Check{}, errNotASentence
 }
+
+// elementOperator reads the words after the id of an element: a state, an attribute with its operator,
+// or an operator of the text.
+func elementOperator(c *domain.Check, text string) error {
+	if st, ok := domain.StateOfWords(text); ok {
+		c.State = st
+		return nil
+	}
+	if rest, ok := strings.CutPrefix(text, "attribute "); ok {
+		name, op, ok := strings.Cut(rest, " ")
+		if !ok || name == "" {
+			return errNotASentence
+		}
+		if !attributeName.MatchString(name) {
+			return fmt.Errorf("%q is not the name of an attribute", name)
+		}
+		c.Attribute = name
+		return operator(c, op)
+	}
+	return operator(c, text)
+}
+
+var attributeName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_:.-]*$`)
 
 // operator reads the words after the subject of a check into c.
 func operator(c *domain.Check, text string) error {

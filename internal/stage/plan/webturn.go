@@ -113,8 +113,15 @@ func actTurn(w turnWire, page pagelist.List, ps *problems) Turn {
 			}
 		}
 		switch act.Kind {
-		case ActionClick:
+		case ActionClick, ActionHover, ActionTick, ActionUntick:
 			ref("ref", a.Ref, false)
+		case ActionSelect:
+			ref("ref", a.Ref, false)
+			if blank(a.Text) {
+				ps.add(path+".text", "a select needs the label of the option to choose")
+			} else {
+				checkTextVariables(path+".text", "the text", a.Text, ps)
+			}
 		case ActionFill:
 			ref("ref", a.Ref, false)
 			switch {
@@ -142,7 +149,7 @@ func actTurn(w turnWire, page pagelist.List, ps *problems) Turn {
 				checkTextVariables(path+".expect", "expect", a.Expect, ps)
 			}
 		default:
-			ps.add(path+".kind", "the action kind %q must be one of click, fill, press, drag, check", a.Kind)
+			ps.add(path+".kind", "the action kind %q must be one of click, fill, select, hover, tick, untick, press, drag, check", a.Kind)
 		}
 		out = append(out, act)
 	}
@@ -240,6 +247,10 @@ func TurnSchema(page pagelist.List, first bool, catalogue []fixture.Entry) json.
 		object(map[string]any{"kind": enum("string", "fill"), "ref": ref, "text": text("The text to type. It replaces what the field holds. {{run.id}} is the ID of the run. For a date field write {{date.today}}, {{date.plus7d}}, or {{date.minus3d}}, and for a datetime-local field {{local.now}}, {{local.plus2h}}, or {{local.minus1d}}, and never type a date that is near today.")}),
 		object(map[string]any{"kind": enum("string", "press"), "ref": pressRef, "key": enum("string", "Enter", "Escape")}),
 		object(map[string]any{"kind": enum("string", "drag"), "ref": ref, "to": ref}),
+		object(map[string]any{"kind": enum("string", "select"), "ref": ref, "text": text("The label of the option to choose, as the list of the element shows it in options.")}),
+		object(map[string]any{"kind": enum("string", "hover"), "ref": ref}),
+		object(map[string]any{"kind": enum("string", "tick"), "ref": ref}),
+		object(map[string]any{"kind": enum("string", "untick"), "ref": ref}),
 		object(map[string]any{"kind": enum("string", "check"), "ref": ref, "expect": text("The text that the element must show, written from the criterion. {{run.id}} and the date variables are filled in as in a text.")}),
 	}
 	branches := []any{

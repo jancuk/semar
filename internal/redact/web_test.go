@@ -22,7 +22,8 @@ func TestWebRecordHoldsNoSecret(t *testing.T) {
 		Err: "failed for " + secret,
 		Web: &domain.WebRecord{
 			Op: "fill", URL: "http://shop.test/cart?token=" + secret, Target: loc,
-			Elements: map[string]domain.ElementState{"pw": {Found: true, Count: 1, Text: secret, Locator: loc}},
+			Elements: map[string]domain.ElementState{"pw": {Found: true, Count: 1, Text: secret, Locator: loc, Attrs: map[string]string{"href": "/a?k=" + secret}}},
+			Title:    "Cart " + secret,
 			Repair:   []domain.Candidate{{Element: "pw", Locator: *loc, Why: "same name " + secret}},
 			Blocked:  []string{secret + ".evil.test"},
 			SignIn:   &domain.WebSignIn{Account: "ana", User: "ana-" + secret},

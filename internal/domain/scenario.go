@@ -73,9 +73,12 @@ type Expectation struct {
 	By string `yaml:"by,omitempty"`
 }
 
-// Exactly one of Status, JSONPath, Header, Element is set. JSONPath, Header, and Element take exactly
-// one operator. An Element check names an element of the screen of the step, and reads its text with
-// Equals, NotEquals, and Contains, whether it is there with Exists, and how many match with Count.
+// Exactly one of Status, JSONPath, Header, Element, Page is set. JSONPath, Header, Element, and Page take
+// exactly one operator. An Element check names an element of the screen of the step, and reads its text
+// with Equals, NotEquals, and Contains, whether it is there with Exists, how many match with Count, and
+// what state it is in with State. With Attribute, Equals, NotEquals, and Contains read that attribute
+// of the element and not its text. A Page check reads the Path or the Title of the page with Equals,
+// NotEquals, and Contains.
 type Check struct {
 	Status     *int     `yaml:"status,omitempty"`
 	JSONPath   string   `yaml:"jsonpath,omitempty"`
@@ -89,4 +92,61 @@ type Check struct {
 	Less       *float64 `yaml:"less,omitempty"`
 	Count      *int     `yaml:"count,omitempty"`
 	EqualsPath string   `yaml:"equalsPath,omitempty"`
+	// Page is "path" or "title".
+	Page string `yaml:"page,omitempty"`
+	// Attribute is the attribute of an Element check that Equals, NotEquals, or Contains read.
+	Attribute string `yaml:"attribute,omitempty"`
+	// State is one of ElementStates.
+	State string `yaml:"state,omitempty"`
+}
+
+// The pages of a Page check.
+const (
+	PagePath  = "path"
+	PageTitle = "title"
+)
+
+// ElementStates maps each state of an element that a check may ask for to the words after "the element
+// <id>" in a Gherkin line. A scenario file and a person read the words, and a check holds the key.
+var ElementStates = map[string]string{
+	"hidden":    "is hidden",
+	"visible":   "is visible",
+	"enabled":   "is enabled",
+	"disabled":  "is disabled",
+	"checked":   "is checked",
+	"unchecked": "is not checked",
+}
+
+// StateOfWords gives the state that the words of a line name, and false for any other words.
+func StateOfWords(words string) (string, bool) {
+	for state, w := range ElementStates {
+		if w == words {
+			return state, true
+		}
+	}
+	return "", false
+}
+
+// SubjectCount is how many of the subjects of a check are set: a status, a JSON path, a header, an
+// element, or a page. A well-formed check has one.
+func (c Check) SubjectCount() int {
+	n := 0
+	for _, set := range []bool{c.Status != nil, c.JSONPath != "", c.Header != "", c.Element != "", c.Page != ""} {
+		if set {
+			n++
+		}
+	}
+	return n
+}
+
+// PresenceOnly reports whether an element check is answered by whether the element is there, how many
+// are, or whether any is shown: its absence is then an answer and no reason for a repair.
+func (c Check) PresenceOnly() bool {
+	if c.Element == "" {
+		return false
+	}
+	if c.State != "" {
+		return c.State == "hidden" || c.State == "visible"
+	}
+	return c.Attribute == "" && c.Equals == nil && c.NotEquals == nil && c.Contains == nil
 }

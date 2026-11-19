@@ -136,21 +136,8 @@ func validateExpectation(path string, e domain.Expectation, origin Origin) []Pro
 
 	c := e.Check
 	cp := path + ".check"
-	kinds := 0
-	if c.Status != nil {
-		kinds++
-	}
-	if c.JSONPath != "" {
-		kinds++
-	}
-	if c.Header != "" {
-		kinds++
-	}
-	if c.Element != "" {
-		kinds++
-	}
-	if kinds != 1 {
-		add(cp, "a check needs exactly one of status, jsonpath, header, element")
+	if c.SubjectCount() != 1 {
+		add(cp, "a check needs exactly one of status, jsonpath, header, element, page")
 	}
 
 	if c.JSONPath != "" {
@@ -160,6 +147,12 @@ func validateExpectation(path string, e domain.Expectation, origin Origin) []Pro
 	}
 	if c.Element != "" {
 		ps = append(ps, elementCheckProblems(cp, c)...)
+	}
+	if c.Page != "" {
+		ps = append(ps, pageCheckProblems(cp, c)...)
+	}
+	if c.Element == "" && (c.State != "" || c.Attribute != "") {
+		add(cp, "a state and an attribute belong to an element check")
 	}
 	if c.JSONPath != "" || c.Header != "" {
 		ops := 0
@@ -294,7 +287,7 @@ func elementCheckProblems(path string, c domain.Check) []Problem {
 		set  bool
 	}{
 		{"equals", c.Equals != nil}, {"notEquals", c.NotEquals != nil}, {"contains", c.Contains != nil},
-		{"exists", c.Exists != nil}, {"count", c.Count != nil},
+		{"exists", c.Exists != nil}, {"count", c.Count != nil}, {"state", c.State != ""},
 		{"greater", c.Greater != nil}, {"less", c.Less != nil}, {"equalsPath", c.EqualsPath != ""},
 	} {
 		if o.set {
@@ -303,12 +296,45 @@ func elementCheckProblems(path string, c domain.Check) []Problem {
 	}
 	switch {
 	case len(ops) != 1:
-		add(path, "an element check needs exactly one operator: equals, notEquals, contains, exists, or count")
+		add(path, "an element check needs exactly one operator: equals, notEquals, contains, exists, count, or a state")
 	case ops[0] == "greater" || ops[0] == "less" || ops[0] == "equalsPath":
-		add(path, "the operator %s is not for an element: use equals, notEquals, contains, exists, or count", ops[0])
+		add(path, "the operator %s is not for an element: use equals, notEquals, contains, exists, count, or a state", ops[0])
+	}
+	if c.State != "" && domain.ElementStates[c.State] == "" {
+		add(path+".state", "state %q must be one of hidden, visible, enabled, disabled, checked, unchecked", c.State)
+	}
+	if c.Attribute != "" {
+		if !attributeName.MatchString(c.Attribute) {
+			add(path+".attribute", "%q is not the name of an attribute", c.Attribute)
+		}
+		if len(ops) == 1 && ops[0] != "equals" && ops[0] != "notEquals" && ops[0] != "contains" {
+			add(path+".attribute", "an attribute is read with equals, notEquals, or contains")
+		}
 	}
 	if c.Count != nil && *c.Count < 0 {
 		add(path+".count", "count must not be negative")
+	}
+	return ps
+}
+
+// pageCheckProblems holds the rules of a check on the page: its path or its title, with one of the
+// operators of a text.
+func pageCheckProblems(path string, c domain.Check) []Problem {
+	var ps []Problem
+	add := func(p, format string, args ...any) {
+		ps = append(ps, Problem{Path: p, Message: fmt.Sprintf(format, args...)})
+	}
+	if c.Page != domain.PagePath && c.Page != domain.PageTitle {
+		add(path+".page", "page must be path or title")
+	}
+	set := 0
+	for _, o := range []bool{c.Equals != nil, c.NotEquals != nil, c.Contains != nil} {
+		if o {
+			set++
+		}
+	}
+	if set != 1 || c.Exists != nil || c.Count != nil || c.Greater != nil || c.Less != nil || c.EqualsPath != "" || c.State != "" || c.Attribute != "" {
+		add(path, "a page check needs exactly one of equals, notEquals, or contains")
 	}
 	return ps
 }

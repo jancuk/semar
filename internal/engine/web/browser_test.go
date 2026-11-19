@@ -1,10 +1,13 @@
 package web_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -114,6 +117,9 @@ type rigOptions struct {
 	// accounts is the web sign-in of each account, by the name of the account.
 	accounts      map[string]config.WebSignIn
 	actionTimeout time.Duration
+	checkTimeout  time.Duration
+	// uploads is the folder that an upload reads from.
+	uploads string
 }
 
 func newRig(t *testing.T, o rigOptions) *rig {
@@ -171,7 +177,7 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	eng := web.New(web.Options{
 		Policy: policy, Recorder: rec, Files: run, Services: map[string]string{"app": srv.URL},
 		Secrets: env, Home: home, Environment: "test", Chrome: o.chrome, Run: "r-1",
-		Accounts: o.accounts, ActionTimeout: o.actionTimeout,
+		Accounts: o.accounts, ActionTimeout: o.actionTimeout, CheckTimeout: o.checkTimeout, Uploads: o.uploads,
 	})
 	t.Cleanup(eng.Close)
 	return &rig{t: t, eng: eng, run: run, store: store, srv: srv, home: home, policy: policy, seen: seen}
@@ -187,6 +193,10 @@ func (r *rig) do(w domain.WebAction, locs map[string]domain.Locator, watch ...we
 }
 
 func (r *rig) try(w domain.WebAction, locs map[string]domain.Locator, watch ...web.Watched) (web.Result, error) {
+	return r.tryUntil(w, locs, nil, watch...)
+}
+
+func (r *rig) tryUntil(w domain.WebAction, locs map[string]domain.Locator, until []domain.Check, watch ...web.Watched) (web.Result, error) {
 	r.step++
 	w.Service, w.App = "app", "kanban"
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -197,6 +207,7 @@ func (r *rig) try(w domain.WebAction, locs map[string]domain.Locator, watch ...w
 		Action:   w,
 		Locators: locs,
 		Watch:    watch,
+		Until:    until,
 		Why:      "the step " + string(w.Do),
 
 		AuthProfile: r.as,
@@ -240,15 +251,16 @@ func TestEveryActionLeavesAScreenshot(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	res := r.do(open("/board"), nil)
 	shot := res.Action.Web.Screenshot
-	if !strings.HasPrefix(shot, "screenshots/board/") || !strings.HasSuffix(shot, ".png") {
+	if !strings.HasPrefix(shot, "screenshots/board/") || !strings.HasSuffix(shot, ".jpg") {
 		t.Fatalf("screenshot = %q", shot)
 	}
 	data, err := os.ReadFile(filepath.Join(r.store.Root(), "runs", "r-1", filepath.FromSlash(shot)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(data) < 8 || string(data[1:4]) != "PNG" {
-		t.Errorf("the file is not a PNG: %d bytes", len(data))
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || format != "jpeg" || cfg.Width < 1 || cfg.Width > 1280 {
+		t.Errorf("the file is not a JPEG of at most 1280 pixels: %v %q %dx%d", err, format, cfg.Width, cfg.Height)
 	}
 }
 

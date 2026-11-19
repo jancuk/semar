@@ -55,7 +55,11 @@ type scenarioView struct {
 	// Attempts says how a scenario that ran more than once came out. Tries has one line for each attempt.
 	Attempts string
 	Tries    []string
+	// Shots are the screenshots of the browser steps that a reason or a check names.
+	Shots []shotView
 }
+
+type shotView struct{ Step, Path string }
 
 type ledgerView struct {
 	Verb, Object, Scenario, Step, Status string
@@ -144,6 +148,7 @@ func buildView(d Data) markdownView {
 			}
 			sv.Checks = append(sv.Checks, checkViewOf(c, d.Scenarios[r.Scenario]))
 		}
+		sv.Shots = failedShots(d.Activity, r)
 		v.Attention = append(v.Attention, sv)
 	}
 	v.StillExists = append(v.StillExists, journeyStillExists(d.Journeys)...)
@@ -162,6 +167,36 @@ func shownAttemptReason(a domain.Attempt) string {
 		return ""
 	}
 	return ": " + shown(shownReason(a.Reasons))
+}
+
+// failedShots gives the screenshot of each browser step that a reason or a failed check of the result
+// names, in the order of the steps that name them.
+func failedShots(acts []domain.Activity, r domain.ScenarioResult) []shotView {
+	var steps []domain.StepID
+	add := func(id domain.StepID) {
+		if id != "" && !slices.Contains(steps, id) {
+			steps = append(steps, id)
+		}
+	}
+	for _, reason := range r.Reasons {
+		add(reason.Step)
+	}
+	for _, c := range r.Checks {
+		if c.State != domain.CheckTrue {
+			add(c.Step)
+		}
+	}
+	var out []shotView
+	for _, id := range steps {
+		for i := len(acts) - 1; i >= 0; i-- {
+			e := acts[i]
+			if e.Surface == domain.SurfaceWeb && e.Use.Scenario == r.Scenario && e.Use.Step == id && screenshotPath.MatchString(e.Screenshot) {
+				out = append(out, shotView{Step: shown(string(id)), Path: e.Screenshot})
+				break
+			}
+		}
+	}
+	return out
 }
 
 // statusCommand is the command that shows the use cases of the tickets. A key that is not safe
@@ -283,7 +318,7 @@ func utc(t time.Time) string {
 
 // screenshotPath is where the engine puts a screenshot. The activity log is read back from disk, so a
 // path is linked only when it has this form.
-var screenshotPath = regexp.MustCompile(`^screenshots/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.png$`)
+var screenshotPath = regexp.MustCompile(`^screenshots/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.(png|jpg)$`)
 
 func browserSteps(acts []domain.Activity) []browserStep {
 	var out []browserStep

@@ -370,3 +370,39 @@ func TestBuildRefusesARecordingThatUsesARecordOfAnotherRun(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildSelectsAndTicksAndHovers(t *testing.T) {
+	page := onPage("/orders", "Orders")
+	events := []record.Event{
+		{Kind: record.KindOpen, Page: record.Page{URL: base + "/orders"}},
+		{Kind: record.KindSelect, Page: page, Target: el("combobox", "Status"), Value: "Refunded"},
+		{Kind: record.KindTick, Page: page, Target: el("checkbox", "Agree")},
+		{Kind: record.KindUntick, Page: page, Target: el("checkbox", "News")},
+		{Kind: record.KindHover, Page: page, Target: el("button", "Menu")},
+		{Kind: record.KindCheck, Page: page, Target: css("#chosen", "chosen"), Value: "chose Refunded"},
+	}
+	d := build(t, events, options())
+	text := feature(t, d)
+	for _, want := range []string{
+		"Choose \"Refunded\" in status\n    # step: select-status\n",
+		"Check agree\n    # step: check-agree\n",
+		"Uncheck news\n    # step: uncheck-news\n",
+		"Hover over menu\n    # step: hover-menu\n",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the scenario lacks %q:\n%s", want, text)
+		}
+	}
+	for i, want := range []struct {
+		do    domain.WebOp
+		value string
+	}{{domain.WebOpen, ""}, {domain.WebSelect, "Refunded"}, {domain.WebCheck, ""}, {domain.WebUncheck, ""}, {domain.WebHover, ""}} {
+		w := d.Script.Steps[i].Web
+		if w.Do != want.do || w.Value != want.value {
+			t.Errorf("step %d = %+v, want %s %q", i, w, want.do, want.value)
+		}
+	}
+	if ps := script.Validate(d.Scenario, d.Script); len(ps) > 0 {
+		t.Errorf("the script does not fit its scenario: %+v", ps)
+	}
+}

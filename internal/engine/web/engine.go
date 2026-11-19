@@ -30,6 +30,8 @@ const (
 	defaultActionTimeout = 30 * time.Second
 	defaultSettle        = 8 * time.Second
 	waitLimit            = 10 * time.Second
+	defaultCheckTimeout  = 5 * time.Second
+	checkPoll            = 150 * time.Millisecond
 
 	refusedNoUseCase = "a write must belong to a scenario step, an exploration, or a probe"
 	refusedBudget    = "action budget reached"
@@ -61,10 +63,15 @@ type Options struct {
 	// defaults are 30 and 8 seconds.
 	ActionTimeout time.Duration
 	Settle        time.Duration
-	Clock         func() time.Time
-	TraceID       func() string // 32 lower-case hex characters
-	SpanID        func() string // 16 lower-case hex characters
-	Logger        *slog.Logger
+	// CheckTimeout is how long the checks of a step wait for their condition after the page settles.
+	// The default is 5 seconds.
+	CheckTimeout time.Duration
+	// Uploads is the folder that the files of an upload are below. With none, an upload is refused.
+	Uploads string
+	Clock   func() time.Time
+	TraceID func() string // 32 lower-case hex characters
+	SpanID  func() string // 16 lower-case hex characters
+	Logger  *slog.Logger
 }
 
 // Watched is an element that a check or a capture of the step names. Presence is true when only its
@@ -72,6 +79,8 @@ type Options struct {
 type Watched struct {
 	Element  string
 	Presence bool
+	// Attrs are the attributes of the element that a check reads.
+	Attrs []string
 }
 
 type Call struct {
@@ -80,8 +89,12 @@ type Call struct {
 	Action domain.WebAction
 	// Locators holds the locator of every element that the action and the watched elements name, and
 	// of every element that their within chains name, with the variables filled in.
-	Locators    map[string]domain.Locator
-	Watch       []Watched
+	Locators map[string]domain.Locator
+	Watch    []Watched
+	// Until holds the checks of the step on an element or on the page, with the variables filled in.
+	// The engine reads the page again until they hold or CheckTimeout passes, and records the last
+	// reading. It decides no outcome: the verdict evaluates the checks on the stored action.
+	Until       []domain.Check
 	Captures    []domain.Capture
 	AuthProfile string // the account of the browser profile; "" is default
 	Why         string
@@ -112,6 +125,9 @@ func New(o Options) *Engine {
 	}
 	if o.Settle <= 0 {
 		o.Settle = defaultSettle
+	}
+	if o.CheckTimeout <= 0 {
+		o.CheckTimeout = defaultCheckTimeout
 	}
 	if o.Clock == nil {
 		o.Clock = time.Now
@@ -204,6 +220,10 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 		a.Refused = refusedNoUseCase
 	case w.Do.Writes() && e.o.Policy.ReadOnly():
 		a.Refused = fmt.Sprintf("%s: %s writes, and the environment is read only", effects.ReadOnly, w.Do)
+	case w.Do == domain.WebUpload:
+		if _, err := uploadFile(e.o.Uploads, w.Value); err != nil {
+			a.Refused = "the upload was refused: " + err.Error()
+		}
 	case w.Do == domain.WebOpen:
 		head, tail := script.SplitWebPath(w.Path)
 		u, err := api.JoinURL(base, head, nil)
@@ -241,6 +261,9 @@ func (e *Engine) Do(ctx context.Context, c Call) (Result, error) {
 			return e.record(ctx, label, a, nil, missing)
 		}
 		value = v
+	}
+	if w.Do == domain.WebUpload {
+		value, _ = uploadFile(e.o.Uploads, w.Value)
 	}
 
 	s, err := e.session(c.AuthProfile)
@@ -318,9 +341,7 @@ func (e *Engine) run(ctx context.Context, s *session, c Call, open *url.URL, val
 
 	// The page is read again after it has settled, with a reader of its own: the one of the action
 	// holds what the page looked like before.
-	post := newReader(tabCtx, c.Locators)
-	defer post.release()
-	states, repair, readErr := e.read(post, c)
+	states, repair, readErr := e.readUntil(tabCtx, s, c)
 	if miss != nil {
 		if states == nil {
 			states = map[string]domain.ElementState{}
@@ -338,6 +359,9 @@ func (e *Engine) run(ctx context.Context, s *session, c Call, open *url.URL, val
 	a.Web.Blocked = s.guard.blockedHosts()
 	if loc, err := s.location(tabCtx); err == nil {
 		a.Web.URL = loc
+	}
+	if title, err := s.title(tabCtx); err == nil {
+		a.Web.Title = title
 	}
 
 	switch {
@@ -385,6 +409,15 @@ func (e *Engine) perform(rd *reader, c Call, value string) (err error, dispatche
 			}
 		}
 		return pressKey(rd.ctx, value), true
+	case domain.WebHover:
+		return rd.hover(target.id), false
+	case domain.WebSelect:
+		return rd.selectOption(target.id, value), true
+	case domain.WebCheck, domain.WebUncheck:
+		return rd.setChecked(target.id, w.Do == domain.WebCheck), true
+	case domain.WebUpload:
+		// value is the file that Do found below the uploads folder.
+		return rd.upload(target.id, value), true
 	case domain.WebDrag:
 		to, err := rd.resolve(w.To)
 		if err != nil {
@@ -457,6 +490,7 @@ func (e *Engine) read(rd *reader, c Call) (map[string]domain.ElementState, []dom
 			needsText[wt.Element] = true
 		}
 	}
+	rd.attrs = attrsOf(c.Watch)
 	states := make(map[string]domain.ElementState, len(names))
 	var repair []domain.Candidate
 	for _, name := range names {
@@ -465,6 +499,9 @@ func (e *Engine) read(rd *reader, c Call) (map[string]domain.ElementState, []dom
 			return states, repair, err
 		}
 		states[name] = res.state
+		if res.state.Count > 1 && needsText[name] {
+			repair = append(repair, res.others...)
+		}
 		if wt := watchOf(c.Watch, name); wt != nil && wt.Presence && !needsText[name] {
 			st := states[name]
 			st.Presence = true
@@ -502,12 +539,13 @@ func watchOf(watch []Watched, name string) *Watched {
 	return nil
 }
 
-// screenshot stores one PNG of the page and gives its path below the run directory.
+// screenshot stores one JPEG of the page, at most 1280 pixels wide, and gives its path below the run
+// directory. It is evidence of the step, so a failure to take it never fails the step.
 func (e *Engine) screenshot(ctx context.Context, a domain.Action) (string, error) {
 	if e.o.Files == nil {
 		return "", errors.New("the engine has no place for files")
 	}
-	data, err := capturePNG(ctx)
+	data, err := captureJPEG(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -523,7 +561,7 @@ func (e *Engine) screenshot(ctx context.Context, a domain.Action) (string, error
 	if a.Use.Step != "" {
 		name += "-" + string(a.Use.Step)
 	}
-	rel := "screenshots/" + dir + "/" + name + ".png"
+	rel := "screenshots/" + dir + "/" + name + ".jpg"
 	if err := e.o.Files.WriteFile(rel, data); err != nil {
 		return "", err
 	}
@@ -592,4 +630,72 @@ func refusalText(err error, label string) string {
 	default:
 		return string(r.Kind) + ": " + label + " is not allowed: its path is not normal or it matches the deny list"
 	}
+}
+
+func attrsOf(watch []Watched) map[string][]string {
+	out := map[string][]string{}
+	for _, w := range watch {
+		if len(w.Attrs) > 0 {
+			out[w.Element] = w.Attrs
+		}
+	}
+	return out
+}
+
+// readUntil reads the page after it settled. When the step has checks, it reads again until they all
+// hold or CheckTimeout passes, and gives the last reading. A check that an element is not there, or
+// hidden, holds on a page that has not drawn the element yet, so after such a check holds the engine
+// waits until the page is quiet and reads once more.
+func (e *Engine) readUntil(ctx context.Context, s *session, c Call) (map[string]domain.ElementState, []domain.Candidate, error) {
+	until := slices.DeleteFunc(slices.Clone(c.Until), func(k domain.Check) bool { return k.Element == "" && k.Page == "" })
+	read := func() (map[string]domain.ElementState, []domain.Candidate, error) {
+		rd := newReader(ctx, c.Locators)
+		defer rd.release()
+		return e.read(rd, c)
+	}
+	states, repair, err := read()
+	if len(until) == 0 || err != nil {
+		return states, repair, err
+	}
+	deadline := time.Now().Add(e.o.CheckTimeout)
+	held := e.hold(ctx, s, c, until, states, repair)
+	for !held && time.Now().Before(deadline) && ctx.Err() == nil {
+		select {
+		case <-ctx.Done():
+		case <-time.After(checkPoll):
+		}
+		if states, repair, err = read(); err != nil {
+			return states, repair, err
+		}
+		held = e.hold(ctx, s, c, until, states, repair)
+	}
+	if held && slices.ContainsFunc(until, absence) {
+		s.settle(ctx, e.o.Settle)
+		return read()
+	}
+	return states, repair, nil
+}
+
+// absence is a check that holds when something is not shown.
+func absence(k domain.Check) bool {
+	return k.Element != "" && (k.Exists != nil && !*k.Exists || k.Count != nil && *k.Count == 0 || k.State == "hidden")
+}
+
+// hold says whether every check is true of what was read. The verdict decides the outcome later, from
+// the stored action: this only tells the engine whether to read again.
+func (e *Engine) hold(ctx context.Context, s *session, c Call, until []domain.Check, states map[string]domain.ElementState, repair []domain.Candidate) bool {
+	w := &domain.WebRecord{Op: string(c.Action.Do), Elements: states, Repair: repair}
+	if loc, err := s.location(ctx); err == nil {
+		w.URL = loc
+	}
+	if title, err := s.title(ctx); err == nil {
+		w.Title = title
+	}
+	act := domain.Action{Surface: domain.SurfaceWeb, Web: w}
+	for _, k := range until {
+		if check.Eval(k, act).State != domain.CheckTrue {
+			return false
+		}
+	}
+	return true
 }

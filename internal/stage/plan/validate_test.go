@@ -351,8 +351,8 @@ func TestSchema(t *testing.T) {
 	ct := reflect.TypeFor[domain.Check]()
 	for i := range ct.NumField() {
 		name, _, _ := strings.Cut(ct.Field(i).Tag.Get("yaml"), ",")
-		// The planner drafts steps for the API. An element check belongs to a web step, which a person writes.
-		if name != "element" {
+		// The planner drafts steps for the API. An element, page, attribute, or state check belongs to a web step, which a person writes.
+		if !slices.Contains([]string{"element", "page", "attribute", "state"}, name) {
 			want = append(want, name)
 		}
 	}

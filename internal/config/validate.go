@@ -191,6 +191,9 @@ func validateEnvironment(name string, e Environment, profiles map[string]AuthPro
 	if c := e.Web.Chrome; c != "" && !filepath.IsAbs(c) {
 		add("%s.web.chrome must be an absolute path, got %q", p, c)
 	}
+	if e.Web.Timeout < 0 || e.Web.Timeout > time.Minute {
+		add("%s.web.timeout must be a duration from 0 to 1 minute, got %s", p, e.Web.Timeout)
+	}
 	validateData(p+".data", e.Data, add)
 	validateChecks(p+".checks", e.Checks, add)
 }

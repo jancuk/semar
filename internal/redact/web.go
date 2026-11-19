@@ -12,6 +12,7 @@ import (
 // The screenshot is a path, and the engine writes no secret into a path.
 func webRecord(s *scrubber, w domain.WebRecord) domain.WebRecord {
 	w.URL = s.text(w.URL)
+	w.Title = s.text(w.Title)
 	if w.Target != nil {
 		t := locator(s, *w.Target)
 		w.Target = &t
@@ -21,6 +22,13 @@ func webRecord(s *scrubber, w domain.WebRecord) domain.WebRecord {
 		for _, name := range slices.Sorted(maps.Keys(w.Elements)) {
 			st := w.Elements[name]
 			st.Text = s.text(st.Text)
+			if st.Attrs != nil {
+				attrs := make(map[string]string, len(st.Attrs))
+				for k, v := range st.Attrs {
+					attrs[k] = s.text(v)
+				}
+				st.Attrs = attrs
+			}
 			if st.Locator != nil {
 				l := locator(s, *st.Locator)
 				st.Locator = &l

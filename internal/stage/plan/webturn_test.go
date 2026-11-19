@@ -174,3 +174,24 @@ func TestTheTurnPromptHoldsThePageTheHistoryAndTheRules(t *testing.T) {
 	}
 	_ = domain.FixtureID("")
 }
+
+func TestDecodeTurnReadsSelectHoverTickAndUntick(t *testing.T) {
+	turn, ps := decodeTurn(t, `{"turn":{"kind":"act","actions":[
+	  {"kind":"select","ref":"e1","text":"Refunded"},{"kind":"hover","ref":"e2"},{"kind":"tick","ref":"e1"},{"kind":"untick","ref":"e2"}]}}`, false)
+	a, ok := turn.(TurnAct)
+	if !ok || len(ps) > 0 || len(a.Actions) != 4 || a.Actions[0] != (Action{Kind: ActionSelect, Ref: "e1", Text: "Refunded"}) || a.Actions[3].Kind != ActionUntick {
+		t.Fatalf("turn = %#v, problems %v", turn, ps)
+	}
+	if got := a.Actions[0].String(); got != `select "Refunded" in e1` {
+		t.Errorf("String() = %q", got)
+	}
+	_, ps = decodeTurn(t, `{"turn":{"kind":"act","actions":[{"kind":"select","ref":"e1","text":""},{"kind":"tick","ref":"e9"}]}}`, false)
+	var texts []string
+	for _, p := range ps {
+		texts = append(texts, p.Message)
+	}
+	joined := strings.Join(texts, "\n")
+	if !strings.Contains(joined, "a select needs the label of the option to choose") || !strings.Contains(joined, "e9 is not in the list of the page") {
+		t.Errorf("problems = %v", texts)
+	}
+}

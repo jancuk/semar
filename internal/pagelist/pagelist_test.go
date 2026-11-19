@@ -123,3 +123,17 @@ e6 color "Tint"
 		t.Errorf("list:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func TestASelectListShowsItsOptionsAndAtMostTwelve(t *testing.T) {
+	opts := []string{"All", "Paid", "Refunded"}
+	for i := 0; i < 20; i++ {
+		opts = append(opts, "Option")
+	}
+	l := pagelist.Build("http://shop.test/o", "Orders", []pagelist.Item{{Index: 0, Role: "combobox", Name: "Status", Value: "All", Acts: true, Options: opts}})
+	if got := len(l.Elements[0].Options); got != pagelist.MaxOptions {
+		t.Errorf("the list holds %d options", got)
+	}
+	if want := `e1 combobox "Status" value="All" options=["All", "Paid", "Refunded", "Option"`; !strings.Contains(l.String(), want) {
+		t.Errorf("the list lacks %q:\n%s", want, l)
+	}
+}

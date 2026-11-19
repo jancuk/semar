@@ -272,3 +272,145 @@ func waitFor(ctx context.Context, locs map[string]domain.Locator, name string, l
 		}
 	}
 }
+
+// hover moves the pointer onto the middle of the element, as a person does to open a menu.
+func (r *reader) hover(id cdp.BackendNodeID) error {
+	x, y, err := r.center(id)
+	if err != nil {
+		return err
+	}
+	return webinput.Hover(r.ctx, x, y)
+}
+
+// selectOption chooses the option of a list whose label is the text. The page hears an input and a
+// change, as it does when a person picks from the list that the browser draws.
+func (r *reader) selectOption(id cdp.BackendNodeID, label string) error {
+	h, err := r.handle(id)
+	if err != nil {
+		return err
+	}
+	arg, _ := json.Marshal(label)
+	res, err := chromedp.Call(r.ctx, runtime.CallFunctionOn, runtime.CallFunctionOnParams{
+		FunctionDeclaration: `function(label){
+  if (this.tagName !== 'SELECT') return 'notlist';
+  if (this.disabled) return 'disabled';
+  const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+  const hit = Array.from(this.options).filter(o => norm(o.text) === norm(label));
+  if (hit.length === 0) return 'none';
+  if (hit.length > 1) return 'many';
+  if (hit[0].disabled) return 'optiondisabled';
+  this.focus();
+  Array.from(this.options).forEach(o => { o.selected = o === hit[0]; });
+  this.dispatchEvent(new Event('input', { bubbles: true }));
+  this.dispatchEvent(new Event('change', { bubbles: true }));
+  return 'ok';
+}`,
+		ObjectID:      h,
+		Arguments:     []*runtime.CallArgument{{Value: arg}},
+		ReturnByValue: ptr(true),
+	})
+	if err != nil {
+		return err
+	}
+	var word string
+	if res.Result != nil {
+		_ = json.Unmarshal(res.Result.Value, &word)
+	}
+	switch word {
+	case "ok":
+		return nil
+	case "notlist":
+		return errors.New("the element is not a select list")
+	case "disabled":
+		return errors.New("the list is disabled")
+	case "none":
+		return fmt.Errorf("the list has no option with the label %q", label)
+	case "many":
+		return fmt.Errorf("the list has more than one option with the label %q", label)
+	case "optiondisabled":
+		return fmt.Errorf("the option %q is disabled", label)
+	}
+	return errors.New("the list could not be set")
+}
+
+// boxState says what kind of box the element is, whether it is checked, and whether it is disabled.
+func (r *reader) boxState(h runtime.RemoteObjectID) (kind string, checked, disabled bool, err error) {
+	res, err := chromedp.Call(r.ctx, runtime.CallFunctionOn, runtime.CallFunctionOnParams{
+		FunctionDeclaration: `function(){
+  const role = (this.getAttribute('role') || '').toLowerCase();
+  let kind = '';
+  if (this.tagName === 'INPUT' && (this.type === 'checkbox' || this.type === 'radio')) kind = this.type;
+  else if (role === 'checkbox' || role === 'switch') kind = 'checkbox';
+  else if (role === 'radio') kind = 'radio';
+  const checked = kind && this.tagName === 'INPUT' ? this.checked : this.getAttribute('aria-checked') === 'true';
+  return { kind: kind, checked: !!checked, disabled: this.matches(':disabled') || this.getAttribute('aria-disabled') === 'true' };
+}`,
+		ObjectID:      h,
+		ReturnByValue: ptr(true),
+	})
+	if err != nil {
+		return "", false, false, err
+	}
+	var out struct {
+		Kind              string
+		Checked, Disabled bool
+	}
+	if res.Result == nil || json.Unmarshal(res.Result.Value, &out) != nil {
+		return "", false, false, errors.New("the element could not be read")
+	}
+	return out.Kind, out.Checked, out.Disabled, nil
+}
+
+// setChecked makes a checkbox, a switch, or a radio button checked or not. A box that is in the state
+// already is left alone, so the step gives the same result when it runs twice. The box is read again
+// after the click, because a page may keep it as it was.
+func (r *reader) setChecked(id cdp.BackendNodeID, want bool) error {
+	h, err := r.handle(id)
+	if err != nil {
+		return err
+	}
+	kind, checked, disabled, err := r.boxState(h)
+	switch {
+	case err != nil:
+		return err
+	case kind == "":
+		return errors.New("the element is not a checkbox, a switch, or a radio button")
+	case disabled:
+		return errors.New("the box is disabled")
+	case checked == want:
+		return nil
+	case !want && kind == "radio":
+		return errors.New("a radio button is cleared by choosing another one")
+	}
+	if err := r.click(id); err != nil {
+		return err
+	}
+	for range 10 {
+		if _, now, _, err := r.boxState(h); err == nil && now == want {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return errors.New("the box did not change after the click")
+}
+
+// upload puts a file in a file field, which sends the input and change events of a chosen file.
+func (r *reader) upload(id cdp.BackendNodeID, file string) error {
+	h, err := r.handle(id)
+	if err != nil {
+		return err
+	}
+	res, err := chromedp.Call(r.ctx, runtime.CallFunctionOn, runtime.CallFunctionOnParams{
+		FunctionDeclaration: `function(){ return this.tagName === 'INPUT' && this.type === 'file' && !this.disabled; }`,
+		ObjectID:            h,
+		ReturnByValue:       ptr(true),
+	})
+	if err != nil {
+		return err
+	}
+	if res.Result == nil || string(res.Result.Value) != "true" {
+		return errors.New("the element is not a file field that takes a file")
+	}
+	_, err = chromedp.Call(r.ctx, dom.SetFileInputFiles, dom.SetFileInputFilesParams{Files: []string{file}, BackendNodeID: id})
+	return err
+}

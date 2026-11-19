@@ -71,7 +71,8 @@ Outcome: **{{ .Outcome }}**{{ if .Next }} Next: `{{ .Next }}`{{ end }}{{ if .Att
   - Source: {{ .Source }}{{ if .Cite }}, cite: {{ .Cite }}{{ end }}
   - Observed: {{ .Observed }}
 {{ if .Detail }}  - Detail: {{ .Detail }}
-{{ end }}{{ end }}{{ if .Checks }}
+{{ end }}{{ end }}{{ range .Shots }}- Screenshot of step {{ .Step }}: [Screenshot]({{ .Path }})
+{{ end }}{{ if or .Checks .Shots }}
 {{ end }}Reproduce: {{ .Reproduce }}
 
 {{ end -}}
