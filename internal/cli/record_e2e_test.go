@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -87,7 +88,11 @@ func orderShop(id string) string {
 </body></html>`
 }
 
-type shopPages struct{ refund atomic.Bool }
+type shopPages struct {
+	refund atomic.Bool
+	// refundExtra is put at the end of the refund page, as a page that loads from another host does.
+	refundExtra atomic.Pointer[string]
+}
 
 func recordRepoWith(t *testing.T, o repoOptions) (*repo, *shopPages) {
 	t.Helper()
@@ -98,7 +103,13 @@ func recordRepoWith(t *testing.T, o repoOptions) (*repo, *shopPages) {
 	wrap := o.wrap
 	o.wrap = func(next http.Handler) http.Handler {
 		mux := http.NewServeMux()
-		mux.HandleFunc("/refund", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, refundShop(pages.refund.Load())) })
+		mux.HandleFunc("/refund", func(w http.ResponseWriter, _ *http.Request) {
+			page := refundShop(pages.refund.Load())
+			if extra := pages.refundExtra.Load(); extra != nil {
+				page = strings.Replace(page, "</body>", *extra+"</body>", 1)
+			}
+			fmt.Fprint(w, page)
+		})
 		mux.HandleFunc("/signin", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, signInShop) })
 		mux.HandleFunc("/desk", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, tabSessionShop) })
 		mux.HandleFunc("/echo", func(w http.ResponseWriter, _ *http.Request) {
@@ -488,4 +499,18 @@ func (r *repo) assertNoSecretInHome(t *testing.T, secret string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestRecordSaysWhichHostsTheReplayBlocked(t *testing.T) {
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "x") }))
+	t.Cleanup(cdn.Close)
+	r, pages := recordRepo(t)
+	extra := `<img src="` + cdn.URL + `/pixel.png">`
+	pages.refundExtra.Store(&extra)
+	res := r.record(t, t.Context(), cli.ExitOK, refundFlow(t), "SHOP-482-09", "--open", "/refund", "--service", "orders")
+	contains(t, "the output", res.stdout,
+		"Replayed once: passed.\n",
+		"blocked hosts: the browser did not reach 1 host, because environments.local.hosts does not list them\n",
+		"  "+strings.TrimPrefix(cdn.URL, "http://")+": SHOP-482-09\n",
+	)
 }

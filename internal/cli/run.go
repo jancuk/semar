@@ -38,6 +38,7 @@ type runFlags struct {
 	all        bool
 	noJourneys bool
 	noPlan     bool
+	noReview   bool
 	env        string
 	builds     []string
 	base       string
@@ -45,7 +46,7 @@ type runFlags struct {
 	headed     bool
 	// done is told how the scenarios of the run ended, and where the report is. semar record uses it to
 	// say how the replay of a new recording went.
-	done func(run domain.Run, report string)
+	done func(fin finishedRun)
 }
 
 func newRunCommand(o options) *cobra.Command {
@@ -56,6 +57,7 @@ func newRunCommand(o options) *cobra.Command {
 		Long: "Run every scenario whose ticket is a ticket of the change, then every journey with criticality critical, and end with the status of the change.\n" +
 			"The change is the commits from the base branch to HEAD. --all runs every scenario and every critical journey, and --scenario <id> runs the scenarios named and no journey.\n" +
 			"A ticket of the change that has a ticket file and no use cases is not planned. On a terminal, run offers to plan it and asks first. With no terminal, or with --no-plan, it never plans, and its exit code is at least 2.\n" +
+			"When a test of the run needs a person to review it, on a terminal, run offers the review once the tests ran. A yes runs the review of semar review for those tests, then runs the tests that were approved again, and ends with the status of that second run. With no terminal, or with --no-review, it never asks.\n" +
 			"Exit 0 when everything that ran passed, 1 when something failed, and 2 otherwise.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -72,6 +74,7 @@ func newRunCommand(o options) *cobra.Command {
 	cmd.Flags().BoolVar(&f.all, "all", false, "run every scenario and every critical journey, not only those of the change")
 	cmd.Flags().BoolVar(&f.noJourneys, "no-journeys", false, "leave the critical journeys out")
 	cmd.Flags().BoolVar(&f.noPlan, "no-plan", false, "never offer to plan a ticket that has no use cases")
+	cmd.Flags().BoolVar(&f.noReview, "no-review", false, "never offer to review the tests that need a person after the run")
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to run against (the same as the argument); needed when there are several, and always for a production environment")
 	cmd.Flags().StringArrayVar(&f.builds, "build", nil, "the commit that a service with no build probe runs, as <commit> or <service>=<commit>; repeat for more")
 	cmd.Flags().StringVar(&f.base, "base", "", "the branch that the change is measured against (default: change.base, else the default branch of origin, else main)")
@@ -86,11 +89,12 @@ type finishedRun struct {
 	reportPath  string
 	interrupted bool
 	coverage    string // the use case line of the report
+	blocked     []report.BlockedHost
 }
 
 // executeScenarios replays the scenarios against one environment, writes the report, and closes the
 // run. It prints nothing but the line that names the target on stderr.
-func executeScenarios(ctx context.Context, stderr io.Writer, o options, dir string, cfg config.Config, envName string, env config.Environment, declared map[string]string, scenarios []domain.Scenario, headed bool, announce func()) (finishedRun, error) {
+func executeScenarios(ctx context.Context, stderr io.Writer, o options, dir string, cfg config.Config, envName string, env config.Environment, declared declaredBuilds, scenarios []domain.Scenario, headed bool, announce func()) (finishedRun, error) {
 	cat, err := runCatalogue(stderr, dir, cfg, scenarios)
 	if err != nil {
 		return finishedRun{}, err
@@ -144,7 +148,7 @@ func executeScenarios(ctx context.Context, stderr io.Writer, o options, dir stri
 			return finishedRun{}, err
 		}
 	}
-	return finishedRun{record: record, reportPath: filepath.Join(r.store.Root(), "runs", string(r.id), reportFile), interrupted: interrupted, coverage: coverage}, nil
+	return finishedRun{record: record, reportPath: filepath.Join(r.store.Root(), "runs", string(r.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts)}, nil
 }
 
 // effectsWords says what a test may change in an environment of this effects mode.
@@ -222,7 +226,7 @@ type replayRig struct {
 // newReplay builds every dependency of one run. The secrets come before anything
 // is created or sent, so a missing secret leaves no trace. The redactor follows
 // the store, which holds its key. cat is nil when no scenario names a fixture.
-func newReplay(ctx context.Context, o options, repo string, cfg config.Config, envName string, env config.Environment, declared map[string]string, scenarios []domain.Scenario, cat *fixture.Catalogue, headed bool) (*replayRig, error) {
+func newReplay(ctx context.Context, o options, repo string, cfg config.Config, envName string, env config.Environment, declared declaredBuilds, scenarios []domain.Scenario, cat *fixture.Catalogue, headed bool) (*replayRig, error) {
 	rg, err := newEnvRig(ctx, o, repo, cfg, env, declared, sessionNeeds(cfg, env, scenarios, cat))
 	if err != nil {
 		return nil, err
@@ -237,6 +241,7 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 		Workers:  cfg.Replay.Workers,
 		Run:      rg.id,
 		Accounts: slices.Sorted(maps.Keys(cfg.AuthProfiles)),
+		NoToken:  noTokenAccounts(cfg),
 	}
 	if cat != nil {
 		fx, err := rg.resolver(o, envName, env, *cat)
@@ -252,7 +257,7 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 
 // newEnvRig loads the sessions of the profiles named in needs, which maps a profile to whoever
 // needs it, and builds the engine of one run.
-func newEnvRig(ctx context.Context, o options, repo string, cfg config.Config, env config.Environment, declared map[string]string, needs map[string]string) (*envRig, error) {
+func newEnvRig(ctx context.Context, o options, repo string, cfg config.Config, env config.Environment, declared declaredBuilds, needs map[string]string) (*envRig, error) {
 	secrets := secret.NewEnv(o.LookupEnv)
 	sessions, err := loadSessions(ctx, cfg, secrets, needs)
 	if err != nil {
@@ -293,7 +298,7 @@ func newEnvRig(ctx context.Context, o options, repo string, cfg config.Config, e
 	var probed []string
 	for _, s := range env.Services {
 		services[s.Name] = s.BaseURL
-		if _, ok := declared[s.Name]; ok || s.Build != nil {
+		if declared.has(s.Name) || s.Build != nil {
 			probed = append(probed, s.Name)
 		}
 	}
@@ -301,21 +306,15 @@ func newEnvRig(ctx context.Context, o options, repo string, cfg config.Config, e
 		Policy:   policy,
 		Recorder: rec,
 		Services: services,
-		Session: func(_ context.Context, profile string) (string, string, error) {
-			s, ok := sessions[profile]
-			if !ok {
-				return "", "", fmt.Errorf("auth profile %s has no session", profile)
-			}
-			return s.header, s.value, nil
-		},
-		Run:     id,
-		Version: Version,
-		Clock:   o.Clock,
+		Session:  sessionSource(cfg, sessions),
+		Run:      id,
+		Version:  Version,
+		Clock:    o.Clock,
 	})
 	return &envRig{
 		secrets: secrets, recorder: rec, services: services,
 		id: id, store: store, run: run, policy: policy, engine: engine, probed: probed,
-		builds: build.NewDeclared(declared, build.NewHTTP(env.Services, nil)),
+		builds: declared.prober(env.Services),
 	}, nil
 }
 
@@ -407,6 +406,33 @@ func addServiceProfiles(needs map[string]string, env config.Environment, f domai
 
 type session struct{ header, value string }
 
+// sessionSource gives the engine the session of an auth profile. An account with no token has none
+// to give, and the replay blocks its API steps before it asks, so this answer is the last guard.
+func sessionSource(cfg config.Config, sessions map[string]session) func(context.Context, string) (string, string, error) {
+	return func(_ context.Context, profile string) (string, string, error) {
+		s, ok := sessions[profile]
+		switch {
+		case ok:
+			return s.header, s.value, nil
+		case cfg.AuthProfiles[profile].HasToken():
+			return "", "", fmt.Errorf("auth profile %s has no session", profile)
+		default:
+			return "", "", fmt.Errorf("the account %s has no token", profile)
+		}
+	}
+}
+
+// noTokenAccounts lists the accounts that have no token, so that a replay blocks their API steps.
+func noTokenAccounts(cfg config.Config) []string {
+	var names []string
+	for _, name := range slices.Sorted(maps.Keys(cfg.AuthProfiles)) {
+		if !cfg.AuthProfiles[name].HasToken() {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // sessionSecrets lists what the redactor must hide of each session value: the whole value and, when it
 // has a scheme such as "Bearer ", the part after the first space, so that a response that echoes only the token is hidden too.
 func sessionSecrets(sessions map[string]session) []string {
@@ -430,6 +456,8 @@ func loadSessions(ctx context.Context, cfg config.Config, r secret.Resolver, nee
 		switch {
 		case !ok:
 			return nil, fmt.Errorf("%s uses auth profile %s, which semar.yaml does not define", needs[name], name)
+		case !p.HasToken():
+			continue
 		case p.Session == nil || p.Session.Header == "":
 			return nil, fmt.Errorf("auth profile %s in semar.yaml has no session header", name)
 		}

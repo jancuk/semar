@@ -83,7 +83,7 @@ func TestPlanDraftsTheFixtureACriterionNeedsRunsItOnceAndPlansTheCriterionAgain(
 	contains(t, "stdout", res.stdout,
 		"SHOP-482 (behaviour): 1 scenario\n",
 		"fixture drafted: order.open. Ran once: ok. Not approved: semar review order.open\n",
-		"semar status",
+		"next:\n  semar run   run the tests against the service\n",
 	)
 	if got := len((*made)[0].Jobs()); got != 3 {
 		t.Errorf("the plan ran %d jobs, want 3: the criterion, the fixture, and the criterion again", got)

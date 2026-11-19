@@ -25,6 +25,7 @@ import (
 	"github.com/jancuk/semar/internal/fixture"
 	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/record"
+	"github.com/jancuk/semar/internal/report"
 	"github.com/jancuk/semar/internal/scenario"
 	"github.com/jancuk/semar/internal/screens"
 	"github.com/jancuk/semar/internal/script"
@@ -428,7 +429,7 @@ func makeFixtures(ctx context.Context, out, errw io.Writer, o options, dir strin
 		fmt.Fprintf(errw, "semar: fixture file %s: %s; this recording does not use it\n", terminalSafe(p.File), terminalSafe(oneLine(problemText(p))))
 	}
 	needs := sessionNeeds(cfg, env, []domain.Scenario{{ID: domain.ScenarioID(id), AuthProfile: authProfile, Given: given}}, &cat)
-	rg, err := newEnvRig(ctx, o, dir, cfg, env, nil, needs)
+	rg, err := newEnvRig(ctx, o, dir, cfg, env, declaredBuilds{}, needs)
 	if err != nil {
 		return fixtureValues{}, none, err
 	}
@@ -470,10 +471,11 @@ func makeFixtures(ctx context.Context, out, errw io.Writer, o options, dir strin
 
 // replayed is how the replay of a written scenario ended.
 type replayed struct {
-	result *domain.ScenarioResult // nil when the scenario did not finish
-	report string
-	stderr string
-	err    error
+	result  *domain.ScenarioResult // nil when the scenario did not finish
+	report  string
+	stderr  string
+	blocked []report.BlockedHost
+	err     error
 }
 
 // replayScenario runs the scenario that was just written, with no window, as semar run does, with the
@@ -483,10 +485,10 @@ func replayScenario(ctx context.Context, o options, dir, envName, app, id string
 	var r replayed
 	var stderr bytes.Buffer
 	flags := runFlags{
-		scenarios: []string{id}, env: envName, dir: dir, builds: builds,
-		done: func(run domain.Run, path string) {
-			if len(run.Results) == 1 {
-				r.result, r.report = &run.Results[0], path
+		scenarios: []string{id}, env: envName, dir: dir, builds: builds, noReview: true,
+		done: func(fin finishedRun) {
+			if len(fin.record.Results) == 1 {
+				r.result, r.report, r.blocked = &fin.record.Results[0], fin.reportPath, fin.blocked
 			}
 		},
 	}
@@ -522,6 +524,7 @@ func replayOnce(ctx context.Context, out io.Writer, o options, f recordTestFlags
 		}
 		fmt.Fprintf(out, "  The files are written. Fix the step in the file, or record it again with --replace.\n  report: %s\n", r.report)
 	}
+	report.WriteBlocked(out, envName, "scenario", r.blocked)
 }
 
 // recordingWindow is what a recorder needs to open: the profile that it browses on.

@@ -54,14 +54,17 @@ steps:
     web: { service: orders, app: shop, do: click, screen: Cart, element: place-order }
 `
 
-func webRepo(t *testing.T) *repo {
+func webRepo(t *testing.T) *repo { return webRepoPage(t, shopPage) }
+
+// webRepoPage is webRepo with a page of its own for the cart.
+func webRepoPage(t *testing.T, page string) *repo {
 	t.Helper()
 	if _, err := web.FindChrome(""); err != nil {
 		t.Skip("skipped: " + err.Error())
 	}
 	r := newRepo(t, repoOptions{app: sampleapp.Options{}, wrap: func(next http.Handler) http.Handler {
 		mux := http.NewServeMux()
-		mux.HandleFunc("/cart", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, shopPage) })
+		mux.HandleFunc("/cart", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, page) })
 		mux.Handle("/", next)
 		return mux
 	}})

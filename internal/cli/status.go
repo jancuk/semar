@@ -137,7 +137,7 @@ func showStatus(ctx context.Context, stdout, stderr io.Writer, o options, f stat
 	}
 
 	var current []domain.BuildRef
-	in.Environment, current, in.BuildsRead, err = readBuilds(ctx, stderr, cfg, f.env, f.builds)
+	in.Environment, current, in.BuildsRead, err = readBuilds(ctx, stderr, f.dir, cfg, f.env, f.builds)
 	if err != nil {
 		return err
 	}

@@ -19,16 +19,23 @@ var commitPattern = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 // from the service: it cannot show that the service was redeployed during a run.
 type Declared struct {
 	commits map[string]string
+	local   map[string]bool
 	next    Prober
 }
 
-func NewDeclared(commits map[string]string, next Prober) *Declared {
-	return &Declared{commits: maps.Clone(commits), next: next}
+// NewDeclared takes the commits, and the services among them whose commit is the working copy that
+// WithLocal read, not one that a person named.
+func NewDeclared(commits map[string]string, next Prober, local ...string) *Declared {
+	d := &Declared{commits: maps.Clone(commits), local: map[string]bool{}, next: next}
+	for _, name := range local {
+		d.local[name] = true
+	}
+	return d
 }
 
 func (d *Declared) Probe(ctx context.Context, service string) (domain.BuildRef, error) {
 	if commit, ok := d.commits[service]; ok {
-		return domain.BuildRef{Service: service, Commit: commit, Declared: true}, nil
+		return domain.BuildRef{Service: service, Commit: commit, Declared: true, Local: d.local[service]}, nil
 	}
 	if d.next == nil {
 		return domain.BuildRef{}, fmt.Errorf("build probe for service %q: the service has no build probe and no declared build", service)

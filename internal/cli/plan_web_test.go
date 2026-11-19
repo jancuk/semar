@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -229,5 +230,44 @@ func TestPlanRecordsTheTurnsOfWebFlowsInTheUsageFileApartFromTheCriteria(t *test
 	}
 	if criteria != 3 || webRecords != 3 {
 		t.Errorf("the usage file holds %d criteria jobs and %d web turns, want 3 and 3:\n%s", criteria, webRecords, data)
+	}
+}
+
+func TestPlanSaysWhichHostsTheBrowserBlockedWhileItExplored(t *testing.T) {
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "x") }))
+	t.Cleanup(cdn.Close)
+	m := &webModel{}
+	p := newPlanRepo(t, sampleapp.Options{})
+	extra := `<img src="` + cdn.URL + `/pixel.png?token=abc123">`
+	p.refundExtra.Store(&extra)
+	p.git.Commit("SHOP-482 write the ticket and the API", map[string]*string{
+		"docs/tickets/SHOP-482.md": gittest.S(webTicket),
+		"docs/openapi.yaml":        gittest.S(criterionAPI),
+	})
+	p.configure(t, criterionAnswerJSON)
+	p.withCriterionKnowledge(t)
+	p.rewriteConfig(t, func(s string) string {
+		return strings.Replace(s, "baseUrl: http://"+p.host, "baseUrl: http://"+p.host+"\n        web: {start: /refund}", 1)
+	})
+	p.opts.HTTP = http.DefaultClient
+	p.opts.Providers = func(string) *provider.Registry {
+		r := provider.NewRegistry()
+		r.Register(fake.Kind, func(cfg config.Provider) (provider.Instance, error) { return fake.NewFunc(cfg.ID, m.answer), nil })
+		return r
+	}
+	res := p.semar(t, t.Context(), "plan", "--diff", "main..release", "--pipeline", "criteria", "--ladder", "planner:small", "--no-trial")
+	if res.code != cli.ExitOK {
+		t.Fatalf("plan exited %d\nstdout:\n%s\nstderr:\n%s", res.code, res.stdout, res.stderr)
+	}
+	host := strings.TrimPrefix(cdn.URL, "http://")
+	contains(t, "stdout", res.stdout,
+		"web: 1 criterion explored, 1 test written",
+		"blocked hosts: the browser did not reach 1 host, because environments.uat.hosts does not list them\n",
+		"  "+host+": docs/tickets/SHOP-482.md:6\n",
+		"can pass or fail for the wrong reason",
+		"run semar login, which offers to add them",
+	)
+	if strings.Contains(res.stdout, "abc123") {
+		t.Errorf("the output holds the query of a blocked request:\n%s", res.stdout)
 	}
 }

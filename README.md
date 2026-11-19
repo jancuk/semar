@@ -57,20 +57,16 @@ Only `semar plan` needs a model. The default provider is [Claude Code](https://c
 
 ## A first run
 
-This walk-through tests one ticket of a service named `orders`. Run the commands inside a clone of the repository of that service.
+This walk-through tests one ticket of a service named `orders`. Run the commands inside a clone of the repository of that service. Four commands do it: `init`, `plan`, and `run`, and `login` for a web application.
 
 **1. Write the ticket as a file.** Semar reads `docs/tickets/<ticket key>.md`, and finds the tickets of a change in its commit messages.
 
 ```markdown
-# SHOP-482 Refund limit
+# SHOP-482 Limit a refund
 
 ## Acceptance criteria
 
-1. A refund above the order total is rejected with 422 and the error code `REFUND_EXCEEDS_TOTAL`.
-2. A refund of the full total sets the status of the order to `refunded`.
-3. A refund of an order that does not exist answers 404.
-4. Web: the order page shows the refunded amount after a refund.
-5. Android: the order screen shows the refunded amount.
+1. A refund larger than the paid amount is refused.
 ```
 
 **2. Set up the repository, once.** `init` asks for the address of the service and for the environment variable that holds the token of a test account. The token itself is never written to a file.
@@ -80,23 +76,23 @@ semar init
 export ORDERS_UAT_TOKEN='<the token of a test account>'
 ```
 
-**3. Plan.** One small model job answers each criterion, and code checks every answer.
+**3. Plan.** One small model job answers each criterion, and code checks every answer. A plan approves nothing.
 
 ```bash
 semar plan
 ```
 
 ```text
-SHOP-482 (behaviour): 4 scenarios
+SHOP-482 (behaviour): 1 scenario
 not drafted: 0
-web: 1 criterion explored, 1 test written, 0 left for a person, 9 turns, $0.03
 plan: .semar/plans/9f3c2ab41d07/plan.md
-model use: 5 jobs (5 haiku), 0 corrections, 9 web turns, 120k input (48k cached), 9.1k output, $0.05
+model use: 1 job (1 haiku), 0 corrections, 14k input (9k cached), 0.8k output, $0.01
+next:
+  semar run   run the tests against the service
+  the run asks you to review what the plan drafted, and runs the approved tests again
 ```
 
-The plan wrote three API tests and one web test, and left the Android criterion as a manual check with its steps. Nothing is approved yet.
-
-**4. Run.** A test that is not approved still runs, so that the review can show what the service answered.
+**4. Run.** A test that is not approved still runs, so that the review can show what the service answered. When a test needs a person, `run` asks whether to review it now. Answer `y`, or press Enter. Each item shows the line of the ticket, the test, what the test sends, and what the run observed. Answer `y` to approve. The approved tests then run again, and the run ends with where the change stands.
 
 ```bash
 semar run
@@ -104,74 +100,99 @@ semar run
 
 ```text
 Change    feature/refund-limit against main: SHOP-482
-Target    uat (test), orders at 9f3c2ab
-Selected  4 scenarios
+Target    local (test), orders at 9f3c2ab
+Selected  1 scenario
 
-SHOP-482-01  needs review  an expected result is not confirmed → semar review SHOP-482-01
 SHOP-482-02  needs review  an expected result is not confirmed → semar review SHOP-482-02
-...
-```
+report: .semar/runs/r-20261118T171445Z-a1c1/report.md
 
-**5. Review.** Each item shows the line of the ticket, the test, what the test sends, and what the last run observed. Answer `y` to approve.
+1 test needs your review. Review it now? [Y/n]
 
-```bash
-semar review
-```
+1 of 1 · SHOP-482 · docs/tickets/SHOP-482.md:5
+  "A refund larger than the paid amount is refused."
 
-```text
-2 of 4 · SHOP-482 · docs/tickets/SHOP-482.md:5
-  "A refund above the order total is rejected with 422 and the error code `REFUND_EXCEEDS_TOTAL`."
-
-  Test SHOP-482-02 · API · as default
-    A refund above the order total is rejected
-    Given Create a paid order of 100000.
+  Test SHOP-482-02 · API · as support-agent
+    Refund above the order total is rejected
+    Given Create a paid order for 100000
           POST /v1/orders
-          json {"amount":100000,"dueAt":"{{datetime.plus7d}}"}
-    When  Request a refund of 150000 for that order.
+          json {"amount":100000}
+    When  Request a refund of 150000 for that order
           POST /v1/orders/{{order_id}}/refunds
           json {"amount":150000}
-    Then  the status is 422 (by model)
-          last run r-20261118T004400Z-70f5: observed status 201, not met
-    And   $.error.code equals "REFUND_EXCEEDS_TOTAL" (by model)
-          last run r-20261118T004400Z-70f5: observed no value, not met
+    Then  the status is 422
+          last run r-20261118T171445Z-a1c1: observed status 422, met
+    And   $.error.code equals "REFUND_EXCEEDS_TOTAL" (source diff)
+          last run r-20261118T171445Z-a1c1: observed REFUND_EXCEEDS_TOTAL, met
+    When  Read the order again
+          GET /v1/orders/{{order_id}}
+    Then  $.data.refunded_total equals 0
+          last run r-20261118T171445Z-a1c1: observed 0, met
 
   [y] approve  [n] skip  [d] details  [q] stop
->
+> y
+approved SHOP-482-02 as ana (local, unverified identity)
+
+approved 1 of 1 item
+SHOP-482-02  passed
+report: .semar/runs/r-20261118T171450Z-2175/report.md
+
+On feature/refund-limit against main · local · orders at 9f3c2ab
+1 use case of SHOP-482
+
+  verified      1
+    SHOP-482/1  A refund above the paid amount is refused
+      approved by an author of the change
+
+Ship: yes.
 ```
 
-The test expects what the ticket says, and the service answers 201. That is a defect, so the test is right and you approve it.
+The run is two runs: the first one that found the test unapproved, and the second one of the approved test. `semar log` lists both. The exit code is that of the final state, after the second run. When you answer `n`, or run `semar run --no-review`, or run with no terminal, there is no second run, and each result that needs a person ends with the command to type, such as `semar review SHOP-482-02`.
 
-**6. Run again, and read where the change stands.**
-
-```bash
-semar run
-```
-
-```text
-SHOP-482-02  failed  step refund-too-much: expected status 422, observed status 201 (source ticket)
-SHOP-482-01  passed
-SHOP-482-03  passed
-SHOP-482-04  passed
-report: .semar/runs/r-20261118T010232Z-666f/report.md
-
-On feature/refund-limit against main · uat · orders at 9f3c2ab
-5 use cases of SHOP-482
-
-  verified      3
-  failing       1
-    SHOP-482/scenario-SHOP-482-02  A refund above the order total is rejected
-      SHOP-482-02 failed in r-20261118T010232Z-666f: step refund-too-much: expected status 422, observed status 201 (source ticket)
-  for a person  1   → semar check <id> pass
-    SHOP-482/manual-1  Android: the order screen shows the refunded amount
-
-Ship: no. 1 failing, 1 open.
-```
-
-When the fix is deployed, `semar run` replays the same four tests with no model. Do the Android check by hand and record it with `semar check SHOP-482/manual-1 pass`. `semar status` then ends with `Ship: yes`.
+Each day after that, `semar run` replays the stored tests with no model call.
 
 ## More samples
 
 Each sample has a full section in the [guide](docs/GUIDE.md).
+
+### A web application
+
+A web application, such as an internal dashboard, needs no token. `init` asks for the address, and Enter answers every other question. It writes an account with no token when the address answers with a web page.
+
+```bash
+semar init
+```
+
+```text
+Address of the service in the test environment: http://localhost:3000
+Environment variable that holds the token, or Enter for none:
+Who is this account, in one line:
+User that this account signs in with on the web, or Enter for none:
+Another account? Name, or Enter for none:
+No build probe was found at http://localhost:3000/version. The service is on this machine, so the head commit of the repository is its build. To name one, add build: {probe: http, url: <address>, commit: <JSONPath of the commit>} to the service in .semar/semar.yaml.
+Wrote .semar/semar.yaml.
+The address answers with a web page, so the account default has no token. To add one later, add session and secrets to authProfiles.default in .semar/semar.yaml.
+```
+
+`login` opens a window. Sign in once, in any way that the application allows, including through another site, and close the window. With one service, `login` takes no argument. It notes the hosts that the page asked for and the environment does not list, and asks about them.
+
+```bash
+semar login
+```
+
+```text
+the window asked for 2 hosts that environments.uat.hosts does not list, so a run blocks them and a page that needs one can miss data:
+  1. login.example.com
+  2. cdn.example.com
+Add them to environments.uat.hosts in .semar/semar.yaml? Type all, none, or numbers such as 1,3 [none]: all
+added 2 hosts to environments.uat.hosts in .semar/semar.yaml
+```
+
+Then plan and run as in the first run. A service on this machine runs the head commit of the repository, so `semar run` needs no `--build`. A service that is somewhere else needs `--build <commit>` or a build probe.
+
+```bash
+semar plan
+semar run
+```
 
 ### A test is two files
 
@@ -287,10 +308,10 @@ semar journey run --critical --env uat             # a release gate in your own 
 
 ### In a pipeline
 
-`semar run` exits with 0 when everything passed, 1 when a test failed, and 2 when something could not be judged. An export writes a stored run for your own tools.
+`semar run` exits with 0 when everything passed, 1 when a test failed, and 2 when something could not be judged. With no terminal it never asks to plan or to review, and `--no-plan` and `--no-review` say so for a runner that has one. An export writes a stored run for your own tools.
 
 ```bash
-semar run uat --no-plan
+semar run uat --no-plan --no-review
 semar export junit r-20261118T010232Z-666f --out junit.xml       # also ctrf and sarif
 ```
 
@@ -305,24 +326,32 @@ semar run --all --env production --build <commit>
 
 ## Commands
 
-A person who knows git needs five commands every day.
-
-| Command | What it does |
-| --- | --- |
-| `semar run` | Runs the tests of this branch, then says where the change stands |
-| `semar review` | Shows everything that needs a person, one item at a time |
-| `semar status` | Shows each use case in one group, and ends with `Ship: yes` or `Ship: no` |
-| `semar check <id> pass` | Records what a person checked by hand |
-| `semar defer <id> --until <day> --reason <text>` | Leaves a use case untested until a day, under your name |
+A person needs four commands every day: `init`, `login` for a web application, `plan`, and `run`. `run` asks for the review and ends with where the change stands.
 
 | Command | What it does |
 | --- | --- |
 | `semar init` | Sets up a repository, or checks this machine against a repository that is set up |
+| `semar login` | Signs in to a web application, in a Chrome window or by itself |
 | `semar plan` | Drafts tests for the change of this branch |
+| `semar run` | Runs the tests of this branch, offers the review of what needs a person, runs the approved tests again, and says where the change stands |
+
+These commands are typed by hand when a person has something to say or to find.
+
+| Command | What it does |
+| --- | --- |
+| `semar check <id> pass` | Records what a person checked by hand |
+| `semar defer <id> --until <day> --reason <text>` | Leaves a use case untested until a day, under your name |
 | `semar record` | Records a web test |
-| `semar login` | Signs in to a web application |
 | `semar rm` | Retires a test, and keeps a record of why |
-| `semar log`, `semar show`, `semar export` | List the runs, print a report or what a run did, and write a run as CTRF, JUnit XML, or SARIF |
+| `semar log`, `semar show` | List the runs, and print a report or what a run did |
+
+The other commands are for a script, for a second look, and for what a person has not met yet.
+
+| Command | What it does |
+| --- | --- |
+| `semar review` | Shows everything that needs a person, one item at a time. `semar run` asks for it, so you type it for a script, for `--yes`, or to look again |
+| `semar status` | Shows each use case in one group, and ends with `Ship: yes` or `Ship: no`. `semar run` ends with it. `--html` writes a page, and `--checklist` prints the manual checks |
+| `semar export` | Writes a stored run as CTRF, JUnit XML, or SARIF |
 | `semar fixture`, `semar journey`, `semar screens` | Work with fixtures, journeys, and the screens of web tests |
 | `semar providers`, `semar dashboard` | Choose the model provider, and see what the plans cost |
 

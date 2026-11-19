@@ -87,7 +87,7 @@ func checkUseCase(ctx context.Context, stdout, stderr io.Writer, o options, f ch
 	if err != nil {
 		return err
 	}
-	_, current, _, err := readBuilds(ctx, stderr, cfg, f.env, f.builds)
+	_, current, _, err := readBuilds(ctx, stderr, repo, cfg, f.env, f.builds)
 	if err != nil {
 		return err
 	}

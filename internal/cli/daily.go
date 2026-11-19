@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/obligation"
@@ -44,13 +43,14 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 	if env.Kind == config.KindProduction && f.env == "" {
 		return fmt.Errorf("the environment %q is a production environment; name it with --env %s to run against it", envName, envName)
 	}
-	declared, err := build.ParseDeclared(f.builds, env.Services)
+	declared, err := readDeclaredBuilds(ctx, f.dir, f.builds, env.Services)
 	if err != nil {
 		return err
 	}
 	env = withServiceAuth(cfg, env)
 
-	sel, code, err := chooseRun(ctx, stdout, stderr, o, f, cfg, envName)
+	answers := newLineReader(o.Stdin)
+	sel, code, err := chooseRun(ctx, stdout, stderr, o, answers, f, cfg, envName)
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 		}
 		announced = true
 		var buildsErr error
-		builds, buildsErr = currentBuilds(ctx, cfg, envName, f.builds)
+		builds, buildsErr = currentBuilds(ctx, f.dir, cfg, envName, f.builds)
 		printHeader(stdout, sel, envName, env, builds, buildsErr)
 	}
 	if len(sel.scenarios) == 0 && len(sel.journeys) == 0 {
@@ -78,6 +78,7 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 	}
 
 	var runs []finishedRun
+	scenarioExit := 0
 	if len(sel.scenarios) > 0 {
 		fin, err := executeScenarios(ctx, stderr, o, f.dir, cfg, envName, env, declared, sel.scenarios, f.headed, announce)
 		if err != nil {
@@ -85,17 +86,13 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 		}
 		runs = append(runs, fin)
 		if f.done != nil {
-			f.done(fin.record, fin.reportPath)
+			f.done(fin)
 		}
 		fmt.Fprintln(stdout)
-		if err := report.Lines(stdout, fin.record); err != nil {
+		if err := printScenarioRun(stdout, envName, fin); err != nil {
 			return err
 		}
-		if err := report.DeclaredBuilds(stdout, fin.record); err != nil {
-			return err
-		}
-		fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
-		code = max(code, scenarioCode(fin))
+		scenarioExit = scenarioCode(fin)
 	}
 	if len(sel.journeys) > 0 && ctx.Err() == nil {
 		fin, err := executeJourneys(ctx, stderr, o, f.dir, cfg, envName, env, declared, sel.journeys, f.headed, announce)
@@ -109,12 +106,34 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 		if err := report.Lines(stdout, fin.record); err != nil {
 			return err
 		}
+		report.WriteBlocked(stdout, envName, "scenario", fin.blocked)
 		fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
 		code = max(code, report.JourneyExitCode(fin.record.Journeys))
 		if fin.interrupted {
 			code = max(code, ExitUndecided)
 		}
 	}
+	// The review comes after the whole run, and a scenario that the person settles runs once more, so
+	// that the status and the exit code are those of the final state.
+	if len(runs) > 0 && len(sel.scenarios) > 0 && !f.noReview && o.Terminal() && ctx.Err() == nil && !runs[0].interrupted {
+		first := runs[0]
+		if again := reviewAfterRun(ctx, stdout, stderr, o, f, envName, answers, first.record.Results); len(again) > 0 {
+			rerun := slices.DeleteFunc(slices.Clone(sel.scenarios), func(sc domain.Scenario) bool { return !slices.Contains(again, sc.ID) })
+			fin, err := executeScenarios(ctx, stderr, o, f.dir, cfg, envName, env, declared, rerun, f.headed, announce)
+			if err != nil {
+				return err
+			}
+			runs = append(runs, fin)
+			if err := printScenarioRun(stdout, envName, fin); err != nil {
+				return err
+			}
+			scenarioExit = ExitUndecided
+			if !fin.interrupted {
+				scenarioExit = report.ExitCode(mergeResults(first.record.Results, fin.record.Results))
+			}
+		}
+	}
+	code = max(code, scenarioExit)
 	if sel.skipped > 0 {
 		fmt.Fprintf(stderr, "semar: %s was skipped, so this run does not cover every journey\n", plural(sel.skipped, "journey file"))
 		code = max(code, ExitUndecided)
@@ -129,7 +148,7 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 	// The status that closes the run reads the builds that the run ended on.
 	in := sel.input
 	in.Environment, in.BuildsRead = envName, true
-	for _, fin := range runs {
+	for _, fin := range slices.Backward(runs) {
 		if len(fin.record.BuildsEnd) > 0 {
 			in.Builds = fin.record.BuildsEnd
 			break
@@ -178,7 +197,7 @@ func statusReport(stderr io.Writer, o options, dir string, in status.Input, obs 
 
 // chooseRun picks the scenarios and journeys of a run. The code is an exit code that the choice
 // already fixes: a ticket that is not planned leaves the run undecided.
-func chooseRun(ctx context.Context, stdout, stderr io.Writer, o options, f runFlags, cfg config.Config, envName string) (selection, int, error) {
+func chooseRun(ctx context.Context, stdout, stderr io.Writer, o options, in *lineReader, f runFlags, cfg config.Config, envName string) (selection, int, error) {
 	var sel selection
 	switch {
 	case len(f.scenarios) > 0:
@@ -207,7 +226,7 @@ func chooseRun(ctx context.Context, stdout, stderr io.Writer, o options, f runFl
 			return sel, 0, err
 		}
 	default:
-		return chooseChange(ctx, stdout, stderr, o, f, cfg, envName)
+		return chooseChange(ctx, stdout, stderr, o, in, f, cfg, envName)
 	}
 	sel.obs = loadObligationsForRun(stderr, f.dir)
 	if len(f.scenarios) > 0 {
@@ -256,7 +275,7 @@ func surfaceGaps(scs []domain.Scenario) []string {
 }
 
 // chooseChange selects the scenarios of the tickets of the change, and then the critical journeys.
-func chooseChange(ctx context.Context, stdout, stderr io.Writer, o options, f runFlags, cfg config.Config, envName string) (selection, int, error) {
+func chooseChange(ctx context.Context, stdout, stderr io.Writer, o options, in *lineReader, f runFlags, cfg config.Config, envName string) (selection, int, error) {
 	var sel selection
 	lc, err := readLocalChange(ctx, f.dir, cfg, f.base)
 	if err != nil {
@@ -299,7 +318,7 @@ func chooseChange(ctx context.Context, stdout, stderr io.Writer, o options, f ru
 	fresh, missing := ticketsWithFiles(f.dir, cfg, notPlanned), ticketsWithMissingCriteria(f.dir, cfg, planned)
 	if len(fresh)+len(missing) > 0 && !f.noPlan && o.Terminal() {
 		est := o.PlanEstimate(ctx, o, f.dir, cfg, slices.Concat(fresh, missing))
-		if offerToPlan(ctx, stdout, newLineReader(o.Stdin), est, fresh, missing) {
+		if offerToPlan(ctx, stdout, in, est, fresh, missing) {
 			if err := planTheChange(ctx, stdout, stderr, o, f, envName); err != nil {
 				return sel, 0, err
 			}
@@ -363,7 +382,7 @@ func printHeader(w io.Writer, sel selection, envName string, env config.Environm
 	case len(builds) > 0:
 		parts := make([]string, len(builds))
 		for i, b := range builds {
-			parts[i] = fmt.Sprintf("%s at %s", terminalSafe(b.Service), shortID(b.Commit))
+			parts[i] = fmt.Sprintf("%s at %s", terminalSafe(b.Service), domain.ShortCommit(b.Commit))
 		}
 		target += ", " + strings.Join(parts, ", ")
 	}
@@ -395,4 +414,18 @@ func loadObligationsForRun(stderr io.Writer, dir string) []obligation.Located {
 		return nil
 	}
 	return list
+}
+
+// printScenarioRun prints the results of a run of scenarios, the builds that a person declared, the
+// blocked hosts, and where the report is.
+func printScenarioRun(stdout io.Writer, envName string, fin finishedRun) error {
+	if err := report.Lines(stdout, fin.record); err != nil {
+		return err
+	}
+	if err := report.DeclaredBuilds(stdout, fin.record); err != nil {
+		return err
+	}
+	report.WriteBlocked(stdout, envName, "scenario", fin.blocked)
+	fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
+	return nil
 }

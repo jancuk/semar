@@ -242,16 +242,9 @@ func (r Report) Lead() string {
 func builds(bs []domain.BuildRef) string {
 	var out []string
 	for _, b := range bs {
-		out = append(out, fmt.Sprintf("%s at %s", b.Service, short(b.Commit)))
+		out = append(out, fmt.Sprintf("%s at %s", b.Service, domain.ShortCommit(b.Commit)))
 	}
 	return strings.Join(out, ", ")
-}
-
-func short(c string) string {
-	if len(c) > 7 {
-		return c[:7]
-	}
-	return c
 }
 
 // Count is the second line.

@@ -541,3 +541,40 @@ func TestFetchReportsABranchTheRemoteNoLongerHas(t *testing.T) {
 		}
 	}
 }
+
+func TestHeadAndDiffHead(t *testing.T) {
+	r := gittest.New(t)
+	head := r.Commit("base", map[string]*string{"a.txt": gittest.S("one\n")})
+	g := open(t, r.Dir)
+	ctx := context.Background()
+	if got, err := g.Head(ctx); err != nil || got != head {
+		t.Fatalf("Head = %q, %v, want %s", got, err, head)
+	}
+	diff := func() string {
+		t.Helper()
+		out, err := g.DiffHead(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
+	if d := diff(); d != "" {
+		t.Errorf("a clean tree has the diff %q", d)
+	}
+	r.Write("a.txt", "two\n")
+	r.Write("untracked.txt", "x\n")
+	if d := diff(); !strings.Contains(d, "+two") || strings.Contains(d, "untracked") {
+		t.Errorf("diff = %q", d)
+	}
+	r.Git("add", "a.txt")
+	if d := diff(); !strings.Contains(d, "+two") {
+		t.Errorf("a staged change is not in the diff: %q", d)
+	}
+}
+
+func TestHeadOfAnEmptyRepositoryIsAnError(t *testing.T) {
+	r := gittest.New(t)
+	if _, err := open(t, r.Dir).Head(context.Background()); err == nil {
+		t.Error("an empty repository has no head")
+	}
+}

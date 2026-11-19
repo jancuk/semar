@@ -85,7 +85,7 @@ func runLine(run domain.Run) string {
 	parts = append(parts, env)
 	var builds []string
 	for _, b := range run.BuildsEnd {
-		builds = append(builds, fmt.Sprintf("%s %s", terminalSafe(oneLine(b.Service)), shortID(b.Commit)))
+		builds = append(builds, fmt.Sprintf("%s %s", terminalSafe(oneLine(b.Service)), domain.ShortCommit(b.Commit)))
 	}
 	if len(builds) > 0 {
 		parts = append(parts, strings.Join(builds, ", "))

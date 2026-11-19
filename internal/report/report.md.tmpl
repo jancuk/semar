@@ -100,6 +100,15 @@ Nothing was written in the environment.
 - {{ . }}
 {{ end -}}
 {{ end -}}
+{{ if .Blocked }}
+## Blocked hosts
+
+The browser did not reach these hosts, because `environments.{{ $.Environment }}.hosts` does not list them. A page that misses data can pass or fail for the wrong reason. No outcome was changed. Add a host under `environments.{{ $.Environment }}.hosts` in `.semar/semar.yaml`, or run `semar login`, which offers to add them.
+
+{{ range .Blocked -}}
+- {{ .Host }}{{ if .Met }}: {{ .Met }}{{ end }}
+{{ end -}}
+{{ end -}}
 {{ if .Browser }}
 ## Browser steps
 

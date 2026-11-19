@@ -14,7 +14,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
@@ -218,7 +217,7 @@ func checkFixtures(ctx context.Context, stdout, stderr io.Writer, o options, f f
 	if env.Kind == config.KindProduction && f.env == "" {
 		return fmt.Errorf("the environment %q is a production environment; name it with --env %s to check fixtures on it", envName, envName)
 	}
-	declared, err := build.ParseDeclared(f.builds, env.Services)
+	declared, err := readDeclaredBuilds(ctx, f.dir, f.builds, env.Services)
 	if err != nil {
 		return err
 	}

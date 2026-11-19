@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/knowledge"
 )
@@ -50,7 +52,9 @@ func (a *asker) ask(question string) (answer string, ok bool) {
 }
 
 // askInit completes the flags of init with what a person says. It asks only what no flag gave.
-func askInit(a *asker, dir string, f *initFlags, given map[string]bool) error {
+// answersWebPage says whether the address answers with a web page, which a person signs in to in a
+// browser and which needs no token.
+func askInit(a *asker, dir string, f *initFlags, given map[string]bool, answersWebPage func(addr string) bool) error {
 	for _, line := range foundLines(dir) {
 		fmt.Fprintln(a.out, line)
 	}
@@ -61,8 +65,13 @@ func askInit(a *asker, dir string, f *initFlags, given map[string]bool) error {
 	f.baseURL = addr
 
 	if !given["token-env"] {
-		name, _ := a.ask("Environment variable that holds the token [" + defaultTokenEnv + "]")
-		if name != "" {
+		if answersWebPage(addr) {
+			name, _ := a.ask("Environment variable that holds the token, or Enter for none")
+			f.noToken = name == ""
+			if name != "" {
+				f.tokenEnv = name
+			}
+		} else if name, _ := a.ask("Environment variable that holds the token [" + defaultTokenEnv + "]"); name != "" {
 			f.tokenEnv = name
 		}
 	}
@@ -181,7 +190,9 @@ func printAskedDone(w io.Writer, f initFlags, lookup func(string) (string, bool)
 			missing = append(missing, fmt.Sprintf("export %s=<the %s of %s>", env, what, who))
 		}
 	}
-	need(f.tokenEnv, "token", "the default account")
+	if !f.noToken {
+		need(f.tokenEnv, "token", "the default account")
+	}
 	for _, a := range f.accounts {
 		if name, env, ok := strings.Cut(a, "="); ok {
 			need(env, "token", "the account "+name)
@@ -192,11 +203,14 @@ func printAskedDone(w io.Writer, f initFlags, lookup func(string) (string, bool)
 			need(env, "web password", "the account "+name)
 		}
 	}
-	if len(missing) == 0 {
+	if len(missing) == 0 && !f.noToken {
 		fmt.Fprintln(w, " Next: semar run")
 		return
 	}
 	fmt.Fprintln(w)
+	if f.noToken {
+		fmt.Fprintln(w, noTokenLine)
+	}
 	for _, m := range missing {
 		fmt.Fprintln(w, m)
 	}
@@ -215,25 +229,12 @@ const (
 // It sends that one request, with no credential, and follows no redirect, so it reaches only the
 // host of the service. It returns the address when it found a probe.
 func findBuildProbe(ctx context.Context, client *http.Client, baseURL string) (string, bool) {
-	if client == nil {
-		client = &http.Client{Timeout: probeTimeout}
-	}
-	c := *client
-	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	target := strings.TrimRight(baseURL, "/") + versionPath
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	resp, done, err := probeGet(ctx, client, target, "application/json")
 	if err != nil {
 		return "", false
 	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "semar/"+Version)
-	resp, err := c.Do(req)
-	if err != nil {
-		return "", false
-	}
-	defer resp.Body.Close()
+	defer done()
 	if resp.StatusCode != http.StatusOK {
 		return "", false
 	}
@@ -251,4 +252,62 @@ func findBuildProbe(ctx context.Context, client *http.Client, baseURL string) (s
 		return "", false
 	}
 	return target, true
+}
+
+// isWebPage sends one GET to the address and reports whether it answers text/html. A web application
+// is signed in to in a browser, so its address needs no token. It reads no body.
+func isWebPage(ctx context.Context, client *http.Client, baseURL string) bool {
+	resp, done, err := probeGet(ctx, client, baseURL, "text/html")
+	if err != nil {
+		return false
+	}
+	defer done()
+	media, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	return err == nil && media == "text/html" && resp.StatusCode < http.StatusInternalServerError
+}
+
+// probeGet sends one GET with no credential and follows no redirect, so it reaches only the host of
+// the address. done ends the request and closes the body.
+func probeGet(ctx context.Context, client *http.Client, target, accept string) (resp *http.Response, done func(), err error) {
+	if client == nil {
+		client = &http.Client{Timeout: probeTimeout}
+	}
+	c := *client
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	req.Header.Set("Accept", accept)
+	req.Header.Set("User-Agent", "semar/"+Version)
+	resp, err = c.Do(req)
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	return resp, func() { resp.Body.Close(); cancel() }, nil
+}
+
+// tokenMayBeSkipped reports whether init may write an account with no token: no flag named a token,
+// and the default variable is not set.
+func tokenMayBeSkipped(given map[string]bool, lookup func(string) (string, bool)) bool {
+	for _, name := range []string{"token-env", "auth-header", "auth-value", "account"} {
+		if given[name] {
+			return false
+		}
+	}
+	v, ok := lookup(defaultTokenEnv)
+	return !ok || v == ""
+}
+
+const noTokenLine = "The address answers with a web page, so the account default has no token. To add one later, add session and secrets to authProfiles.default in " + configFileName + "."
+
+// noProbeConsequence says what the build is when no probe was found.
+func noProbeConsequence(baseURL string) string {
+	if build.IsLocal(baseURL) {
+		return "The service is on this machine, so the head commit of the repository is its build. " + probeNotFoundTo + "."
+	}
+	return probeNotFoundTo + ". Until then, name the build with semar run --build <commit>."
 }

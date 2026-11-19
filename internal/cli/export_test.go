@@ -24,6 +24,12 @@ func WithRecording(ctx context.Context, drive func(tab context.Context)) context
 	return withRecording(ctx, recordingHooks{hidden: true, drive: drive})
 }
 
+// WithLogin makes semar login open no window that a person can see, and lets drive stand where the
+// person stands: it closes the pages when it is done.
+func WithLogin(ctx context.Context, drive func(tab context.Context)) context.Context {
+	return withLogin(ctx, loginHooks{hidden: true, drive: drive})
+}
+
 // WithTrustedScreens makes a run treat the screens of an app as approved, without storing an approval.
 func WithTrustedScreens(ctx context.Context, app string) context.Context {
 	return withTrustedScreens(ctx, app)

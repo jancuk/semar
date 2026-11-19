@@ -63,6 +63,9 @@ type WebOutcome struct {
 	Test   *WebTest
 	Manual string
 	End    FlowEnd
+	// Blocked lists the hosts that the browser refused to reach during the flow, because the
+	// environment does not list them.
+	Blocked []string
 }
 
 // exploreWeb explores the criteria that a first job left as a manual check on a web page, one at a time,
@@ -165,6 +168,7 @@ func (rs *runState) exploreOne(ctx context.Context, o CriterionOutcome) (*WebRes
 		}
 		res.Turns += out.End.Turns
 		res.Actions += out.End.Actions
+		res.Blocked = slices.Compact(slices.Sorted(slices.Values(slices.Concat(res.Blocked, out.Blocked))))
 		if out.Test != nil {
 			res.Test, res.Manual = out.Test, ""
 			if out.End.Done != nil {

@@ -33,12 +33,12 @@ The examples use a service named `orders`, a web application named `shop`, and a
 | A trial run | The read-only steps of a draft are sent once, so a wrong path is fixed before you see the plan | [The trial run](#the-trial-run) |
 | A second plan | A criterion that has a test costs no model call and gets no second test | [Plan the same ticket again](#plan-the-same-ticket-again) |
 | Values that follow the run | `{{date.plus7d}}` and its relatives are computed at each run. A plan refuses a typed-in date near today and a typed-in ID | [Values that follow the run](#values-that-follow-the-run) |
-| One review | `semar review` shows each item that needs a person, with what the test sends and what the service answered last | [Review what needs a person](#review-what-needs-a-person) |
+| One review | `semar run` offers the review of what needs a person once the tests ran, and `semar review` shows the same items, with what each test sends and what the service answered last | [Review what needs a person](#review-what-needs-a-person) |
 | Replay with no model | `semar run` replays stored scripts. Code computes each outcome from recorded evidence | [The daily loop](#the-daily-loop), [Results](#results) |
 | Tests by hand | A Gherkin scenario and a YAML script, with no model at all | [Write a test by hand](#write-a-test-by-hand) |
 | Several accounts | A step acts as another account with `as`, for access checks | [Act as another account](#act-as-another-account) |
 | Fixtures | A reviewed file finds or makes the data that a test needs, across services, and cleans it up | [Prepare data with fixtures](#prepare-data-with-fixtures) |
-| Web tests | Semar drives Chrome on a profile of its own, and signs in by itself | [Test a web application](#test-a-web-application) |
+| Web tests | Semar drives Chrome on a profile of its own, and signs in by itself. A web application needs no token | [Test a web application](#test-a-web-application) |
 | A recorded web test | `semar record` writes a web test while you do the flow once | [Record a web test](#record-a-web-test) |
 | Web tests from a plan | A model does the flow in Chrome, and Semar writes it as a test that replays with no model | [Plan writes web tests](#plan-writes-web-tests) |
 | Journeys | A business flow across services runs leg by leg against one set of builds | [Test a business flow with a journey](#test-a-business-flow-with-a-journey) |
@@ -115,7 +115,7 @@ added knowledge: api (docs/openapi.yaml), docs (docs), tickets (docs/tickets)
 export ORDERS_UAT_TOKEN=<the token of the test account> before semar run
 ```
 
-On a terminal, `init` asks for what it cannot find and no flag gave: the address of the service, the environment variable of the token, and further accounts, each with one line on who the account is. For each account it also asks for the user that the account signs in with on the web, and the variable of its password (Enter for none). It prints the API document, the documents, and the ticket files that it found. It looks for the build probe with one `GET` to `/version` on the address of the service. The probe counts when the answer is JSON with the commit at `$.commit`.
+On a terminal, `init` asks for what it cannot find and no flag gave: the address of the service, the environment variable of the token (Enter for none, when the address is a web page), and further accounts, each with one line on who the account is. For each account it also asks for the user that the account signs in with on the web, and the variable of its password (Enter for none). It prints the API document, the documents, and the ticket files that it found. It looks for the build probe with one `GET` to `/version` on the address of the service. The probe counts when the answer is JSON with the commit at `$.commit`.
 
 Every question has a flag, and `init` with no terminal asks nothing:
 
@@ -123,6 +123,17 @@ Every question has a flag, and `init` with no terminal asks nothing:
 semar init --base-url https://orders.uat.example.com --token-env ORDERS_UAT_TOKEN \
   --account bob=ORDERS_UAT_TOKEN_BOB --describe "bob=a customer with no orders"
 ```
+
+**An account with no token.** A web application is tested through its browser session, so it needs no token. When no flag names a token, `SEMAR_TOKEN` is not set, and one `GET` of the address answers `text/html`, `init` writes the account with no `session` and no `secrets`, and says so in one line with the way to add a token later. The question for the token variable then accepts an empty answer.
+
+```yaml
+authProfiles:
+  default: {}
+```
+
+A web step of such an account uses the browser profile of [`semar login`](#sign-in-to-a-web-application). An API step of it is `blocked`, with one line that names the account and says that it has no token, and Semar sends nothing for it. The machine check lists no variable for it.
+
+**The build of a service on this machine.** A service with no build probe whose base URL is `localhost`, an address of `127.0.0.0/8`, or `::1` runs the working copy, so its build is the head commit of the repository. When tracked files differ from that commit, the build is the commit and a short digest of the difference, so a result from an earlier state of the files is `stale`. An untracked file is not part of it. `init` asks for nothing for such a service, and the header of a run, and its report, say that the build is the head commit and was not read from the service. `semar run --build <commit>` names another one.
 
 **Check a machine.** In a repository that has `.semar/semar.yaml`, `semar init` writes nothing. It checks this machine and prints one line for each item: `ok`, `missing` with the way to fix it, or `review` for what a person has not approved. The exit code is 0 when nothing is missing and 2 otherwise. Run it after you clone a repository that a colleague set up.
 
@@ -186,7 +197,7 @@ semar run --all --env production --build <commit>
 Three rules to know:
 
 * **The token is never in a file.** The configuration names an environment variable. Semar reads it at run time and removes its value from everything it stores. Use an account made for testing, never a personal one.
-* **A result belongs to a build.** A run with no recorded build ends as `inconclusive`. With a build probe, Semar asks the service which commit it runs, before and after the run, and a change between the two makes the results `stale`. Without one, declare the build with `semar run --build <commit>`. The report then says that the build was declared and not read from the service.
+* **A result belongs to a build.** A run with no recorded build ends as `inconclusive`. With a build probe, Semar asks the service which commit it runs, before and after the run, and a change between the two makes the results `stale`. Without one, a service on this machine runs the head commit of the repository, and any other service needs `semar run --build <commit>`. The report then says that the build was declared and not read from the service.
 * **The harness is yours.** `semar plan` starts the `claude` or the `codex` on your `PATH`, or the absolute path in the environment variable `SEMAR_CLAUDE_BIN` or `SEMAR_CODEX_BIN`. The configuration cannot name a program to start, because it is a file of the repository under test.
 
 **Keys for fixtures, journeys, and the trial run.** `semar init` does not write these. Add them by hand when you need them.
@@ -232,21 +243,32 @@ The file takes these keys too:
 
 ## The daily loop
 
-A person who knows git needs five commands. `semar --help` lists them first, under "Every day".
+A person needs four commands, with no flag. `semar --help` lists them first, under "Every day", with the commands that you type by hand.
 
 ```text
-$ semar run                 # the tests of this branch, then where the change stands
-$ semar review              # everything that needs my eyes, one item at a time
-$ semar status              # one group for each use case, and Ship: yes or Ship: no
-$ semar check <id> pass     # what I checked by hand
-$ semar defer <id> --until 2026-12-17 --reason "..."
+$ semar init                # once: the address of the service
+$ semar login               # a web application: sign in once, in a window
+$ semar plan                # tests for the change of this branch, from its tickets
+$ semar run                 # the tests, the review of what needs a person, and where the change stands
 ```
+
+A person types `semar check <id> pass` for what was checked by hand, and `semar defer <id> --until 2026-12-17 --reason "..."` to leave a use case untested for a time. `semar review` and `semar status` are listed under "More". `run` asks for the review and ends with the status, so a script, a second look, and `status --html` and `status --checklist` are what they are for.
 
 The change is the range from the base branch to `HEAD`. The base is `change.base` in `semar.yaml`, else the default branch of `origin` as the clone knows it, else `main`, else `master`, and `--base <branch>` names another. `run` and `status` read the range from the clone with no fetch. The tickets of the change are the tickets that `semar changes` finds in the range.
 
 `semar run` prints what it selected before it sends anything: the change, the environment with its kind and build, the number of scenarios and journeys, and the gaps. A gap is a ticket of the change with no use cases, a commit with no ticket, or a scenario that cannot run here. A ticket that has a ticket file and no use cases is not planned: on a terminal, `run` offers to plan it, with the provider, the model, and an estimate, and plans only when you answer `y`. A change with no ticket ends with exit code 2 and names `--all`.
 
-A result has one of these words: `passed`, `failed`, `blocked`, `needs review`, `stale`. `needs review` is a missing approval of a scenario, a fixture, or a screens file. `stale` is a pass on another build, or of a scenario that changed since. Every line of a result that has a next step ends with the command, such as `needs review → semar review SHOP-482-03`. `semar status` names the command once on the line of a group when every use case of the group continues with it, such as `needs review  3  → semar review`.
+**The review inside a run.** After the scenarios ran, when at least one of them needs a person, on a terminal, `run` asks once:
+
+```text
+2 tests need your review. Review them now? [Y/n]
+```
+
+A test needs a person when its result is `needs review`: an expected result that nobody confirmed, a fixture that is not approved, or a screens file that is not approved. Enter and `y` are a yes. A yes runs the review of `semar review`, for the tests of this run and for the fixtures and the screens files that they need, one item at a time. The tests that you settled then run again, in a second run, and the status that ends the command reads the results of that second run. A test that you skipped is not run again. If you approve nothing, nothing runs again. The two runs are two runs in the store: `semar log` lists both, and the exit code is that of the final state, with the second result in place of the first for each test that ran again. `semar run --scenario <id>` makes the same offer for that scenario. The offer does not cover a journey.
+
+Any other answer, `--no-review`, a run with no terminal, and a run where nothing needs review behave as before: there is no review and no second run. The line of each result that needs a person still ends with the command to type, such as `needs review → semar review SHOP-482-03`, and so does the status, so a person who declined, and a script, can see the next step.
+
+A result has one of these words: `passed`, `failed`, `blocked`, `needs review`, `stale`. `needs review` is a missing approval of a scenario, a fixture, or a screens file, and the run offers its review. `stale` is a pass on another build, or of a scenario that changed since. Every line of a result that has a next step ends with the command, such as `needs review → semar review SHOP-482-03`. `semar status` names the command once on the line of a group when every use case of the group continues with it, such as `needs review  3  → semar review`.
 
 `semar review` stores the `user.email` of git with each approval, when it is set. `semar status` marks a use case whose every approval came from an author of a commit of the change with `approved by an author of the change`. The mark changes no state and no exit code.
 
@@ -703,7 +725,7 @@ steps[0].body[0]: field customerId of createOrder holds the ID "c-1042", which n
 
 ## Review what needs a person
 
-Nothing that a plan, a recording, or a person writes counts until a person approves it. `semar review` is the one place for that. It shows the fixtures that are not approved, the screens files that are not approved, the scenarios that need a confirmation, and the journeys, one item at a time.
+Nothing that a plan, a recording, or a person writes counts until a person approves it. `semar run` asks for the review of what its tests need, and `semar review` is the same review for a script, for a second look, and for the items that no run met. It shows the fixtures that are not approved, the screens files that are not approved, the scenarios that need a confirmation, and the journeys, one item at a time.
 
 ```bash
 semar review                 # everything that waits
@@ -745,7 +767,7 @@ How to read an item:
 | `(by model)` | A model wrote the expected result. `(source diff)` ends a result whose source is not the ticket |
 | `last run …` | What the newest run observed for this expected result: `met`, `not met`, or `not evaluated` with the reason |
 
-**Run before you review.** A scenario that is not approved still runs. Its result is `needs review`, and the run stores what the service answered. So the order plan, run, review, run gives the review the real answer beside each expected result, and you can see that a test expects 422 where the service answers 201 before you approve it. With no run, review prints one line:
+**Run before you review.** A scenario that is not approved still runs. Its result is `needs review`, and the run stores what the service answered. So `semar run` gives the review the real answer beside each expected result, and you can see that a test expects 422 where the service answers 201 before you approve it. The run asks for the review itself, and runs the approved tests again. See [The daily loop](#the-daily-loop). With no run, review prints one line:
 
 ```text
   not run yet: semar run --scenario SHOP-482-02 sends it and stores what the service answers
@@ -998,6 +1020,14 @@ When a redesign moves an element, the run says which element it did not find. `s
 
 `semar run --headed` shows the browser window of a web step.
 
+**Blocked hosts.** The browser reaches the hosts that `environments.<env>.hosts` lists, and blocks every other one. A page that misses the data of a blocked host can pass or fail for the wrong reason, so a run and a plan say which hosts were blocked. `semar run` prints, before the `report:` line, the hosts, the scenarios that met each one (the first three, and then a count), why it matters, and what to do. `semar plan` prints them after its `web:` line, with the criteria that met each one. `report.md` has a `## Blocked hosts` section with the same hosts. No outcome and no exit code changes, because a host of an analytics service is blocked in every run.
+
+```text
+blocked hosts: the browser did not reach 1 host, because environments.uat.hosts does not list them
+  cdn.example.com: SHOP-482-07, SHOP-482-08
+a page that misses data from a blocked host can pass or fail for the wrong reason; no outcome changed. To allow them, add the host under environments.uat.hosts in .semar/semar.yaml, or run semar login, which offers to add them
+```
+
 ### Sign in to a web application
 
 An application that keeps its session in the tab shows the sign-in form at every start, so a recorded test would start with the typing of the sign-in, and so would each recording. Name the user and the password variable of an account once, and Semar signs in by itself wherever it meets the form. A test holds no sign-in step.
@@ -1027,7 +1057,25 @@ authProfiles:
 * **A sign-in that does not finish** ends the step with a line that names the account, says that the form is still there, quotes the alert that the page shows, and names `web.user` and the variable. The scenario is `blocked` or `inconclusive`, never `failed`, because the product was not judged. `semar login --user` exits with 2.
 * **A test of the sign-in page itself** uses an account with no `web` block.
 
-It does not sign in through another site, with a second factor, with a captcha, or with a form in two pages. For those, `semar login <service>` with no flag opens a window, and the session lasts in the profile.
+It does not sign in through another site, with a second factor, with a captcha, or with a form in two pages. For those, `semar login` with no flag opens a window, and the session lasts in the profile.
+
+**A window, for any application.** `semar login` with no flag opens Chrome on the browser profile of the account, at the address of the service. With one service in the environment it takes no argument. With several it names them and asks for one, as in `semar login orders`. Sign in once, in any way that the application allows. The command ends when the last page of the window is closed, on every system, and a page that you or the application opened keeps it going. Chrome is then ended in the way that saves the profile.
+
+```bash
+semar login
+```
+
+While the window is open, Semar notes the host of every request of the page that `environments.<env>.hosts` does not list. It blocks nothing in the window. After the window is closed it prints them. In a terminal it asks whether to add them, all or by number, and writes `semar.yaml` with every other line and comment kept. With no terminal it prints the lines to add and changes nothing.
+
+```text
+the window asked for 2 hosts that environments.uat.hosts does not list, so a run blocks them and a page that needs one can miss data:
+  1. login.example.com
+  2. cdn.example.com
+Add them to environments.uat.hosts in .semar/semar.yaml? Type all, none, or numbers such as 1,3 [none]: 1
+added 1 host to environments.uat.hosts in .semar/semar.yaml
+```
+
+An empty answer, `none`, and a stream that ends add nothing. A list in flow form that runs over several lines is not edited: Semar says so and names the hosts to add by hand.
 
 ### Record a web test
 
@@ -1471,6 +1519,29 @@ semar init
 | `--web-password-env <text>` | The environment variable that holds the web password of an account, as \<account>=\<ENV>; needs --web-user; repeatable |
 | `--web-user <text>` | The user that an account signs in with on the web, as \<account>=\<user>; default names the default account; needs --web-password-env; repeatable |
 
+#### `semar login`
+
+Open Chrome on the browser profile of an account of an environment, at the base URL of the service, and wait until the last page of the window is closed. Without a service, login uses the only service of the environment.
+
+The profile is Semar's own, at browser/\<environment>/\<account> below the Semar home. It is never the profile that you browse with, and a later run of a web step starts on it, so the sign-in is still there.
+
+Without --as, the account is the auth profile of the service, or default.
+
+While the window is open, login notes the hosts that its pages ask for and that environments.\<environment>.hosts does not list. It blocks nothing. After the window is closed it prints them, and in a terminal it asks whether to add them to semar.yaml.
+
+With --user and --password-env, login writes the web block of the account into semar.yaml, signs in once with no window, and says whether it worked. Semar then signs in by itself wherever a web step or a recording meets the sign-in form. The password stays in the environment variable. For a second factor, a captcha, or a sign-in through another site, use login with a window.
+
+```text
+semar login [<service>] [--env <environment>] [--as <account>] [--user <user> --password-env <NAME>]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--as <text>` | The account whose profile to sign in to: an auth profile of semar.yaml |
+| `--env <text>` | The environment of semar.yaml; needed when there are several, and always for a production environment |
+| `--password-env <text>` | The environment variable that holds the web password of the account; needs --user |
+| `--user <text>` | The user that the account signs in with on the web; needs --password-env |
+
 #### `semar plan`
 
 Draft scenarios and scripts for the change of this branch, or of --diff
@@ -1517,6 +1588,8 @@ The change is the commits from the base branch to HEAD. --all runs every scenari
 
 A ticket of the change that has a ticket file and no use cases is not planned. On a terminal, run offers to plan it and asks first. With no terminal, or with --no-plan, it never plans, and its exit code is at least 2.
 
+When a test of the run needs a person to review it, on a terminal, run offers the review once the tests ran. A yes runs the review of semar review for those tests, then runs the tests that were approved again, and ends with the status of that second run. With no terminal, or with --no-review, it never asks.
+
 Exit 0 when everything that ran passed, 1 when something failed, and 2 otherwise.
 
 ```text
@@ -1532,51 +1605,8 @@ semar run [environment]
 | `--headed` | Show the browser window of a web step |
 | `--no-journeys` | Leave the critical journeys out |
 | `--no-plan` | Never offer to plan a ticket that has no use cases |
+| `--no-review` | Never offer to review the tests that need a person after the run |
 | `--scenario <text>` | Run the scenario with this ID, and no journey; repeat for more |
-
-#### `semar review`
-
-Show what needs a person, one item at a time: the fixtures that are not approved, the screens files that are not approved, the scenarios that need a confirmation, grouped by use case, and the journeys.
-
-Answer y to approve an item, n to skip it, d for its details, and q to stop. An ID narrows the list: a scenario, a ticket, a fixture, a journey, or the app of a screens file.
-
---yes approves every item with no question. With no terminal and no --yes, the items are listed and nothing is approved.
-
-Exit 0 when nothing is left to review, and 2 when an item was skipped or the review stopped.
-
-```text
-semar review [id...]
-```
-
-| Flag | Meaning |
-| --- | --- |
-| `--env <text>` | The environment whose auth profiles the legs of a journey use; needed when there are several |
-| `--yes` | Approve every item without asking |
-
-#### `semar status`
-
-Show each use case of the change in one group: verified, failing, blocked, needs review, stale, for a person, no test, or deferred.
-
-The change is the commits from the base branch to HEAD, and its tickets are the ones that those commits name. --all shows every use case.
-
-Exit 0 when every use case is verified or deferred, 1 when one failed or a person recorded a failure, and 2 otherwise.
-
-With no environment, and several in semar.yaml, the builds are not read, so a pass on any build counts: the exit code is then 2 at best.
-
-```text
-semar status [environment]
-```
-
-| Flag | Meaning |
-| --- | --- |
-| `--all` | Show every use case, not only those of the change |
-| `--base <text>` | The branch that the change is measured against (default: change.base, else the default branch of origin, else main) |
-| `--build <text>` | With an environment, the commit that a service with no build probe runs, as \<commit> or \<service>=\<commit>; repeat for more |
-| `--checklist` | Print the manual checklist instead of the table |
-| `--env <text>` | The environment of semar.yaml whose builds count (the same as the argument) |
-| `--html <text>` | Also write the status as one HTML file that needs no network, for a person with no command line |
-| `--run <text>` | Read the results of this run only, and print the manual checklist after the table |
-| `--ticket <text>` | Show only the use cases of this ticket, or of this group in the ID; repeat for more |
 
 #### `semar check`
 
@@ -1680,6 +1710,50 @@ semar rm <scenario id> --reason <text>
 
 ### More
 
+#### `semar review`
+
+Show what needs a person, one item at a time: the fixtures that are not approved, the screens files that are not approved, the scenarios that need a confirmation, grouped by use case, and the journeys.
+
+Answer y to approve an item, n to skip it, d for its details, and q to stop. An ID narrows the list: a scenario, a ticket, a fixture, a journey, or the app of a screens file.
+
+--yes approves every item with no question. With no terminal and no --yes, the items are listed and nothing is approved.
+
+Exit 0 when nothing is left to review, and 2 when an item was skipped or the review stopped.
+
+```text
+semar review [id...]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--env <text>` | The environment whose auth profiles the legs of a journey use; needed when there are several |
+| `--yes` | Approve every item without asking |
+
+#### `semar status`
+
+Show each use case of the change in one group: verified, failing, blocked, needs review, stale, for a person, no test, or deferred.
+
+The change is the commits from the base branch to HEAD, and its tickets are the ones that those commits name. --all shows every use case.
+
+Exit 0 when every use case is verified or deferred, 1 when one failed or a person recorded a failure, and 2 otherwise.
+
+With no environment, and several in semar.yaml, the builds are not read, so a pass on any build counts: the exit code is then 2 at best.
+
+```text
+semar status [environment]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--all` | Show every use case, not only those of the change |
+| `--base <text>` | The branch that the change is measured against (default: change.base, else the default branch of origin, else main) |
+| `--build <text>` | With an environment, the commit that a service with no build probe runs, as \<commit> or \<service>=\<commit>; repeat for more |
+| `--checklist` | Print the manual checklist instead of the table |
+| `--env <text>` | The environment of semar.yaml whose builds count (the same as the argument) |
+| `--html <text>` | Also write the status as one HTML file that needs no network, for a person with no command line |
+| `--run <text>` | Read the results of this run only, and print the manual checklist after the table |
+| `--ticket <text>` | Show only the use cases of this ticket, or of this group in the ID; repeat for more |
+
 #### `semar changes`
 
 Print the tickets, commits, and files between two branches, with no model
@@ -1692,27 +1766,6 @@ semar changes --diff <link or range>
 | --- | --- |
 | `--diff <text>` | A compare link of the code host, or a range such as main..release |
 | `--no-fetch` | Use the branches as they are in this clone, without fetching origin |
-
-#### `semar login`
-
-Open Chrome on the browser profile of an account of an environment, at the base URL of the service, and wait until the window is closed.
-
-The profile is Semar's own, at browser/\<environment>/\<account> below the Semar home. It is never the profile that you browse with, and a later run of a web step starts on it, so the sign-in is still there.
-
-Without --as, the account is the auth profile of the service, or default.
-
-With --user and --password-env, login writes the web block of the account into semar.yaml, signs in once with no window, and says whether it worked. Semar then signs in by itself wherever a web step or a recording meets the sign-in form. The password stays in the environment variable. For a second factor, a captcha, or a sign-in through another site, use login with a window.
-
-```text
-semar login <service> [--env <environment>] [--as <account>] [--user <user> --password-env <NAME>]
-```
-
-| Flag | Meaning |
-| --- | --- |
-| `--as <text>` | The account whose profile to sign in to: an auth profile of semar.yaml |
-| `--env <text>` | The environment of semar.yaml; needed when there are several, and always for a production environment |
-| `--password-env <text>` | The environment variable that holds the web password of the account; needs --user |
-| `--user <text>` | The user that the account signs in with on the web; needs --password-env |
 
 #### `semar fixture list`
 

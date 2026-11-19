@@ -99,6 +99,9 @@ type Activity struct {
 	Evidence string     `json:"evidence"` // path of the action file, relative to the run directory
 	// Screenshot is the path of the screenshot of a web action, relative to the run directory.
 	Screenshot string `json:"screenshot,omitempty"`
+	// Blocked lists the hosts that the browser refused to reach during a web action because the
+	// environment does not list them, in the form of a hosts entry.
+	Blocked []string `json:"blocked,omitempty"`
 }
 
 type ObjectRef struct {

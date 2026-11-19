@@ -144,6 +144,10 @@ func (m *machineCheck) services(ctx context.Context, o options, cfg config.Confi
 				m.add(stateMissing, "%s: %s did not answer at %s: start the service, or correct the address", envName, s.Name, s.BaseURL)
 				continue
 			}
+			if build.IsLocal(s.BaseURL) {
+				m.add(stateOK, "%s: %s answers; it has no build probe, so its build is the head commit of the repository", envName, s.Name)
+				continue
+			}
 			m.add(stateOK, "%s: %s answers; it has no build probe, so name the build with semar run --build <commit>", envName, s.Name)
 		}
 	}

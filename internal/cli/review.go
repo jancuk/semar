@@ -90,17 +90,30 @@ func runReview(ctx context.Context, stdout, stderr io.Writer, o options, f revie
 		fmt.Fprintln(stderr, "semar: nothing was approved: the input is not a terminal, so pass --yes to approve")
 		return exitError{ExitUndecided}
 	}
-	name, err := o.User()
+	left, err := approveItems(ctx, stdout, o, f, newLineReader(o.Stdin), items)
 	if err != nil {
 		return err
 	}
+	if left > 0 {
+		return exitError{ExitUndecided}
+	}
+	return nil
+}
+
+// approveItems asks about each item in turn, or approves them all with --yes, says how many were
+// approved, and returns how many are left. semar review and semar run share it.
+func approveItems(ctx context.Context, stdout io.Writer, o options, f reviewFlags, in *lineReader, items []reviewItem) (int, error) {
+	name, err := o.User()
+	if err != nil {
+		return 0, err
+	}
 	if strings.TrimSpace(name) == "" {
-		return errors.New("the approver has no name; set git config user.name")
+		return 0, errors.New("the approver has no name; set git config user.name")
 	}
 	who := approver{name: name, email: o.Email(f.dir)}
 	store, err := evidence.Open(semarDir(f.dir))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	approvals := confirm.NewLocal(store.Root())
 	approve := func(it reviewItem) error {
@@ -112,15 +125,13 @@ func runReview(ctx context.Context, stdout, stderr io.Writer, o options, f revie
 		return nil
 	}
 
-	approved, skipped := 0, 0
-	in := newLineReader(o.Stdin)
-	stopped := false
+	approved, skipped, stopped := 0, 0, false
 loop:
 	for i, it := range items {
 		it.show(stdout, i+1, len(items))
 		if f.yes {
 			if err := approve(it); err != nil {
-				return err
+				return 0, err
 			}
 			approved++
 			continue
@@ -136,7 +147,7 @@ loop:
 			switch strings.ToLower(strings.TrimSpace(line)) {
 			case "y", "yes":
 				if err := approve(it); err != nil {
-					return err
+					return 0, err
 				}
 				approved++
 			case "n", "no":
@@ -164,10 +175,7 @@ loop:
 		}
 	}
 	fmt.Fprintln(stdout)
-	if left > 0 {
-		return exitError{ExitUndecided}
-	}
-	return nil
+	return left, nil
 }
 
 // picker says which objects the IDs on the command line name. With no ID, every object is named.

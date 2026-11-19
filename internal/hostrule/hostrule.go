@@ -32,6 +32,27 @@ func Allowed(u *url.URL, hosts []string) bool {
 	return false
 }
 
+// Entry is the hosts entry that would allow u: its host, and its port when that is not the default
+// of its scheme. It gives "" for a URL that is not http or https, and for a host that Allowed
+// would never match.
+func Entry(u *url.URL) string {
+	if u == nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return ""
+	}
+	host := normalize(u.Hostname())
+	if host == "" {
+		return ""
+	}
+	port := u.Port()
+	if port == "" || port == defaultPort(u.Scheme) {
+		return host
+	}
+	if strings.Contains(host, ":") {
+		return "[" + host + "]:" + port
+	}
+	return host + ":" + port
+}
+
 // normalize lower-cases ASCII letters only and removes one trailing dot. A host
 // with a byte above 0x7F gives "", which matches nothing: Unicode folding turns
 // U+0130 and U+212A into i and k, which would admit a host the list does not name.

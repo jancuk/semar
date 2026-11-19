@@ -65,6 +65,8 @@ type WebResult struct {
 	Actions  int
 	// Earlier is why the flow of each lower model wrote no test, in the order of the ladder.
 	Earlier []string
+	// Blocked lists the hosts that the browser refused to reach in the flows, sorted.
+	Blocked []string
 }
 
 // WebStats is what the web part of a plan did.

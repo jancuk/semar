@@ -81,7 +81,7 @@ func (t *fixtureRig) open(ctx context.Context) (*envRig, string) {
 			needs[name] = "an account that a drafted fixture may act as"
 		}
 	}
-	rg, err := newEnvRig(ctx, t.o, t.dir, t.cfg, t.env, nil, needs)
+	rg, err := newEnvRig(ctx, t.o, t.dir, t.cfg, t.env, declaredBuilds{}, needs)
 	if err != nil {
 		t.failed = "the run could not start: " + oneLine(terminalSafe(err.Error()))
 		return nil, t.failed

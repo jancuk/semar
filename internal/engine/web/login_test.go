@@ -9,7 +9,7 @@ import (
 )
 
 func TestLoginWithoutChrome(t *testing.T) {
-	err := web.Login(context.Background(), web.LoginOptions{Chrome: "/does/not/exist", Home: t.TempDir(), Environment: "test", URL: "http://x.test"})
+	_, err := web.Login(context.Background(), web.LoginOptions{Chrome: "/does/not/exist", Home: t.TempDir(), Environment: "test", URL: "http://x.test"})
 	if err == nil {
 		t.Fatal("Login started with no Chrome")
 	}

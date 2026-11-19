@@ -2,6 +2,7 @@ package activity
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/jancuk/semar/internal/domain"
@@ -39,6 +40,7 @@ func fromWebAction(a domain.Action, class effects.Class, evidencePath string) do
 		TraceID:    a.TraceID,
 		Evidence:   evidencePath,
 		Screenshot: w.Screenshot,
+		Blocked:    slices.Clone(w.Blocked),
 	}
 }
 

@@ -65,6 +65,7 @@ type browserStep struct {
 
 type markdownView struct {
 	Browser                            []browserStep
+	Blocked                            []blockedView
 	RunID, Environment, Started, Ended string
 	EnvironmentKind                    string
 	BuildsStart, BuildsEnd, Counts     string
@@ -142,6 +143,7 @@ func buildView(d Data) markdownView {
 		v.Ledger = append(v.Ledger, ledgerViewOf(row))
 	}
 	v.Browser = browserSteps(d.Activity)
+	v.Blocked = blockedViews(d.Activity)
 	return v
 }
 
@@ -239,6 +241,13 @@ func builds(bs []domain.BuildRef) string {
 }
 
 func declaredBuild(b domain.BuildRef) string {
+	if b.Local {
+		from := "the head commit of the repository"
+		if strings.Contains(b.Commit, "+") {
+			from = "the head commit of the repository and the changes to its tracked files"
+		}
+		return fmt.Sprintf("%s %s (%s, not read from the service)", b.Service, b.Commit, from)
+	}
 	return fmt.Sprintf("%s %s (declared on the command line, not read from the service)", b.Service, b.Commit)
 }
 

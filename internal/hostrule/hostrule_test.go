@@ -74,3 +74,34 @@ func TestAllowed(t *testing.T) {
 		t.Fatal("Allowed(nil) = true")
 	}
 }
+
+func TestEntryIsTheFormThatAHostsListUses(t *testing.T) {
+	cases := map[string]string{
+		"https://cdn.example.com/a.js":      "cdn.example.com",
+		"https://CDN.Example.com:443/a.js":  "cdn.example.com",
+		"http://cdn.example.com:80/":        "cdn.example.com",
+		"http://cdn.example.com:8080/":      "cdn.example.com:8080",
+		"https://cdn.example.com:80/":       "cdn.example.com:80",
+		"http://127.0.0.1:41000/x":          "127.0.0.1:41000",
+		"http://[::1]:9000/":                "[::1]:9000",
+		"http://[::1]/":                     "::1",
+		"https://user:pw@cdn.example.com/a": "cdn.example.com",
+		"ws://cdn.example.com/socket":       "",
+		"data:text/plain,hello":             "",
+		"https://café.example.com/":         "",
+	}
+	for raw, want := range cases {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := hostrule.Entry(u); got != want {
+			t.Errorf("Entry(%q) = %q, want %q", raw, got, want)
+		}
+		if want != "" {
+			if got := hostrule.Entry(u); !hostrule.Allowed(u, []string{got}) {
+				t.Errorf("the entry %q does not allow %q", got, raw)
+			}
+		}
+	}
+}

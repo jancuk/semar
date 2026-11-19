@@ -204,6 +204,21 @@ func (g *Git) Resolve(ctx context.Context, remote, name string) (string, error) 
 	return "", fmt.Errorf("cannot resolve %q: tried %s", name, strings.Join(candidates, " and "))
 }
 
+// Head returns the commit that HEAD names.
+func (g *Git) Head(ctx context.Context) (string, error) {
+	return g.Resolve(ctx, "", "HEAD")
+}
+
+// DiffHead returns the patch from HEAD to the tracked files of the work tree, with the staged
+// changes. An untracked file is not in it.
+func (g *Git) DiffHead(ctx context.Context) ([]byte, error) {
+	out, err := g.run(ctx, maxDiffBytes, "diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames")
+	if err != nil {
+		return nil, fmt.Errorf("diff of the work tree from HEAD: %w", err)
+	}
+	return out, nil
+}
+
 // MergeBase returns the best common ancestor of two commits.
 func (g *Git) MergeBase(ctx context.Context, a, b string) (string, error) {
 	if err := checkName("commit", a); err != nil {
@@ -481,7 +496,7 @@ next:
 		}
 		env = append(env, kv)
 	}
-	cmd.Env = append(env, "GIT_TERMINAL_PROMPT=0", "GIT_PAGER=cat", "LC_ALL=C")
+	cmd.Env = append(env, "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_PAGER=cat", "LC_ALL=C")
 	cmd.WaitDelay = 5 * time.Second
 	return cmd
 }

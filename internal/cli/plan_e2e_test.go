@@ -111,6 +111,8 @@ type planRepo struct {
 	git  *gittest.Repo
 	host string
 	temp string
+	// refundExtra is put at the end of the refund page, as a page that loads from another host does.
+	refundExtra atomic.Pointer[string]
 }
 
 func newPlanRepo(t *testing.T, app sampleapp.Options) *planRepo {
@@ -135,7 +137,14 @@ func newPlanRepo(t *testing.T, app sampleapp.Options) *planRepo {
 	a := sampleapp.New(app)
 	// The page of the refund is served next to the API, for a plan that writes a web test.
 	pages := http.NewServeMux()
-	pages.HandleFunc("/refund", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, refundShop(false)) })
+	p := &planRepo{git: g, temp: t.TempDir()}
+	pages.HandleFunc("/refund", func(w http.ResponseWriter, _ *http.Request) {
+		page := refundShop(false)
+		if extra := p.refundExtra.Load(); extra != nil {
+			page = strings.Replace(page, "</body>", *extra+"</body>", 1)
+		}
+		fmt.Fprint(w, page)
+	})
 	pages.Handle("/", a)
 	srv := httptest.NewServer(pages)
 	t.Cleanup(srv.Close)
@@ -146,7 +155,7 @@ func newPlanRepo(t *testing.T, app sampleapp.Options) *planRepo {
 
 	var clock, ids atomic.Int64
 	start := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
-	p := &planRepo{git: g, host: u.Host, temp: t.TempDir()}
+	p.host = u.Host
 	p.repo = &repo{dir: g.Dir, app: a, opts: cli.Options{
 		HTTP:     offlineHTTP(),
 		Clock:    func() time.Time { return start.Add(time.Duration(clock.Add(1)) * time.Second) },
@@ -263,8 +272,10 @@ func TestPlanFromADiffEndToEnd(t *testing.T) {
 	contains(t, "stdout", res.stdout,
 		"SHOP-482 (behaviour): 1 scenario", "SHOP-483 (behaviour): 1 scenario", "not drafted: 1",
 		"plan: "+p.path(".semar", "plans", p.head(t)[:12], "plan.md"),
-		"next:\n  semar review SHOP-482-01   ",
-		"  semar run --build "+p.head(t)[:12]+"   run the approved scenarios against the service\n  semar status   where things stand\n")
+		"next:\n  semar run   run the tests against the service\n  the run asks you to review what the plan drafted, and runs the approved tests again\n")
+	if strings.Contains(res.stdout, "--build") || strings.Contains(res.stdout, "semar status") {
+		t.Errorf("the next step of a local service names a build or the status:\n%s", res.stdout)
+	}
 	contains(t, "stderr", res.stderr, "wrote "+p.path(".semar", "semar.yaml"), "export "+planTokenEnv, "several minutes")
 	if n := jobs.Load(); n != 1 {
 		t.Errorf("the planner ran %d times, want 1", n)
@@ -338,9 +349,10 @@ authProfiles:
 	contains(t, "the first run", first.stdout, "needs review", "not confirmed")
 	confirmed := p.must(t, cli.ExitOK, "review", "--yes")
 	contains(t, "confirm --all", confirmed.stdout, "approved SHOP-482-01", "approved SHOP-483-01")
-	// A run passes only with a recorded build, and the file of semar init has no build probe.
-	unprobed := p.must(t, cli.ExitUndecided, "run", "--all")
-	contains(t, "a run with no build probe", unprobed.stdout, "no build was recorded")
+	// The service is on this machine and has no build probe, so a run takes the head commit of the repository.
+	local := p.must(t, cli.ExitOK, "run", "--all")
+	contains(t, "a run with no build probe", local.stdout, "passed",
+		"build: orders "+p.head(t)+" (the head commit of the repository, not read from the service)")
 	head := p.head(t)[:12]
 	second := p.must(t, cli.ExitOK, "run", "--all", "--build", head)
 	contains(t, "the second run", second.stdout, "passed",

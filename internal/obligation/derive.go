@@ -290,9 +290,4 @@ func staleDetails(c Cover, current []domain.BuildRef) []string {
 	return out
 }
 
-func shortCommit(c string) string {
-	if len(c) > 7 {
-		return c[:7]
-	}
-	return c
-}
+func shortCommit(c string) string { return domain.ShortCommit(c) }

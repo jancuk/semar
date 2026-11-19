@@ -65,6 +65,9 @@ type Deps struct {
 	// Accounts are the auth profiles of the configuration that a step may act as (steps[].as).
 	// The profile of a scenario itself is always known.
 	Accounts []string
+	// NoToken are the accounts that have no token. A scenario with an API step as one of them ends
+	// blocked before it sends anything.
+	NoToken []string
 	// Web is the browser engine and Screens the screens files that its steps use. Without them, a
 	// scenario with a web step ends blocked.
 	Web     WebDoer
@@ -84,6 +87,7 @@ func New(d Deps) *Runner {
 	d.Services = slices.Clone(d.Services)
 	d.Trust = slices.Clone(d.Trust)
 	d.Accounts = slices.Clone(d.Accounts)
+	d.NoToken = slices.Clone(d.NoToken)
 	return &Runner{d: d}
 }
 
@@ -238,6 +242,11 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (run replayed, 
 		return run, nil
 	}
 
+	if blocked := r.noTokenSteps(sc, s); len(blocked) > 0 {
+		run.blocked = blocked
+		return run, nil
+	}
+
 	vars := map[string]string{"run.id": string(r.d.Run)}
 	if len(sc.Given) > 0 {
 		if r.d.Fixtures == nil {
@@ -275,6 +284,33 @@ func (r *Runner) unknownAccounts(sc domain.Scenario) []string {
 			continue
 		}
 		text := fmt.Sprintf("account %s is not in the configuration", st.As)
+		if !slices.Contains(blocked, text) {
+			blocked = append(blocked, text)
+		}
+	}
+	return blocked
+}
+
+// noTokenSteps gives one reason for each account with no token that an API step acts as. A web step
+// of such an account needs no token.
+func (r *Runner) noTokenSteps(sc domain.Scenario, s domain.Script) []string {
+	if len(r.d.NoToken) == 0 {
+		return nil
+	}
+	api := map[domain.StepID]bool{}
+	for _, ss := range s.Steps {
+		api[ss.Step] = ss.Request != nil
+	}
+	var blocked []string
+	for _, st := range sc.Steps {
+		account := sc.AuthProfile
+		if st.As != "" {
+			account = st.As
+		}
+		if !api[st.ID] || !slices.Contains(r.d.NoToken, account) {
+			continue
+		}
+		text := fmt.Sprintf("the account %s has no token, so an API step as it is not sent; add a session and secrets to it in semar.yaml", account)
 		if !slices.Contains(blocked, text) {
 			blocked = append(blocked, text)
 		}

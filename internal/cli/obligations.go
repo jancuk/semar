@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/changeset"
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
@@ -48,19 +47,19 @@ func ticketKey(l obligation.Located) string {
 
 // currentBuilds reads the builds that the environment runs now. A build that cannot be read is an
 // error, because counting every result as current would claim more than was seen.
-func currentBuilds(ctx context.Context, cfg config.Config, envName string, declaredBuilds []string) ([]domain.BuildRef, error) {
+func currentBuilds(ctx context.Context, dir string, cfg config.Config, envName string, values []string) ([]domain.BuildRef, error) {
 	_, env, err := cfg.Environment(envName)
 	if err != nil {
 		return nil, err
 	}
-	declared, err := build.ParseDeclared(declaredBuilds, env.Services)
+	declared, err := readDeclaredBuilds(ctx, dir, values, env.Services)
 	if err != nil {
 		return nil, err
 	}
-	prober := build.NewDeclared(declared, build.NewHTTP(env.Services, nil))
+	prober := declared.prober(env.Services)
 	var out []domain.BuildRef
 	for _, s := range env.Services {
-		if _, ok := declared[s.Name]; !ok && s.Build == nil {
+		if !declared.has(s.Name) && s.Build == nil {
 			continue
 		}
 		b, err := prober.Probe(ctx, s.Name)
@@ -86,7 +85,7 @@ func loadConfigOrNone(dir string) (config.Config, error) {
 // readBuilds reads the builds for a command that matches results to them. A named environment must
 // be readable. With none named and exactly one in the configuration, that one is read, and when it
 // cannot be, the command goes on with the builds not read and says so.
-func readBuilds(ctx context.Context, stderr io.Writer, cfg config.Config, named string, declared []string) (envName string, builds []domain.BuildRef, read bool, err error) {
+func readBuilds(ctx context.Context, stderr io.Writer, dir string, cfg config.Config, named string, declared []string) (envName string, builds []domain.BuildRef, read bool, err error) {
 	if len(declared) > 0 && named == "" {
 		return "", nil, false, errors.New("--build needs an environment: it names the build that a service without a probe runs now")
 	}
@@ -95,7 +94,7 @@ func readBuilds(ctx context.Context, stderr io.Writer, cfg config.Config, named 
 		for n := range cfg.Environments {
 			envName = n
 		}
-		builds, err = currentBuilds(ctx, cfg, envName, nil)
+		builds, err = currentBuilds(ctx, dir, cfg, envName, nil)
 		if err != nil {
 			fmt.Fprintf(stderr, "semar: %s; the results are not matched to the current build\n", oneLine(terminalSafe(err.Error())))
 			return envName, nil, false, nil
@@ -106,7 +105,7 @@ func readBuilds(ctx context.Context, stderr io.Writer, cfg config.Config, named 
 		fmt.Fprintln(stderr, "semar: the builds that the environment runs now were not read; name an environment to count only results on the current builds")
 		return "", nil, false, nil
 	}
-	builds, err = currentBuilds(ctx, cfg, envName, declared)
+	builds, err = currentBuilds(ctx, dir, cfg, envName, declared)
 	if err != nil {
 		return "", nil, false, err
 	}

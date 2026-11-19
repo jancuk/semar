@@ -100,6 +100,11 @@ type AuthProfile struct {
 	Web *WebSignIn `yaml:"web"`
 }
 
+// HasToken reports whether an API step can send the account's session. An account with no session
+// and no secrets has none: its web steps use the browser profile that semar login fills, and an API
+// step as it is blocked.
+func (p AuthProfile) HasToken() bool { return p.Session != nil || len(p.Secrets) > 0 }
+
 // WebSignIn is the user and the password of an account on a sign-in form. Password is a secret
 // reference, env:NAME, and never the password.
 type WebSignIn struct {

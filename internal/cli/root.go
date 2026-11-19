@@ -204,10 +204,10 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 			root.AddCommand(c)
 		}
 	}
-	grouped(groupDaily, newInitCommand(o), newRunCommand(o), newRecordCommand(o), newReviewCommand(o), newStatusCommand(o), newCheckCommand(o),
-		newDeferCommand(o), newLogCommand(), newShowCommand(), newRmCommand(o), newPlanCommand(o))
-	grouped(groupMore, newChangesCommand(), newExportCommand(), newFixtureCommand(o), newJourneyCommand(o), newProvidersCommand(o),
-		newDashboardCmd(o), newScenariosCommand(), newScreensCommand(o), newScriptCommand(), newLoginCommand(o), version)
+	grouped(groupDaily, newInitCommand(o), newLoginCommand(o), newPlanCommand(o), newRunCommand(o), newRecordCommand(o), newCheckCommand(o),
+		newDeferCommand(o), newLogCommand(), newShowCommand(), newRmCommand(o))
+	grouped(groupMore, newReviewCommand(o), newStatusCommand(o), newChangesCommand(), newExportCommand(), newFixtureCommand(o), newJourneyCommand(o), newProvidersCommand(o),
+		newDashboardCmd(o), newScenariosCommand(), newScreensCommand(o), newScriptCommand(), version)
 	root.AddCommand(removedCommand("confirm", "use semar review"), removedCommand("ledger", "use semar status, semar check, or semar defer"),
 		removedCommand("activity", "use semar show --activity"))
 	return root

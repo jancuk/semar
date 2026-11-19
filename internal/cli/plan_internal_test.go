@@ -58,6 +58,17 @@ func TestNextRunNamesAProductionEnvironment(t *testing.T) {
 	}
 }
 
+func TestNextRunDeclaresABuildOnlyForAServiceThatIsNotOnThisMachine(t *testing.T) {
+	local := config.Environment{Services: []config.Service{{Name: "shop", BaseURL: "http://localhost:3000"}}}
+	if got := nextRun(local, "local", "", "0123456789abcdef"); got != "semar run" {
+		t.Errorf("nextRun of a local service = %q", got)
+	}
+	remote := config.Environment{Services: []config.Service{{Name: "shop", BaseURL: "https://shop.example.com"}}}
+	if got := nextRun(remote, "uat", "", "0123456789abcdef"); got != "semar run --build 0123456789ab" {
+		t.Errorf("nextRun of a remote service = %q", got)
+	}
+}
+
 func TestModelUseLine(t *testing.T) {
 	cases := []struct {
 		name     string

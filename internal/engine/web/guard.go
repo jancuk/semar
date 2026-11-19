@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 	"github.com/chromedp/chromedp"
 
 	"github.com/jancuk/semar/internal/effects"
+	"github.com/jancuk/semar/internal/hostrule"
 )
 
 // guard decides, for every request that the page makes, whether the browser may send it, and keeps the
@@ -138,7 +140,9 @@ func (g *guard) serve(ctx context.Context) {
 	}
 }
 
-// requestVerdict is why the page may not send a request, or "" when it may.
+// requestVerdict is why the page may not send a request, or "" when it may. host is the hosts entry
+// that would allow the request, and it is set only when the host is the reason: a request that the
+// deny list or the read-only mode stops has no host to add.
 func (g *guard) requestVerdict(method, raw string) (host string, refused string) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -149,7 +153,11 @@ func (g *guard) requestVerdict(method, raw string) (host string, refused string)
 		return "", ""
 	}
 	if err := g.policy.AdmitPage(effects.Request{Method: method, URL: u}); err != nil {
-		return u.Host, err.Error()
+		var ref *effects.Refusal
+		if errors.As(err, &ref) && ref.Kind == effects.HostNotAllowed {
+			host = hostrule.Entry(u)
+		}
+		return host, err.Error()
 	}
 	return "", ""
 }
@@ -157,12 +165,11 @@ func (g *guard) requestVerdict(method, raw string) (host string, refused string)
 func (g *guard) answer(ctx context.Context, ev *fetch.EventRequestPaused) {
 	host, refused := g.requestVerdict(ev.Request.Method, ev.Request.URL)
 	if refused != "" {
-		g.mu.Lock()
-		if host == "" {
-			host = "(a request that does not parse)"
+		if host != "" {
+			g.mu.Lock()
+			g.blocked[host] = true
+			g.mu.Unlock()
 		}
-		g.blocked[host] = true
-		g.mu.Unlock()
 		_, _ = chromedp.Call(ctx, fetch.FailRequest, fetch.FailRequestParams{
 			RequestID: ev.RequestID, ErrorReason: network.ErrorReasonBlockedByClient,
 		})

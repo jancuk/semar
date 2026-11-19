@@ -37,13 +37,13 @@ func TestHelpGroupsTheEverydayCommandsFirst(t *testing.T) {
 	if every < 0 || more < every {
 		t.Fatalf("the help has no Every day group before More:\n%s", help)
 	}
-	for _, name := range []string{"init", "run", "review", "status", "check", "defer", "log", "show", "rm", "plan"} {
+	for _, name := range []string{"init", "login", "plan", "run", "check", "defer", "record", "log", "show", "rm"} {
 		at := strings.Index(help, "\n  "+name+" ")
 		if at < every || at > more {
 			t.Errorf("%s is not in the Every day group:\n%s", name, help)
 		}
 	}
-	for _, name := range []string{"changes", "export", "fixture", "journey", "providers", "dashboard", "scenarios", "screens", "script", "version", "completion"} {
+	for _, name := range []string{"review", "status", "changes", "export", "fixture", "journey", "providers", "dashboard", "scenarios", "screens", "script", "version", "completion"} {
 		if at := strings.Index(help, "\n  "+name+" "); at < more {
 			t.Errorf("%s is not in the More group:\n%s", name, help)
 		}

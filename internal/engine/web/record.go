@@ -304,6 +304,15 @@ func (r *Recorder) CloseWindow() {
 	}
 }
 
+// BlockedHosts lists the hosts that the policy of the recorder refused to reach, sorted. A recorder with
+// no policy blocks nothing.
+func (r *Recorder) BlockedHosts() []string {
+	if r.guard == nil {
+		return nil
+	}
+	return r.guard.blockedHosts()
+}
+
 // Events gives what has been sent so far, in the order that it happened.
 func (r *Recorder) Events() []record.Event {
 	r.mu.Lock()
@@ -313,7 +322,7 @@ func (r *Recorder) Events() []record.Event {
 
 // Wait returns when the person has closed the window.
 func (r *Recorder) Wait(ctx context.Context) error {
-	err := waitWindowClosed(ctx, r.tab, r.o.Poll, true)
+	err := waitWindowClosed(ctx, r.tab, r.o.Poll, true, nil)
 	r.mu.Lock()
 	r.gone = true
 	r.mu.Unlock()

@@ -42,6 +42,7 @@ type initFlags struct {
 	describe                                               []string // name=text, one for each account that has a description
 	webUsers                                               []string // name=user, one for each account that signs in on the web
 	webPasswordEnvs                                        []string // name=ENV, the variable of that password
+	noToken                                                bool     // the default account has no session and no secrets
 }
 
 var initFlagNames = []string{"base-url", "service", "auth-header", "auth-value", "token-env", "build-url", "build-commit", "kind", "account", "describe", "web-user", "web-password-env"}
@@ -83,6 +84,7 @@ func newInitCommand(o options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			given := givenInitFlags(cmd)
 			asked := false
+			canSkipToken := tokenMayBeSkipped(given, o.LookupEnv)
 			if _, err := os.Lstat(configPath(dir)); err == nil && f.baseURL == "" && !initFlagGiven(cmd) {
 				return checkMachine(cmd.Context(), o, cmd.OutOrStdout(), dir)
 			}
@@ -92,7 +94,8 @@ func newInitCommand(o options) *cobra.Command {
 						"On a terminal, semar init asks for it; here standard input is not a terminal, so it asks nothing")
 				}
 				a := newAsker(cmd.Context(), o.Stdin, cmd.OutOrStdout())
-				if err := askInit(a, dir, &f, given); err != nil {
+				answersWebPage := func(addr string) bool { return canSkipToken && isWebPage(cmd.Context(), o.HTTP, addr) }
+				if err := askInit(a, dir, &f, given, answersWebPage); err != nil {
 					return err
 				}
 				asked = true
@@ -115,17 +118,20 @@ func newInitCommand(o options) *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s already has these settings; nothing was written\n", configFileName)
 				return nil
 			}
+			if !asked && canSkipToken && isWebPage(cmd.Context(), o.HTTP, f.baseURL) {
+				f.noToken = true
+			}
 			if f.buildURL == "" && f.buildCommit == "" {
 				if probe, ok := findBuildProbe(cmd.Context(), o.HTTP, f.baseURL); ok {
 					f.buildURL = probe
 					fmt.Fprintf(cmd.OutOrStdout(), "Found   the build probe at %s\n", probe)
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "No build probe was found at %s. %s. Until then, name the build with semar run --build <commit>.\n",
-						strings.TrimRight(f.baseURL, "/")+versionPath, probeNotFoundTo)
+					fmt.Fprintf(cmd.OutOrStdout(), "No build probe was found at %s. %s\n",
+						strings.TrimRight(f.baseURL, "/")+versionPath, noProbeConsequence(f.baseURL))
 				}
-				if data, err = buildInitConfig(dir, f); err != nil {
-					return err
-				}
+			}
+			if data, err = buildInitConfig(dir, f); err != nil {
+				return err
 			}
 			path, err := writeInitConfig(dir, data)
 			if err != nil {
@@ -164,7 +170,11 @@ func printInitDone(w io.Writer, path string, f initFlags) {
 		printAccounts(w, f)
 		return
 	}
-	fmt.Fprintf(w, "export %s=<the token of the test account> before semar run\n", f.tokenEnv)
+	if f.noToken {
+		fmt.Fprintln(w, noTokenLine)
+	} else {
+		fmt.Fprintf(w, "export %s=<the token of the test account> before semar run\n", f.tokenEnv)
+	}
 	printAccounts(w, f)
 }
 
@@ -266,11 +276,17 @@ func buildInitConfig(dir string, f initFlags) ([]byte, error) {
 			"session", flow(mapping("header", text(f.authHeader), "value", quoted(f.authValue))),
 			"secrets", flow(mapping("TOKEN", quoted("env:"+env))),
 		)
+		if name == "default" && f.noToken {
+			n = &yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle}
+		}
 		if d := descriptions[name]; d != "" {
 			n.Content = append([]*yaml.Node{text("description"), quoted(d)}, n.Content...)
 		}
 		if w, ok := signIns[name]; ok {
 			n.Content = append(n.Content, text("web"), flow(mapping("user", text(w.User), "password", quoted(w.Password))))
+		}
+		if len(n.Content) > 0 {
+			n.Style = 0
 		}
 		return n
 	}

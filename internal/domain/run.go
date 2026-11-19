@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // BuildRef is the build of one service. Declared is true when a person named the commit on the
 // command line, so nothing read it from the service.
@@ -9,6 +12,21 @@ type BuildRef struct {
 	Commit     string `json:"commit"`
 	ConfigHash string `json:"configHash"`
 	Declared   bool   `json:"declared,omitempty"`
+	// Local is set with Declared when the commit is the working copy of a service on this machine, not
+	// one that a person named.
+	Local bool `json:"local,omitempty"`
+}
+
+// ShortCommit is the first 7 characters of a build's commit. The build of a service that runs the
+// working copy ends in +<digest> when tracked files differ from the commit, and the digest is kept.
+func ShortCommit(commit string) string {
+	if len(commit) <= 7 {
+		return commit
+	}
+	if i := strings.IndexByte(commit, '+'); i > 7 {
+		return commit[:7] + commit[i:]
+	}
+	return commit[:7]
 }
 
 type Reason struct {

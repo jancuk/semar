@@ -87,6 +87,9 @@ func planTrial(ctx context.Context, stderr io.Writer, o options, f planFlags, cf
 		return skip(envName + " is a production environment; name it with --env to try the reads against it")
 	}
 
+	if !cfg.AuthProfiles[in.AuthProfile].HasToken() {
+		return skip(fmt.Sprintf("the account %s has no token", in.AuthProfile))
+	}
 	secrets := secret.NewEnv(o.LookupEnv)
 	needs := map[string]string{in.AuthProfile: "the trial run"}
 	if cat != nil {
@@ -154,18 +157,12 @@ func planTrial(ctx context.Context, stderr io.Writer, o options, f planFlags, cf
 		Policy:   policy,
 		Recorder: rec,
 		Services: services,
-		Session: func(_ context.Context, profile string) (string, string, error) {
-			s, ok := sessions[profile]
-			if !ok {
-				return "", "", fmt.Errorf("auth profile %s has no session", profile)
-			}
-			return s.header, s.value, nil
-		},
-		Run:     id,
-		Version: Version,
-		Timeout: timeout,
-		Budget:  trialRequests,
-		Clock:   o.Clock,
+		Session:  sessionSource(cfg, sessions),
+		Run:      id,
+		Version:  Version,
+		Timeout:  timeout,
+		Budget:   trialRequests,
+		Clock:    o.Clock,
 	})
 
 	deps := trial.Deps{

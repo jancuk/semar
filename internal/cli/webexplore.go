@@ -19,6 +19,7 @@ import (
 	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/pagelist"
 	"github.com/jancuk/semar/internal/record"
+	"github.com/jancuk/semar/internal/report"
 	"github.com/jancuk/semar/internal/screens"
 	"github.com/jancuk/semar/internal/stage/plan"
 )
@@ -105,13 +106,15 @@ func (w *webExplorer) Explore(ctx context.Context, req plan.WebRequest, drive pl
 	if err != nil {
 		return plan.WebOutcome{}, err
 	}
+	blocked := rec.BlockedHosts()
 	events := rec.Finish()
 	fx.release()
 	if end.Manual != "" {
-		return plan.WebOutcome{Manual: end.Manual, End: end}, nil
+		return plan.WebOutcome{Manual: end.Manual, End: end, Blocked: blocked}, nil
 	}
 	out, err := w.write(ctx, req, end, events, fx)
 	out.End = end
+	out.Blocked = blocked
 	return out, err
 }
 
@@ -405,7 +408,7 @@ func answersHTML(ctx context.Context, client *http.Client, page string) bool {
 
 // printWebPart is the web part of a plan in a few lines: what was explored, written, and left for a
 // person with the reason, the turns, and the cost.
-func printWebPart(w io.Writer, out plan.Output) {
+func printWebPart(w io.Writer, envName string, out plan.Output) {
 	if out.Pipeline == nil || out.Pipeline.Web.Explored == 0 {
 		return
 	}
@@ -429,6 +432,16 @@ func printWebPart(w io.Writer, out plan.Output) {
 		line += fmt.Sprintf(", $%.2f", cost)
 	}
 	fmt.Fprintln(w, line)
+	var blocked []report.BlockedHost
+	for _, o := range out.Outcomes {
+		if o.Web == nil {
+			continue
+		}
+		for _, h := range o.Web.Blocked {
+			blocked = report.AddBlocked(blocked, h, o.Packet.Cite)
+		}
+	}
+	report.WriteBlocked(w, envName, "criterion", blocked)
 	for _, o := range out.Outcomes {
 		if o.Web != nil && o.Web.Test == nil {
 			fmt.Fprintf(w, "web: left for a person: %s: %s\n", terminalSafe(o.Packet.Cite), terminalSafe(oneLine(o.Web.Manual)))

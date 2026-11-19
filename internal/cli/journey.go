@@ -127,7 +127,7 @@ func listJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jo
 	}
 	var live *liveBuilds
 	if f.env != "" {
-		if live, err = newLiveBuilds(f); err != nil {
+		if live, err = newLiveBuilds(ctx, f); err != nil {
 			return err
 		}
 	}
@@ -205,7 +205,7 @@ type liveBuilds struct {
 	read   map[string]*domain.BuildRef // nil: the build could not be read
 }
 
-func newLiveBuilds(f journeyListFlags) (*liveBuilds, error) {
+func newLiveBuilds(ctx context.Context, f journeyListFlags) (*liveBuilds, error) {
 	cfg, err := config.Load(f.dir)
 	if err != nil {
 		return nil, err
@@ -214,11 +214,11 @@ func newLiveBuilds(f journeyListFlags) (*liveBuilds, error) {
 	if err != nil {
 		return nil, err
 	}
-	declared, err := build.ParseDeclared(f.builds, env.Services)
+	declared, err := readDeclaredBuilds(ctx, f.dir, f.builds, env.Services)
 	if err != nil {
 		return nil, err
 	}
-	return &liveBuilds{env: env, prober: build.NewDeclared(declared, build.NewHTTP(env.Services, nil)), read: map[string]*domain.BuildRef{}}, nil
+	return &liveBuilds{env: env, prober: declared.prober(env.Services), read: map[string]*domain.BuildRef{}}, nil
 }
 
 func (l *liveBuilds) build(ctx context.Context, service string) *domain.BuildRef {
@@ -367,7 +367,7 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 	if env.Kind == config.KindProduction && f.env == "" {
 		return fmt.Errorf("the environment %q is a production environment; name it with --env %s to run against it", envName, envName)
 	}
-	declared, err := build.ParseDeclared(f.builds, env.Services)
+	declared, err := readDeclaredBuilds(ctx, f.dir, f.builds, env.Services)
 	if err != nil {
 		return err
 	}
@@ -392,6 +392,7 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 	if err := report.Summary(stdout, record, coverage); err != nil {
 		return err
 	}
+	report.WriteBlocked(stdout, envName, "scenario", fin.blocked)
 	fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
 	if interrupted {
 		fmt.Fprintf(stderr, "semar: the run was interrupted: run %s is incomplete\n", record.ID)
@@ -411,7 +412,7 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 }
 
 // executeJourneys runs the journeys against one environment, writes the report, and closes the run.
-func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir string, cfg config.Config, envName string, env config.Environment, declared map[string]string, chosen []domain.Journey, headed bool, announce func()) (finishedRun, error) {
+func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir string, cfg config.Config, envName string, env config.Environment, declared declaredBuilds, chosen []domain.Journey, headed bool, announce func()) (finishedRun, error) {
 	var cat *fixture.Catalogue
 	if slices.ContainsFunc(chosen, func(j domain.Journey) bool { return len(j.Given) > 0 }) {
 		c, err := fixture.Load(dir, allServices(cfg), fixtureAccounts(cfg))
@@ -432,7 +433,7 @@ func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir strin
 	confirmations := confirm.NewLocal(rg.store.Root())
 	deps := replay.Deps{
 		Engine: rg.engine, Builds: rg.builds, Confirm: confirmations, Trust: cfg.Policy.Trust.Confirm, Run: rg.id,
-		Accounts: slices.Sorted(maps.Keys(cfg.AuthProfiles)),
+		Accounts: slices.Sorted(maps.Keys(cfg.AuthProfiles)), NoToken: noTokenAccounts(cfg),
 	}
 	eng := rg.webEngine(o, cfg, envName, env, headed)
 	defer eng.Close()
@@ -514,7 +515,7 @@ func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir strin
 			return finishedRun{}, err
 		}
 	}
-	return finishedRun{record: record, reportPath: filepath.Join(rg.store.Root(), "runs", string(rg.id), reportFile), interrupted: interrupted, coverage: coverage}, nil
+	return finishedRun{record: record, reportPath: filepath.Join(rg.store.Root(), "runs", string(rg.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts)}, nil
 }
 
 // legStepAccounts is the as of each step of a leg that has one.

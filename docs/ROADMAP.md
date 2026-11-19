@@ -11,10 +11,11 @@ This page says what Semar does today, what comes next and in which order, and wh
 | Planning | `semar plan` drafts tests from the change of a branch and its ticket files. One job with no tools answers each acceptance criterion, on a ladder from a small model up, under a cost limit |
 | Checks on a draft | Code compares each drafted request with the API document, tries the read-only steps once, and refuses a typed-in date near today and a typed-in ID |
 | A second plan | A criterion that has a test is skipped. A new or changed criterion is planned, and the plan names the tests of a criterion that changed or is gone |
-| Review | One command shows each item that needs a person, with what the test sends and what the service answered in the last run |
+| Review | One review shows each item that needs a person, with what the test sends and what the service answered in the last run. `semar run` offers it after the tests ran, runs the approved tests again, and ends with the status |
 | Data | Fixtures find or make a record across services and clean it up. A plan drafts a fixture that is missing and tries it once |
 | Accounts | A step, a fixture step, and a journey leg can act as another account |
 | Web | Chrome on a profile of Semar's own, sign-in by itself, `semar record`, web tests from a plan, and a locator repair with no model |
+| A web application with four commands | `semar init` needs only the address, and writes an account with no token for a web page. `semar login` needs no argument, ends when its last page is closed, and offers to add the hosts that the page asked for. A run and a plan name the hosts that the browser blocked. A service on this machine runs the head commit of the repository, so `semar run` needs no `--build` |
 | Journeys | A business flow across services, with API legs and web legs, runs against one set of builds |
 | The ledger | Every use case of a change ends in one state. Manual checks, deferrals, and retired tests are recorded with a name and a reason |
 | Reports | A report for each run, an activity log, a status page as one HTML file, and exports as CTRF, JUnit XML, and SARIF |
@@ -31,6 +32,8 @@ The order is the order of work. Each item says what a person does today in its p
 | 3 | **A fixture that uses a fixture.** A paid order needs a customer, and the customer fixture is written once | Each fixture repeats the steps that it needs |
 | 4 | **Fixtures and status across repositories.** A team shares fixtures from one place, and one view shows the status of a ticket that touches several services. Tickets come from the tracker and not only from files | Fixtures live in the repository under test. A ticket is a file in `docs/tickets/`, and `semar status` reads one repository |
 | 5 | **Repair of a test.** When a criterion changes, Semar proposes the change to its test, and a person approves it | The plan writes a new test and names the old one. A person removes it with `semar rm` |
+| 6 | **A sign-in that Semar repeats through another site.** A person signs in once in the window, and Semar records the sign-in and repeats it when the session ends | A person signs in again in the window of `semar login` each time that the session ends |
+| 7 | **Web checks for what is absent, and for an attribute.** A check says that an element is not on the page, and a check reads an attribute such as a placeholder | A web check reads the text of an element that is on the page |
 
 ## Later
 
@@ -56,7 +59,9 @@ Each limit is described in the guide, in the section of its feature.
 * The rule against a typed-in ID reads a query parameter and a top-level body field, in the criteria pipeline only.
 * An approval covers the steps and the expected results of a scenario, and not the payload of its script.
 * The single pipeline writes every test again on a second plan.
-* A web flow does not use a select list, a hover, a file upload, a second tab, a color field, or a slider. It does not sign in through another site or with a second factor.
+* A web flow does not use a select list, a hover, a file upload, a second tab, a color field, or a slider. It does not repeat a sign-in through another site or with a second factor. A person signs in in the window of `semar login`, and the session lasts in the profile until it ends.
+* A web check reads the text of an element that is on the page. It cannot say that an element is absent, and it cannot read an attribute such as a placeholder.
+* A review inside `semar run` covers the scenarios of the run. A journey that needs review is not offered, and `semar review` takes it.
 * A lease on a fixture covers one machine. Runners on several machines are not covered.
 * Semar has no scheduler. Run `semar run`, `semar fixture check`, and `semar journey run` from your own pipeline.
 * An identity is local and not verified: an approval holds the user name of the machine and the email of git.

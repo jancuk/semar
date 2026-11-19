@@ -18,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/changeset"
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/confirm"
@@ -355,7 +356,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		return err
 	}
 	record("ok", filepath.Base(filepath.Dir(planFile)))
-	printPlanDone(stdout, out, len(cfg.Knowledge) > 0, trialSummary(in, out), useLine(out, in.SetupOn), planFile, nextRun(env, envName, f.env, cs.HeadCommit))
+	printPlanDone(stdout, envName, out, len(cfg.Knowledge) > 0, trialSummary(in, out), useLine(out, in.SetupOn), planFile, nextRun(env, envName, f.env, cs.HeadCommit))
 	if out.CostLimit {
 		fmt.Fprintf(stderr, "semar: the cost limit of %s was reached: %s. Plan again to do the rest: the answers that exist are reused\n",
 			plan.Dollars(in.MaxCost), stoppedWords(out))
@@ -624,7 +625,8 @@ func planFailed(ctx context.Context, stderr io.Writer, err error) error {
 }
 
 // nextRun is the run command that can reach passed: a service with no build probe needs its
-// build declared, and the head of the plan is what the test environment is meant to run.
+// build declared, and the head of the plan is what the test environment is meant to run. A service
+// on this machine gets the working copy as its build, so it needs nothing declared.
 func nextRun(env config.Environment, envName, envFlag, head string) string {
 	cmd := "semar run"
 	// A production environment is run only when it is named.
@@ -633,7 +635,7 @@ func nextRun(env config.Environment, envName, envFlag, head string) string {
 	}
 	var unprobed []string
 	for _, s := range env.Services {
-		if s.Build == nil {
+		if s.Build == nil && !build.IsLocal(s.BaseURL) {
 			unprobed = append(unprobed, s.Name)
 		}
 	}
@@ -653,7 +655,7 @@ func shortCommit(id string) string {
 	return id
 }
 
-func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, planFile, run string) {
+func printPlanDone(w io.Writer, envName string, out plan.Output, listed bool, trial, modelUse, planFile, run string) {
 	count := map[string]int{}
 	for _, sc := range out.Scenarios {
 		count[sc.Ticket]++
@@ -665,7 +667,7 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, p
 		fmt.Fprintf(w, "%s (%s): %s\n", terminalSafe(t.Key), terminalSafe(t.Kind), plural(count[t.Key], "scenario"))
 	}
 	fmt.Fprintf(w, "not drafted: %d\n", len(out.Draft.NotDrafted))
-	printWebPart(w, out)
+	printWebPart(w, envName, out)
 	for _, d := range out.FixtureDrafts {
 		if d.Drafted {
 			fmt.Fprintf(w, "fixture drafted: %s. %s Not approved: semar review %s\n", terminalSafe(d.Need.ID), terminalSafe(plan.FixtureRunWords(d)), terminalSafe(d.Need.ID))
@@ -697,8 +699,7 @@ func printPlanDone(w io.Writer, out plan.Output, listed bool, trial, modelUse, p
 		fmt.Fprintln(w, modelUse)
 	}
 	if len(out.Scenarios) > 0 || len(out.WebTests) > 0 {
-		fmt.Fprintf(w, "next:\n  semar review %s   read what the plan drafted, a fixture before the scenarios that use it, and approve it\n", terminalSafe(firstToReview(out)))
-		fmt.Fprintf(w, "  %s   run the approved scenarios against the service\n  semar status   where things stand\n", run)
+		fmt.Fprintf(w, "next:\n  %s   run the tests against the service\n  the run asks you to review what the plan drafted, and runs the approved tests again\n", run)
 	}
 	for _, line := range againLines(out.Again) {
 		fmt.Fprintln(w, line)
@@ -742,19 +743,6 @@ func stoppedWords(out plan.Output) string {
 		return fmt.Sprintf("%d criteria were not planned, and plan.md lists each as not planned", st.NotPlanned)
 	}
 	return "a fixture was not drafted, or a criterion was not planned again, as plan.md says"
-}
-
-// firstToReview is what a person reads first: a drafted fixture, then the first scenario.
-func firstToReview(out plan.Output) string {
-	for _, d := range out.FixtureDrafts {
-		if d.Drafted {
-			return d.Need.ID
-		}
-	}
-	if len(out.Scenarios) == 0 {
-		return string(out.WebTests[0].Scenario.ID)
-	}
-	return string(out.Scenarios[0].ID)
 }
 
 func plural(n int, noun string) string {
