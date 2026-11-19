@@ -273,7 +273,7 @@ func journeyCoverOf(run domain.Run, jr domain.JourneyResult) obligation.Cover {
 	if jr.ManifestEnd != nil {
 		m = *jr.ManifestEnd
 	}
-	c := obligation.Cover{Journey: string(jr.Journey), Found: true, Outcome: string(jr.Outcome), Run: run.ID, Builds: m.Services, Word: reasonWord(string(jr.Outcome), jr.Reasons)}
+	c := obligation.Cover{Journey: string(jr.Journey), Found: true, Outcome: string(jr.Outcome), Run: run.ID, Builds: m.Services}
 	if len(jr.Reasons) > 0 {
 		c.Reason = jr.Reasons[0].Text
 	}
@@ -285,23 +285,11 @@ func scenarioRun(run domain.Run) bool {
 	return run.Purpose == "" || run.Purpose == domain.PurposeJourney
 }
 
-// reasonWord is the word of a stored result when it is not the outcome itself.
-func reasonWord(outcome string, reasons []domain.Reason) string {
-	texts := make([]string, len(reasons))
-	for i, r := range reasons {
-		texts[i] = r.Text
-	}
-	if w := words.Of(outcome, texts); w != outcome {
-		return w
-	}
-	return ""
-}
-
 // coverOf is the result of a scenario as a use case sees it. A result that stored the expectation
 // hash of its scenario counts only while the scenario file has the same one. A result of an older
 // run has none, and counts as it always did.
 func coverOf(repo string, run domain.Run, r domain.ScenarioResult) obligation.Cover {
-	c := obligation.Cover{Scenario: r.Scenario, Found: true, Outcome: string(r.Outcome), Run: run.ID, Builds: run.BuildsEnd, Word: reasonWord(string(r.Outcome), r.Reasons), Attempts: words.Attempts(string(r.Outcome), r.Flaky, len(r.Attempts), r.AttemptsAllowed)}
+	c := obligation.Cover{Scenario: r.Scenario, Found: true, Outcome: string(r.Outcome), Run: run.ID, Builds: run.BuildsEnd, Attempts: words.Attempts(string(r.Outcome), r.Flaky, len(r.Attempts), r.AttemptsAllowed)}
 	c.ByModel, c.Results = r.ModelCount()
 	if r.ExpectHash != "" {
 		sc, err := loadScenario(repo, r.Scenario)

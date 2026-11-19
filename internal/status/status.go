@@ -15,18 +15,17 @@ import (
 type Group string
 
 const (
-	Verified    Group = "verified"
-	Failing     Group = "failing"
-	Blocked     Group = "blocked"
-	NeedsReview Group = "needs review"
-	Stale       Group = "stale"
-	ForAPerson  Group = "for a person"
-	NoTest      Group = "no test"
-	Deferred    Group = "deferred"
+	Verified   Group = "verified"
+	Failing    Group = "failing"
+	Blocked    Group = "blocked"
+	Stale      Group = "stale"
+	ForAPerson Group = "for a person"
+	NoTest     Group = "no test"
+	Deferred   Group = "deferred"
 )
 
 // Groups is the order that a person reads them in.
-var Groups = []Group{Verified, Failing, Blocked, NeedsReview, Stale, ForAPerson, NoTest, Deferred}
+var Groups = []Group{Verified, Failing, Blocked, Stale, ForAPerson, NoTest, Deferred}
 
 // Classify gives a use case its group. Every entry is in exactly one.
 func Classify(e obligation.Entry) Group {
@@ -46,8 +45,6 @@ func Classify(e obligation.Entry) Group {
 	switch {
 	case e.NoReason || len(e.Covers) == 0:
 		return NoTest
-	case e.Review:
-		return NeedsReview
 	case e.Stale:
 		return Stale
 	}
@@ -82,20 +79,18 @@ type Input struct {
 	BuildsRead   bool
 	Tickets      []string // the tickets of the change, or nil for every use case
 	Entries      []obligation.Entry
-	NotPlanned   []string        // tickets of the change that have no use case
-	NoTicket     []string        // commits of the change that name no ticket, as short IDs and subjects
-	ByAuthor     map[string]bool // use cases whose every approval came from an author of the change
+	NotPlanned   []string // tickets of the change that have no use case
+	NoTicket     []string // commits of the change that name no ticket, as short IDs and subjects
 	Links        map[string]obligation.Link
 }
 
 // Item is one use case with its group, what to show for it, and the command that comes next.
 type Item struct {
-	Entry    obligation.Entry
-	Group    Group
-	Notes    []string
-	Next     string // the command for this use case, with its ID
-	Command  string // the command that every use case of the group shares, or "" when there is none
-	ByAuthor bool
+	Entry   obligation.Entry
+	Group   Group
+	Notes   []string
+	Next    string // the command for this use case, with its ID
+	Command string // the command that every use case of the group shares, or "" when there is none
 }
 
 // Report is the whole of status, for the text and for the HTML file.
@@ -121,7 +116,7 @@ func Build(in Input) Report {
 	r := Report{Input: in, Counts: map[Group]int{}}
 	for _, e := range in.Entries {
 		g := Classify(e)
-		it := Item{Entry: e, Group: g, Next: next(g, e), Command: command(g, e), ByAuthor: in.ByAuthor[e.Obligation.ID]}
+		it := Item{Entry: e, Group: g, Next: next(g, e), Command: command(g, e)}
 		it.Notes = notes(g, it)
 		r.Items = append(r.Items, it)
 		r.Counts[g]++
@@ -135,7 +130,7 @@ func Build(in Input) Report {
 	}
 	r.Failing, r.Deferred = r.Counts[Failing], r.Counts[Deferred]
 	r.Open = len(in.NotPlanned)
-	for _, g := range []Group{Blocked, NeedsReview, Stale, ForAPerson, NoTest} {
+	for _, g := range []Group{Blocked, Stale, ForAPerson, NoTest} {
 		r.Open += r.Counts[g]
 	}
 	r.ShipReason = shipReason(r)
@@ -163,16 +158,6 @@ func (r Report) ModelLine() string {
 
 func next(g Group, e obligation.Entry) string {
 	switch g {
-	case NeedsReview:
-		for _, c := range e.Covers {
-			if c.Word == "needs review" {
-				if c.Journey != "" {
-					return "semar review " + c.Journey
-				}
-				return "semar review " + string(c.Scenario)
-			}
-		}
-		return "semar review"
 	case Stale:
 		return "semar run"
 	case Blocked:
@@ -190,8 +175,6 @@ func next(g Group, e obligation.Entry) string {
 // command is next with the ID left out, so that a group can name it once.
 func command(g Group, e obligation.Entry) string {
 	switch g {
-	case NeedsReview:
-		return "semar review"
 	case ForAPerson:
 		return "semar check <id> pass"
 	}
@@ -211,9 +194,6 @@ func notes(g Group, it Item) []string {
 		out = append(out, fmt.Sprintf("by test %s, linked by %s", e.Link.Scenario, e.Link.User))
 	case e.Manual != nil:
 		out = append(out, "checked by "+e.Manual.User)
-	}
-	if it.ByAuthor {
-		out = append(out, "approved by an author of the change")
 	}
 	for _, c := range e.Covers {
 		if strings.HasPrefix(c.Attempts, "flaky") {

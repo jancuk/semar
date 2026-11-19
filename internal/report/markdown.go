@@ -134,7 +134,7 @@ func (vw viewer) buildView(d Data) markdownView {
 	v.Journeys = vw.journeyViews(d)
 	legs := legJourneys(d.Journeys)
 	for _, r := range ordered(run.Results) {
-		word := resultWord(string(r.Outcome), r.Reasons)
+		word := string(r.Outcome)
 		sv := scenarioView{
 			ID:      vw.show(string(r.Scenario)),
 			Title:   vw.show(d.Scenarios[r.Scenario].Title),

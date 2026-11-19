@@ -50,12 +50,12 @@ func (vw viewer) journeyViews(d Data) []journeyView {
 		v := journeyView{
 			ID:        vw.show(string(j.Journey)),
 			Title:     vw.show(d.JourneyTitles[j.Journey]),
-			Outcome:   vw.show(resultWord(string(j.Outcome), j.Reasons)),
+			Outcome:   vw.show(string(j.Outcome)),
 			First:     vw.show(string(j.FirstFailing)),
 			Manifest:  vw.manifestText(j.Manifest),
 			Hash:      vw.show(string(j.Manifest.Hash[:min(len(j.Manifest.Hash), 12)])),
 			Reproduce: vw.journeyCommand(j.Journey, d.Run.Environment),
-			Next:      words.Next(resultWord(string(j.Outcome), j.Reasons), string(j.Journey)),
+			Next:      words.Next(string(j.Outcome), string(j.Journey)),
 		}
 		for _, r := range j.Reasons {
 			v.Reasons = append(v.Reasons, vw.show(r.Text))
@@ -148,7 +148,7 @@ func (vw viewer) journeyStillExists(journeys []domain.JourneyResult) []string {
 func journeyLines(journeys []domain.JourneyResult) []string {
 	var lines []string
 	for _, j := range journeys {
-		word := resultWord(string(j.Outcome), j.Reasons)
+		word := string(j.Outcome)
 		line := plain(string(j.Journey)) + "\t" + plain(word)
 		if text := journeyHead(j); text != "" {
 			head, more := cut(text, maxShown)
@@ -160,7 +160,7 @@ func journeyLines(journeys []domain.JourneyResult) []string {
 		line += nextMark(line, word, string(j.Journey))
 		lines = append(lines, line)
 		for _, l := range j.Legs {
-			line := "  " + plain(string(l.Leg)) + "\t" + plain(resultWord(string(l.Outcome), l.Reasons))
+			line := "  " + plain(string(l.Leg)) + "\t" + plain(string(l.Outcome))
 			if len(l.As) > 0 {
 				line += " as " + plain(strings.Join(l.As, ", "))
 			}

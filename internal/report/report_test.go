@@ -539,7 +539,7 @@ func givenReport() report.Data {
 				As: "order", Fixture: "order.paid", Version: "1.0.0", Hash: hash("b"), Via: "find", Cleanup: "not_needed",
 			}}},
 			{Scenario: "SHOP-482-07", Outcome: domain.OutcomeBlocked,
-				Reasons: []domain.Reason{{Rule: domain.OutcomeBlocked, Text: "fixture order.paid is not approved: run semar review order.paid"}},
+				Reasons: []domain.Reason{{Rule: domain.OutcomeBlocked, Text: "fixture order.paid: create[0]: POST /v1/orders is on the deny list of uat"}},
 				Fixtures: []domain.FixtureRecord{{
 					As: "order", Fixture: "order.paid", Version: "1.0.0", Hash: hash("c"), Via: "none", Cleanup: "not_needed",
 				}}},
@@ -548,7 +548,7 @@ func givenReport() report.Data {
 	scenarios := map[domain.ScenarioID]domain.Scenario{
 		"SHOP-482-05": {ID: "SHOP-482-05", Title: "Refund of a paid order"},
 		"SHOP-482-06": {ID: "SHOP-482-06", Title: "Refund of a found order"},
-		"SHOP-482-07": {ID: "SHOP-482-07", Title: "Refund before approval"},
+		"SHOP-482-07": {ID: "SHOP-482-07", Title: "Refund with a denied fixture"},
 	}
 	return report.Data{Run: run, Scenarios: scenarios}
 }

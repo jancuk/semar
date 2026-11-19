@@ -27,9 +27,6 @@ type Cover struct {
 	Outcome  string // a scenario outcome or a journey outcome
 	Run      domain.RunID
 	Reason   string // the first reason of the result
-	// Word is what a person reads for the result (Plan 26, D7). "needs review" says that an
-	// approval is missing. Empty means the outcome is the word.
-	Word string
 	// Attempts says how a scenario that ran more than once came out, such as "flaky, passed on attempt
 	// 2 of 3". Empty for a result with one attempt.
 	Attempts string
@@ -68,7 +65,7 @@ type Entry struct {
 
 	// An open use case waits for some of these: a person's approval of a cover, a run on the
 	// current build or of a scenario that changed, or a first run.
-	Review, Stale, NotRun bool
+	Stale, NotRun bool
 }
 
 // ManualTie says how a passed manual result relates to the builds that the environment runs now
@@ -173,15 +170,7 @@ func deriveOne(o Located, r Results, deferrals map[string]Deferral, manual map[s
 			failed = append(failed, label+" failed in "+string(c.Run)+withReason(c.Reason))
 		case c.Outcome != string(domain.OutcomePassed):
 			word := strings.ReplaceAll(c.Outcome, "_", " ")
-			if c.Word != "" {
-				word = c.Word
-			}
-			switch word {
-			case "needs review":
-				e.Review = true
-				notPassed = append(notPassed, fmt.Sprintf("%s needs review in %s%s", label, c.Run, withReason(c.Reason)))
-				return
-			case "stale":
+			if word == "stale" {
 				e.Stale = true
 			}
 			notPassed = append(notPassed, fmt.Sprintf("%s is %s in %s%s", label, word, c.Run, withReason(c.Reason)))

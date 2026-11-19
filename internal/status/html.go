@@ -81,11 +81,7 @@ func htmlItemOf(it Item) htmlItem {
 		if c.Journey != "" {
 			subject = "journey " + c.Journey
 		}
-		word := c.Outcome
-		if c.Word != "" {
-			word = c.Word
-		}
-		hi.Reads = append(hi.Reads, line(fmt.Sprintf("%s: %s, read from run %s", subject, strings.ReplaceAll(word, "_", " "), c.Run)))
+		hi.Reads = append(hi.Reads, line(fmt.Sprintf("%s: %s, read from run %s", subject, strings.ReplaceAll(c.Outcome, "_", " "), c.Run)))
 	}
 	if m := e.Obligation.Manual; m != nil && it.Group == ForAPerson {
 		hi.Check = &htmlCheck{Why: line(m.Text), Expected: line(m.Expected), Steps: lines(m.Steps)}

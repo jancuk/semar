@@ -590,26 +590,23 @@ func TestALinkedScenarioDoesTheManualCheck(t *testing.T) {
 }
 
 func TestWhatAnOpenUseCaseWaitsFor(t *testing.T) {
-	review := res("A-rev", "inconclusive", "an expected result is not confirmed")
-	review.Word = "needs review"
 	changed := res("A-chg", "passed", "")
 	changed.ScenarioChanged = true
 	tests := []struct {
-		name                string
-		r                   obligation.Results
-		id                  domain.ScenarioID
-		review, stale, none bool
+		name        string
+		r           obligation.Results
+		id          domain.ScenarioID
+		stale, none bool
 	}{
-		{"an approval is missing", results(review), "A-rev", true, false, false},
-		{"the scenario changed", results(changed), "A-chg", false, true, false},
-		{"it ran on another build", results(obligation.Cover{Scenario: "A-old", Found: true, Outcome: "passed", Run: "r-1", Builds: []domain.BuildRef{{Service: "orders", Commit: "abc", ConfigHash: "cfg1"}}}), "A-old", false, true, false},
-		{"it never ran", results(obligation.Cover{Scenario: "A-new"}), "A-new", false, false, true},
+		{"the scenario changed", results(changed), "A-chg", true, false},
+		{"it ran on another build", results(obligation.Cover{Scenario: "A-old", Found: true, Outcome: "passed", Run: "r-1", Builds: []domain.BuildRef{{Service: "orders", Commit: "abc", ConfigHash: "cfg1"}}}), "A-old", true, false},
+		{"it never ran", results(obligation.Cover{Scenario: "A-new"}), "A-new", false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := one(t, ob("g/a", covers(tt.id)), tt.r, nil, nil)
-			if e.State != obligation.Blocked || e.Review != tt.review || e.Stale != tt.stale || e.NotRun != tt.none {
-				t.Errorf("state %s review %v stale %v notRun %v, want review %v stale %v notRun %v", e.State, e.Review, e.Stale, e.NotRun, tt.review, tt.stale, tt.none)
+			if e.State != obligation.Blocked || e.Stale != tt.stale || e.NotRun != tt.none {
+				t.Errorf("state %s stale %v notRun %v, want stale %v notRun %v", e.State, e.Stale, e.NotRun, tt.stale, tt.none)
 			}
 		})
 	}

@@ -47,18 +47,10 @@ func TestEveryUseCaseIsInExactlyOneGroup(t *testing.T) {
 			e.Manual = &obligation.ManualResult{Result: "failed", User: "tester"}
 		}), status.Failing},
 		{"blocked", entry("SHOP-482/1", obligation.Blocked, func(e *obligation.Entry) { e.Covers = []obligation.Cover{{Scenario: "A-1", Found: true}} }), status.Blocked},
-		{"an approval is missing", entry("SHOP-482/1", obligation.Blocked, func(e *obligation.Entry) {
-			e.Covers = []obligation.Cover{{Scenario: "A-1"}}
-			e.Review = true
-		}), status.NeedsReview},
 		{"stale", entry("SHOP-482/1", obligation.Blocked, func(e *obligation.Entry) {
 			e.Covers = []obligation.Cover{{Scenario: "A-1"}}
 			e.Stale = true
 		}), status.Stale},
-		{"review comes before stale", entry("SHOP-482/1", obligation.Blocked, func(e *obligation.Entry) {
-			e.Covers = []obligation.Cover{{Scenario: "A-1"}, {Scenario: "A-2"}}
-			e.Stale, e.Review = true, true
-		}), status.NeedsReview},
 		{"for a person", entry("SHOP-482/1", obligation.NeedsAPerson, manual), status.ForAPerson},
 		{"a pass of a person on the current build", entry("SHOP-482/1", obligation.Verified, passedNow), status.Verified},
 		{"no test", entry("SHOP-482/1", obligation.Blocked, func(e *obligation.Entry) { e.NoReason = true }), status.NoTest},
@@ -121,9 +113,8 @@ func TestTextHasTheShapeOfTheContract(t *testing.T) {
 			}),
 			entry("SHOP-482/3", obligation.Blocked, func(e *obligation.Entry) {
 				e.Obligation.Title = "A refund is confirmed by the buyer"
-				e.Review = true
-				e.Covers = []obligation.Cover{{Scenario: "SHOP-482-03", Word: "needs review"}}
-				e.Reasons = []string{"SHOP-482-03 needs review in r-1: an expected result is not confirmed"}
+				e.Covers = []obligation.Cover{{Scenario: "SHOP-482-03", Found: true, Outcome: "inconclusive"}}
+				e.Reasons = []string{"SHOP-482-03 is inconclusive in r-1: a check could not be evaluated"}
 			}),
 			entry("SHOP-482/manual-1", obligation.NeedsAPerson, func(e *obligation.Entry) {
 				e.Obligation.Title = "Check the refund receipt on a phone"
@@ -145,8 +136,9 @@ func TestTextHasTheShapeOfTheContract(t *testing.T) {
   failing       1
     SHOP-482/2  A refund above the paid amount is refused
       SHOP-482-02 failed in r-1: expected status 422, observed status 200
-  needs review  1  → semar review
+  blocked       1
     SHOP-482/3  A refund is confirmed by the buyer
+      SHOP-482-03 is inconclusive in r-1: a check could not be evaluated
   for a person  1  → semar check <id> pass
     SHOP-482/manual-1  Check the refund receipt on a phone
   no test       1  → semar plan
@@ -162,15 +154,6 @@ Ship: no. 1 failing, 3 open.
 
 func TestAGroupNamesItsCommandOnceAndTheSameSentenceIsNotRepeated(t *testing.T) {
 	var entries []obligation.Entry
-	for _, n := range []string{"01", "02", "03"} {
-		id := "SHOP-482/scenario-SHOP-482-" + n
-		entries = append(entries, entry(id, obligation.Blocked, func(e *obligation.Entry) {
-			e.Review = true
-			e.Obligation.Title = "Refund " + n
-			e.Covers = []obligation.Cover{{Scenario: domain.ScenarioID("SHOP-482-" + n), Word: "needs review"}}
-			e.Reasons = []string{"SHOP-482-" + n + " needs review in r-1: an expected result is not confirmed"}
-		}))
-	}
 	entries = append(entries,
 		entry("SHOP-482/manual-1", obligation.NeedsAPerson, func(e *obligation.Entry) {
 			e.Obligation.Title = "Check the receipt on a phone"
@@ -186,7 +169,6 @@ func TestAGroupNamesItsCommandOnceAndTheSameSentenceIsNotRepeated(t *testing.T) 
 	)
 	got := render(t, status.Input{Branch: "b", Base: "main", Tickets: []string{"SHOP-482"}, Entries: entries})
 	for _, want := range []string{
-		"  needs review  3  → semar review\n    SHOP-482/scenario-SHOP-482-01  Refund 01\n",
 		"  for a person  1  → semar check <id> pass\n    SHOP-482/manual-1  Check the receipt on a phone\n",
 		"  stale         1  → semar run\n    SHOP-482/stale-1  Refund after a change\n      A-1 passed on another build\n",
 	} {
@@ -194,12 +176,12 @@ func TestAGroupNamesItsCommandOnceAndTheSameSentenceIsNotRepeated(t *testing.T) 
 			t.Errorf("text lacks %q:\n%s", want, got)
 		}
 	}
-	for _, not := range []string{"not confirmed", "Only a person can check", "→ semar review SHOP"} {
+	for _, not := range []string{"Only a person can check", "→ semar review"} {
 		if strings.Contains(got, not) {
 			t.Errorf("text holds %q:\n%s", not, got)
 		}
 	}
-	if n := strings.Count(got, "→"); n != 3 {
+	if n := strings.Count(got, "→"); n != 2 {
 		t.Errorf("%d commands, want one per group:\n%s", n, got)
 	}
 }
@@ -279,19 +261,16 @@ func TestAnUnplannedTicketIsOpen(t *testing.T) {
 	}
 }
 
-func TestTheNoteOfAnApprovalByAnAuthor(t *testing.T) {
+func TestAVerifiedUseCaseHasNoNoteOfWhoApprovedIt(t *testing.T) {
 	in := status.Input{Branch: "b", Base: "main", Environment: "uat", BuildsRead: true, Tickets: []string{"SHOP-482"},
-		Entries:  []obligation.Entry{entry("SHOP-482/1", obligation.Verified, nil), entry("SHOP-482/2", obligation.Verified, nil)},
-		ByAuthor: map[string]bool{"SHOP-482/2": true}}
-	r := status.Build(in)
-	if r.Code != 0 {
-		t.Errorf("code %d: the mark must not change the code", r.Code)
+		Entries: []obligation.Entry{entry("SHOP-482/1", obligation.Verified, nil), entry("SHOP-482/2", obligation.Verified, nil)}}
+	if got := render(t, in); strings.Contains(got, "approved") {
+		t.Errorf("text mentions an approval:\n%s", got)
 	}
-	if !r.Items[1].ByAuthor || r.Items[0].ByAuthor {
-		t.Errorf("marks %v %v, want only the second", r.Items[0].ByAuthor, r.Items[1].ByAuthor)
-	}
-	if got := render(t, in); !strings.Contains(got, "approved by an author of the change") {
-		t.Errorf("text lacks the mark:\n%s", got)
+	for _, g := range status.Groups {
+		if g == "needs review" {
+			t.Error("the groups hold needs review")
+		}
 	}
 }
 

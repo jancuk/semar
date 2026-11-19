@@ -152,7 +152,7 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 		in.Builds = builds
 	}
 	if len(sel.obs) > 0 || len(sel.notPlanned) > 0 {
-		rep, err := statusReport(stderr, o, f.dir, in, sel.obs, "", in.Builds, sel.changeSet)
+		rep, err := statusReport(stderr, o, f.dir, in, sel.obs, "", in.Builds)
 		if err != nil {
 			return err
 		}
@@ -176,16 +176,13 @@ func scenarioCode(fin finishedRun) int {
 }
 
 // statusReport derives the state of the use cases from the stored runs and groups it.
-func statusReport(stderr io.Writer, o options, dir string, in status.Input, obs []obligation.Located, only domain.RunID, current []domain.BuildRef, changed *domain.ChangeSet) (status.Report, error) {
+func statusReport(stderr io.Writer, o options, dir string, in status.Input, obs []obligation.Located, only domain.RunID, current []domain.BuildRef) (status.Report, error) {
 	entries, err := deriveEntries(stderr, o, dir, obs, only, current)
 	if err != nil {
 		return status.Report{}, err
 	}
 	in.Entries = entries
 	in.Builds = current
-	if changed != nil {
-		in.ByAuthor = approvedByAuthors(dir, entries, *changed)
-	}
 	return status.Build(in), nil
 }
 

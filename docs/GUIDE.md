@@ -2205,7 +2205,7 @@ semar review [id...]
 
 #### `semar status`
 
-Show each use case of the change in one group: verified, failing, blocked, needs review, stale, for a person, no test, or deferred.
+Show each use case of the change in one group: verified, failing, blocked, stale, for a person, no test, or deferred.
 
 The change is the commits from the base branch to HEAD, and its tickets are the ones that those commits name. --all shows every use case.
 

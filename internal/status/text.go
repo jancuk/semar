@@ -20,9 +20,8 @@ func line(s string) string {
 	return strings.NewReplacer("\n", `\n`, "\t", `\t`).Replace(obligation.Safe(s))
 }
 
-// showsReasons is false for a group whose next command already says what to do, and whose reason
-// is the same sentence on every use case.
-func showsReasons(g Group) bool { return g != NeedsReview && g != Verified }
+// showsReasons is false for a verified use case, which has no reason.
+func showsReasons(g Group) bool { return g != Verified }
 
 // Text writes what semar status prints: the first two lines, each group with one line per use case,
 // the tickets that have no use case, and the verdict.

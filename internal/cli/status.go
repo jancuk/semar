@@ -35,7 +35,7 @@ func newStatusCommand(o options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status [environment]",
 		Short: "Show where the change stands: what is verified, what fails, and what waits for a person",
-		Long: "Show each use case of the change in one group: verified, failing, blocked, needs review, stale, for a person, no test, or deferred.\n" +
+		Long: "Show each use case of the change in one group: verified, failing, blocked, stale, for a person, no test, or deferred.\n" +
 			"The change is the commits from the base branch to HEAD, and its tickets are the ones that those commits name. --all shows every use case.\n" +
 			"Exit 0 when every use case is verified or deferred, 1 when one failed or a person recorded a failure, and 2 otherwise.\n" +
 			"With no environment, and several in semar.yaml, the builds are not read, so a pass on any build counts: the exit code is then 2 at best.",
@@ -86,7 +86,6 @@ func showStatus(ctx context.Context, stdout, stderr io.Writer, o options, f stat
 	}
 
 	in := status.Input{}
-	var changed *domain.ChangeSet
 	var obs []obligation.Located
 	switch {
 	case len(f.tickets) > 0:
@@ -127,7 +126,6 @@ func showStatus(ctx context.Context, stdout, stderr io.Writer, o options, f stat
 				in.NotPlanned = append(in.NotPlanned, t)
 			}
 		}
-		changed = &lc.Change
 		for _, id := range lc.Change.NoTicket {
 			in.NoTicket = append(in.NoTicket, noTicketCommit(lc, id))
 		}
@@ -142,7 +140,7 @@ func showStatus(ctx context.Context, stdout, stderr io.Writer, o options, f stat
 	if err != nil {
 		return err
 	}
-	rep, err := statusReport(stderr, o, f.dir, in, obs, domain.RunID(f.run), current, changed)
+	rep, err := statusReport(stderr, o, f.dir, in, obs, domain.RunID(f.run), current)
 	if err != nil {
 		return err
 	}

@@ -175,7 +175,7 @@ func TestStatusGroupsInOrderAndAddUp(t *testing.T) {
 	res := r.must(t, cli.ExitFailed, "status")
 	out := squash(res.stdout)
 	last := -1
-	for _, h := range []string{"verified 1", "failing 1", "needs review 1", "for a person 1", "no test 1", "deferred 1"} {
+	for _, h := range []string{"verified 1", "failing 1", "blocked 1", "for a person 1", "no test 1", "deferred 1"} {
 		i := strings.Index(out, h)
 		if i < 0 || i < last {
 			t.Fatalf("the group %q is missing or out of order:\n%s", h, res.stdout)
@@ -186,7 +186,7 @@ func TestStatusGroupsInOrderAndAddUp(t *testing.T) {
 		"6 use cases",
 		"no test 1 → semar plan\n SHOP-482/nothing N\n use case with no test and no reason",
 		"SHOP-482-02 failed in r-old-1: refund-too-much: expected 422, got 201",
-		"needs review 1 → semar review\n SHOP-482/review B",
+		"blocked 1\n SHOP-482/review B\n SHOP-482-03 is inconclusive in r-old-1: an expected result is not confirmed",
 		"for a person 1 → semar check <id> pass\n SHOP-482/person P",
 		"deferred 1\n SHOP-482/deferred D",
 		"Ship: no. 1 failing, 3 open.")
@@ -762,4 +762,44 @@ func TestStatusAfterARunCountsTheModelResults(t *testing.T) {
 	r.must(t, cli.ExitOK, "review", scenarioID, "--yes")
 	r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 	contains(t, "the status", r.semar(t, t.Context(), "status").stdout, "results written by a model: 1 of 3")
+}
+
+func TestAnOldNotConfirmedResultShowsAsInconclusive(t *testing.T) {
+	r := ledgerRepo(t)
+	r.putRun(t, "r-20261101T000000Z-aaaa", "", nil, true, scenarioResult(scenarioID, domain.OutcomeInconclusive, "an expected result is not confirmed"))
+	r.ledgerFile(t, obligations("SHOP-482", entry("SHOP-482/a", "Refund limit", "covers: ["+scenarioID+"]")))
+	const id = "r-20261101T000000Z-aaaa"
+	path := filepath.Join(r.path(".semar", "runs", id), "run.json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := r.semar(t, t.Context(), "status")
+	out := filepath.Join(t.TempDir(), "ctrf.json")
+	r.must(t, cli.ExitOK, "export", "ctrf", id, "--out", out)
+	exported, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// show prints the report as it was stored and never judges the run again.
+	const stored = "# Semar report r-20261101T000000Z-aaaa\n\nOutcome: **inconclusive**\n"
+	if err := os.WriteFile(filepath.Join(r.path(".semar", "runs", id), "report.md"), []byte(stored), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	show := r.must(t, cli.ExitOK, "show", id)
+	if show.stdout != stored {
+		t.Errorf("show printed:\n%s\nwant the stored report", show.stdout)
+	}
+	for name, text := range map[string]string{"show": show.stdout, "status": st.stdout, "export": string(exported)} {
+		if strings.Contains(text, "needs review") || strings.Contains(text, "semar review") {
+			t.Errorf("%s mentions a review:\n%s", name, text)
+		}
+	}
+	contains(t, "show", show.stdout, "inconclusive")
+	contains(t, "status", squash(st.stdout), "is inconclusive in "+id)
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(before) {
+		t.Errorf("the stored run changed: %v", err)
+	}
 }

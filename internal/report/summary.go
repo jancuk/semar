@@ -158,7 +158,7 @@ func Lines(w io.Writer, run domain.Run) error {
 		}
 	} else {
 		for _, r := range ordered(run.Results) {
-			word := resultWord(string(r.Outcome), r.Reasons)
+			word := string(r.Outcome)
 			line := plain(string(r.Scenario)) + "\t" + plain(word)
 			switch {
 			case len(r.Reasons) > 0:
@@ -216,19 +216,9 @@ func DeclaredBuilds(w io.Writer, run domain.Run) error {
 	return nil
 }
 
-// resultWord is the word that a person reads for a stored outcome (Plan 26, D7).
-func resultWord(outcome string, reasons []domain.Reason) string {
-	texts := make([]string, len(reasons))
-	for i, r := range reasons {
-		texts[i] = r.Text
-	}
-	return words.Of(outcome, texts)
-}
-
 // nextMark ends a line with the command that follows its word, or with nothing.
 func nextMark(line, word, subject string) string {
 	next := words.Next(word, plain(subject))
-	// A reason that names its own command, such as the review of a screens file, is the next step.
 	if next == "" || strings.Contains(line, strings.TrimSpace(words.Next(word, ""))) {
 		return ""
 	}

@@ -7,11 +7,11 @@
 - Builds at the end: none recorded
 - Outcomes: failed 0, blocked 1, inconclusive 0, stale 0, not_run 0, passed 2
 
-### SHOP-482-07 Refund before approval
+### SHOP-482-07 Refund with a denied fixture
 
-Outcome: **needs review** Next: `semar review SHOP-482-07`
+Outcome: **blocked**
 
-- Reason: fixture order.paid is not approved: run semar review order.paid
+- Reason: fixture order.paid: create\[0\]: POST /v1/orders is on the deny list of uat
 
 - Given order: order.paid 1.0.0 (hash cccccccccccc), no state was given; cleanup not needed
 
