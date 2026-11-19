@@ -1,8 +1,17 @@
 # Semar
 
-Semar helps a QA person draft the tests of a change and keep them as a regression set. A model drafts each test from the ticket and the API document, a person approves it, and then it replays with no model, on your machine or in a pipeline. Semar tests an HTTP API and a web application.
+Semar gives testing by an AI agent one standard workflow. It goes from the ticket and the change to tests, evidence, a verdict, and a report, and the steps are the same whoever runs them and whichever model drafts. A model drafts each test from the ticket and the API document, and then the test replays with no model, on your machine or in a pipeline. Semar tests an HTTP API and a web application.
 
-Code decides every result from recorded evidence. A model never says whether a test passed, and an expected result counts only after a person approved it.
+Code decides every result from recorded evidence. A model never says whether a test passed. A test counts as soon as it is written, and every result that a model wrote says `by model`.
+
+| What is standard | How it is the same every time |
+| --- | --- |
+| The test | A Gherkin file in the repository, one for each scenario |
+| The source of each expected result | `ticket`, `diff`, and the other sources, with `, by model` when a model wrote it |
+| The evidence | Every request and every response, with secrets redacted |
+| The verdict | Code decides it from the evidence. A pass is a pass |
+| The report | `report.md`, `report.html`, `junit.xml`, and `summary.md` |
+| The rerun | `semar run`, with no model |
 
 ## A day with Semar
 
@@ -13,7 +22,7 @@ Five commands do the work of a normal day. `semar --help` lists them under "Ever
 | `semar init` | Sets up a repository once |
 | `semar login` | Signs in to a web application once |
 | `semar plan` | Drafts tests for the change of this branch |
-| `semar run` | Runs the tests, offers the review of what needs a person, and says whether the change can ship |
+| `semar run` | Runs the tests and says whether the change can ship |
 | `semar show` | Prints the report of a run |
 
 The samples below test the ticket `PROJ-12` of a service named `orders`. Semar reads the ticket from `docs/tickets/PROJ-12.md`, and finds the tickets of a change in its commit messages.
@@ -59,7 +68,7 @@ Signed in as default (ana@shop.example) at http://localhost:3000. The profile of
 
 ### Plan the tests of the change
 
-`semar plan` gives each acceptance criterion to a small model, and code checks every answer. It also drafts edge cases from the API document with no model: a missing field, a wrong type, a value out of range, an unknown ID. A plan approves nothing.
+`semar plan` gives each acceptance criterion to a small model, and code checks every answer. It also drafts edge cases from the API document with no model: a missing field, a wrong type, a value out of range, an unknown ID. A drafted test counts as soon as the plan writes it.
 
 ```text
 $ semar plan
@@ -68,16 +77,15 @@ not drafted: 0
 differs from the documents: 0
 plan: .semar/plans/77c1a72ed689/plan.md
 tried: 0 of 2 steps (every step needs a write or a fixture create, which a trial never sends)
-edge cases: 4 drafted, 1 left out (1 because the API document declares no fitting status); each needs your review
+edge cases: 4 drafted, 1 left out (1 because the API document declares no fitting status)
 model use: 1 job (1 haiku), 0 corrections, 12k input (6.4k cached), 1.5k output, $0.00
 next:
   semar run   run the tests against the service
-  the run asks you to review what the plan drafted, and runs the approved tests again
 ```
 
-### Run the tests and review them
+### Run the tests
 
-`semar run` runs the tests of the change. A test that nobody approved still runs, so the review shows what the service answered. Answer `y` to review, then `y` to approve each test. The approved tests then run again, and the run ends with whether the change can ship. This sample leaves out the line that names who approved, and items 2 to 5 of the review.
+`semar run` runs the tests of the change and ends with whether the change can ship. A test counts as soon as it is written. A result that a model wrote counts too, and the line of the test says how many of its results a model wrote. This sample runs the tests that the plan above wrote. The service answers 201 where the model expected 422, so `PROJ-12-01` fails. The sample of the report below is a later run, after the fix.
 
 ```text
 $ semar run
@@ -86,56 +94,24 @@ Change    feature/refund-limit against main: PROJ-12
 Target    uat (test), orders at 77c1a72
 Selected  5 scenarios
 
-PROJ-12-01   needs review  an expected result is not confirmed → semar review PROJ-12-01
-PROJ-12-E01  needs review  an expected result is not confirmed → semar review PROJ-12-E01
-PROJ-12-E02  needs review  an expected result is not confirmed → semar review PROJ-12-E02
-PROJ-12-E03  needs review  an expected result is not confirmed → semar review PROJ-12-E03
-PROJ-12-E04  needs review  an expected result is not confirmed → semar review PROJ-12-E04
-build: orders 77c1a72ed68977b683d94cee3b75ab28aedba448 (the head commit of the repository, not read from the service)
-report: .semar/runs/r-20261119T003257Z-f019/report.md
-
-5 tests need your review. Review them now? [Y/n] y
-
-1 of 5 · PROJ-12 · docs/tickets/PROJ-12.md:7
-  "A refund larger than the paid amount is refused with 422 and the error code REFUND_EXCEEDS_TOTAL."
-
-  Test PROJ-12-01 · API · as default
-    Refund larger than the paid amount is refused with 422 and REFUND_EXCEEDS_TOTAL
-    Given Create a paid order of 1000 to hold the amount that the refund is compared with.
-          POST /v1/orders
-          json {"amount":1000}
-    When  Request a refund of 1001 against the order, which is larger than its paid amount of 1000.
-          POST /v1/orders/{{order_id}}/refunds
-          json {"amount":1001}
-    Then  the status is 422 (by model)
-          last run r-20261119T003257Z-f019: observed status 422, met
-    And   $.error.code equals "REFUND_EXCEEDS_TOTAL" (by model)
-          last run r-20261119T003257Z-f019: observed REFUND_EXCEEDS_TOTAL, met
-
-  [y] approve  [n] skip  [d] details  [q] stop
-> y
-
-approved 5 of 5 items
-semar: running against uat (test, test data)
-PROJ-12-01   passed
+PROJ-12-01   failed  step request-refund: expected status equals 422, observed 201 (source ticket, by model)  (2 of 2 results by model)
 PROJ-12-E01  passed
 PROJ-12-E02  passed
 PROJ-12-E03  passed
 PROJ-12-E04  passed
 build: orders 77c1a72ed68977b683d94cee3b75ab28aedba448 (the head commit of the repository, not read from the service)
-report: .semar/runs/r-20261119T003301Z-f910/report.md
+report: .semar/runs/r-20261119T003257Z-f019/report.md
 
 On feature/refund-limit against main · uat · orders at 77c1a72
 1 use case of PROJ-12
 
-  verified      1
-    PROJ-12/scenario-PROJ-12-01  Refund larger than the paid amount is refused with 422 and REFUND_…
-      approved by an author of the change
-
-Ship: yes.
+results written by a model: 2 of 2
+Ship: no.
 ```
 
-The exit code is 0 when everything passed, 1 when a test failed, and 2 when a test could not be judged. From then on, `semar run` replays the approved tests with no model call.
+The failure line names the source of the expected result and says `by model` when a model wrote it. The model expected a result that the service does not give, and Semar reports that as a failure. Read the test, and decide which one is wrong. To take a result over, delete `, by model` from the comment under its `Then` line. A pull request reviews that edit like any other.
+
+The exit code is 0 when everything passed, 1 when a test failed, and 2 when a test could not be judged. From then on, `semar run` replays the tests with no model call.
 
 ### Read the report
 
@@ -190,7 +166,7 @@ HTML report: .semar/runs/r-20261119T003301Z-f910/report.html
 | `semar rm <id> --reason <text>` | Retires a test, and keeps a record of why |
 | `semar log` | Lists the stored runs |
 
-Every other command, such as `semar review`, `semar status`, and `semar journey`, still works and is left out of the help. The [command reference](docs/GUIDE.md#command-reference) lists every command with every flag.
+Every other command, such as `semar status` and `semar journey`, still works and is left out of the help. The [command reference](docs/GUIDE.md#command-reference) lists every command with every flag.
 
 ## Run the regression set in a pipeline
 
