@@ -1,0 +1,80 @@
+{
+  "info": {
+    "name": "Shop",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://shop.example" },
+    { "key": "orderAmount", "value": "100000" },
+    { "key": "authToken", "value": "tok-collection-secret-7f3a91" },
+    { "key": "orderId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "List orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{authToken}}" },
+              { "key": "Cookie", "value": "session=cookie-secret-abc123" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/orders?limit=5" }
+          },
+          "response": [{ "name": "ok", "code": 200, "status": "OK", "body": "{\"data\":[]}" }],
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('ok', function () {});"] } }]
+        },
+        {
+          "name": "Create order",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"amount\": {{orderAmount}}}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/v1/orders"
+          },
+          "response": [{ "name": "created", "code": 201 }]
+        },
+        {
+          "name": "List orders without an example",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/v1/orders" } },
+          "response": []
+        },
+        {
+          "name": "Order with no id",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/v1/orders/{{orderId}}" } },
+          "response": [{ "code": 200 }]
+        }
+      ]
+    },
+    {
+      "name": "Sign in",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"qa\", \"password\": \"hunter2-login-pw\", \"token\": \"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJxYSJ9.c2lnbmF0dXJl\"}"
+        },
+        "url": { "raw": "{{baseUrl}}/v1/login" }
+      },
+      "response": [{ "code": 200 }]
+    },
+    {
+      "name": "Form",
+      "request": {
+        "method": "POST",
+        "body": { "mode": "urlencoded", "urlencoded": [{ "key": "a", "value": "b" }] },
+        "url": { "raw": "{{baseUrl}}/v1/orders" }
+      },
+      "response": [{ "code": 200 }]
+    },
+    {
+      "name": "Other service",
+      "request": { "method": "GET", "url": { "raw": "https://other.example/v1/health" } },
+      "response": [{ "code": 200 }]
+    }
+  ]
+}

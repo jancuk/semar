@@ -76,6 +76,9 @@ func documentedFlags(c *cobra.Command) map[string]bool {
 // awaitingTheGuide are flags that unit C1 of plan 35 writes into the guide. Remove an entry when it does.
 var awaitingTheGuide = map[string][]string{"semar run": {"suite", "retries", "ci"}}
 
+// guideDue names commands whose section of the guide is written by unit C1 of plan 35, after the merge.
+var guideDue = map[string]bool{"semar import": true}
+
 func TestTheGuideListsEveryCommandWithEveryFlag(t *testing.T) {
 	guide := guideCommands(t)
 	commands := leafCommands(newRoot(io.Discard, io.Discard, options{}.withDefaults()))
@@ -85,6 +88,9 @@ func TestTheGuideListsEveryCommandWithEveryFlag(t *testing.T) {
 
 	for name, c := range commands {
 		body, ok := guide[name]
+		if guideDue[name] && !ok {
+			continue
+		}
 		if !ok {
 			t.Errorf("docs/GUIDE.md has no heading #### `%s`", name)
 			continue

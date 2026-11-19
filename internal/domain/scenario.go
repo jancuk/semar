@@ -25,6 +25,8 @@ const (
 	SourceBaseline Source = "baseline"
 	// SourceRule is an expected result that a fixed rule of Semar wrote from the API document. No model took part.
 	SourceRule Source = "rule"
+	// SourceImport is an expected result that semar import took from a file. Nobody approved it, so it always needs a review.
+	SourceImport Source = "import"
 )
 
 const (

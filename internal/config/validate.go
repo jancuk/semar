@@ -19,7 +19,7 @@ import (
 )
 
 var sources = []domain.Source{
-	domain.SourceTicket, domain.SourceTestcase, domain.SourcePerson, domain.SourceDiff, domain.SourceBaseline,
+	domain.SourceTicket, domain.SourceTestcase, domain.SourcePerson, domain.SourceDiff, domain.SourceBaseline, domain.SourceImport,
 }
 
 var modelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,127}$`)
