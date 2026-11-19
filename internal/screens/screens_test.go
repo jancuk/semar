@@ -165,21 +165,6 @@ func TestRepairedKeepsAVariable(t *testing.T) {
 	}
 }
 
-func TestChangesSaysWhetherRoleAndNameStayed(t *testing.T) {
-	old, _ := screens.Parse([]byte(shop), "shop.yaml", "shop")
-	moved, _ := screens.Parse([]byte(strings.Replace(shop, "{ role: button, name: Place order }", "{ role: button, name: Place order, css: .pay }", 1)), "shop.yaml", "shop")
-	changed, _ := screens.Parse([]byte(strings.Replace(shop, "name: Place order", "name: Cancel order", 1)), "shop.yaml", "shop")
-	if got := screens.Changes(old, moved); len(got) != 1 || !got[0].SameRoleAndName || got[0].Kind != "changed" {
-		t.Errorf("moved = %+v", got)
-	}
-	if got := screens.Changes(old, changed); len(got) != 1 || got[0].SameRoleAndName {
-		t.Errorf("changed = %+v", got)
-	}
-	if got := screens.Changes(old, old); len(got) != 0 {
-		t.Errorf("same = %+v", got)
-	}
-}
-
 func TestReplaceChangesOnlyTheTextOfTheElement(t *testing.T) {
 	src := "# the shop screens\n" + shop
 	out, err := screens.Replace([]byte(src), "shop", "Cart", "place-order", domain.Locator{Role: "button", Name: "Pay now"})

@@ -16,7 +16,6 @@ import (
 func dailyRepo(t *testing.T) *repo {
 	t.Helper()
 	r := newRepo(t, repoOptions{})
-	r.opts.Email = func(string) string { return "ada@example.com" }
 	r.copyScenario(t, "SHOP-480-01")
 	rel := ".semar/scenarios/SHOP-482/SHOP-480-01.feature"
 	data, err := os.ReadFile(r.path(rel))

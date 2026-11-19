@@ -194,7 +194,7 @@ func Lines(w io.Writer, run domain.Run) error {
 
 // shownReason is the reason that a result line shows: the first one that is a cause. A step that was
 // never sent has no recorded result, and that is a consequence of the reason that stopped the run,
-// such as a screens file that is not approved.
+// such as a screens file that is missing.
 func shownReason(reasons []domain.Reason) string {
 	for _, r := range reasons {
 		if !strings.HasSuffix(r.Text, "has no recorded result") {

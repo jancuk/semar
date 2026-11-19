@@ -1,6 +1,6 @@
 // Package screens reads the screen objects of a repository: .semar/screens/<app>.yaml says how to
 // find each element of each screen of an app. The file is untrusted text. It is read once, through
-// real directories and within fixed limits, and a person approves it before a step uses it.
+// real directories and within fixed limits.
 package screens
 
 import (

@@ -73,7 +73,7 @@ func readEarlier(repo string, inChange map[string]bool, scs []domain.Scenario) m
 
 // againLines end the output of a plan that found something that earlier plans had decided: how many
 // criteria were kept, planned, and removed, and for each test of an earlier text the command that
-// removes it. The plan never removes a test itself, because a person approved it (D7). A plan that
+// removes it. The plan never removes a test itself (D7). A plan that
 // found nothing of the kind has no line.
 func againLines(a *plan.Again) []string {
 	if a == nil || (a.Count(plan.StateKept) == 0 && a.Count(plan.StateChanged) == 0 && len(a.Removed) == 0) {

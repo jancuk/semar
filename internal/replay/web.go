@@ -33,8 +33,7 @@ const reasonNoBrowser = "the scenario has web steps, and this run has no browser
 
 // prepareWeb checks the web steps of a script before any step is sent. A screens file that is not
 // there, a screen or an element that it lacks, and a step with no app are reasons to block the
-// scenario, because the script does not fit what is on disk. A screens file that no person approved
-// is a reason to stop with no result (TRD rule 8): the steps are not sent, and each ends inconclusive.
+// scenario, because the script does not fit what is on disk.
 // It returns nil for a scenario with no web step.
 func (r *Runner) prepareWeb(sc domain.Scenario, s domain.Script, run *replayed) (wr *webRun, proceed bool) {
 	var apps []string

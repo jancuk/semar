@@ -31,7 +31,7 @@ func Parse(data []byte, name string) (domain.Fixture, error) {
 		return domain.Fixture{}, err
 	}
 	// Numbers in a request body and in an until are held exactly, as in a script and in a scenario
-	// check, so that the hash a person approves is the hash of the value that a run sends.
+	// check, so that the hash of a fixture is the hash of the value that a run sends.
 	numbers := func(key string) (yamlfile.NumberKind, bool) {
 		return yamlfile.AnyNumber, key == "json" || key == "equals"
 	}

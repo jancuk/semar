@@ -32,8 +32,8 @@ func newExportCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "export (ctrf | junit | sarif) <run id>",
 		Short: "Write one stored run as a CTRF, JUnit XML, or SARIF report",
-		Long: "Write one stored run in a common format. ctrf and junit list every scenario, and sarif lists the\n" +
-			"confirmed defects of the run. An export reads stored evidence, computes no outcome, and refuses a\n" +
+		Long: "Write one stored run in a common format. ctrf and junit list every scenario, and sarif lists every\n" +
+			"expected result of the run that does not hold. An export reads stored evidence, computes no outcome, and refuses a\n" +
 			"run that is interrupted or whose evidence changed. The exit code is 0 when the report was written\n" +
 			"and 3 when it was not; it does not reflect the outcomes.",
 		Args: cobra.ExactArgs(2),

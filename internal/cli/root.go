@@ -21,7 +21,6 @@ import (
 	"github.com/jancuk/semar/internal/keychain"
 	"github.com/jancuk/semar/internal/provider"
 	"github.com/jancuk/semar/internal/userconfig"
-	"github.com/jancuk/semar/internal/vcs"
 )
 
 // Version is set at build time with -ldflags and never changed at run time.
@@ -38,9 +37,6 @@ type options struct {
 	TempRoot  string                 // where plan copies the source; "" is a directory in the user cache directory
 	CacheDir  func() (string, error) // the user cache directory; nil is os.UserCacheDir
 	Providers func(repoRoot string) *provider.Registry
-	// Email is the user.email of git for the repository in dir, or "" when it is not set. A review
-	// stores it with each approval.
-	Email func(dir string) string
 	// PlanEstimate says what planning will cost, for the offer of semar run. Nil reads the usage log.
 	PlanEstimate planEstimator
 	Environ      func() []string // the person's environment, for a harness that runs with their setup
@@ -103,9 +99,6 @@ func (o options) withDefaults() options {
 	}
 	if o.PlanEstimate == nil {
 		o.PlanEstimate = usageEstimate
-	}
-	if o.Email == nil {
-		o.Email = gitEmail
 	}
 	if o.Environ == nil {
 		o.Environ = os.Environ
@@ -251,18 +244,4 @@ func removedCommand(name, instead string) *cobra.Command {
 
 func addDirFlag(cmd *cobra.Command, dir *string) {
 	cmd.Flags().StringVar(dir, "dir", ".", "the root of the repository that holds .semar")
-}
-
-// gitEmail is the user.email that git has for the repository in dir. A directory that is not in a
-// repository, and a setting that is not there, give "".
-func gitEmail(dir string) string {
-	g, err := vcs.Open(dir)
-	if err != nil {
-		return ""
-	}
-	email, err := g.Config(context.Background(), "user.email")
-	if err != nil {
-		return ""
-	}
-	return email
 }

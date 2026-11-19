@@ -96,7 +96,7 @@ const (
 )
 
 // The hashed shape is private and has fixed keys, so a change to a yaml tag or to the name of a
-// field cannot change a stored approval.
+// field cannot change a stored hash.
 type hashedParam struct {
 	Default *string `json:"default,omitempty"`
 }
@@ -166,8 +166,8 @@ func hashedSteps(in []FixtureStep) []hashedFixtureStep {
 	return out
 }
 
-// FixtureHash covers everything a person approved: every field except APIVersion and Kind.
-// When encoding fails it returns the empty Hash, which matches no approval.
+// FixtureHash covers every field of a fixture except APIVersion and Kind.
+// When encoding fails it returns the empty Hash, which matches no stored hash.
 func FixtureHash(f Fixture) Hash {
 	h := hashedFixture{
 		ID: f.ID, Description: f.Description, Version: f.Version, Owner: f.Owner,

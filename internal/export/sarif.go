@@ -88,7 +88,7 @@ type sarifRegion struct {
 	StartLine int `json:"startLine"`
 }
 
-// SARIF writes the confirmed defects of the run as SARIF 2.1.0 results (D6). The $schema key
+// SARIF writes every expected result of the run that does not hold as SARIF 2.1.0 results. The $schema key
 // is not written, because the address of the published schema is not verified.
 func SARIF(w io.Writer, r Run) error {
 	results := []sarifResult{}

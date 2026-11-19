@@ -443,7 +443,7 @@ func (r *Runner) judge(lr *legRun, start, end []domain.BuildRef) domain.Scenario
 	})
 	res.Reasons = append(res.Reasons, lr.rep.Notes...)
 	// A step that was never sent has no recorded result, and that is a consequence. The reason that
-	// stopped the leg, such as a screens file that nobody approved, comes first.
+	// stopped the leg, such as a screens element that is missing, comes first.
 	slices.SortStableFunc(res.Reasons, func(a, b domain.Reason) int {
 		return boolInt(unsent(a)) - boolInt(unsent(b))
 	})

@@ -103,7 +103,7 @@ func Load(repo string, services []string, opts ...Option) (Catalogue, error) {
 	return c, nil
 }
 
-// LoadOne reads the one fixture file with this ID, for a person who is about to approve it. The ID
+// LoadOne reads the one fixture file with this ID. The ID
 // comes from the command line, so it must match the ID pattern before it names a file. An unusable
 // file is an error that lists every problem, one per line.
 func LoadOne(repo string, id domain.FixtureID, services []string, opts ...Option) (domain.Fixture, error) {

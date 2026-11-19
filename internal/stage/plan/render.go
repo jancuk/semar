@@ -247,7 +247,7 @@ func toolLine(tools []provider.ToolUse) string {
 }
 
 // writeFixturesNeeded lists the fixtures that the planner proposed. A proposal is text of the
-// model, so every part is escaped. It never counts: a person writes the file and approves it.
+// model, so every part is escaped. It never counts: a person writes the file.
 func writeFixturesNeeded(b *strings.Builder, needed []FixtureNeeded) {
 	b.WriteString("\n## Fixtures needed\n\n")
 	if len(needed) == 0 {
@@ -534,7 +534,7 @@ func FixtureRunWords(d FixtureDraft) string {
 	return words
 }
 
-// DraftedEntries are the drafted fixtures as the catalogue shows them, not approved, in the order of
+// DraftedEntries are the drafted fixtures as the catalogue shows them, in the order of
 // the drafts. plan.md names them like any fixture that a scenario uses.
 func (o Output) DraftedEntries() []fixture.Entry {
 	var out []fixture.Entry

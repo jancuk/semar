@@ -63,8 +63,7 @@ type Entry struct {
 	NoReason   bool      // no cover, no gap, and no manual reason
 	Link       *Link     // the link that gives the state of a manual use case to a scenario
 
-	// An open use case waits for some of these: a person's approval of a cover, a run on the
-	// current build or of a scenario that changed, or a first run.
+	// An open use case waits for some of these: a run on the current build or of a scenario that changed, or a first run.
 	Stale, NotRun bool
 }
 

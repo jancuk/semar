@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -214,46 +213,4 @@ func Repaired(file, resolved, candidate domain.Locator) domain.Locator {
 		CSS:    keep(file.CSS, resolved.CSS, candidate.CSS),
 		Within: file.Within,
 	}
-}
-
-// Change is one element that differs between two versions of a screens file.
-type Change struct {
-	Screen, Element string
-	Kind            string // added, removed, or changed
-	// SameRoleAndName is true for a changed element whose role and name are the same: only the way
-	// of finding it moved, so the repair followed an element that moved.
-	SameRoleAndName bool
-	Old, New        domain.Locator
-}
-
-// Changes lists what a person has not seen of the screens file: the elements that differ from the
-// version that was approved before, in order.
-func Changes(old, cur domain.Screens) []Change {
-	var out []Change
-	names := slices.Concat(old.ScreenNames(), cur.ScreenNames())
-	slices.Sort(names)
-	names = slices.Compact(names)
-	for _, sn := range names {
-		elements := slices.Concat(old.ElementNames(sn), cur.ElementNames(sn))
-		slices.Sort(elements)
-		elements = slices.Compact(elements)
-		for _, en := range elements {
-			o, hadOld := old.Locator(sn, en)
-			n, hasNew := cur.Locator(sn, en)
-			c := Change{Screen: sn, Element: en, Old: o, New: n}
-			switch {
-			case !hadOld:
-				c.Kind = "added"
-			case !hasNew:
-				c.Kind = "removed"
-			case o == n:
-				continue
-			default:
-				c.Kind = "changed"
-				c.SameRoleAndName = o.Role == n.Role && o.Name == n.Name
-			}
-			out = append(out, c)
-		}
-	}
-	return out
 }

@@ -223,7 +223,7 @@ func (r *Runner) attempts(ctx context.Context, sc domain.Scenario) (replayed, er
 }
 
 // retriable says whether an attempt ended in a way that another attempt could change: it failed, it
-// was inconclusive for a reason other than a missing approval, or it was blocked only because a setup
+// was inconclusive, or it was blocked only because a setup
 // step got no good answer. Any other block is the environment's rule or a missing file, which a
 // second attempt cannot change. The builds are judged once for the
 // whole run, so this reads the attempt with stand-in builds that never differ.
