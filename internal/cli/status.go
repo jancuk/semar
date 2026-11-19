@@ -91,6 +91,7 @@ func showStatus(ctx context.Context, stdout, stderr io.Writer, o options, f stat
 	switch {
 	case len(f.tickets) > 0:
 		in.Tickets = f.tickets
+		in.Scope = "the tickets named"
 		obs = slices.DeleteFunc(slices.Clone(all), func(l obligation.Located) bool { return !slices.Contains(f.tickets, ticketKey(l)) })
 		if len(obs) == 0 {
 			fmt.Fprintf(stdout, "no use case: no obligation belongs to %s\n", terminalSafe(strings.Join(f.tickets, ", ")))

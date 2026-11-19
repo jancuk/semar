@@ -475,6 +475,9 @@ func TestLedgerTicketFilter(t *testing.T) {
 
 	res := r.must(t, cli.ExitUndecided, "status", "--ticket", "SHOP-482")
 	contains(t, "the table", squash(res.stdout), "1 use case of SHOP-482", "SHOP-482/a")
+	if first := strings.SplitN(res.stdout, "\n", 2)[0]; !strings.HasPrefix(first, "The tickets named") {
+		t.Errorf("the first line must say what was picked, not where the directory is: %q", first)
+	}
 	if strings.Contains(res.stdout, "SHOP-480/b") || strings.Contains(res.stdout, "refunds/c") {
 		t.Errorf("another ticket is listed:\n%s", res.stdout)
 	}
