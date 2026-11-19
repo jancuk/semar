@@ -1,9 +1,6 @@
 package domain
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"regexp"
@@ -305,36 +302,6 @@ func (s Screens) ScreenNames() []string { return slices.Sorted(maps.Keys(s.Scree
 // ElementNames lists the elements of a screen in order.
 func (s Screens) ElementNames(screen string) []string {
 	return slices.Sorted(maps.Keys(s.Screens[screen]))
-}
-
-// ScreensHash is the SHA-256 of what a person approved: the app and every locator. The layout of the
-// file and its comments are not part of it. It is empty when the content cannot be encoded.
-func ScreensHash(s Screens) Hash {
-	type element struct {
-		Name string  `json:"name"`
-		Loc  Locator `json:"locator"`
-	}
-	type screen struct {
-		Name     string    `json:"name"`
-		Elements []element `json:"elements"`
-	}
-	hashed := struct {
-		App     string   `json:"app"`
-		Screens []screen `json:"screens"`
-	}{App: s.App}
-	for _, sn := range s.ScreenNames() {
-		sc := screen{Name: sn}
-		for _, en := range s.ElementNames(sn) {
-			sc.Elements = append(sc.Elements, element{en, s.Screens[sn][en]})
-		}
-		hashed.Screens = append(hashed.Screens, sc)
-	}
-	b, err := json.Marshal(hashed)
-	if err != nil {
-		return ""
-	}
-	sum := sha256.Sum256(b)
-	return Hash(hex.EncodeToString(sum[:]))
 }
 
 // ElementState is what the engine read of one element after an action settled. Count is the number of

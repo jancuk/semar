@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/domain"
 )
 
 func loadText(t *testing.T, text string) (config.Config, error) {
@@ -139,7 +138,6 @@ func TestLoadValidation(t *testing.T) {
 		{"port not in hosts", svc("http://api.uat.example.com:8080"), "baseUrl host api.uat.example.com:8080 is not in hosts"},
 		{"loopback needs port entry", strings.Replace(svc("http://127.0.0.1:8080"), "api.uat.example.com", "127.0.0.1", 1), "baseUrl host 127.0.0.1:8080 is not in hosts"},
 		{"loopback with port entry", strings.Replace(svc("http://127.0.0.1:8080"), "api.uat.example.com", "127.0.0.1:8080", 1), ""},
-		{"bad trust source", "version: 1\npolicy: {trust: {confirm: [diff, invariant]}}\n", "trust.confirm: invariant is not a source"},
 		{"negative workers", "version: 1\nreplay: {workers: -1}\n", "replay.workers must not be negative"},
 	}
 	for _, c := range cases {
@@ -161,12 +159,11 @@ func TestLoadValidation(t *testing.T) {
 func TestLoadDefaults(t *testing.T) {
 	cases := []struct {
 		name, text string
-		confirm    []domain.Source
 		workers    int
 	}{
-		{"nothing set", "version: 1\n", []domain.Source{domain.SourceDiff, domain.SourceBaseline}, 4},
-		{"zero workers", "version: 1\nreplay: {workers: 0}\n", []domain.Source{domain.SourceDiff, domain.SourceBaseline}, 4},
-		{"explicit", "version: 1\nreplay: {workers: 2}\npolicy: {trust: {confirm: [ticket]}}\n", []domain.Source{domain.SourceTicket}, 2},
+		{"nothing set", "version: 1\n", 4},
+		{"zero workers", "version: 1\nreplay: {workers: 0}\n", 4},
+		{"explicit", "version: 1\nreplay: {workers: 2}\n", 2},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -174,13 +171,38 @@ func TestLoadDefaults(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !slices.Equal(c.confirm, cfg.Policy.Trust.Confirm) {
-				t.Fatalf("confirm = %v, want %v", cfg.Policy.Trust.Confirm, c.confirm)
-			}
 			if cfg.Replay.Workers != c.workers {
 				t.Fatalf("workers = %d, want %d", cfg.Replay.Workers, c.workers)
 			}
+			if cfg.TrustIgnored {
+				t.Fatal("the notice is set although the file has no policy key")
+			}
 		})
+	}
+}
+
+func TestAnOldTrustSettingLoadsAndIsIgnored(t *testing.T) {
+	const base = "version: 1\n"
+	for _, policy := range []string{
+		"policy:\n  trust:\n    confirm: [diff, baseline]\n",
+		"policy:\n  trust:\n    confirm: []\n",
+		"policy:\n  trust: {}\n",
+		"policy:\n  trust:\n",
+		"policy: {}\n",
+		"policy: {trust: {confirm: [ticket, nothing]}}\n",
+	} {
+		cfg, err := loadText(t, base+policy)
+		if err != nil || !cfg.TrustIgnored {
+			t.Errorf("%q: ignored %v, error %v", policy, cfg.TrustIgnored, err)
+		}
+	}
+	for policy, want := range map[string]string{
+		"policy:\n  other: 1\n":             "unknown key policy.other",
+		"policy:\n  trust:\n    other: 1\n": "unknown key policy.trust.other",
+	} {
+		if _, err := loadText(t, base+policy); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: error %v, want %q", policy, err, want)
+		}
 	}
 }
 

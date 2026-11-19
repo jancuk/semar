@@ -131,22 +131,6 @@ func TestNeededFollowsWithin(t *testing.T) {
 	}
 }
 
-func TestHashIgnoresLayoutAndComments(t *testing.T) {
-	a, _ := screens.Parse([]byte(shop), "shop.yaml", "shop")
-	reflowed := "# approved by the team\n" + strings.ReplaceAll(shop, "{ role: button, name: Place order }", "\n      role: button\n      name: Place order")
-	b, err := screens.Parse([]byte(reflowed), "shop.yaml", "shop")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if domain.ScreensHash(a) != domain.ScreensHash(b) {
-		t.Errorf("a comment and a new layout changed the hash")
-	}
-	c, _ := screens.Parse([]byte(strings.Replace(shop, "Place order", "Pay", 1)), "shop.yaml", "shop")
-	if domain.ScreensHash(a) == domain.ScreensHash(c) {
-		t.Errorf("a changed name kept the hash")
-	}
-}
-
 func TestReplaceKeepsTheRestOfTheFile(t *testing.T) {
 	src := "# the shop screens\n" + shop
 	out, err := screens.Replace([]byte(src), "shop", "Cart", "place-order", domain.Locator{Role: "button", Name: "Pay now"})

@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jancuk/semar/internal/atomicfile"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/idcheck"
@@ -205,42 +204,4 @@ func applyRepairs(ctx context.Context, stdout io.Writer, f repairFlags, misses [
 		}
 	}
 	return nil
-}
-
-// screensLines is what a person reads before approving the screens of an app: every element with its
-// locator, and what changed since the file that was approved before.
-func screensLines(scr domain.Screens, h domain.Hash, before *confirm.ScreensApproval) []string {
-	lines := []string{fmt.Sprintf("Screens of %s, hash %s:", scr.App, h)}
-	for _, sn := range scr.ScreenNames() {
-		lines = append(lines, "  screen "+sn)
-		for _, en := range scr.ElementNames(sn) {
-			loc, _ := scr.Locator(sn, en)
-			lines = append(lines, fmt.Sprintf("    %s: %s", en, loc))
-		}
-	}
-	if before == nil {
-		lines = append(lines, "  these screens were never approved before")
-		return lines
-	}
-	changes := screens.Changes(before.Screens(), scr)
-	if len(changes) == 0 {
-		return lines
-	}
-	lines = append(lines, fmt.Sprintf("  since the approval of %s (hash %s):", before.At.Format("2006-01-02"), before.Hash))
-	for _, c := range changes {
-		where := c.Screen + "." + c.Element
-		switch {
-		case c.Kind == "added":
-			lines = append(lines, fmt.Sprintf("    added %s: %s", where, c.New))
-		case c.Kind == "removed":
-			lines = append(lines, fmt.Sprintf("    removed %s: was %s", where, c.Old))
-		case c.SameRoleAndName:
-			lines = append(lines, fmt.Sprintf("    changed %s: the role and the name are the same, so the repair followed a moved element", where),
-				fmt.Sprintf("      was %s", c.Old), fmt.Sprintf("      now %s", c.New))
-		default:
-			lines = append(lines, fmt.Sprintf("    changed %s: the element changed: check it is the same thing", where),
-				fmt.Sprintf("      was %s", c.Old), fmt.Sprintf("      now %s", c.New))
-		}
-	}
-	return lines
 }

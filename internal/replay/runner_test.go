@@ -18,7 +18,6 @@ import (
 
 	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/api"
@@ -41,12 +40,11 @@ var key = []byte("0123456789abcdef0123456789abcdef")
 
 // rig is one replay against a fresh sample application.
 type rig struct {
-	app     *sampleapp.App
-	url     string // of the sample application
-	store   *evidence.Store
-	confirm *confirm.Local
-	policy  *effects.Policy
-	deps    replay.Deps
+	app    *sampleapp.App
+	url    string // of the sample application
+	store  *evidence.Store
+	policy *effects.Policy
+	deps   replay.Deps
 }
 
 type rigOptions struct {
@@ -139,13 +137,11 @@ func newRig(t *testing.T, o rigOptions) *rig {
 		Name:  "orders",
 		Build: &config.BuildProbe{Probe: "http", URL: buildURL, Commit: "$.commit"},
 	}}, nil)
-	conf := confirm.NewLocal(root)
 	return &rig{
-		app:     app,
-		url:     srv.URL,
-		store:   store,
-		confirm: conf,
-		policy:  pol,
+		app:    app,
+		url:    srv.URL,
+		store:  store,
+		policy: pol,
 		deps: replay.Deps{
 			Engine:   eng,
 			Scripts:  store,

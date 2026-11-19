@@ -13,14 +13,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/hostrule"
 	"github.com/jancuk/semar/internal/idcheck"
 )
-
-var sources = []domain.Source{
-	domain.SourceTicket, domain.SourceTestcase, domain.SourcePerson, domain.SourceDiff, domain.SourceBaseline, domain.SourceImport,
-}
 
 var modelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,127}$`)
 
@@ -96,11 +91,6 @@ func validate(c Config, name string) error {
 	}
 	if c.Replay.Retries < 0 || c.Replay.Retries > MaxRetries {
 		add("replay.retries must be from 0 to %d", MaxRetries)
-	}
-	for _, s := range c.Policy.Trust.Confirm {
-		if !slices.Contains(sources, s) {
-			add("policy.trust.confirm: %s is not a source", s)
-		}
 	}
 	validatePlan(c, add)
 	validateKnowledge(c, add)

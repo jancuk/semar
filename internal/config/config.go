@@ -10,16 +10,16 @@ import (
 
 	yaml "go.yaml.in/yaml/v4"
 
-	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/yamlfile"
 )
 
 type Config struct {
+	// TrustIgnored is set when the file still holds the policy.trust setting of Plan 35 and before.
+	TrustIgnored bool                   `yaml:"-"`
 	Version      int                    `yaml:"version"`
 	Environments map[string]Environment `yaml:"environments"`
 	AuthProfiles map[string]AuthProfile `yaml:"authProfiles"`
 	Redact       Redact                 `yaml:"redact"`
-	Policy       Policy                 `yaml:"policy"`
 	Replay       Replay                 `yaml:"replay"`
 	Providers    []Provider             `yaml:"providers"`
 	Tickets      Tickets                `yaml:"tickets"`
@@ -143,14 +143,6 @@ type Redact struct {
 	Patterns  []string `yaml:"patterns"`
 }
 
-type Policy struct {
-	Trust Trust `yaml:"trust"`
-}
-
-type Trust struct {
-	Confirm []domain.Source `yaml:"confirm"`
-}
-
 type Replay struct {
 	Workers int `yaml:"workers"`
 	// Retries is how many more times a scenario that failed or was inconclusive is replayed. 0 to 5.
@@ -234,7 +226,7 @@ const (
 )
 
 var topLevelKeys = []string{
-	"version", "environments", "authProfiles", "redact", "policy", "replay",
+	"version", "environments", "authProfiles", "redact", "replay",
 	"providers", "tickets", "plan", "knowledge", "change",
 }
 
@@ -265,10 +257,15 @@ func parse(data []byte, name string) (Config, error) {
 		return Config{}, fmt.Errorf("%s:%d: the configuration must be a mapping", name, top.Line)
 	}
 	var unknown []error
+	trustIgnored := false
 	known := make([]*yaml.Node, 0, len(top.Content))
 	for i := 0; i+1 < len(top.Content); i += 2 {
 		key := top.Content[i]
 		switch {
+		case key.Value == "policy":
+			ignored, errs := oldPolicy(top.Content[i+1], name)
+			trustIgnored = ignored
+			unknown = append(unknown, errs...)
 		case slices.Contains(laterPlanKeys, key.Value):
 		case slices.Contains(topLevelKeys, key.Value):
 			known = append(known, key, top.Content[i+1])
@@ -289,9 +286,7 @@ func parse(data []byte, name string) (Config, error) {
 	if err := yamlfile.LoadNode(top, name, &cfg); err != nil {
 		return Config{}, err
 	}
-	if len(cfg.Policy.Trust.Confirm) == 0 {
-		cfg.Policy.Trust.Confirm = []domain.Source{domain.SourceDiff, domain.SourceBaseline}
-	}
+	cfg.TrustIgnored = trustIgnored
 	if cfg.Replay.Workers == 0 {
 		cfg.Replay.Workers = defaultWorkers
 	}
@@ -309,6 +304,46 @@ func parse(data []byte, name string) (Config, error) {
 		cfg.Knowledge[i].Path = strings.TrimSuffix(cfg.Knowledge[i].Path, "/")
 	}
 	return cfg, nil
+}
+
+// TrustNotice is the one line that run and plan print when semar.yaml still sets policy.trust.confirm.
+const TrustNotice = "policy.trust.confirm in .semar/semar.yaml is no longer used and can be removed"
+
+// oldPolicy reads the key policy of a semar.yaml written before Plan 36. Nothing under it is used
+// now, but a file that holds only the old trust setting still loads. It reports that the setting was
+// there, and an unknown key under policy or policy.trust is an error as it was.
+func oldPolicy(n *yaml.Node, name string) (ignored bool, errs []error) {
+	n = resolveAlias(n)
+	if n.Kind != yaml.MappingNode {
+		if n.Tag == "!!null" {
+			return true, nil
+		}
+		return false, []error{fmt.Errorf("%s:%d: policy must be a mapping", name, n.Line)}
+	}
+	ignored = true
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		key, val := n.Content[i], resolveAlias(n.Content[i+1])
+		if key.Value != "trust" {
+			errs = append(errs, fmt.Errorf("%s:%d: unknown key policy.%s", name, key.Line, key.Value))
+			continue
+		}
+		if val.Kind != yaml.MappingNode {
+			if val.Tag != "!!null" {
+				errs = append(errs, fmt.Errorf("%s:%d: policy.trust must be a mapping", name, val.Line))
+			}
+			continue
+		}
+		for j := 0; j+1 < len(val.Content); j += 2 {
+			k, v := val.Content[j], resolveAlias(val.Content[j+1])
+			switch {
+			case k.Value != "confirm":
+				errs = append(errs, fmt.Errorf("%s:%d: unknown key policy.trust.%s", name, k.Line, k.Value))
+			case v.Kind != yaml.SequenceNode && v.Tag != "!!null":
+				errs = append(errs, fmt.Errorf("%s:%d: policy.trust.confirm must be a list", name, v.Line))
+			}
+		}
+	}
+	return ignored, errs
 }
 
 // binaryPathKeys refuses providers[].binaryPath: the configuration is committed in the

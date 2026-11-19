@@ -115,6 +115,9 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 	}
 	cfg, err := config.Load(f.dir)
 	missing := errors.Is(err, fs.ErrNotExist)
+	if err == nil {
+		noteIgnoredSettings(stderr, cfg)
+	}
 	var initData []byte
 	switch {
 	case missing && f.init.baseURL == "":

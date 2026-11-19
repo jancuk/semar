@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/importer"
 	"github.com/jancuk/semar/internal/redact"
@@ -260,16 +259,6 @@ func TestAServiceWithAPathPrefix(t *testing.T) {
 	first, second := b.Drafts[0].Script.Steps[0].Request, b.Drafts[1].Script.Steps[0].Request
 	if first.Service != "v2" || first.Path != "/orders" || second.Service != "root" || second.Path != "/api/v20/orders" {
 		t.Errorf("%+v %+v", first, second)
-	}
-}
-
-func TestAnImportedExpectationAlwaysNeedsAReview(t *testing.T) {
-	e := domain.Expectation{Check: domain.Check{Status: new(int)}, Source: domain.SourceImport}
-	if !confirm.NeedsExpectation(e, nil) {
-		t.Error("an imported expectation needs no review")
-	}
-	if !confirm.NeedsExpectation(e, []domain.Source{domain.SourceDiff}) {
-		t.Error("a trust list lifted the review of an imported expectation")
 	}
 }
 

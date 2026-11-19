@@ -40,6 +40,7 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 	if err != nil {
 		return err
 	}
+	noteIgnoredSettings(stderr, cfg)
 	if f.retriesSet {
 		cfg.Replay.Retries = f.retries
 	}
