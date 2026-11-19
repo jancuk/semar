@@ -10,10 +10,10 @@ import (
 )
 
 // Marshal writes a fixture as the file that Parse reads back to the same fixture. A key with no value
-// is left out. The header says who drafted the file and how to approve it.
+// is left out. The header says who drafted the file.
 func Marshal(f domain.Fixture) ([]byte, error) {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "# Drafted by semar plan. Read it, and approve it with semar review %s.\n", f.ID)
+	fmt.Fprintf(&buf, "# Drafted by semar plan. Read it, edit it if needed, and plan again.\n")
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
 	if err := enc.Encode(f); err != nil {

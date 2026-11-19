@@ -13,7 +13,6 @@ import (
 
 	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/api"
@@ -201,7 +200,6 @@ func planTrial(ctx context.Context, stderr io.Writer, o options, f planFlags, cf
 			Engine:      engine,
 			Policy:      policy,
 			Catalogue:   *cat,
-			Approvals:   confirm.NewLocal(store.Root()),
 			Health:      fixture.NewHealthStore(store.Root()),
 			Environment: envName,
 			Services:    services,

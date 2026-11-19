@@ -22,7 +22,7 @@ The repository holds documents about this service. Before you draft, find the on
 A fixture prepares data that a scenario needs, such as a paid order, and a person reviewed how it does that. Name a fixture in a scenario's `given` instead of drafting steps that create the data. You see what each fixture gives, not how it works.
 
 - `order.paid`: A paid order of 1000 that belongs to the given customer. Parameters: `customer` (has a default). Outputs: `id`.
-- `customer.verified` (not approved yet): A customer who passed identity checks. Outputs: `id`, `email`.
+- `customer.verified`: A customer who passed identity checks. Outputs: `id`, `email`.
 
 - `given` is a list of `{"fixture": "<id>", "as": "<name>", "with": {"<parameter>": "<value>"}}`. A step then uses `{{<name>.<output>}}`, for example `{{order.id}}` in a path.
 - Pick a fixture by its description. Give every parameter that has no default.

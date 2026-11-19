@@ -28,7 +28,7 @@ func TestMarshalWritesAFileThatParsesToTheSameFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.HasPrefix(text, "# Drafted by semar plan.") || !strings.Contains(text, "semar review order.cancelled") {
+	if !strings.HasPrefix(text, "# Drafted by semar plan.") || strings.Contains(text, "semar review") {
 		t.Errorf("the file has no header:\n%s", text)
 	}
 	back, err := Parse(data, "order.cancelled.yaml")

@@ -1936,7 +1936,7 @@ Each command that reads the repository also takes `--dir <path>`, the root of th
 | [`semar defer`](#semar-defer) | Left out | Leaves a use case untested until a day, under your name |
 | [`semar changes`](#semar-changes) | Left out | Prints the tickets, commits, and files between two branches, with no model |
 | [`semar export`](#semar-export) | Left out | Writes one stored run as CTRF, JUnit XML, or SARIF |
-| [`semar fixture list`](#semar-fixture-list) | Left out | Lists the fixtures with their approval, their health, and the scenarios that use them |
+| [`semar fixture list`](#semar-fixture-list) | Left out | Lists the fixtures with their health and the scenarios that use them |
 | [`semar fixture check`](#semar-fixture-check) | Left out | Runs the fixtures on an environment and records their health |
 | [`semar journey list`](#semar-journey-list) | Left out | Lists the journeys with their last result |
 | [`semar journey run`](#semar-journey-run) | Left out | Runs journeys against an environment, leg by leg |
@@ -2275,7 +2275,7 @@ semar export (ctrf | junit | sarif) <run id>
 
 #### `semar fixture list`
 
-List the fixtures with their approval, their health, and the scenarios that use them
+List the fixtures with their health and the scenarios that use them
 
 ```text
 semar fixture list
@@ -2287,9 +2287,7 @@ semar fixture list
 
 #### `semar fixture check`
 
-Run find, then create, then cleanup of each fixture on an environment, and record whether it still works.
-
-A fixture that is not approved is not run. A fixture that failed its last check blocks the scenarios that use it.
+Run find, then create, then cleanup of each fixture on an environment, and record whether it still works. A fixture that failed its last check blocks the scenarios that use it.
 
 ```text
 semar fixture check (<id>... | --all) --env <name>

@@ -397,7 +397,6 @@ func TestRecordAsksForTheNameOfAPasswordOnATerminal(t *testing.T) {
 
 func TestRecordMakesAFixtureAndWritesItsValuesAsVariables(t *testing.T) {
 	r, _ := recordRepoWith(t, repoOptions{tree: "e2e-fixtures", app: sampleapp.Options{}, payments: &sampleapp.PaymentOptions{}})
-	r.approveFixture(t)
 	ctx := t.Context()
 
 	res := r.record(t, ctx, cli.ExitOK, func(d webtest.Driver) {
@@ -435,7 +434,6 @@ func TestRecordMakesAFixtureAndWritesItsValuesAsVariables(t *testing.T) {
 
 func TestRecordInterruptedWritesNothingAndCleansUpItsFixture(t *testing.T) {
 	r, _ := recordRepoWith(t, repoOptions{tree: "e2e-fixtures", app: sampleapp.Options{}, payments: &sampleapp.PaymentOptions{}})
-	r.approveFixture(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 

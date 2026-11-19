@@ -100,14 +100,10 @@ func TestCheckIgnoresItsOwnLastHealthRecord(t *testing.T) {
 	}
 }
 
-func TestCheckNeedsApprovalAndSendsNothingWithout(t *testing.T) {
-	r := newRig(t, rigOptions{unapproved: true})
-	res := r.check()
-	if res.Checked || !strings.Contains(res.Note, "fixture order.paid is not approved: run semar review order.paid") {
+func TestCheckOfAFixtureNobodyApprovedRuns(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	if res := r.check(); !res.Checked {
 		t.Fatalf("result = %+v", res)
-	}
-	if n := r.sent("", ""); n != 0 {
-		t.Errorf("%d requests were sent for a fixture nobody approved", n)
 	}
 	missing, err := r.resolver().Check(t.Context(), "order.refunded", "alice")
 	if err != nil || missing.Checked || !strings.Contains(missing.Note, "fixture order.refunded (as check) is missing") {

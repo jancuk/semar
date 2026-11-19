@@ -38,7 +38,7 @@ Before: accepted. Now: 422.
 
 Given: order from order.paid
 
-Given: buyer from customer.verified (not approved yet: semar review customer.verified)
+Given: buyer from customer.verified
 
 1. POST /v1/orders/{id}/refunds: Request a refund of 150000
    - Sends POST /v1/orders/{{order.id}}/refunds; json {"amount":150000}
@@ -70,9 +70,9 @@ The read must stay the same.
 ## Fixtures needed
 
 - SHOP-482: an order that already has one refund. Proposed fixture order.refunded: A paid order with one refund of 100. Parameters: customer. Outputs: id. Services: orders.
-  A person writes the fixture in .semar/fixtures/order.refunded.yaml, approves it, and plans again.
+  A person writes the fixture in .semar/fixtures/order.refunded.yaml and plans again.
 - SHOP-483: a customer with two addresses. Proposed fixture customer.two-addresses: A customer who has two saved addresses. Parameters: none. Outputs: id, email. Services: orders.
-  A person writes the fixture in .semar/fixtures/customer.two-addresses.yaml, approves it, and plans again.
+  A person writes the fixture in .semar/fixtures/customer.two-addresses.yaml and plans again.
 
 ## Files that no scenario covers
 

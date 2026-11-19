@@ -275,7 +275,6 @@ type Entry struct {
 	Description string
 	Params      []ParamEntry // sorted by name
 	Outputs     []string
-	Approved    bool
 }
 
 type ParamEntry struct {
@@ -283,16 +282,14 @@ type ParamEntry struct {
 	Required bool // no default: every given entry must set it in with
 }
 
-// Entries lists the valid fixtures for the planner, in ID order. approved says whether a person
-// approved the fixture as it is now; with nil, none is.
-func (c Catalogue) Entries(approved func(domain.Fixture) bool) []Entry {
+// Entries lists the valid fixtures for the planner, in ID order.
+func (c Catalogue) Entries() []Entry {
 	out := make([]Entry, len(c.Fixtures))
 	for i, f := range c.Fixtures {
 		e := Entry{ID: f.ID, Description: f.Description, Outputs: slices.Clone(f.Outputs)}
 		for _, name := range slices.Sorted(maps.Keys(f.Params)) {
 			e.Params = append(e.Params, ParamEntry{Name: name, Required: f.Params[name].Default == nil})
 		}
-		e.Approved = approved != nil && approved(f)
 		out[i] = e
 	}
 	return out

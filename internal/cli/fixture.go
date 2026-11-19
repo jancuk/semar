@@ -15,7 +15,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/fixture"
@@ -39,7 +38,7 @@ func newFixtureListCommand() *cobra.Command {
 	var f fixtureListFlags
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List the fixtures with their approval, their health, and the scenarios that use them",
+		Short: "List the fixtures with their health and the scenarios that use them",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return listFixtures(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), f)
@@ -94,16 +93,9 @@ func listFixtures(ctx context.Context, stdout, stderr io.Writer, f fixtureListFl
 		}
 	}
 
-	approvals := confirm.NewLocal(semarDir(f.dir))
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	for _, fx := range cat.Fixtures {
-		approval := "not approved"
-		if ok, err := approvals.FixtureApproved(fx.ID, domain.FixtureHash(fx)); err != nil {
-			approval = "approval unreadable: " + oneLine(terminalSafe(err.Error()))
-		} else if ok {
-			approval = "approved"
-		}
-		cells := []string{string(fx.ID), fx.Version, fx.Owner, approval}
+		cells := []string{string(fx.ID), fx.Version, fx.Owner}
 		if health != nil {
 			cells = append(cells, healthWords(health, f.env, fx))
 		}
@@ -182,8 +174,7 @@ func newFixtureCheckCommand(o options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check (<id>... | --all) --env <name>",
 		Short: "Run find, create, and cleanup of fixtures on an environment and record their health",
-		Long: "Run find, then create, then cleanup of each fixture on an environment, and record whether it still works.\n" +
-			"A fixture that is not approved is not run. A fixture that failed its last check blocks the scenarios that use it.",
+		Long:  "Run find, then create, then cleanup of each fixture on an environment, and record whether it still works. A fixture that failed its last check blocks the scenarios that use it.",
 		Args: func(_ *cobra.Command, args []string) error {
 			switch {
 			case len(args) == 0 && !f.all:

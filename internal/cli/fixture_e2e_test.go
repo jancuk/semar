@@ -1,8 +1,6 @@
 package cli_test
 
 import (
-	"bytes"
-	"os"
 	"strings"
 	"testing"
 
@@ -18,15 +16,6 @@ func givenLine(h domain.Hash, how string) string {
 func TestFixtureRunEndToEnd(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 
-	// A fixture that nobody approved gives no state, and nothing reaches the services.
-	blocked := r.must(t, cli.ExitUndecided, "run", "--scenario", fixtureScenario)
-	contains(t, "the summary", blocked.stdout, fixtureScenario, "needs review", "fixture order.paid is not approved: run semar review order.paid")
-	if n := r.reached("/v1"); n != 0 {
-		t.Errorf("%d requests reached the services before the fixture was approved", n)
-	}
-
-	confirmed := r.must(t, cli.ExitOK, "review", "order.paid", "--yes")
-	contains(t, "the approval", confirmed.stdout, "approved fixture order.paid", "local, unverified identity")
 	hash, err := cli.FixtureHashOf(r.dir, "order.paid")
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +81,7 @@ func TestFixtureRunEndToEnd(t *testing.T) {
 func TestFixtureRunReusesARecordThatFindGives(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	seeded := r.seedPaidOrder(t)
-	hash := r.approveFixture(t)
+	hash := r.fixtureHash(t)
 	orders := r.app.Requests("POST", "/v1/orders")
 
 	res := r.must(t, cli.ExitOK, "run", "--scenario", fixtureScenario)
@@ -120,49 +109,37 @@ func TestFixtureRunReusesARecordThatFindGives(t *testing.T) {
 	}
 }
 
-func TestFixtureRunNotApprovedIsBlockedBeforeAnyRequest(t *testing.T) {
+func TestAFixtureCreateThatEffectsDenyIsBlockedAndSendsNothing(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
-
+	r.rewriteConfig(t, func(s string) string {
+		return strings.Replace(s, "      mode: test_data\n", "      mode: test_data\n      deny:\n        - {method: POST, path: /v1/orders}\n", 1)
+	})
 	res := r.must(t, cli.ExitUndecided, "run", "--scenario", fixtureScenario)
-	contains(t, "the summary", res.stdout, "needs review")
-	if strings.Contains(res.stdout, "failed 1") {
-		t.Errorf("a fixture that is not approved must never give failed:\n%s", res.stdout)
-	}
-	if n := r.reached("/v1"); n != 0 {
-		t.Errorf("%d requests reached the services", n)
+	contains(t, "the summary", res.stdout, "blocked", "is on the deny list")
+	if n := r.app.Requests("POST", "/v1/orders"); n != 0 {
+		t.Errorf("%d creates reached the service although effects.deny lists them", n)
 	}
 	run := r.lastRun(t)
 	if len(run.Results) != 1 || run.Results[0].Outcome != domain.OutcomeBlocked || len(run.Results[0].Actions) != 0 {
 		t.Fatalf("results = %+v", run.Results)
 	}
-	hash, err := cli.FixtureHashOf(r.dir, "order.paid")
-	if err != nil {
-		t.Fatal(err)
-	}
-	md := r.lastReport(t)
-	contains(t, "report.md", md,
-		"fixture order.paid is not approved: run semar review order.paid",
-		givenLine(hash, "no state was given; cleanup not needed"))
+}
 
-	// An approval belongs to the fixture as it was: a change lapses it.
-	r.approveFixture(t)
-	file := r.path(".semar", "fixtures", "order.paid.yaml")
-	data, err := os.ReadFile(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(file, bytes.Replace(data, []byte("of 1000"), []byte("of 1001"), 1), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	r.must(t, cli.ExitUndecided, "run", "--scenario", fixtureScenario)
-	if n := r.reached("/v1"); n != 0 {
-		t.Errorf("%d requests reached the services for a changed fixture", n)
+func TestAFixtureCreateIsNotSentToAReadOnlyEnvironment(t *testing.T) {
+	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
+	r.rewriteConfig(t, func(s string) string {
+		return strings.Replace(s, "mode: test_data", "mode: read_only", 1)
+	})
+	res := r.must(t, cli.ExitUndecided, "run", "--scenario", fixtureScenario)
+	contains(t, "the summary", res.stdout, "blocked")
+	if n := r.app.Requests("POST", ""); n != 0 {
+		t.Errorf("%d writes reached a read-only environment", n)
 	}
 }
 
 func TestFixtureRunCleanupFailureIsListed(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{Defects: defects(sampleapp.CancelFails)}, sampleapp.PaymentOptions{})
-	hash := r.approveFixture(t)
+	hash := r.fixtureHash(t)
 
 	res := r.must(t, cli.ExitOK, "run", "--scenario", fixtureScenario)
 	contains(t, "the summary", res.stdout, "passed")
@@ -182,7 +159,6 @@ func TestFixtureRunCleanupFailureIsListed(t *testing.T) {
 
 func TestFixtureRunPaymentThatNeverSettlesIsBlocked(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{Defects: defects(sampleapp.PaymentNeverSettles)})
-	r.approveFixture(t)
 
 	res := r.must(t, cli.ExitUndecided, "run", "--scenario", fixtureScenario)
 	contains(t, "the summary", res.stdout, "blocked", "create step 3 (GET /v1/orders/{{id}}) waited 1s and $.data.status was never paid")
@@ -204,7 +180,6 @@ func TestFixtureRunPaymentThatNeverSettlesIsBlocked(t *testing.T) {
 
 func TestFixtureCheckThenARunOfAnUnhealthyFixture(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{Defects: defects(sampleapp.PaymentNeverSettles)})
-	r.approveFixture(t)
 
 	res := r.must(t, cli.ExitFailed, "fixture", "check", "--all", "--env", "local", "--auth-profile", "support-agent")
 	contains(t, "the check", res.stdout, "order.paid 1.0.0: unhealthy", "waited 1s")

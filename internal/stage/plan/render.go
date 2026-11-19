@@ -270,7 +270,7 @@ func writeFixturesNeeded(b *strings.Builder, needed []FixtureNeeded) {
 		p := n.Proposal
 		fmt.Fprintf(b, "- %s: %s. Proposed fixture %s: %s. Parameters: %s. Outputs: %s. Services: %s.\n",
 			value(n.Ticket), sentence(n.What), value(p.ID), sentence(p.Description), list(p.Params), list(p.Outputs), list(p.Services))
-		fmt.Fprintf(b, "  A person writes the fixture in .semar/fixtures/%s.yaml, approves it, and plans again.\n", value(p.ID))
+		fmt.Fprintf(b, "  A person writes the fixture in .semar/fixtures/%s.yaml and plans again.\n", value(p.ID))
 	}
 }
 
@@ -290,11 +290,7 @@ func writeScenario(b *strings.Builder, sc domain.Scenario, script *domain.Script
 		b.WriteString("First drafted after the trial run. Check that its expected results come from the code.\n\n")
 	}
 	for _, g := range sc.Given {
-		note := ""
-		if e, ok := fixtures[g.Fixture]; ok && !e.Approved {
-			note = fmt.Sprintf(" (not approved yet: semar review %s)", shown(string(g.Fixture), maxValueShown))
-		}
-		fmt.Fprintf(b, "Given: %s from %s%s\n\n", shown(g.As, maxValueShown), shown(string(g.Fixture), maxValueShown), note)
+		fmt.Fprintf(b, "Given: %s from %s\n\n", shown(g.As, maxValueShown), shown(string(g.Fixture), maxValueShown))
 	}
 	for i, st := range sc.Steps {
 		route := ""
@@ -587,7 +583,7 @@ func writeFixturesDrafted(b *strings.Builder, out Output) {
 		}
 		fmt.Fprintf(b, "- %s: %s. %s, %s. %s\n", id, strings.TrimRight(shown(d.Fixture.Description, maxTextShown), "."),
 			requests, clean, FixtureRunWords(d))
-		fmt.Fprintf(b, "  Used by %s. Not approved → semar review %s\n", shown(used, maxTextShown), id)
+		fmt.Fprintf(b, "  Used by %s.\n", shown(used, maxTextShown))
 	}
 }
 

@@ -120,9 +120,8 @@ func (r *repo) lastReport(t *testing.T) string {
 	return string(data)
 }
 
-func (r *repo) approveFixture(t *testing.T) domain.Hash {
+func (r *repo) fixtureHash(t *testing.T) domain.Hash {
 	t.Helper()
-	r.must(t, cli.ExitOK, "review", "order.paid", "--yes")
 	h, err := cli.FixtureHashOf(r.dir, "order.paid")
 	if err != nil {
 		t.Fatal(err)
@@ -139,19 +138,13 @@ func slicesContains(ids []domain.ActionID, id domain.ActionID) bool {
 	return false
 }
 
-func TestFixtureListShowsApprovalAndProblems(t *testing.T) {
+func TestFixtureListHasNoApprovalColumn(t *testing.T) {
 	r := newRepo(t, repoOptions{tree: "e2e-fixtures", offline: true})
 
 	res := r.must(t, cli.ExitOK, "fixture", "list")
-	contains(t, "the list", res.stdout, "order.paid", "1.0.0", "team-orders", "not approved", "used by SHOP-482-05")
-	if strings.Contains(res.stdout, "invalid:") {
+	contains(t, "the list", res.stdout, "order.paid", "1.0.0", "team-orders", "used by SHOP-482-05")
+	if strings.Contains(res.stdout, "approved") || strings.Contains(res.stdout, "invalid:") {
 		t.Errorf("a valid catalogue lists a problem:\n%s", res.stdout)
-	}
-
-	r.approveFixture(t)
-	res = r.must(t, cli.ExitOK, "fixture", "list")
-	if strings.Contains(res.stdout, "not approved") || !strings.Contains(res.stdout, "approved") {
-		t.Errorf("an approved fixture is listed as:\n%s", res.stdout)
 	}
 
 	// A file that cannot be used is listed with its problem, and the exit code says so.
@@ -168,7 +161,6 @@ func TestFixtureListShowsApprovalAndProblems(t *testing.T) {
 
 func TestFixtureListWithAnEnvironmentShowsHealthAndPolicy(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
-	r.approveFixture(t)
 
 	res := r.must(t, cli.ExitOK, "fixture", "list", "--env", "local")
 	contains(t, "the list", res.stdout, "not checked on local")
@@ -187,7 +179,7 @@ func TestFixtureListWithAnEnvironmentShowsHealthAndPolicy(t *testing.T) {
 
 func TestFixtureCheckRecordsHealth(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
-	hash := r.approveFixture(t)
+	hash := r.fixtureHash(t)
 
 	res := r.must(t, cli.ExitOK, "fixture", "check", "--all", "--env", "local", "--auth-profile", "support-agent")
 	contains(t, "the check", res.stdout, "order.paid 1.0.0: healthy (find nothing, create made, cleanup done)", "1 fixture: 1 healthy, 0 unhealthy, 0 not fully checked")
@@ -220,21 +212,17 @@ func TestFixtureCheckRecordsHealth(t *testing.T) {
 	r.must(t, cli.ExitOK, "run", "--scenario", fixtureScenario)
 }
 
-func TestFixtureCheckNeedsApprovalAndSendsNothingWithout(t *testing.T) {
+func TestFixtureCheckChecksAFixtureNobodyApproved(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
-	res := r.must(t, cli.ExitUndecided, "fixture", "check", "order.paid", "--env", "local", "--auth-profile", "support-agent")
-	contains(t, "the check", res.stdout, "order.paid 1.0.0: not fully checked: fixture order.paid is not approved: run semar review order.paid", "1 not fully checked")
-	if n := r.reached("/v1"); n != 0 {
-		t.Errorf("%d requests reached the services for a fixture nobody approved", n)
-	}
-	if exists(t, r.path(".semar", "store", "fixture-health")) {
-		t.Error("a check that judged nothing stored a health record")
+	res := r.must(t, cli.ExitOK, "fixture", "check", "order.paid", "--env", "local", "--auth-profile", "support-agent")
+	contains(t, "the check", res.stdout, "order.paid 1.0.0: healthy", "1 fixture: 1 healthy")
+	if strings.Contains(res.stdout, "approved") {
+		t.Errorf("the check mentions an approval:\n%s", res.stdout)
 	}
 }
 
 func TestFixtureCheckProductionNeedsEnv(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
-	r.approveFixture(t)
 	r.rewriteConfig(t, func(s string) string { return strings.Replace(s, "kind: test", "kind: production", 1) })
 
 	res := r.semar(t, t.Context(), "fixture", "check", "--all", "--auth-profile", "support-agent")
@@ -252,7 +240,6 @@ func TestFixtureCheckProductionNeedsEnv(t *testing.T) {
 
 func TestFixtureCheckOnAReadOnlyEnvironmentSendsNoWrite(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
-	r.approveFixture(t)
 	r.rewriteConfig(t, func(s string) string { return strings.Replace(s, "mode: test_data", "mode: read_only", 1) })
 
 	res := r.must(t, cli.ExitUndecided, "fixture", "check", "--all", "--env", "local", "--auth-profile", "support-agent")
@@ -284,7 +271,6 @@ func TestFixtureCheckUsage(t *testing.T) {
 
 func TestRunLoadsFixtureSessions(t *testing.T) {
 	r := fixtureRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
-	r.approveFixture(t)
 	// Only the payments profile is missing: the scenario's own session is there.
 	t.Setenv(paymentsTokenVar, "")
 
@@ -328,23 +314,20 @@ outputs: [id]
 
 // fixturePlan plans a fresh repository that holds a valid fixture and an invalid one, and returns
 // the result and the prompt that the planner was given.
-func fixturePlan(t *testing.T, approve bool) (result, string) {
+func fixturePlan(t *testing.T) (result, string) {
 	t.Helper()
 	p := newPlanRepo(t, sampleapp.Options{})
 	p.configure(t, goodDraft)
 	p.write(t, ".semar/fixtures/order.created.yaml", ordersOnlyFixture)
 	// The file name does not match its ID, and its create step calls a service that no environment has.
 	p.write(t, ".semar/fixtures/order-paid.yaml", orderPaidFixture)
-	if approve {
-		p.must(t, cli.ExitOK, "review", "order.created", "--yes")
-	}
 	made := p.recordJobs()
 	res := p.must(t, cli.ExitOK, "plan", "--diff", "main..release")
 	return res, onlyPrompt(t, *made)
 }
 
 func TestPlanSkipsInvalidFixtureWithOneLine(t *testing.T) {
-	res, prompt := fixturePlan(t, false)
+	res, prompt := fixturePlan(t)
 	var lines []string
 	for _, l := range strings.Split(res.stderr, "\n") {
 		if strings.Contains(l, "fixture file") {
@@ -359,17 +342,9 @@ func TestPlanSkipsInvalidFixtureWithOneLine(t *testing.T) {
 	}
 	contains(t, "stderr", res.stderr, "id order.paid does not match the file name order-paid.yaml", "payments is not a service of any environment")
 
-	contains(t, "the prompt", prompt, "## Fixtures you may name", "- `order.created` (not approved yet): An order of 1000. Outputs: `id`.")
+	contains(t, "the prompt", prompt, "## Fixtures you may name", "- `order.created`: An order of 1000. Outputs: `id`.")
 	if strings.Contains(prompt, "order.paid") {
 		t.Errorf("the prompt names a fixture that is not valid:\n%s", prompt)
-	}
-}
-
-func TestPlanMarksAnApprovedFixture(t *testing.T) {
-	_, prompt := fixturePlan(t, true)
-	contains(t, "the prompt", prompt, "- `order.created`: An order of 1000. Outputs: `id`.")
-	if strings.Contains(prompt, "not approved yet") {
-		t.Errorf("an approved fixture is marked as not approved:\n%s", prompt)
 	}
 }
 
@@ -389,7 +364,6 @@ func TestFixtureCheckSendsAStepAsItsAccount(t *testing.T) {
 	r.withOtherAccount(t)
 	// The order is made by the other account, so the account of the run cannot read it.
 	r.writeFixture(t, "order.paid.yaml", strings.Replace(orderPaidFixture, "  - request: { service: orders, method: POST, path: /v1/orders,", "  - as: other\n    request: { service: orders, method: POST, path: /v1/orders,", 1))
-	r.approveFixture(t)
 
 	res := r.must(t, cli.ExitUndecided, "fixture", "check", "order.paid", "--env", "local", "--auth-profile", "support-agent")
 	contains(t, "the check", res.stdout, "create step 3 (GET /v1/orders/{{id}}) answered 403")
@@ -397,7 +371,6 @@ func TestFixtureCheckSendsAStepAsItsAccount(t *testing.T) {
 	text := strings.ReplaceAll(orderPaidFixture, "  - request: { service: orders, method: POST,", "  - as: other\n    request: { service: orders, method: POST,")
 	text = strings.ReplaceAll(text, "  - request: { service: orders, method: GET, path: \"/v1/orders/{{id}}\"", "  - as: other\n    request: { service: orders, method: GET, path: \"/v1/orders/{{id}}\"")
 	r.writeFixture(t, "order.paid.yaml", text)
-	r.approveFixture(t)
 	res = r.must(t, cli.ExitOK, "fixture", "check", "order.paid", "--env", "local", "--auth-profile", "support-agent")
 	contains(t, "the check", res.stdout, "healthy")
 }

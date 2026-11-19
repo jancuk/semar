@@ -56,12 +56,6 @@ func planFixtureTrial(o options, f planFlags, cfg config.Config, envName string,
 	return t
 }
 
-// approved says that the fixture of a trial counts as approved: the person has not seen it yet, and
-// this run is what the plan does before the person looks.
-type approved struct{}
-
-func (approved) FixtureApproved(domain.FixtureID, domain.Hash) (bool, error) { return true, nil }
-
 // open builds the run on the first fixture. Every session that a fixture step may need is loaded
 // here, so that a missing account is one reason and not one for each fixture.
 func (t *fixtureRig) open(ctx context.Context) (*envRig, string) {
@@ -110,7 +104,7 @@ func (t *fixtureRig) TryFixture(ctx context.Context, fx domain.Fixture) (plan.Fi
 	}
 	resolver := fixture.New(fixture.Deps{
 		Engine: rg.engine, Policy: rg.policy, Catalogue: fixture.Catalogue{Fixtures: []domain.Fixture{fx}},
-		Approvals: approved{}, Environment: t.envName, Services: services, ServiceAuth: auth, Data: t.env.Data, Run: rg.id,
+		Environment: t.envName, Services: services, ServiceAuth: auth, Data: t.env.Data, Run: rg.id,
 	})
 	res, err := resolver.Check(ctx, fx.ID, t.profile)
 	if err != nil {

@@ -267,17 +267,6 @@ func TestJourneyEndToEndGivenFixture(t *testing.T) {
 	r.writeRel(t, ".semar/fixtures/order.paid.yaml", string(fixtureText))
 	r.writeRel(t, ".semar/journeys/seen-paid.yaml", givenJourney)
 
-	// A fixture that nobody approved blocks the journey, and nothing reaches /v1.
-	blocked := r.must(t, cli.ExitUndecided, "journey", "run", "seen-paid")
-	contains(t, "the summary", squash(blocked.stdout), "seen-paid needs review fixture order.paid is not approved: run semar review order.paid")
-	if n := r.reached("/v1"); n != 0 {
-		t.Errorf("%d requests reached the services before the fixture was approved", n)
-	}
-	if j := singleJourney(t, r); j.Outcome != domain.JourneyBlocked {
-		t.Errorf("an unapproved fixture gave %s, and never failed a journey", j.Outcome)
-	}
-
-	r.approveFixture(t)
 	r.must(t, cli.ExitOK, "journey", "run", "seen-paid")
 	j := singleJourney(t, r)
 	if j.Outcome != domain.JourneyPassed || len(j.Fixtures) != 1 || j.Fixtures[0].Cleanup != "done" || j.Fixtures[0].Outputs["id"] != "o-1" {
@@ -313,7 +302,6 @@ func TestJourneyEndToEndServiceWithoutProfileUsesDefault(t *testing.T) {
 	}
 	r.writeRel(t, ".semar/fixtures/order.paid.yaml", string(fixtureText))
 	r.writeRel(t, ".semar/journeys/seen-paid.yaml", givenJourney)
-	r.approveFixture(t)
 
 	r.must(t, cli.ExitOK, "journey", "run", "seen-paid")
 	if j := singleJourney(t, r); j.Outcome != domain.JourneyPassed || len(j.Fixtures) != 1 || j.Fixtures[0].Cleanup != "done" {

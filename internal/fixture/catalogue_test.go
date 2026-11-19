@@ -274,22 +274,19 @@ func TestEntries(t *testing.T) {
 	if err != nil || len(c.Problems) != 0 {
 		t.Fatalf("Load = %+v, %v", c, err)
 	}
-	got := c.Entries(func(f domain.Fixture) bool { return f.ID == "order.paid" })
+	got := c.Entries()
 	want := []Entry{
-		{ID: "a.first", Description: "A paid order of 1000 that belongs to the given customer", Params: []ParamEntry{{"customer", false}}, Outputs: []string{"id"}, Approved: false},
-		{ID: "order.paid", Description: "A paid order of 1000 that belongs to the given customer", Params: []ParamEntry{{"amount", false}, {"customer", false}, {"tier", true}}, Outputs: []string{"id"}, Approved: true},
+		{ID: "a.first", Description: "A paid order of 1000 that belongs to the given customer", Params: []ParamEntry{{"customer", false}}, Outputs: []string{"id"}},
+		{ID: "order.paid", Description: "A paid order of 1000 that belongs to the given customer", Params: []ParamEntry{{"amount", false}, {"customer", false}, {"tier", true}}, Outputs: []string{"id"}},
 	}
 	if !reflect.DeepEqual(want, got) {
 		t.Fatalf("entries = %+v, want %+v", got, want)
-	}
-	if got := c.Entries(nil); got[0].Approved || got[1].Approved {
-		t.Error("a nil approval function approved a fixture")
 	}
 }
 
 func TestEntriesDoNotShareSlicesWithTheCatalogue(t *testing.T) {
 	c := Catalogue{Fixtures: []domain.Fixture{example(t)}}
-	e := c.Entries(nil)
+	e := c.Entries()
 	e[0].Outputs[0] = "changed"
 	if c.Fixtures[0].Outputs[0] != "id" {
 		t.Fatal("an entry shares its outputs with the fixture")

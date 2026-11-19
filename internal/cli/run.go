@@ -16,7 +16,6 @@ import (
 
 	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/api"
@@ -374,7 +373,6 @@ func (rg *envRig) resolver(o options, envName string, env config.Environment, ca
 		Engine:      rg.engine,
 		Policy:      rg.policy,
 		Catalogue:   cat,
-		Approvals:   confirm.NewLocal(rg.store.Root()),
 		Health:      fixture.NewHealthStore(rg.store.Root()),
 		Leases:      leases,
 		Environment: envName,

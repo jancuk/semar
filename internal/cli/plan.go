@@ -21,7 +21,6 @@ import (
 	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/changeset"
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/edge"
 	"github.com/jancuk/semar/internal/fixture"
@@ -415,8 +414,7 @@ func findTickets(stderr io.Writer, sourceDir string, sources []knowledge.Source,
 }
 
 // planFixtures is what the planner may name under given: every valid fixture of the repository,
-// marked approved when a person approved it as it is now. A file that cannot be used stays out,
-// and one line for each of its problems says so.
+// A file that cannot be used stays out, and one line for each of its problems says so.
 func planFixtures(stderr io.Writer, repo string, cfg config.Config) ([]fixture.Entry, fixture.Catalogue, error) {
 	cat, err := fixture.Load(repo, allServices(cfg), fixtureAccounts(cfg))
 	if err != nil {
@@ -425,11 +423,7 @@ func planFixtures(stderr io.Writer, repo string, cfg config.Config) ([]fixture.E
 	for _, p := range cat.Problems {
 		fmt.Fprintf(stderr, "semar: fixture file %s: %s; the planner does not see it\n", terminalSafe(p.File), terminalSafe(oneLine(problemText(p))))
 	}
-	approvals := confirm.NewLocal(semarDir(repo))
-	return cat.Entries(func(f domain.Fixture) bool {
-		ok, err := approvals.FixtureApproved(f.ID, domain.FixtureHash(f))
-		return err == nil && ok
-	}), cat, nil
+	return cat.Entries(), cat, nil
 }
 
 // planJourneys is the journeys that plan.md may list as flows to rerun: every valid file of
@@ -692,7 +686,7 @@ func printPlanDone(w io.Writer, envName string, out plan.Output, listed bool, tr
 	printWebPart(w, envName, out)
 	for _, d := range out.FixtureDrafts {
 		if d.Drafted {
-			fmt.Fprintf(w, "fixture drafted: %s. %s Not approved: semar review %s\n", terminalSafe(d.Need.ID), terminalSafe(plan.FixtureRunWords(d)), terminalSafe(d.Need.ID))
+			fmt.Fprintf(w, "fixture drafted: %s. %s\n", terminalSafe(d.Need.ID), terminalSafe(plan.FixtureRunWords(d)))
 			continue
 		}
 		why := d.Reason

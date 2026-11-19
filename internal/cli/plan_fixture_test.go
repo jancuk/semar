@@ -82,7 +82,7 @@ func TestPlanDraftsTheFixtureACriterionNeedsRunsItOnceAndPlansTheCriterionAgain(
 
 	contains(t, "stdout", res.stdout,
 		"SHOP-482 (behaviour): 1 scenario\n",
-		"fixture drafted: order.open. Ran once: ok. Not approved: semar review order.open\n",
+		"fixture drafted: order.open. Ran once: ok.\n",
 		"next:\n  semar run   run the tests against the service\n",
 	)
 	if got := len((*made)[0].Jobs()); got != 3 {
@@ -119,11 +119,11 @@ func TestPlanDraftsTheFixtureACriterionNeedsRunsItOnceAndPlansTheCriterionAgain(
 	}
 	contains(t, "plan.md", string(md), "## Fixtures drafted\n",
 		"- order.open: An open order of the default account. 2 requests, cleans up. Ran once: ok.\n",
-		"  Used by SHOP-482-01, SHOP-482-E01, SHOP-482-E02. Not approved → semar review order.open\n",
+		"  Used by SHOP-482-01, SHOP-482-E01, SHOP-482-E02.\n",
 		"1 fixture drafted")
 
 	list := p.must(t, cli.ExitOK, "fixture", "list")
-	contains(t, "fixture list", list.stdout, "order.open", "not approved", "used by SHOP-482-01")
+	contains(t, "fixture list", list.stdout, "order.open", "used by SHOP-482-01")
 }
 
 func TestPlanSendsAFixtureThatFailsItsRunBackToTheModel(t *testing.T) {
@@ -145,7 +145,7 @@ func TestPlanWithNoTrialDraftsTheFixtureAndSendsNothingToTheEnvironment(t *testi
 	p.cancelledRepo(t, needsCancelledAnswer, cancelledFixtureAnswer, refundCancelledAnswer)
 	p.recordJobs()
 	res := p.must(t, cli.ExitOK, "plan", "--diff", "main..release", "--no-trial")
-	contains(t, "stdout", res.stdout, "fixture drafted: order.open. Not run: turned off with --no-trial. Not approved: semar review order.open\n")
+	contains(t, "stdout", res.stdout, "fixture drafted: order.open. Not run: turned off with --no-trial.\n")
 	if n := p.app.Requests("", ""); n != 0 {
 		t.Errorf("the environment got %d requests", n)
 	}
@@ -165,6 +165,26 @@ func TestPlanDoesNotRunAFixtureOnAnEnvironmentThatAllowsOnlyReads(t *testing.T) 
 	contains(t, "stdout", res.stdout, "fixture drafted: order.open. Not run:")
 	if n := p.app.Requests("POST", ""); n != 0 {
 		t.Errorf("a read-only environment got %d writes", n)
+	}
+}
+
+func TestPlanDoesNotSendAFixtureCreateThatEffectsDeny(t *testing.T) {
+	p := newPlanRepo(t, sampleapp.Options{})
+	p.cancelledRepo(t, needsCancelledAnswer, cancelledFixtureAnswer, cancelledFixtureAnswer, cancelledFixtureAnswer, cancelledFixtureAnswer)
+	p.rewriteConfig(t, func(s string) string {
+		return strings.Replace(s, "effects: {mode: test_data}", "effects: {mode: test_data, deny: [{method: POST, path: /v1/orders}]}", 1)
+	})
+	p.recordJobs()
+	res := p.semar(t, t.Context(), "plan", "--diff", "main..release")
+	contains(t, "stdout", res.stdout, "fixture not drafted: order.open:", "deny list")
+	if strings.Contains(res.stdout, "semar review") {
+		t.Errorf("the plan points to semar review:\n%s", res.stdout)
+	}
+	if n := p.app.Requests("POST", "/v1/orders"); n != 0 {
+		t.Errorf("the environment got %d creates although effects.deny lists them", n)
+	}
+	if _, err := os.Stat(p.path(".semar", "fixtures", "order.open.yaml")); err == nil {
+		t.Error("a fixture whose create the policy denies was written")
 	}
 }
 

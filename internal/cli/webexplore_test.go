@@ -198,7 +198,6 @@ func TestATestWhoseReplayDoesNotEndAsPredictedIsRemoved(t *testing.T) {
 
 func TestAFlowWithFixturesMakesThemAndCleansThemUp(t *testing.T) {
 	r, _ := recordRepoWith(t, repoOptions{tree: "e2e-fixtures", app: sampleapp.Options{}, payments: &sampleapp.PaymentOptions{}})
-	r.approveFixture(t)
 	r.rewriteConfig(t, func(s string) string {
 		return strings.Replace(s, "baseUrl: "+r.ordersURL, "baseUrl: "+r.ordersURL+"\n        web: {start: /orders/o-1}", 1)
 	})

@@ -101,7 +101,7 @@ func TestPlanNamesTheDocumentsOnlyWhenThereAreSome(t *testing.T) {
 }
 
 const fixtureList = "- `order.paid`: A paid order of 1000 that belongs to the given customer. Parameters: `customer` (has a default). Outputs: `id`.\n" +
-	"- `customer.verified` (not approved yet): A customer who passed identity checks. Outputs: `id`, `email`."
+	"- `customer.verified`: A customer who passed identity checks. Outputs: `id`, `email`."
 
 const fixtureRule = "- When a scenario needs data that no fixture gives and no earlier step of the scenario can read, do not draft it. " +
 	"Add a `notDrafted` entry whose `needs` says `fixture <proposed id>`, and a `fixturesNeeded` entry with the ticket, what the scenario needs, and a proposal: " +

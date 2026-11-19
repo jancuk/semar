@@ -54,9 +54,6 @@ func fixtureList(entries []fixture.Entry) string {
 func fixtureLine(e fixture.Entry) string {
 	var b strings.Builder
 	b.WriteString("- " + codeName(string(e.ID)))
-	if !e.Approved {
-		b.WriteString(" (not approved yet)")
-	}
 	desc := strings.TrimRight(strings.ReplaceAll(plain(e.Description, maxFixtureDescription), "`", "'"), ".")
 	if desc == "" {
 		desc = "(no description)"

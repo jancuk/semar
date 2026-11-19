@@ -387,20 +387,29 @@ func TestParametersMayHoldDateVariables(t *testing.T) {
 		"fixture order.paid: parameter customer: {{date.tomorrow}} is not run.id, a date variable, or data.<key>")
 }
 
-func TestNotApproved(t *testing.T) {
-	r := newRig(t, rigOptions{unapproved: true})
-	wantBlocked(t, r.resolve(request(orderGiven)), "fixture order.paid is not approved: run semar review order.paid")
+func TestAFixtureResolvesWithNoApproval(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	if res := r.resolve(request(orderGiven)); len(res.Blocked) != 0 {
+		t.Fatalf("blocked: %v", res.Blocked)
+	}
+}
 
-	// An approval of the fixture as it was before a change does not count.
-	r = newRig(t, rigOptions{})
-	changed := example(t)
-	changed.Description = "A paid order of 2000"
-	r.deps.Catalogue = Catalogue{Fixtures: []domain.Fixture{changed}}
-	wantBlocked(t, r.resolve(request(orderGiven)), "fixture order.paid is not approved: run semar review order.paid")
-
+func TestAFixtureThatIsNotInTheCatalogueIsMissing(t *testing.T) {
+	r := newRig(t, rigOptions{})
 	wantBlocked(t, r.resolve(request(domain.Given{Fixture: "order.refunded", As: "refund"})), "fixture order.refunded (as refund) is missing")
 	if n := r.sent("", ""); n != 0 {
 		t.Errorf("%d requests were sent", n)
+	}
+}
+
+func TestAFixtureCreateThatThePolicyDeniesIsNotSent(t *testing.T) {
+	r := newRig(t, rigOptions{effects: config.Effects{Deny: []config.OpPattern{{Method: "POST", Path: "/v1/orders"}}}})
+	res := r.resolve(request(orderGiven))
+	if len(res.Blocked) == 0 || !strings.Contains(strings.Join(res.Blocked, "\n"), "fixture order.paid:") {
+		t.Fatalf("blocked = %v, want the policy's refusal of the create", res.Blocked)
+	}
+	if n := r.sent("POST", ""); n != 0 {
+		t.Errorf("%d writes were sent although the policy denies the create", n)
 	}
 }
 

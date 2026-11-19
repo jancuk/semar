@@ -801,23 +801,17 @@ func loadFixture(t *testing.T) domain.Fixture {
 }
 
 // withFixtures gives the rig a real resolver over the one fixture of testdata, through the rig's engine.
-func (r *rig) withFixtures(t *testing.T, approved bool) {
+// With present false the catalogue is empty, so that every given entry is missing.
+func (r *rig) withFixtures(t *testing.T, present bool) {
 	t.Helper()
-	f := loadFixture(t)
-	if approved {
-		err := r.confirm.PutFixture(confirm.FixtureApproval{
-			Fixture: f.ID, Version: f.Version, Hash: domain.FixtureHash(f), User: "tester",
-			Identity: "local, unverified identity", At: time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC),
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
+	var fixtures []domain.Fixture
+	if present {
+		fixtures = []domain.Fixture{loadFixture(t)}
 	}
 	r.deps.Fixtures = fixture.New(fixture.Deps{
 		Engine:      r.deps.Engine,
 		Policy:      r.policy,
-		Catalogue:   fixture.Catalogue{Fixtures: []domain.Fixture{f}},
-		Approvals:   r.confirm,
+		Catalogue:   fixture.Catalogue{Fixtures: fixtures},
 		Health:      fixture.NewHealthStore(r.store.Root()),
 		Environment: "local",
 		Services:    map[string]string{"orders": r.url},
@@ -891,7 +885,7 @@ func TestFixtureBlockedSendsNoStep(t *testing.T) {
 	r.withFixtures(t, false)
 	sc := r.givenScenario(t, "/v1/orders/{{order.id}}")
 	results, _, _ := r.run(t, sc)
-	expect(t, results[0], domain.OutcomeBlocked, "fixture order.new is not approved: run semar review order.new")
+	expect(t, results[0], domain.OutcomeBlocked, "fixture order.new (as order) is missing")
 	if n := r.app.Requests("", "/v1/orders"); n != 0 {
 		t.Errorf("%d requests were sent", n)
 	}

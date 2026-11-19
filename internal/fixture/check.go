@@ -14,7 +14,7 @@ type CheckResult struct {
 	// Record has the fixture, version, hash, environment, run, the three phases, Healthy, and
 	// Reason. The caller adds At and Builds. It is stored only when Checked is true.
 	Record HealthRecord
-	// Checked is false when the check could not judge the fixture: it was not approved, a
+	// Checked is false when the check could not judge the fixture: a
 	// parameter has no value, the policy refuses a step, or the environment is read only and
 	// the fixture has create steps. Note says why. A record of that would block scenarios for a
 	// reason that is not the fixture's health.
@@ -26,7 +26,7 @@ type CheckResult struct {
 
 // Check runs the find steps of a fixture, then its create steps also when find gave a record, so
 // that create is checked, and then the cleanup of what create made. It sends only what the
-// effects policy admits. The fixture must be approved, but its own last health record does not
+// effects policy admits. Its own last health record does not
 // block it, so a fixture that failed once can be checked again. No lease is taken: create makes a
 // record that no other run knows. It returns an error only for a recorder failure or a cancelled
 // context, after it has cleaned up what it made.

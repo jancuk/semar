@@ -174,7 +174,7 @@ func shopInput(t *testing.T) Input {
 		Knowledge: []knowledge.Source{api},
 		Tickets:   []knowledge.Ticket{{Key: "SHOP-482", Path: ticket482, Text: shopTicket}},
 		Fixtures: []fixture.Entry{{
-			ID: "order.paid", Description: "A paid order for 100000 of a customer", Approved: true,
+			ID: "order.paid", Description: "A paid order for 100000 of a customer",
 			Params: []fixture.ParamEntry{{Name: "customer", Required: true}}, Outputs: []string{"order"},
 		}},
 		Accounts: []Account{{Name: "default", Description: "A support agent"}, {Name: "bob", Description: "A customer with no refund rights"}},

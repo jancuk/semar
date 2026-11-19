@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/jancuk/semar/internal/config"
-	"github.com/jancuk/semar/internal/confirm"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/api"
@@ -102,8 +101,7 @@ type rigOptions struct {
 	effects      config.Effects // Mode test_data when empty
 	wrapOrders   func(http.Handler) http.Handler
 	wrapPayments func(http.Handler) http.Handler
-	fixtures     []domain.Fixture // default: the example, approved
-	unapproved   bool
+	fixtures     []domain.Fixture // default: the example
 	noLeases     bool
 	timeout      time.Duration
 	prefix       string // a path prefix of both base URLs, such as /api
@@ -117,7 +115,6 @@ type rig struct {
 	payURL    string
 	sink      *collect
 	clock     *fakeClock
-	approvals *confirm.Local
 	health    *HealthStore
 	leases    *Leases
 	deps      Deps
@@ -196,12 +193,6 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	if fixtures == nil {
 		fixtures = []domain.Fixture{example(t)}
 	}
-	approvals := confirm.NewLocal(root)
-	if !o.unapproved {
-		for _, f := range fixtures {
-			approve(t, approvals, f)
-		}
-	}
 	var leases *Leases
 	if !o.noLeases {
 		if leases, err = OpenLeases(t.TempDir()); err != nil {
@@ -212,12 +203,11 @@ func newRig(t *testing.T, o rigOptions) *rig {
 	health := NewHealthStore(root)
 	return &rig{
 		t: t, app: app, pay: pay, ordersURL: osrv.URL + o.prefix, payURL: psrv.URL + o.prefix, sink: sink, clock: clock,
-		approvals: approvals, health: health, leases: leases,
+		health: health, leases: leases,
 		deps: Deps{
 			Engine:      eng,
 			Policy:      pol,
 			Catalogue:   Catalogue{Fixtures: fixtures},
-			Approvals:   approvals,
 			Health:      health,
 			Leases:      leases,
 			Environment: testEnv,
@@ -238,17 +228,6 @@ func host(t *testing.T, raw string) string {
 		t.Fatal(err)
 	}
 	return u.Host
-}
-
-func approve(t *testing.T, l *confirm.Local, f domain.Fixture) {
-	t.Helper()
-	err := l.PutFixture(confirm.FixtureApproval{
-		Fixture: f.ID, Version: f.Version, Hash: domain.FixtureHash(f), User: "tester",
-		Identity: "local, unverified identity", At: time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 func (r *rig) resolver() *Resolver { return New(r.deps) }

@@ -33,10 +33,6 @@ const (
 	CleanupNotNeeded = "not_needed"
 )
 
-type Approvals interface {
-	FixtureApproved(id domain.FixtureID, h domain.Hash) (bool, error)
-}
-
 type Health interface {
 	Latest(env string, id domain.FixtureID) (HealthRecord, bool, error)
 }
@@ -49,7 +45,6 @@ type Deps struct {
 	Engine      Doer
 	Policy      *effects.Policy
 	Catalogue   Catalogue
-	Approvals   Approvals
 	Health      Health
 	Leases      *Leases // nil refuses lease: exclusive with a blocked reason
 	Environment string
@@ -174,7 +169,7 @@ func (r *Resolver) newEntry(owner domain.ScenarioID, auth string, pass domain.Pa
 	}
 }
 
-// prepare runs the checks that need no request: load, approval, health, policy, and parameters.
+// prepare runs the checks that need no request: load, health, policy, and parameters.
 func (r *Resolver) prepare(e *entry) []string {
 	g := e.given
 	f, ok := r.d.Catalogue.Get(g.Fixture)
@@ -185,16 +180,6 @@ func (r *Resolver) prepare(e *entry) []string {
 	h := domain.FixtureHash(f)
 	e.rec.Version, e.rec.Hash = f.Version, h
 
-	approved := false
-	if r.d.Approvals != nil {
-		var err error
-		if approved, err = r.d.Approvals.FixtureApproved(f.ID, h); err != nil {
-			return []string{fmt.Sprintf("fixture %s: its approvals could not be read: %v", f.ID, err)}
-		}
-	}
-	if !approved {
-		return []string{fmt.Sprintf("fixture %s is not approved: run semar review %s", f.ID, f.ID)}
-	}
 	if r.d.Health != nil && !e.check {
 		rec, found, err := r.d.Health.Latest(r.d.Environment, f.ID)
 		if err != nil {
