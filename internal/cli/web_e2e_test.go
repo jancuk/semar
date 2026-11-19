@@ -180,12 +180,6 @@ func TestScreensRepairOfARunWithNoMiss(t *testing.T) {
 	contains(t, "the answer", res.stdout, "nothing to repair")
 }
 
-func TestReviewRefusesAScreensAppThatHasNoFile(t *testing.T) {
-	r := newRepo(t, repoOptions{offline: true})
-	res := r.must(t, cli.ExitError, "review", "nope", "--yes")
-	contains(t, "the error", res.stderr, "nope is not a scenario, a ticket, a fixture, a journey, or the app of a screens file")
-}
-
 func TestLoginWithoutChromeSaysSo(t *testing.T) {
 	r := newRepo(t, repoOptions{offline: true})
 	r.rewriteConfig(t, func(s string) string {
@@ -216,7 +210,6 @@ func TestNoChromeBlocksAWebScenario(t *testing.T) {
 		return strings.Replace(s, "    effects:", "    web: {chrome: /does/not/exist}\n    effects:", 1)
 	})
 	r.must(t, cli.ExitOK, "script", "add", r.path("scripts", "WEB-1.yaml"))
-	r.must(t, cli.ExitOK, "review", "shop", "--yes")
 	r.must(t, cli.ExitUndecided, "run", "--scenario", "WEB-1")
 	contains(t, "the report", r.lastReport(t), "blocked", "Chrome was not found")
 }

@@ -196,10 +196,9 @@ func (r *repo) path(parts ...string) string {
 
 func (r *repo) scriptFile() string { return r.path("scripts", scenarioID+".yaml") }
 
-func (r *repo) addScriptAndConfirm(t *testing.T) {
+func (r *repo) addScript(t *testing.T) {
 	t.Helper()
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
-	r.must(t, cli.ExitOK, "review", scenarioID, "--yes")
 }
 
 func (r *repo) runDirs(t *testing.T) []string {
@@ -343,7 +342,7 @@ func TestRunEndToEnd(t *testing.T) {
 
 func TestRunFindsTheSeededDefect(t *testing.T) {
 	r := newRepo(t, repoOptions{app: sampleapp.Options{Defects: map[sampleapp.Defect]bool{sampleapp.RefundOverTotal: true}}})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 
 	res := r.must(t, cli.ExitFailed, "run", "--scenario", scenarioID)
 	contains(t, "the summary", res.stdout, "failed")
@@ -415,7 +414,7 @@ func TestInterruptedRunIsVisible(t *testing.T) { // Review Focus 4
 			})
 		},
 	})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 
 	res := r.semar(t, ctx, "run", "--scenario", scenarioID)
 	if res.code != cli.ExitUndecided {
@@ -502,40 +501,9 @@ func TestScriptAddRefusesAScriptThatDoesNotFit(t *testing.T) {
 	}
 }
 
-func TestReviewWithoutYes(t *testing.T) {
-	cases := []struct {
-		name     string
-		terminal bool
-		answer   string
-		want     int
-		stored   bool
-	}{
-		{"no terminal", false, "y\n", cli.ExitUndecided, false},
-		{"answer no", true, "n\n", cli.ExitUndecided, false},
-		{"no answer", true, "", cli.ExitUndecided, false},
-		{"answer yes", true, "y\n", cli.ExitOK, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := newRepo(t, repoOptions{offline: true})
-			r.opts.Stdin = strings.NewReader(tc.answer)
-			r.opts.Terminal = func() bool { return tc.terminal }
-			res := r.must(t, tc.want, "review", scenarioID)
-			if tc.terminal {
-				contains(t, "stdout", res.stdout, "Refund above the order total is rejected", "(source diff)")
-			} else {
-				contains(t, "stdout", res.stdout, "scenario "+scenarioID)
-			}
-			if got := exists(t, r.path(".semar", "store", "confirmations")); got != tc.stored {
-				t.Errorf("stored = %v, want %v", got, tc.stored)
-			}
-		})
-	}
-}
-
 func TestMissingSecretSendsNothing(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	t.Setenv(tokenVar, "")
 
 	res := r.must(t, cli.ExitError, "run", "--scenario", scenarioID)
@@ -569,7 +537,7 @@ func TestDuplicatedScenarioID(t *testing.T) {
 	if err := os.WriteFile(copied, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"run", "--scenario", scenarioID}, {"run", "--all"}, {"review", scenarioID, "--yes"}} {
+	for _, args := range [][]string{{"run", "--scenario", scenarioID}, {"run", "--all"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			res := r.must(t, cli.ExitError, args...)
 			contains(t, "stderr", res.stderr, original, copied)
@@ -580,7 +548,7 @@ func TestDuplicatedScenarioID(t *testing.T) {
 func TestActivityFilters(t *testing.T) {
 	r := newRepo(t, repoOptions{})
 	r.must(t, cli.ExitError, "show", "--activity")
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 
 	cases := []struct {
@@ -615,7 +583,7 @@ func TestActivityFilters(t *testing.T) {
 
 func TestRepeatedScenarioRunsOnce(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 
 	res := r.must(t, cli.ExitOK, "run", "--scenario", scenarioID, "--scenario", scenarioID)
 	if n := strings.Count(res.stdout, scenarioID+" "); n != 1 {
@@ -649,7 +617,7 @@ func TestACloseThatFailsLeavesAReportThatSaysSo(t *testing.T) {
 		})
 	}
 	r = newRepo(t, repoOptions{wrap: failClose})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 
 	res := r.must(t, cli.ExitError, "run", "--scenario", scenarioID)
 	if strings.Contains(res.stdout, "passed") {
@@ -684,52 +652,13 @@ func TestASessionValueWrittenInThePlaceIsRedacted(t *testing.T) {
 			})
 		},
 	})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 
 	r.must(t, cli.ExitUndecided, "run", "--scenario", scenarioID)
 	if dir := r.latestRun(t); !exists(t, filepath.Join(dir, "exchanges", scenarioID)) {
 		t.Fatal("the run recorded no exchange, so the scan below proves nothing")
 	}
 	r.assertNoSecret(t, []string{literal, "Bearer " + literal}, "semar.yaml")
-}
-
-func TestReviewListsTheWholeOperandAndNothingHostile(t *testing.T) {
-	r := newRepo(t, repoOptions{offline: true})
-	scenarioFile := r.path(".semar", "scenarios", "SHOP-482", scenarioID+".feature")
-	head, tail := strings.Repeat("A", 150), strings.Repeat("C", 150)
-	data, err := os.ReadFile(scenarioFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changed := strings.Replace(string(data), `equals "REFUND_EXCEEDS_TOTAL"`, `equals "`+head+`\u001b[31m\u202eB\u200b\t`+tail+`"`, 1)
-	if changed == string(data) {
-		t.Fatal("the change did not apply")
-	}
-	if err := os.WriteFile(scenarioFile, []byte(changed), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	res := r.must(t, cli.ExitOK, "review", scenarioID, "--yes")
-	contains(t, "the listing", res.stdout, head+`\u001b[31mB`+`\t`+tail)
-	for _, hostile := range []string{"\x1b", "\u202e", "\u200b"} {
-		if strings.Contains(res.stdout, hostile) {
-			t.Errorf("the listing holds the character %+q", hostile)
-		}
-	}
-}
-
-func TestReviewRefusesAnEmptyName(t *testing.T) {
-	for _, name := range []string{"", "  "} {
-		t.Run(fmt.Sprintf("%q", name), func(t *testing.T) {
-			r := newRepo(t, repoOptions{offline: true})
-			r.opts.User = func() (string, error) { return name, nil }
-			res := r.must(t, cli.ExitError, "review", scenarioID, "--yes")
-			contains(t, "stderr", res.stderr, "the approver has no name; set git config user.name")
-			if exists(t, r.path(".semar", "store")) {
-				t.Error("something was stored")
-			}
-		})
-	}
 }
 
 func TestScenarioFilesOtherThanRegularFeaturesAreNotSkipped(t *testing.T) {
@@ -741,7 +670,7 @@ func TestScenarioFilesOtherThanRegularFeaturesAreNotSkipped(t *testing.T) {
 		if err := os.Symlink(filepath.Join(dir(r), scenarioID+".feature"), link); err != nil {
 			t.Skipf("no symlinks here: %v", err)
 		}
-		for _, args := range [][]string{{"run", "--all"}, {"review", scenarioID, "--yes"}} {
+		for _, args := range [][]string{{"run", "--all"}} {
 			res := r.must(t, cli.ExitError, args...)
 			contains(t, "stderr", res.stderr, link)
 		}
@@ -754,7 +683,7 @@ func TestScenarioFilesOtherThanRegularFeaturesAreNotSkipped(t *testing.T) {
 			if err := os.WriteFile(old, []byte("apiVersion: semar/v1\nkind: Scenario\nid: OLD-1\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			for _, args := range [][]string{{"run", "--all"}, {"run", "--scenario", scenarioID}, {"review", scenarioID, "--yes"}} {
+			for _, args := range [][]string{{"run", "--all"}, {"run", "--scenario", scenarioID}} {
 				res := r.must(t, cli.ExitError, args...)
 				contains(t, "stderr", res.stderr, "scenario files are Gherkin now: run semar scenarios convert", old)
 			}
@@ -764,7 +693,7 @@ func TestScenarioFilesOtherThanRegularFeaturesAreNotSkipped(t *testing.T) {
 
 func TestCommandsStopWhenTheirContextIsDone(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -827,7 +756,7 @@ func TestRunWithADeclaredBuild(t *testing.T) {
 			i, j := strings.Index(s, "        build:\n"), strings.Index(s, "authProfiles:")
 			return s[:i] + s[j:]
 		})
-		r.addScriptAndConfirm(t)
+		r.addScript(t)
 		res := r.must(t, cli.ExitUndecided, "run", "--all")
 		contains(t, "a run with no build", res.stdout, "no build was recorded")
 		res = r.must(t, cli.ExitOK, "run", "--all", "--build", "0123456789abcdef")

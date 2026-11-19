@@ -60,7 +60,7 @@ func TestHelpListsTheCommandsOfANormalDay(t *testing.T) {
 }
 
 func TestACommandThatTheHelpHidesStillRuns(t *testing.T) {
-	for _, args := range [][]string{{"version"}, {"status", "--help"}, {"review", "--help"}, {"defer", "--help"}, {"help", "run"}, {"completion", "bash"}} {
+	for _, args := range [][]string{{"version"}, {"status", "--help"}, {"defer", "--help"}, {"help", "run"}, {"completion", "bash"}} {
 		var out, errw bytes.Buffer
 		if code := cli.Run(context.Background(), args, &out, &errw); code != cli.ExitOK || out.Len() == 0 {
 			t.Errorf("semar %v: exit %d, stdout %d bytes, stderr %q", args, code, out.Len(), errw.String())
@@ -73,7 +73,9 @@ func TestRemovedCommandsNameTheNewOneAndExitWithThree(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"confirm", "SHOP-482-01", "--yes"}, "semar confirm was removed: use semar review"},
+		{[]string{"review"}, "semar review was removed: a test counts as soon as it is written; edit the test file to change what it expects"},
+		{[]string{"review", "SHOP-482-01", "--yes"}, "semar review was removed: a test counts as soon as it is written; edit the test file to change what it expects"},
+		{[]string{"confirm", "SHOP-482-01", "--yes"}, "semar confirm was removed: a test counts as soon as it is written; edit the test file to change what it expects"},
 		{[]string{"ledger"}, "semar ledger was removed: use semar status, semar check, or semar defer"},
 		{[]string{"ledger", "record", "SHOP-482/a", "passed"}, "semar ledger was removed: use semar status, semar check, or semar defer"},
 		{[]string{"activity", "latest"}, "semar activity was removed: use semar show --activity"},

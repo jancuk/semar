@@ -22,7 +22,7 @@ func localRepo(t *testing.T) (*repo, string) {
 		i, j := strings.Index(s, "        build:\n"), strings.Index(s, "authProfiles:")
 		return s[:i] + s[j:]
 	})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	if err := os.WriteFile(r.path("NOTES.md"), []byte("one\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

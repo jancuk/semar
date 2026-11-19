@@ -98,7 +98,7 @@ func TestScenariosUnderALinkOrASpecialFileAreNotSkipped(t *testing.T) {
 	if err := os.Symlink(other, link); err != nil {
 		t.Skip("symlinks are not available:", err)
 	}
-	for _, args := range [][]string{{"run", "--all"}, {"review", "--yes"}} {
+	for _, args := range [][]string{{"run", "--all"}} {
 		res := r.must(t, cli.ExitError, args...)
 		contains(t, "stderr", res.stderr, link, "symbolic link")
 	}

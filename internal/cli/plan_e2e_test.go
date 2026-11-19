@@ -409,7 +409,6 @@ func TestPlanWithABuildProbeFromInit(t *testing.T) {
 	if b := cfg.Environments["uat"].Services[0].Build; b == nil || *b != want {
 		t.Fatalf("build probe = %+v, want %+v", b, want)
 	}
-	p.must(t, cli.ExitOK, "review", "--yes")
 	res := p.must(t, cli.ExitOK, "run", "--all")
 	contains(t, "the run", res.stdout, "passed")
 	if strings.Contains(res.stdout, "declared") {
@@ -433,7 +432,6 @@ func TestPlanFindsTheSeededDefect(t *testing.T) {
 	p := newPlanRepo(t, sampleapp.Options{Defects: map[sampleapp.Defect]bool{sampleapp.RefundOverTotal: true}})
 	p.configure(t, goodDraft)
 	p.must(t, cli.ExitOK, "plan", "--diff", "main..release")
-	p.must(t, cli.ExitOK, "review", "--yes")
 	res := p.must(t, cli.ExitFailed, "run", "--all", "--build", p.head(t)[:12])
 	contains(t, "the run", res.stdout, "failed")
 }
@@ -750,22 +748,6 @@ func TestInitWritesABuildProbe(t *testing.T) {
 	if b := cfg.Environments["uat"].Services[0].Build; b == nil || *b != want {
 		t.Errorf("build probe = %+v, want %+v", b, want)
 	}
-}
-
-func TestReviewRefusesWhatItCannotApprove(t *testing.T) {
-	r := newRepo(t, repoOptions{offline: true})
-	res := r.must(t, cli.ExitError, "review", "nowhere", "--yes")
-	contains(t, "stderr", res.stderr, "nowhere is not a scenario, a ticket, a fixture, a journey, or the app of a screens file")
-	if exists(t, r.path(".semar", "store", "confirmations")) {
-		t.Error("a confirmation was stored")
-	}
-	r.opts.User = func() (string, error) { return " ", nil }
-	res = r.must(t, cli.ExitError, "review", "--yes")
-	contains(t, "stderr", res.stderr, "the approver has no name")
-	r.opts.User = func() (string, error) { return "tester", nil }
-	r.must(t, cli.ExitUndecided, "review")
-	res = r.must(t, cli.ExitOK, "review", "--yes")
-	contains(t, "stdout", res.stdout, "Test "+scenarioID, "approved "+scenarioID)
 }
 
 // Review focus 4: a second plan of the same diff knows the scenarios of the first.

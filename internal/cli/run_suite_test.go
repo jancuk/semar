@@ -28,7 +28,7 @@ func (r *repo) tagSuite(t *testing.T, tag string) {
 
 func TestASuiteTagAsksForNoNewReviewOfAnApprovedScenario(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	contains(t, "the run before the tag", squash(r.must(t, cli.ExitOK, "run", "--scenario", scenarioID).stdout), scenarioID+" passed")
 
 	r.tagSuite(t, "@suite:smoke")
@@ -43,16 +43,13 @@ func TestASuiteTagAsksForNoNewReviewOfAnApprovedScenario(t *testing.T) {
 	if strings.Contains(res.stdout, "needs review") {
 		t.Errorf("changing the suites asked for a new review:\n%s", res.stdout)
 	}
-	if out := r.must(t, cli.ExitOK, "review").stdout; !strings.Contains(out, "nothing needs review") {
-		t.Errorf("semar review after the tag changed: %s", out)
-	}
 }
 
 func readText(t *testing.T, p string) string { t.Helper(); return string(mustRead(t, p)) }
 
 func TestRunSuiteRunsThatSuiteWhateverTheChangeIsAndNoJourney(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.copyScenario(t, "SHOP-480-01")
 	r.tagSuite(t, "@suite:smoke")
 
@@ -71,7 +68,7 @@ func TestRunSuiteRunsThatSuiteWhateverTheChangeIsAndNoJourney(t *testing.T) {
 
 func TestRunSuiteIsAnErrorForASuiteThatNoScenarioIsIn(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 
 	res := r.semar(t, t.Context(), "run", "--suite", "smoke")
 	if res.code == cli.ExitOK || !strings.Contains(res.stderr, `no scenario is in the suite "smoke": no scenario has a @suite: tag`) {
@@ -128,7 +125,7 @@ func failsTheFirstCreate(next http.Handler) http.Handler {
 
 func TestRunRetriesAFlakyScenarioAndNamesIt(t *testing.T) {
 	r := newRepo(t, repoOptions{wrap: failsTheFirstCreate})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 
 	res := r.must(t, cli.ExitOK, "run", "--all", "--retries", "2")
 	out := squash(res.stdout)
@@ -140,12 +137,12 @@ func TestRunRetriesAFlakyScenarioAndNamesIt(t *testing.T) {
 	// The setting of the repository gives the same without the flag.
 	r2 := newRepo(t, repoOptions{wrap: failsTheFirstCreate})
 	r2.rewriteConfig(t, func(s string) string { return s + "replay:\n  retries: 2\n" })
-	r2.addScriptAndConfirm(t)
+	r2.addScript(t)
 	contains(t, "replay.retries", squash(r2.must(t, cli.ExitOK, "run", "--all").stdout), "flaky, passed on attempt 2 of 3")
 
 	// With no retries the same service fails the run.
 	r3 := newRepo(t, repoOptions{wrap: failsTheFirstCreate})
-	r3.addScriptAndConfirm(t)
+	r3.addScript(t)
 	r3.must(t, cli.ExitUndecided, "run", "--all")
 }
 
@@ -154,7 +151,7 @@ func TestRunNeverSendsARequestOfTheOnceListAgainOnARetry(t *testing.T) {
 	r.rewriteConfig(t, func(s string) string {
 		return strings.Replace(s, "      mode: test_data\n", "      mode: test_data\n      once:\n        - {method: POST, path: \"/v1/orders/*/refunds\"}\n", 1)
 	})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 
 	res := r.must(t, cli.ExitFailed, "run", "--all", "--retries", "3")
 	contains(t, "the run", squash(res.stdout), scenarioID+" failed", "(the scenario sent a request that effects.once lists, so it was not run again)")

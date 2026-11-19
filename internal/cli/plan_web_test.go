@@ -153,9 +153,6 @@ func TestPlanWritesAWebTestAndAnAPITestAndARunOfThemPasses(t *testing.T) {
 	}
 
 	// A person reads the web test and the screens, and then the tests run.
-	p.must(t, cli.ExitOK, "review", "SHOP-482-01", "--yes")
-	p.must(t, cli.ExitOK, "review", "SHOP-482-02", "--yes")
-	p.must(t, cli.ExitOK, "review", "orders", "--yes")
 	run := p.must(t, cli.ExitOK, "run", "--scenario", "SHOP-482-01", "--build", p.head(t))
 	contains(t, "the run", run.stdout, "SHOP-482-01  passed")
 }

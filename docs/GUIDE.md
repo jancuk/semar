@@ -2184,25 +2184,6 @@ semar log [-n <count>]
 
 These commands work, and `semar --help` does not list them. `semar <command> --help` prints their text.
 
-#### `semar review`
-
-Show what needs a person, one item at a time: the fixtures that are not approved, the screens files that are not approved, the scenarios that need a confirmation, grouped by use case, and the journeys.
-
-Answer y to approve an item, n to skip it, d for its details, and q to stop. An ID narrows the list: a scenario, a ticket, a fixture, a journey, or the app of a screens file.
-
---yes approves every item with no question. With no terminal and no --yes, the items are listed and nothing is approved.
-
-Exit 0 when nothing is left to review, and 2 when an item was skipped or the review stopped.
-
-```text
-semar review [id...]
-```
-
-| Flag | Meaning |
-| --- | --- |
-| `--env <text>` | The environment whose auth profiles the legs of a journey use; needed when there are several |
-| `--yes` | Approve every item without asking |
-
 #### `semar status`
 
 Show each use case of the change in one group: verified, failing, blocked, stale, for a person, no test, or deferred.

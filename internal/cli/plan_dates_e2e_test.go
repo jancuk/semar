@@ -53,7 +53,6 @@ func TestPlanRefusesATypedDateAndTheStoredScriptFollowsTheRun(t *testing.T) {
 	}
 	contains(t, "the scenario", string(scenario), `equals "{{datetime.plus7d}}"`)
 
-	p.must(t, cli.ExitOK, "review", "--yes")
 	sent := map[string]string{}
 	for _, id := range []domain.RunID{"r-20261114T100000Z-0001", "r-20261121T100000Z-0001"} {
 		p.opts.RunID = func() domain.RunID { return id }

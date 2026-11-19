@@ -111,7 +111,6 @@ func newTrialRepo(t *testing.T) *trialRepo {
 	p.rewriteConfig(t, strings.NewReplacer("127.0.0.1:9", ou.Host, "127.0.0.1:7", pu.Host).Replace)
 	tr.planRepo = p
 
-	p.must(t, cli.ExitOK, "review", "order.paid", "--yes")
 	p.seedPaidOrder(t)
 	return tr
 }

@@ -10,7 +10,7 @@ import (
 
 func TestLogListsTheRunsNewestFirst(t *testing.T) {
 	r := newRepo(t, repoOptions{app: sampleapp.Options{Defects: defects(sampleapp.RefundOverTotal)}})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.must(t, cli.ExitFailed, "run", "--scenario", scenarioID)
 	r.putRun(t, "r-test-0001-x-unfinished", "", nil, false)
 	r.must(t, cli.ExitFailed, "run", "--scenario", scenarioID)
@@ -41,7 +41,7 @@ func TestLogWithNoRunSaysSo(t *testing.T) {
 
 func TestShowPrintsTheReportOfARun(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 	r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 

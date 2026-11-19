@@ -206,7 +206,7 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 	grouped(groupDaily, newInitCommand(o), newLoginCommand(o), newPlanCommand(o), newRunCommand(o), newShowCommand())
 	grouped(groupAlso, newCheckCommand(o), newRecordCommand(o), newImportCommand(o), newRmCommand(o), newLogCommand())
 	// The help shows the commands of a normal day. The others still work, and the guide describes them.
-	for _, c := range []*cobra.Command{newDeferCommand(o), newReviewCommand(o), newStatusCommand(o), newChangesCommand(), newExportCommand(),
+	for _, c := range []*cobra.Command{newDeferCommand(o), newStatusCommand(o), newChangesCommand(), newExportCommand(),
 		newFixtureCommand(o), newJourneyCommand(o), newProvidersCommand(o), newDashboardCmd(o), newScenariosCommand(), newScreensCommand(o),
 		newScriptCommand(), version} {
 		c.Hidden = true
@@ -219,10 +219,12 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 	}
 	// The template of cobra lists the help command even when it is hidden.
 	root.SetUsageTemplate(strings.ReplaceAll(root.UsageTemplate(), `(or .IsAvailableCommand (eq .Name "help"))`, ".IsAvailableCommand"))
-	root.AddCommand(removedCommand("confirm", "use semar review"), removedCommand("ledger", "use semar status, semar check, or semar defer"),
+	root.AddCommand(removedCommand("review", removedReviewWhy), removedCommand("confirm", removedReviewWhy), removedCommand("ledger", "use semar status, semar check, or semar defer"),
 		removedCommand("activity", "use semar show --activity"))
 	return root
 }
+
+const removedReviewWhy = "a test counts as soon as it is written; edit the test file to change what it expects"
 
 const (
 	groupDaily = "daily"

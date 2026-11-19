@@ -296,7 +296,7 @@ func TestRunWithoutGivenReadsNoFixtureFile(t *testing.T) {
 	if err := os.Symlink(r.dir, filepath.Join(r.path(".semar", "fixtures"), "loop.yaml")); err != nil {
 		t.Skip("no symbolic links:", err)
 	}
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 }
 

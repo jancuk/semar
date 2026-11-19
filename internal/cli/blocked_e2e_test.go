@@ -17,7 +17,6 @@ func blockedShop(t *testing.T) (r *repo, host string) {
 	t.Cleanup(cdn.Close)
 	page := strings.Replace(shopPage, "</body>", `<img src="`+cdn.URL+`/pixel.png?token=abc123"></body>`, 1)
 	r = webRepoPage(t, page)
-	r.must(t, cli.ExitOK, "review", "shop", "--yes")
 	return r, strings.TrimPrefix(cdn.URL, "http://")
 }
 
@@ -43,7 +42,6 @@ func TestRunNamesTheHostsTheBrowserBlockedAndWritesThemInTheReport(t *testing.T)
 
 func TestRunOfAPageWithNoBlockedHostSaysNothingOfThem(t *testing.T) {
 	r := webRepo(t)
-	r.must(t, cli.ExitOK, "review", "shop", "--yes")
 	res := r.must(t, cli.ExitOK, "run", "--scenario", "WEB-1")
 	if strings.Contains(res.stdout, "blocked hosts") || strings.Contains(r.lastReport(t), "Blocked hosts") {
 		t.Errorf("a run with no blocked host mentions them:\n%s", res.stdout)

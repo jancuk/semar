@@ -561,7 +561,7 @@ func TestLedgerExpiredDeferralIsIgnoredAndSaid(t *testing.T) {
 
 func TestRunSummaryHasCoverageLine(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.ledgerFile(t, obligations("SHOP-482",
 		entry("SHOP-482/a", "Covered", "covers: ["+scenarioID+"]"),
 		entry("SHOP-482/b", "Gap", `gap: "not drafted"`)))
@@ -580,7 +580,7 @@ func TestRunSummaryHasCoverageLine(t *testing.T) {
 
 func TestRunWithoutObligationsHasNoCoverageLine(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	res := r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 	if strings.Contains(res.stdout, "use case") || res.stderr != "semar: running against local (test, test data)\n" {
 		t.Errorf("a repository with no obligation changed the summary:\n%s\n%s", res.stdout, res.stderr)
@@ -592,7 +592,7 @@ func TestRunWithoutObligationsHasNoCoverageLine(t *testing.T) {
 
 func TestRunWithObligationsOfOtherTicketsHasNoCoverageLine(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.writeRel(t, ".semar/obligations/other.yaml", obligations("SHOP-480", entry("SHOP-480/c", "Another ticket", `gap: "not drafted"`)))
 	res := r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 	if strings.Contains(res.stdout, "use case") || strings.Contains(r.lastReport(t), "use case") {
@@ -602,7 +602,7 @@ func TestRunWithObligationsOfOtherTicketsHasNoCoverageLine(t *testing.T) {
 
 func TestRunCountsTheStoredResultOfAScenarioItDidNotRun(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.copyScenario(t, "SHOP-482-02")
 	builds := []domain.BuildRef{{Service: "orders", Commit: "9f3c2ab"}}
 	r.putRun(t, "r-0-old", "", builds, true, scenarioResult("SHOP-482-02", domain.OutcomePassed, ""))
@@ -622,7 +622,7 @@ func TestRunCountsTheStoredResultOfAScenarioItDidNotRun(t *testing.T) {
 
 func TestRunWithAnInvalidObligationsFileLeavesTheLineOut(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.ledgerFile(t, "apiVersion: semar/v1\nkind: Obligations\nobligations:\n  - id: SHOP-482/a\n    source: diff\n")
 	res := r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 	contains(t, "stderr", res.stderr, "semar: the use case line is left out of the report: .semar/obligations/SHOP-482.plan.yaml:", "title is required")
@@ -661,7 +661,7 @@ func TestLedgerRefusesStoredRecordsThatTheCommandsWouldRefuse(t *testing.T) {
 func TestAScenarioIDOfTheFormOfALegIsRefused(t *testing.T) {
 	r := ledgerRepo(t)
 	r.copyScenario(t, "checkout.pay")
-	for _, args := range [][]string{{"review", "checkout.pay", "--yes"}, {"run", "--scenario", "checkout.pay"}} {
+	for _, args := range [][]string{{"run", "--scenario", "checkout.pay"}} {
 		res := r.must(t, cli.ExitError, args...)
 		contains(t, "stderr", res.stderr, "invalid scenario ID", "checkout.pay")
 	}
@@ -759,7 +759,6 @@ func TestStatusAfterARunCountsTheModelResults(t *testing.T) {
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
 	// the edit keeps the shape, so the stored script still runs
 	r.editScenario(t, "# ticket SHOP-482: the order must stay unchanged", "# ticket SHOP-482: the order must stay unchanged, by model")
-	r.must(t, cli.ExitOK, "review", scenarioID, "--yes")
 	r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 	contains(t, "the status", r.semar(t, t.Context(), "status").stdout, "results written by a model: 1 of 3")
 }

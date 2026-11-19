@@ -32,7 +32,7 @@ func TestAnAccountWithNoTokenIsValid(t *testing.T) {
 
 func TestAnApiStepOfAnAccountWithNoTokenIsBlocked(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.rewriteConfig(t, withoutToken)
 	t.Setenv(tokenVar, "")
 

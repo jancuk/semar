@@ -371,7 +371,6 @@ func (r *repo) exportScenario(t *testing.T, id, title, steps, scriptSteps string
 	r.writeRel(t, "scripts/"+id+".yaml", fmt.Sprintf("apiVersion: semar/v1\nkind: Script\nscenario: %s\nexpectHash: %q\n"+
 		"authoredBy: { instance: hand, model: none, harness: none }\nsteps:%s", id, domain.ExpectHash(sc), scriptSteps))
 	r.must(t, cli.ExitOK, "script", "add", script)
-	r.must(t, cli.ExitOK, "review", id, "--yes")
 }
 
 func TestExportEndToEnd(t *testing.T) {
@@ -676,7 +675,7 @@ func TestExportEndToEndInconclusive(t *testing.T) {
 // refused by every format.
 func TestExportEndToEndInvariantAndChangedEvidence(t *testing.T) {
 	r := newRepo(t, repoOptions{app: sampleapp.Options{Defects: defects(sampleapp.RefundServerError)}})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.must(t, cli.ExitFailed, "run", "--scenario", scenarioID)
 	id := filepath.Base(r.latestRun(t))
 	e := r.exportAll(t, id)

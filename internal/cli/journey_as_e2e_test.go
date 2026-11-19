@@ -106,10 +106,3 @@ func TestJourneyLegActsAsAnAccountThatIsNotConfigured(t *testing.T) {
 		t.Errorf("journey %s, want blocked", j.Outcome)
 	}
 }
-
-func TestJourneyConfirmationShowsWhoALegActsAs(t *testing.T) {
-	r, _ := memberRepo(t, "bob", "diff")
-	res := r.must(t, cli.ExitOK, "review", "member", "--yes")
-	contains(t, "the confirmation", res.stdout, "Leg member of journey member (scenario member.member), acts as bob", "step read as bob")
-	r.must(t, cli.ExitOK, "journey", "run", "member", "--env", "local")
-}

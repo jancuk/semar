@@ -36,7 +36,7 @@ func (r *repo) toLegacy(t *testing.T) (yamlFile, featureFile string) {
 
 func TestScenariosConvertKeepsEveryConfirmationAndScript(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	before, err := scenario.Load(r.path(".semar", "scenarios", "SHOP-482", scenarioID+".feature"))
 	if err != nil {
 		t.Fatal(err)
@@ -66,15 +66,9 @@ func TestScenariosConvertKeepsEveryConfirmationAndScript(t *testing.T) {
 		t.Error("the expectation hash changed")
 	}
 
-	// The confirmation and the stored script of the YAML scenario still hold: the run is not "not confirmed".
+	// The stored script of the YAML scenario still holds.
 	res = r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 	contains(t, "stdout", res.stdout, scenarioID+"  passed")
-	if strings.Contains(res.stdout+r.lastReport(t), "not confirmed") {
-		t.Error("the converted scenario lost its confirmation")
-	}
-	// A person who confirms it again confirms the same expectation hash.
-	res = r.must(t, cli.ExitOK, "review", scenarioID, "--yes")
-	contains(t, "stdout", res.stdout, "scenario "+scenarioID+" is already confirmed")
 }
 
 func TestScenariosConvertWritesTheFileInPlaceAndRepeatsNothing(t *testing.T) {

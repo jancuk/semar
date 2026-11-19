@@ -69,7 +69,6 @@ func TestRunNamesTheGapsBeforeItSendsAnything(t *testing.T) {
 	r.git(t, "add", ".semar/notes.md")
 	r.git(t, "commit", "--quiet", "-m", "Set up Semar")
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
-	r.must(t, cli.ExitOK, "review", "--yes")
 
 	r.opts.Terminal = func() bool { return false }
 	res := r.must(t, cli.ExitUndecided, "run")
@@ -88,7 +87,6 @@ func TestRunOffersToPlanOnATerminalAndPlansOnlyOnY(t *testing.T) {
 	r.git(t, "commit", "--quiet", "--allow-empty", "-m", "SHOP-490 show the limit in the receipt")
 	r.writeRel(t, "docs/tickets/SHOP-490.md", "# SHOP-490 Show the limit\n\n## Acceptance criteria\n\n1. The receipt shows the limit.\n")
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
-	r.must(t, cli.ExitOK, "review", "--yes")
 
 	r.opts.Home = t.TempDir()
 	r.opts.Terminal = func() bool { return true }
@@ -131,7 +129,6 @@ func TestRunOfAChangeWithNoTicketSaysSoAndNamesAll(t *testing.T) {
 func TestRunWithScenariosOrAllIsNotTheChange(t *testing.T) {
 	r := dailyRepo(t)
 	r.must(t, cli.ExitOK, "script", "add", r.scriptFile())
-	r.must(t, cli.ExitOK, "review", "--yes")
 	res := r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 	contains(t, "--scenario", res.stdout, "Change    the scenarios named", "Selected  1 scenario\n")
 	res = r.semar(t, t.Context(), "run", "--all")
@@ -151,7 +148,6 @@ func TestRunOutsideAGitRepositoryNeedsAllOrScenario(t *testing.T) {
 func TestRunRunsTheCriticalJourneysAfterTheScenarios(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	r.requireConfirmation(t)
-	r.must(t, cli.ExitOK, "review", "checkout", "--yes")
 	res := r.must(t, cli.ExitOK, "run", "--all")
 	contains(t, "the run", squash(res.stdout), "Selected 0 scenarios, 1 critical journey", "checkout passed")
 	res = r.must(t, cli.ExitUndecided, "run", "--all", "--no-journeys")

@@ -20,7 +20,7 @@ const (
 func ledgerE2ERepo(t *testing.T, app sampleapp.Options) *repo {
 	t.Helper()
 	r := newRepo(t, repoOptions{app: app})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.ledgerFile(t, obligations("SHOP-482",
 		entry(scenarioObligation, "Refund above the order total is rejected", "covers: ["+scenarioID+"]"),
 		entry(gapObligation, "A refund of a paid order by another customer", `gap: "not drafted: needs fixture order.paid"`),

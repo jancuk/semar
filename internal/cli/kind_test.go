@@ -13,7 +13,7 @@ import (
 
 func TestRunStartLineNamesTheEnvironment(t *testing.T) {
 	r := newRepo(t, repoOptions{})
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	res := r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 	contains(t, "stderr", res.stderr, "semar: running against local (test, test data)\n")
 	if strings.Contains(res.stdout, "running against") {
@@ -26,7 +26,7 @@ func TestRunOfAProductionEnvironmentNeedsItsName(t *testing.T) {
 
 	t.Run("refused without --env", func(t *testing.T) {
 		r := newRepo(t, repoOptions{})
-		r.addScriptAndConfirm(t)
+		r.addScript(t)
 		r.rewriteConfig(t, asProduction)
 		res := r.must(t, cli.ExitError, "run", "--all")
 		contains(t, "stderr", res.stderr, `the environment "local" is a production environment; name it with --env local to run against it`)
@@ -43,7 +43,7 @@ func TestRunOfAProductionEnvironmentNeedsItsName(t *testing.T) {
 
 	t.Run("accepted with --env", func(t *testing.T) {
 		r := newRepo(t, repoOptions{})
-		r.addScriptAndConfirm(t)
+		r.addScript(t)
 		r.rewriteConfig(t, asProduction)
 		res := r.must(t, cli.ExitOK, "run", "--scenario", scenarioID, "--env", "local")
 		contains(t, "stderr", res.stderr, "semar: running against local (production, test data)\n")
@@ -61,7 +61,7 @@ func TestRunOfAProductionEnvironmentNeedsItsName(t *testing.T) {
 
 	t.Run("read only mode is named in the start line", func(t *testing.T) {
 		r := newRepo(t, repoOptions{})
-		r.addScriptAndConfirm(t)
+		r.addScript(t)
 		r.rewriteConfig(t, func(s string) string {
 			return strings.Replace(asProduction(s), "mode: test_data", "mode: read_only", 1)
 		})
@@ -71,7 +71,7 @@ func TestRunOfAProductionEnvironmentNeedsItsName(t *testing.T) {
 
 	t.Run("a test environment needs no --env", func(t *testing.T) {
 		r := newRepo(t, repoOptions{})
-		r.addScriptAndConfirm(t)
+		r.addScript(t)
 		r.must(t, cli.ExitOK, "run", "--scenario", scenarioID)
 	})
 }

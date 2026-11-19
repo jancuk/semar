@@ -70,7 +70,7 @@ func TestRunStepActsAsAnotherAccount(t *testing.T) {
 		})
 	}})
 	r.actAs(t, "bob")
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	r.semar(t, t.Context(), "run", "--scenario", scenarioID)
 
 	mu.Lock()
@@ -89,7 +89,7 @@ func TestRunStepActsAsAnotherAccount(t *testing.T) {
 func TestRunStepActsAsAnAccountThatIsNotConfigured(t *testing.T) {
 	r := newRepo(t, repoOptions{})
 	r.actAs(t, "dave")
-	r.addScriptAndConfirm(t)
+	r.addScript(t)
 	res := r.must(t, cli.ExitUndecided, "run", "--scenario", scenarioID)
 	contains(t, "the output", res.stdout+res.stderr, "account dave is not in the configuration")
 	if n := r.app.Requests("", "/v1/"); n != 0 {
