@@ -2,6 +2,7 @@ package verdict_test
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -890,5 +891,48 @@ func TestComputeStoresTheExpectationHashOfTheScenario(t *testing.T) {
 	got := verdict.Compute(in)
 	if want := domain.ExpectHash(in.Scenario); want == "" || got.ExpectHash != want {
 		t.Errorf("ExpectHash = %q, want %q", got.ExpectHash, want)
+	}
+}
+
+// byModel marks the expected result i of a step as one that a model wrote.
+func byModel(id domain.StepID, i int) mod {
+	return func(in *verdict.Input) {
+		in.Scenario.Steps = slices.Clone(in.Scenario.Steps)
+		for k, st := range in.Scenario.Steps {
+			if st.ID == id {
+				in.Scenario.Steps[k].Expect = slices.Clone(st.Expect)
+				in.Scenario.Steps[k].Expect[i].By = "model"
+			}
+		}
+	}
+}
+
+func TestAModelWrittenResultCarriesTheMark(t *testing.T) {
+	res := verdict.Compute(with(pass, byModel("refund-too-much", 1))())
+	for _, c := range res.Checks {
+		want := c.Step == "refund-too-much" && c.Index == 1
+		if c.ByModel != want {
+			t.Errorf("check %s/%d ByModel = %v, want %v", c.Step, c.Index, c.ByModel, want)
+		}
+	}
+}
+
+func TestTheFailureOfAModelWrittenResultSaysByModel(t *testing.T) {
+	text := func(res domain.ScenarioResult) string {
+		for _, r := range res.Reasons {
+			if strings.HasPrefix(r.Text, "step refund-too-much: expected") {
+				return r.Text
+			}
+		}
+		return ""
+	}
+	failing := checkState("refund-too-much", 0, domain.CheckFalse)
+	by := text(verdict.Compute(with(pass, failing, byModel("refund-too-much", 0))()))
+	if !strings.HasSuffix(by, "(source ticket, by model)") {
+		t.Errorf("reason %q lacks the model mark", by)
+	}
+	plain := text(verdict.Compute(with(pass, failing)()))
+	if !strings.HasSuffix(plain, "(source ticket)") || strings.Contains(plain, "by model") {
+		t.Errorf("reason %q should name the source only", plain)
 	}
 }

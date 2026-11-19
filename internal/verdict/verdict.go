@@ -141,14 +141,18 @@ func Compute(in Input) domain.ScenarioResult {
 			res.Checks = append(res.Checks, domain.CheckResult{
 				Step: step.ID, Index: i, Source: string(e.Source),
 				State: r.State, Expected: r.Expected, Observed: r.Observed, Detail: r.Detail,
-				Confirmed: confirmed,
+				Confirmed: confirmed, ByModel: e.By == "model",
 			})
 			if refused {
 				continue
 			}
 			switch {
 			case r.State == domain.CheckFalse && confirmed:
-				text := fmt.Sprintf("step %s: expected %s, observed %s (source %s)", step.ID, r.Expected, r.Observed, e.Source)
+				by := ""
+				if e.By == "model" {
+					by = ", by model"
+				}
+				text := fmt.Sprintf("step %s: expected %s, observed %s (source %s%s)", step.ID, r.Expected, r.Observed, e.Source, by)
 				if r.Detail != "" {
 					text += ": " + r.Detail
 				}

@@ -55,6 +55,23 @@ type CheckResult struct {
 	Observed  string     `json:"observed"`
 	Detail    string     `json:"detail,omitempty"`
 	Confirmed bool       `json:"confirmed"`
+	// ByModel is true when a model wrote the expected result. A result stored before Plan 36 has no mark.
+	ByModel bool `json:"byModel,omitempty"`
+}
+
+// ModelCount counts the expected results of the result: byModel those that a model wrote,
+// results every expected result. Invariants are left out. A result stored before Plan 36 gives 0.
+func (r ScenarioResult) ModelCount() (byModel, results int) {
+	for _, c := range r.Checks {
+		if c.Index < 0 {
+			continue
+		}
+		results++
+		if c.ByModel {
+			byModel++
+		}
+	}
+	return byModel, results
 }
 
 // Attempt is one replay of a scenario: its own outcome, reasons, checks, and the actions that hold its

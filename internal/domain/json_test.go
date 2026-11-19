@@ -96,3 +96,17 @@ func TestScenarioResultOmitsAnEmptyExpectHash(t *testing.T) {
 		t.Errorf("%s, %v", got, err)
 	}
 }
+
+func TestByModelIsLeftOutWhenFalse(t *testing.T) {
+	b, err := json.Marshal(domain.CheckResult{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "byModel") {
+		t.Errorf("a check that no model wrote carries a mark: %s", b)
+	}
+	res := domain.ScenarioResult{Checks: []domain.CheckResult{{Index: 0, ByModel: true}, {Index: 1}, {Index: -1, ByModel: true}}}
+	if by, all := res.ModelCount(); by != 1 || all != 2 {
+		t.Errorf("ModelCount = %d, %d; want 1, 2", by, all)
+	}
+}
