@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/netip"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -174,6 +175,9 @@ func validateEnvironment(name string, e Environment, profiles map[string]AuthPro
 				add("%s.web.start must be a path below the base URL that starts with one /, got %q", sp, st)
 			}
 		}
+		if s.Android != nil {
+			validateServiceAndroid(sp+".android", *s.Android, e.Android, add)
+		}
 		if _, ok := profiles[s.AuthProfile]; s.AuthProfile != "" && !ok {
 			add("%s.authProfile: auth profile %s is not defined under authProfiles", sp, s.AuthProfile)
 		}
@@ -184,6 +188,7 @@ func validateEnvironment(name string, e Environment, profiles map[string]AuthPro
 	if e.Web.Timeout < 0 || e.Web.Timeout > time.Minute {
 		add("%s.web.timeout must be a duration from 0 to 1 minute, got %s", p, e.Web.Timeout)
 	}
+	validateAndroid(p, e, add)
 	validateData(p+".data", e.Data, add)
 	validateChecks(p+".checks", e.Checks, add)
 }
@@ -325,4 +330,194 @@ func descriptionProblem(d string) string {
 		return "holds a control or format character; use one plain line"
 	}
 	return ""
+}
+
+var (
+	androidPackagePattern    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$`)
+	androidActivityPattern   = regexp.MustCompile(`^\.?[A-Za-z0-9_.$]+$`)
+	androidDevicePattern     = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
+	androidSchemePattern     = regexp.MustCompile(`^[a-z][a-z0-9+.-]*$`)
+	androidPermissionPattern = regexp.MustCompile(`^[A-Za-z0-9_.]+$`)
+	androidAppPattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+.:/_@%~?=&-]{0,511}$`)
+)
+
+// deniedSchemes can never be the scheme of an open: they run code or read files.
+var deniedSchemes = []string{"http", "https", "file", "content", "intent", "javascript"}
+
+// IsLoopbackHost reports whether a host name or address is the machine itself.
+func IsLoopbackHost(host string) bool {
+	host = strings.ToLower(strings.Trim(host, "[]"))
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
+}
+
+// Remote reports whether the environment reaches the device through a server at serverUrl.
+func (a Android) Remote() bool { return a.ServerURL != "" }
+
+// RemoteLoopback reports whether the server at serverUrl is on this machine.
+func (a Android) RemoteLoopback() bool {
+	u, err := url.Parse(a.ServerURL)
+	return err == nil && IsLoopbackHost(u.Hostname())
+}
+
+func validateAndroid(p string, e Environment, add func(string, ...any)) {
+	a := e.Android
+	p += ".android"
+	if a.Device != "" && !androidDevicePattern.MatchString(a.Device) {
+		add("%s.device %q must hold letters, digits, and . _ : - only", p, a.Device)
+	}
+	var u *url.URL
+	if a.ServerURL != "" {
+		var err error
+		u, err = url.Parse(a.ServerURL)
+		switch {
+		case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "":
+			add("%s.serverUrl must be an absolute http or https URL", p)
+			u = nil
+		case u.User != nil:
+			add("%s.serverUrl must hold no user name or password: use serverUser and serverKey", p)
+		case u.RawQuery != "" || u.Fragment != "":
+			add("%s.serverUrl must hold no query and no fragment", p)
+		case !hostrule.Allowed(u, e.Hosts):
+			add("%s: serverUrl host %s is not in hosts", p, originHost(u))
+		}
+	}
+	if (a.ServerUser == "") != (a.ServerKey == "") {
+		add("%s needs both serverUser and serverKey, or neither", p)
+	}
+	for field, ref := range map[string]string{"serverUser": a.ServerUser, "serverKey": a.ServerKey} {
+		if ref != "" && !webPasswordPattern.MatchString(ref) {
+			add("%s.%s must be a reference to an environment variable, env:NAME, and never the value itself", p, field)
+		}
+	}
+	if a.ServerUser != "" && a.ServerURL == "" {
+		add("%s.serverUser needs serverUrl", p)
+	}
+	if a.ServerUser != "" && u != nil && u.Scheme != "https" && !IsLoopbackHost(u.Hostname()) {
+		add("%s: serverUser and serverKey go only to an https serverUrl, or to one on this machine", p)
+	}
+	if len(a.Capabilities) > 0 {
+		if a.ServerURL == "" {
+			add("%s.capabilities needs serverUrl", p)
+		}
+		validateCapabilities(p+".capabilities", a.Capabilities, add)
+	}
+	if (a.UIAutomator2ServerAPK == "") != (a.UIAutomator2ServerTestAPK == "") {
+		add("%s needs both uiautomator2ServerApk and uiautomator2ServerTestApk, or neither", p)
+	}
+	for field, f := range map[string]string{"uiautomator2ServerApk": a.UIAutomator2ServerAPK, "uiautomator2ServerTestApk": a.UIAutomator2ServerTestAPK} {
+		if f == "" {
+			continue
+		}
+		if !filepath.IsLocal(f) && !filepath.IsAbs(f) || strings.ContainsFunc(f, unicode.IsControl) {
+			add("%s.%s must be a path inside the repository or an absolute path, got %q", p, field, f)
+		}
+		if a.ServerURL != "" {
+			add("%s.%s is used with adb only, and serverUrl does not use adb", p, field)
+		}
+	}
+	if a.Timeout < 0 || a.Timeout > time.Minute {
+		add("%s.timeout must be a duration from 0 to 1 minute, got %s", p, a.Timeout)
+	}
+	if a.StartTimeout < 0 || a.StartTimeout > 5*time.Minute {
+		add("%s.startTimeout must be a duration from 0 to 5 minutes, got %s", p, a.StartTimeout)
+	}
+}
+
+// maxCapabilities bounds the capabilities of a session, so a file cannot send a body of any size.
+const maxCapabilities = 64
+
+// reservedCapabilities are set by Semar and cannot be given in a file.
+var reservedCapabilities = []string{"platformName", "appium:platformName", "appium:appPackage", "appium:appActivity", "appium:app", "appium:automationName"}
+
+func validateCapabilities(p string, caps map[string]any, add func(string, ...any)) {
+	if len(caps) > maxCapabilities {
+		add("%s: at most %d capabilities are allowed", p, maxCapabilities)
+	}
+	for _, k := range slices.Sorted(maps.Keys(caps)) {
+		switch {
+		case k == "" || strings.ContainsFunc(k, unicode.IsControl):
+			add("%s: a capability name is empty or holds a control character", p)
+		case slices.Contains(reservedCapabilities, k):
+			add("%s.%s is set by Semar and cannot be given here", p, k)
+		}
+		if problem := capabilityProblem(caps[k], 0); problem != "" {
+			add("%s.%s %s", p, k, problem)
+		}
+	}
+}
+
+func capabilityProblem(v any, depth int) string {
+	switch t := v.(type) {
+	case string, bool, int, int64, uint64, float64:
+		return ""
+	case map[string]any:
+		if depth >= 3 {
+			return "is nested too deep"
+		}
+		for _, k := range slices.Sorted(maps.Keys(t)) {
+			if problem := capabilityProblem(t[k], depth+1); problem != "" {
+				return problem
+			}
+		}
+		return ""
+	}
+	return "must be a string, a number, a boolean, or a mapping of them"
+}
+
+func validateServiceAndroid(p string, a ServiceAndroid, env Android, add func(string, ...any)) {
+	if !androidPackagePattern.MatchString(a.AppPackage) {
+		add("%s.appPackage is required and must be a package name such as com.example.shop, got %q", p, a.AppPackage)
+	}
+	if a.AppActivity != "" && !androidActivityPattern.MatchString(a.AppActivity) {
+		add("%s.appActivity %q must be an activity name such as .MainActivity", p, a.AppActivity)
+	}
+	remoteFar := env.Remote() && !env.RemoteLoopback()
+	if a.APK != "" {
+		if !filepath.IsLocal(a.APK) && !filepath.IsAbs(a.APK) || strings.ContainsFunc(a.APK, unicode.IsControl) {
+			add("%s.apk must be a path inside the repository or an absolute path, got %q", p, a.APK)
+		}
+		if remoteFar {
+			add("%s.apk cannot be used with a serverUrl that is not on this machine: the server cannot read the file", p)
+		}
+	}
+	if a.App != "" {
+		switch {
+		case !androidAppPattern.MatchString(a.App):
+			add("%s.app %q is not a reference that a server can install", p, a.App)
+		case !remoteFar:
+			add("%s.app is used only with a serverUrl that is not on this machine", p)
+		}
+		if a.APK != "" {
+			add("%s takes apk or app, and not both", p)
+		}
+	}
+	if !slices.Contains([]string{"", ResetRestart, ResetClear, ResetNone}, a.Reset) {
+		add("%s.reset must be %s, %s, or %s, got %q", p, ResetRestart, ResetClear, ResetNone, a.Reset)
+	}
+	seen := map[string]bool{}
+	for i, sc := range a.Schemes {
+		switch {
+		case !androidSchemePattern.MatchString(sc):
+			add("%s.schemes[%d] %q must be a lower-case scheme such as shop", p, i, sc)
+		case slices.Contains(deniedSchemes, sc):
+			add("%s.schemes[%d]: the scheme %s cannot be listed", p, i, sc)
+		case seen[sc]:
+			add("%s.schemes[%d]: %s is listed twice", p, i, sc)
+		}
+		seen[sc] = true
+	}
+	seen = map[string]bool{}
+	for i, perm := range a.Permissions {
+		switch {
+		case !androidPermissionPattern.MatchString(perm):
+			add("%s.permissions[%d] %q must be a permission name such as android.permission.CAMERA", p, i, perm)
+		case seen[perm]:
+			add("%s.permissions[%d]: %s is listed twice", p, i, perm)
+		}
+		seen[perm] = true
+	}
 }

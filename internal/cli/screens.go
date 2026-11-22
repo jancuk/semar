@@ -62,27 +62,28 @@ type miss struct {
 
 func (m miss) key() string { return m.app + "/" + m.screen + "." + m.element }
 
-// runMisses reads the web actions of a run and gives each element that was not found. A later action
+// runMisses reads the actions of a run that read a screen, in a browser or on a device, and gives each element that was not found. A later action
 // that missed the same element replaces an earlier one.
 func runMisses(store *evidence.Store, id domain.RunID, acts []domain.Activity) ([]miss, error) {
 	var out []miss
 	for _, e := range acts {
-		if e.Surface != domain.SurfaceWeb || e.Evidence == "" {
+		if !e.Surface.OnScreen() || e.Evidence == "" {
 			continue
 		}
 		a, err := store.ReadAction(id, e.Evidence)
 		if err != nil {
 			return nil, err
 		}
-		if a.Web == nil || a.Web.App == "" || a.Web.Screen == "" {
+		ui := a.UI()
+		if ui == nil || ui.App == "" || ui.Screen == "" {
 			continue
 		}
-		for name, st := range a.Web.Elements {
+		for name, st := range ui.Elements {
 			if st.Count != 0 || st.Locator == nil || st.Presence {
 				continue
 			}
-			m := miss{app: a.Web.App, screen: a.Web.Screen, element: name, scenario: a.Use.Scenario, step: a.Use.Step, looked: *st.Locator}
-			for _, c := range a.Web.Repair {
+			m := miss{app: ui.App, screen: ui.Screen, element: name, scenario: a.Use.Scenario, step: a.Use.Step, looked: *st.Locator}
+			for _, c := range ui.Repair {
 				if c.Element == name {
 					m.candidates = append(m.candidates, c)
 				}
@@ -134,14 +135,14 @@ func repairScreens(ctx context.Context, stdout io.Writer, f repairFlags, arg str
 
 func printMisses(stdout io.Writer, id domain.RunID, misses []miss) error {
 	if len(misses) == 0 {
-		fmt.Fprintf(stdout, "run %s: every element that a web step looked for was found, so there is nothing to repair\n", id)
+		fmt.Fprintf(stdout, "run %s: every element that a step on a screen looked for was found, so there is nothing to repair\n", id)
 		return nil
 	}
 	for _, m := range misses {
 		fmt.Fprintf(stdout, "%s %s.%s was not found (scenario %s, step %s)\n", m.app, m.screen, m.element, m.scenario, m.step)
 		fmt.Fprintf(stdout, "  old: %s\n", terminalSafe(oneLine(m.looked.String())))
 		if len(m.candidates) == 0 {
-			fmt.Fprintf(stdout, "  no candidate: the page has nothing like it. Either the product changed or the script is out of date\n")
+			fmt.Fprintf(stdout, "  no candidate: the screen has nothing like it. Either the product changed or the script is out of date\n")
 			continue
 		}
 		for i, c := range m.candidates {

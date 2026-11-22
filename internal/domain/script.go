@@ -22,12 +22,14 @@ type ProviderRef struct {
 	Harness  string `yaml:"harness" json:"harness"`
 }
 
-// ScriptStep is one action. Exactly one of Request and Web is set.
+// ScriptStep is one action. Exactly one of Request, Web, and Mobile is set.
 type ScriptStep struct {
-	Step     StepID      `yaml:"step"`
-	Request  *APIRequest `yaml:"request,omitempty"`
-	Web      *WebAction  `yaml:"web,omitempty"`
-	Captures []Capture   `yaml:"captures,omitempty"`
+	Step    StepID      `yaml:"step"`
+	Request *APIRequest `yaml:"request,omitempty"`
+	Web     *WebAction  `yaml:"web,omitempty"`
+	// Mobile is the action of a step of an android scenario.
+	Mobile   *MobileAction `yaml:"mobile,omitempty"`
+	Captures []Capture     `yaml:"captures,omitempty"`
 }
 
 // Path, Query, Headers, and JSON may hold {{name}} variables.

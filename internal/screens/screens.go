@@ -16,6 +16,7 @@ import (
 
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/idcheck"
+	"github.com/jancuk/semar/internal/xpathlite"
 	"github.com/jancuk/semar/internal/yamlfile"
 )
 
@@ -125,7 +126,7 @@ func locatorProblems(where string, l domain.Locator, siblings map[string]domain.
 		ps = append(ps, Problem{Path: path, Message: fmt.Sprintf(format, args...)})
 	}
 	if l.Empty() {
-		add(where, "the element has no way to be found: give it testId, role, name, text, or css")
+		add(where, "the element has no way to be found: give it testId, role, name, text, css, id, desc, class, or xpath")
 	}
 	for field, text := range l.Fields() {
 		if strings.Contains(variable.ReplaceAllString(text, ""), "{{") {
@@ -133,6 +134,11 @@ func locatorProblems(where string, l domain.Locator, siblings map[string]domain.
 		}
 		if strings.ContainsFunc(text, isControl) {
 			add(where+"."+field, "%s holds a control character", field)
+		}
+	}
+	if l.XPath != "" && !strings.Contains(l.XPath, "{{") {
+		if err := xpathlite.Validate(l.XPath); err != nil {
+			add(where+".xpath", "%v", err)
 		}
 	}
 	if l.Within != "" {

@@ -33,7 +33,7 @@ func FuzzParse(f *testing.F) {
 		strings.Replace(s, "needs: [place]", "needs: [pay]", 1),
 		strings.Replace(s, "needs: [place]", "needs: [place, place]", 1),
 		strings.Replace(s, "surface: api", "surface: web", 1),
-		strings.Replace(s, "surface: api\n    service: payments", "surface: android\n    given: []\n    service: payments", 1),
+		strings.Replace(s, "surface: api\n    service: payments", "surface: ios\n    given: []\n    service: payments", 1),
 		strings.Replace(s, "{{place.id}}", "{{settled.id}}", 1),
 		strings.Replace(s, "{{place.id}}", "{{secret.TOKEN}}", 1),
 		strings.Replace(s, "{{place.id}}", "{{a.b.c}}", 1),

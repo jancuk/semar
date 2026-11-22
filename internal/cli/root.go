@@ -52,8 +52,8 @@ type options struct {
 	TrialTimeout time.Duration
 	TrialLimit   time.Duration
 
-	// Sleep waits between the attempts of a journey's wait. Nil sleeps for real. A test sets it to
-	// wait for nothing.
+	// Sleep waits between the attempts of a journey's wait and between the reads of a device. Nil
+	// sleeps for real. A test sets it to wait for nothing.
 	Sleep func(ctx context.Context, d time.Duration) error
 
 	drop *envDrop

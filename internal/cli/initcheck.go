@@ -6,12 +6,17 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/engine/mobile/android"
+	"github.com/jancuk/semar/internal/engine/mobile/webdriver"
 	"github.com/jancuk/semar/internal/engine/web"
 	"github.com/jancuk/semar/internal/journey"
 )
@@ -55,6 +60,7 @@ func checkMachine(ctx context.Context, o options, stdout io.Writer, dir string) 
 	m.services(ctx, o, cfg)
 	m.provider(ctx, o, dir, cfg)
 	m.chrome(dir, cfg)
+	m.android(ctx, o, dir, cfg)
 	for _, it := range m.items {
 		fmt.Fprintf(stdout, "  %-7s  %s\n", it.state, it.text)
 	}
@@ -211,4 +217,165 @@ func webStepsWords(n int) string {
 		return "1 scenario has web steps"
 	}
 	return fmt.Sprintf("%d scenarios have web steps", n)
+}
+
+// android is checked only when a scenario or a leg of a journey runs on a device: adb, the device, and
+// the two server APKs, or for an environment with a serverUrl, that the server answers.
+func (m *machineCheck) android(ctx context.Context, o options, dir string, cfg config.Config) {
+	scs, _ := loadAllScenarios(dir)
+	n := 0
+	for _, sc := range scs {
+		if sc.Surface == domain.SurfaceAndroid {
+			n++
+		}
+	}
+	js, _, _ := journey.Load(dir)
+	for _, j := range js {
+		if slices.ContainsFunc(j.Legs, func(l domain.Leg) bool { return l.Surface == domain.SurfaceAndroid }) {
+			n++
+		}
+	}
+	if n == 0 {
+		return
+	}
+	named := false
+	adbSaid := false
+	for _, envName := range slices.Sorted(maps.Keys(cfg.Environments)) {
+		env := cfg.Environments[envName]
+		if env.Kind == config.KindProduction || len(androidServices(env)) == 0 {
+			continue
+		}
+		named = true
+		if env.Android.Remote() {
+			m.androidServer(ctx, o, envName, env)
+			continue
+		}
+		bin, err := android.FindADB(o.LookupEnv, dir)
+		if err != nil {
+			if !adbSaid {
+				m.add(stateMissing, "adb was not found: %s", strings.TrimPrefix(err.Error(), "adb was not found: "))
+				adbSaid = true
+			}
+			continue
+		}
+		if !adbSaid {
+			m.add(stateOK, "adb is at %s", bin)
+			adbSaid = true
+		}
+		serial := m.androidDevice(ctx, o, envName, env, bin)
+		m.androidServerAPKs(ctx, o, dir, envName, env, bin, serial)
+	}
+	if !named {
+		m.add(stateMissing, "%s on a device, and no test environment has a service with an android app: add android.appPackage to a service in semar.yaml", androidScenariosWords(n))
+	}
+}
+
+func androidScenariosWords(n int) string {
+	if n == 1 {
+		return "1 scenario or journey leg runs"
+	}
+	return fmt.Sprintf("%d scenarios or journey legs run", n)
+}
+
+// androidServer checks that the server at serverUrl answers.
+func (m *machineCheck) androidServer(ctx context.Context, o options, envName string, env config.Environment) {
+	c := webdriver.New(env.Android.ServerURL)
+	if o.HTTP != nil {
+		c.HTTP = o.HTTP
+	}
+	for _, f := range []struct {
+		ref string
+		to  *string
+	}{{env.Android.ServerUser, &c.User}, {env.Android.ServerKey, &c.Key}} {
+		if name, ok := strings.CutPrefix(f.ref, "env:"); ok {
+			v, set := o.LookupEnv(name)
+			if !set || v == "" {
+				m.add(stateMissing, "%s: %s is not set: export it with the credential of the device server", envName, name)
+				return
+			}
+			*f.to = v
+		}
+	}
+	cctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	switch st, err := c.Status(cctx); {
+	case err != nil:
+		m.add(stateMissing, "%s: the device server at %s did not answer: %s", envName, env.Android.ServerURL, oneLine(err.Error()))
+	case !st.Ready:
+		m.add(stateMissing, "%s: the device server at %s is not ready", envName, env.Android.ServerURL)
+	default:
+		m.add(stateOK, "%s: the device server at %s answers", envName, env.Android.ServerURL)
+	}
+}
+
+// androidDevice checks that the device that a run would use is there and ready. It gives the serial, or
+// "" when there is none.
+func (m *machineCheck) androidDevice(ctx context.Context, o options, envName string, env config.Environment, bin string) string {
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	run := android.ExecRunner{}
+	if err := run.Quiet(cctx, bin, "start-server"); err != nil {
+		m.add(stateMissing, "%s: the adb server could not be started: %s", envName, oneLine(err.Error()))
+		return ""
+	}
+	out, err := run.Output(cctx, bin, "devices", "-l")
+	if err != nil {
+		m.add(stateMissing, "%s: adb could not list the devices: %s", envName, oneLine(err.Error()))
+		return ""
+	}
+	want := env.Android.Device
+	if v, ok := o.LookupEnv("ANDROID_SERIAL"); ok && v != "" {
+		want = v
+	}
+	dev, un := android.ChooseDevice(android.ParseDevices(string(out)), want)
+	if un != nil {
+		m.add(stateMissing, "%s: %s", envName, un.Reason)
+		return ""
+	}
+	m.add(stateOK, "%s: the device %s is ready", envName, dev.Serial)
+	return dev.Serial
+}
+
+// androidServerAPKs checks that Semar has the two UiAutomator2 server APKs, or that the device has the
+// packages already.
+func (m *machineCheck) androidServerAPKs(ctx context.Context, o options, dir, envName string, env config.Environment, bin, serial string) {
+	files := []string{env.Android.UIAutomator2ServerAPK, env.Android.UIAutomator2ServerTestAPK}
+	if files[0] == "" {
+		home, err := o.home()
+		if err == nil {
+			files = []string{filepath.Join(home, "android", android.ServerAPKName), filepath.Join(home, "android", android.ServerTestAPKName)}
+		}
+	} else {
+		for i, f := range files {
+			files[i] = build.APKPath(dir, f)
+		}
+	}
+	have := len(files) == 2
+	for _, f := range files {
+		if info, err := os.Stat(f); err != nil || !info.Mode().IsRegular() {
+			have = false
+		}
+	}
+	if have {
+		m.add(stateOK, "%s: the UiAutomator2 server APKs are at %s", envName, filepath.Dir(files[0]))
+		return
+	}
+	if serial != "" {
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		present := true
+		for _, pkg := range []string{"io.appium.uiautomator2.server", "io.appium.uiautomator2.server.test"} {
+			// The package names are constants, and the device shell takes the command as one quoted line.
+			out, err := android.ExecRunner{}.Output(cctx, bin, "-s", serial, "shell", "'pm' 'path' '"+pkg+"'")
+			if err != nil || !strings.Contains(string(out), "package:") {
+				present = false
+			}
+		}
+		if present {
+			m.add(stateOK, "%s: the UiAutomator2 server is already on the device %s", envName, serial)
+			return
+		}
+	}
+	m.add(stateMissing, "%s: the UiAutomator2 server APKs were not found: put %s and %s in the Semar home under android/, or name them with uiautomator2ServerApk and uiautomator2ServerTestApk (Semar downloads nothing)",
+		envName, android.ServerAPKName, android.ServerTestAPKName)
 }

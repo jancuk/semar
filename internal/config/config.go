@@ -46,6 +46,8 @@ type Environment struct {
 	Services []Service `yaml:"services"`
 	// Web is how the browser of the web engine starts in this environment.
 	Web Web `yaml:"web"`
+	// Android is how a device is reached in this environment.
+	Android Android `yaml:"android"`
 	// Data is the set of values that tests need, keyed by a dotted name such as customers.default.
 	Data map[string]string `yaml:"data"`
 	// Checks says what every API response is judged by besides the expected results of its step.
@@ -72,6 +74,61 @@ type Web struct {
 	Timeout time.Duration `yaml:"timeout"`
 }
 
+// Android is environments.<name>.android: how the android engine reaches a device. Every field is
+// optional. There is no key for the adb program: a repository cannot choose a host program.
+type Android struct {
+	// Device is the serial of the device to use. ANDROID_SERIAL wins. With neither, the one running
+	// emulator is used, and a physical device only when it is named.
+	Device string `yaml:"device"`
+	// ServerURL is a W3C WebDriver server, such as Appium or a device farm. With it Semar does not use adb.
+	ServerURL string `yaml:"serverUrl"`
+	// ServerUser and ServerKey are secret references, env:NAME, for HTTP basic authentication.
+	ServerUser string `yaml:"serverUser"`
+	ServerKey  string `yaml:"serverKey"`
+	// Capabilities are added to the session request of a server at ServerURL.
+	Capabilities map[string]any `yaml:"capabilities"`
+	// The two UiAutomator2 server packages that adb installs. Both or neither.
+	UIAutomator2ServerAPK     string `yaml:"uiautomator2ServerApk"`
+	UIAutomator2ServerTestAPK string `yaml:"uiautomator2ServerTestApk"`
+	// Timeout is how long a check of a screen waits for its condition. Zero means 5 seconds.
+	Timeout time.Duration `yaml:"timeout"`
+	// StartTimeout is how long the start of the server on the device may take. Zero means 60 seconds.
+	StartTimeout time.Duration `yaml:"startTimeout"`
+}
+
+// The defaults of Android, which a zero value in the file stands for.
+const (
+	DefaultAndroidTimeout      = 5 * time.Second
+	DefaultAndroidStartTimeout = 60 * time.Second
+)
+
+// CheckTimeout is how long a check of a screen waits for its condition.
+func (a Android) CheckTimeout() time.Duration {
+	if a.Timeout <= 0 {
+		return DefaultAndroidTimeout
+	}
+	return a.Timeout
+}
+
+// StartLimit is how long the start of the server on the device may take.
+func (a Android) StartLimit() time.Duration {
+	if a.StartTimeout <= 0 {
+		return DefaultAndroidStartTimeout
+	}
+	return a.StartTimeout
+}
+
+// SecretEnvNames lists the variables that serverUser and serverKey name.
+func (a Android) SecretEnvNames() []string {
+	var out []string
+	for _, ref := range []string{a.ServerUser, a.ServerKey} {
+		if name, ok := strings.CutPrefix(ref, "env:"); ok && name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 type Effects struct {
 	Mode  string      `yaml:"mode"`
 	Deny  []OpPattern `yaml:"deny"`
@@ -90,6 +147,40 @@ type Service struct {
 	AuthProfile string `yaml:"authProfile"`
 	// Web is set when the service has a web page whose address differs from the base URL.
 	Web *ServiceWeb `yaml:"web"`
+	// Android is set when the service has an app for android.
+	Android *ServiceAndroid `yaml:"android"`
+}
+
+// ServiceAndroid is the app of a service on a device. AppPackage is required.
+type ServiceAndroid struct {
+	AppPackage string `yaml:"appPackage"`
+	// AppActivity is the activity to start. Empty means the launcher activity.
+	AppActivity string `yaml:"appActivity"`
+	// APK is a file of the repository, or an absolute path. Semar installs it, and its digest is the build.
+	APK string `yaml:"apk"`
+	// App is what a server at a non-loopback serverUrl installs, such as bs://abc. It excludes APK.
+	App string `yaml:"app"`
+	// Reset is what happens before each scenario: restart (the default), clear, or none.
+	Reset string `yaml:"reset"`
+	// Schemes are the custom schemes that an open may use, besides http and https.
+	Schemes []string `yaml:"schemes"`
+	// Permissions are granted after each reset.
+	Permissions []string `yaml:"permissions"`
+}
+
+// The values of ServiceAndroid.Reset.
+const (
+	ResetRestart = "restart"
+	ResetClear   = "clear"
+	ResetNone    = "none"
+)
+
+// ResetMode is the reset of the service, with the default applied.
+func (a ServiceAndroid) ResetMode() string {
+	if a.Reset == "" {
+		return ResetRestart
+	}
+	return a.Reset
 }
 
 // ServiceWeb says where the web page of a service starts: a path below its base URL.

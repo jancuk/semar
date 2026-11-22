@@ -73,6 +73,11 @@ type Deps struct {
 	// scenario with a web step ends blocked.
 	Web     WebDoer
 	Screens ScreenSource
+	// Mobile is the engine of the app on a device. Without it, a scenario with a step on a device ends
+	// blocked. MobileServices are the services that have an android app in this environment: a step on
+	// another service ends blocked. Nil does not check.
+	Mobile         MobileDoer
+	MobileServices []string
 	// Retries is how many more times a scenario is replayed after an attempt that failed or was
 	// inconclusive. Zero replays nothing.
 	Retries int
@@ -85,6 +90,8 @@ type Runner struct {
 	d Deps
 	// webMu holds one scenario with web steps at a time, so that two of them never act on one page.
 	webMu sync.Mutex
+	// mobileMu does the same for the device. A scenario that holds both takes webMu first.
+	mobileMu sync.Mutex
 }
 
 func New(d Deps) *Runner {
@@ -457,6 +464,18 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 			r.d.Web.NewScenario()
 		}
 	}
+	var mr *webRun
+	if slices.ContainsFunc(s.Steps, func(ss domain.ScriptStep) bool { return ss.Mobile != nil }) {
+		r.mobileMu.Lock()
+		defer r.mobileMu.Unlock()
+		var proceed bool
+		if mr, proceed = r.prepareMobile(sc, s, run); !proceed {
+			return nil
+		}
+		if mr != nil {
+			r.d.Mobile.NewScenario()
+		}
+	}
 	var doErr error
 	interrupted := false
 	// shown holds the variables as a report may show them: a capture is the redacted value of
@@ -464,15 +483,18 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 	shown := maps.Clone(vars)
 	for i, step := range sc.Steps {
 		ss, ok := bound[step.ID]
-		if !ok || (ss.Request == nil && ss.Web == nil) {
+		if !ok || (ss.Request == nil && ss.Web == nil && ss.Mobile == nil) {
 			what := "request"
-			if sc.Surface == domain.SurfaceWeb {
+			switch sc.Surface {
+			case domain.SurfaceWeb:
 				what = "web action"
+			case domain.SurfaceAndroid:
+				what = "device action"
 			}
 			note(step.ID, fmt.Sprintf("step %s has no %s in the script, so the later steps were not sent", step.ID, what))
 			break
 		}
-		res, err := r.send(ctx, wr, run, sc, step, ss, vars, pass, note)
+		res, err := r.send(ctx, wr, mr, run, sc, step, ss, vars, pass, note)
 		if !res.built {
 			break
 		}
@@ -485,6 +507,8 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 		if err != nil {
 			if reason, blocked := blockedByBrowser(err); blocked {
 				run.blocked = append(run.blocked, reason)
+			} else if reason, blocked := blockedByDevice(err); blocked {
+				run.blocked = append(run.blocked, reason)
 			} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				interrupted = true
 			} else {
@@ -493,7 +517,7 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 			}
 			break
 		}
-		if a := res.Action; (a.Web == nil && a.Response == nil) || a.Refused != "" || a.Err != "" {
+		if a := res.Action; (a.UI() == nil && a.Response == nil) || a.Refused != "" || a.Err != "" {
 			break
 		}
 		maps.Copy(run.captured, res.Captured)
@@ -524,10 +548,10 @@ type sent struct {
 	built    bool
 }
 
-// send hands one step to the engine of its surface: the browser for a web step, the API engine for a
-// request. It is the one place where the two meet, so that a step is recorded, judged, and stopped on
-// in one way.
-func (r *Runner) send(ctx context.Context, wr *webRun, run *replayed, sc domain.Scenario, step domain.Step, ss domain.ScriptStep, vars map[string]string, pass domain.Pass, note func(domain.StepID, string)) (sent, error) {
+// send hands one step to the engine of its surface: the browser for a web step, the device for a mobile
+// step, the API engine for a request. It is the one place where they meet, so that a step is recorded,
+// judged, and stopped on in one way.
+func (r *Runner) send(ctx context.Context, wr, mr *webRun, run *replayed, sc domain.Scenario, step domain.Step, ss domain.ScriptStep, vars map[string]string, pass domain.Pass, note func(domain.StepID, string)) (sent, error) {
 	if ss.Web != nil {
 		call, err := wr.webCall(sc, step, ss, vars, pass)
 		if err != nil {
@@ -535,6 +559,15 @@ func (r *Runner) send(ctx context.Context, wr *webRun, run *replayed, sc domain.
 			return sent{}, nil
 		}
 		res, err := r.d.Web.Do(ctx, call)
+		return sent{res.Action, res.Captured, res.Missing, true}, err
+	}
+	if ss.Mobile != nil {
+		call, err := mr.mobileCall(sc, step, ss, vars, pass)
+		if err != nil {
+			note(step.ID, fmt.Sprintf("step %s could not be run: %v", step.ID, err))
+			return sent{}, nil
+		}
+		res, err := r.d.Mobile.Do(ctx, call)
 		return sent{res.Action, res.Captured, res.Missing, true}, err
 	}
 	call, err := buildCall(sc, step, ss, vars, pass)
@@ -593,12 +626,12 @@ func buildCall(sc domain.Scenario, step domain.Step, ss domain.ScriptStep, vars 
 // from vars before the check; shown holds the same variables as a report may print them.
 func evaluate(step domain.Step, a domain.Action, vars, shown map[string]string) verdict.StepEvidence {
 	ev := verdict.StepEvidence{Action: &a}
-	if a.Web == nil {
-		// A browser action has no response to hold an invariant.
+	if a.UI() == nil {
+		// An action on a screen has no response to hold an invariant.
 		ev.Invariants = check.Invariants(step, a)
 	}
-	if a.Web != nil && a.Err != "" {
-		// The action did not happen, for instance because its element was not found. The page is as it
+	if a.UI() != nil && a.Err != "" {
+		// The action did not happen, for instance because its element was not found. The screen is as it
 		// was before the step, so what it shows says nothing about what the step was to do: no check is
 		// decided, and the step ends inconclusive and never failed.
 		for _, e := range step.Expect {

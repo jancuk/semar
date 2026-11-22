@@ -22,12 +22,16 @@ const matchesMany = "the locator matches %d elements"
 // action. Only exists, count, hidden, and visible may fail on an element that is not there. A check
 // that reads one element, which is not found or which the locator does not pick out alone, is not
 // evaluated, so the step ends inconclusive and never failed (TRD rule 5).
-func evalElement(res *Result, c domain.Check, op string, w *domain.WebRecord) {
+func evalElement(res *Result, c domain.Check, op string, w *domain.UIRead) {
 	if w == nil {
 		notEvaluated(res, "nothing was read: the step is not a browser step")
 		return
 	}
 	if c.Page != "" {
+		if w.Device {
+			notEvaluated(res, "a step on a device has no page: check an element")
+			return
+		}
 		evalPage(res, c, op, w)
 		return
 	}
@@ -66,7 +70,7 @@ func ManyReason(count int, names string) string {
 }
 
 // alone says whether the locator picked out one element. When it did not, it sets the reason.
-func alone(res *Result, c domain.Check, st domain.ElementState, w *domain.WebRecord) bool {
+func alone(res *Result, c domain.Check, st domain.ElementState, w *domain.UIRead) bool {
 	switch {
 	case st.Count > 1:
 		reason := ManyReason(st.Count, namesOf(w, c.Element))
@@ -81,7 +85,7 @@ func alone(res *Result, c domain.Check, st domain.ElementState, w *domain.WebRec
 
 // namesOf lists the elements that the engine named for an element that matched several, as the repair
 // names its candidates.
-func namesOf(w *domain.WebRecord, element string) string {
+func namesOf(w *domain.UIRead, element string) string {
 	var out []string
 	for _, cand := range w.Repair {
 		if cand.Element == element {
@@ -91,7 +95,7 @@ func namesOf(w *domain.WebRecord, element string) string {
 	return strings.Join(out, ", ")
 }
 
-func evalElementText(res *Result, c domain.Check, op string, st domain.ElementState, w *domain.WebRecord) {
+func evalElementText(res *Result, c domain.Check, op string, st domain.ElementState, w *domain.UIRead) {
 	if !alone(res, c, st, w) {
 		return
 	}
@@ -107,7 +111,7 @@ func evalElementText(res *Result, c domain.Check, op string, st domain.ElementSt
 	res.State = compareText(st.Text, c, op)
 }
 
-func evalElementAttribute(res *Result, c domain.Check, op string, st domain.ElementState, w *domain.WebRecord) {
+func evalElementAttribute(res *Result, c domain.Check, op string, st domain.ElementState, w *domain.UIRead) {
 	if !alone(res, c, st, w) {
 		return
 	}
@@ -135,7 +139,7 @@ func compareText(got string, c domain.Check, op string) domain.CheckState {
 	return state(strings.Contains(got, text(c.Contains)))
 }
 
-func evalElementState(res *Result, c domain.Check, st domain.ElementState, w *domain.WebRecord) {
+func evalElementState(res *Result, c domain.Check, st domain.ElementState, w *domain.UIRead) {
 	switch c.State {
 	case "hidden":
 		res.State = state(!st.Visible)
@@ -163,7 +167,7 @@ func evalElementState(res *Result, c domain.Check, st domain.ElementState, w *do
 	}
 }
 
-func evalPage(res *Result, c domain.Check, op string, w *domain.WebRecord) {
+func evalPage(res *Result, c domain.Check, op string, w *domain.UIRead) {
 	var got string
 	switch c.Page {
 	case domain.PageTitle:

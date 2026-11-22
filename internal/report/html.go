@@ -39,7 +39,7 @@ type webView struct {
 	Shot                *shotEmbed
 }
 
-// shotEmbed is a screenshot of a web step. Src is empty when the report leaves it out, and Path says where it is.
+// shotEmbed is a screenshot of a web or a device step. Src is empty when the report leaves it out, and Path says where it is.
 type shotEmbed struct {
 	Src  template.URL
 	Path string
@@ -210,7 +210,7 @@ func (e *embedder) steps(vw viewer, d Data, res domain.ScenarioResult, all bool)
 	}
 	lastShot := -1
 	for i, a := range d.Activity {
-		if a.Use.Scenario == res.Scenario && a.Surface == domain.SurfaceWeb && screenshotPath.MatchString(a.Screenshot) {
+		if a.Use.Scenario == res.Scenario && a.Surface.OnScreen() && screenshotPath.MatchString(a.Screenshot) {
 			lastShot = i
 		}
 	}
@@ -231,7 +231,7 @@ func (e *embedder) steps(vw viewer, d Data, res domain.ScenarioResult, all bool)
 				continue
 			}
 			switch a.Surface {
-			case domain.SurfaceWeb:
+			case domain.SurfaceWeb, domain.SurfaceAndroid:
 				wv := webView{Why: vw.show(a.Why), Target: vw.show(a.Target), Result: vw.show(a.Result)}
 				if screenshotPath.MatchString(a.Screenshot) {
 					wv.Shot = e.shot(a.Screenshot, all || i == lastShot)

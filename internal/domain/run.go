@@ -15,6 +15,9 @@ type BuildRef struct {
 	// Local is set with Declared when the commit is the working copy of a service on this machine, not
 	// one that a person named.
 	Local bool `json:"local,omitempty"`
+	// APK is set with Declared when the commit is the digest of the APK file that the service lists,
+	// and not a commit. The ManifestHash does not cover it.
+	APK bool `json:"apk,omitempty"`
 }
 
 // ShortCommit is the first 7 characters of a build's commit. The build of a service that runs the

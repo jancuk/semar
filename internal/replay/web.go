@@ -58,11 +58,7 @@ func (r *Runner) prepareWeb(sc domain.Scenario, s domain.Script, run *replayed) 
 		if !slices.Contains(apps, app) {
 			apps = append(apps, app)
 		}
-		uses[app] = append(uses[app], screens.Use{
-			Where:    "step " + string(ss.Step),
-			Action:   *ss.Web,
-			Elements: stepElements(stepOf[ss.Step], ss),
-		})
+		uses[app] = append(uses[app], screens.WebUse("step "+string(ss.Step), *ss.Web, stepElements(stepOf[ss.Step], ss)))
 	}
 	if len(apps) == 0 && len(run.blocked) == 0 {
 		return nil, true
@@ -74,6 +70,12 @@ func (r *Runner) prepareWeb(sc domain.Scenario, s domain.Script, run *replayed) 
 		run.blocked = append(run.blocked, reasonNoBrowser)
 		return nil, false
 	}
+	return r.loadScreens(run, apps, uses)
+}
+
+// loadScreens loads the screens file of each app that a scenario uses, and checks every use against
+// it. The scenario is blocked, with the reasons, when a file is missing or does not fit.
+func (r *Runner) loadScreens(run *replayed, apps []string, uses map[string][]screens.Use) (wr *webRun, proceed bool) {
 	wr = &webRun{screens: map[string]domain.Screens{}}
 	for _, app := range apps {
 		scr, err := r.d.Screens.Load(app)
@@ -174,7 +176,7 @@ func until(step domain.Step, vars map[string]string) []domain.Check {
 // watched lists the elements that the engine reads after the action. An element that a check asks
 // only for its existence or its number, and that no capture and no text check reads, is read for
 // presence only: its absence is no reason for a repair.
-func watched(step domain.Step, ss domain.ScriptStep) []web.Watched {
+func watched(step domain.Step, ss domain.ScriptStep) []domain.Watched {
 	var order []string
 	presence := map[string]bool{}
 	use := func(name string, onlyPresence bool) {
@@ -199,9 +201,9 @@ func watched(step domain.Step, ss domain.ScriptStep) []web.Watched {
 	for _, c := range ss.Captures {
 		use(c.Element, false)
 	}
-	out := make([]web.Watched, len(order))
+	out := make([]domain.Watched, len(order))
 	for i, name := range order {
-		out[i] = web.Watched{Element: name, Presence: presence[name], Attrs: attrs[name]}
+		out[i] = domain.Watched{Element: name, Presence: presence[name], Attrs: attrs[name]}
 	}
 	return out
 }

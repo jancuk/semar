@@ -3,6 +3,7 @@ package edge_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jancuk/semar/internal/domain"
@@ -155,5 +156,25 @@ func TestDroppedCasesAreRemembered(t *testing.T) {
 	}
 	if _, err := edge.ReadDropped(dir); err == nil {
 		t.Error("a file that is not an edge-dropped file was read")
+	}
+}
+
+func TestAValueReadOnADeviceCannotFeedAnEdgeCase(t *testing.T) {
+	sc, s := refundBase()
+	// The step that gives the ID is a step on a device: an edge case runs only API steps.
+	s.Steps[0] = domain.ScriptStep{Step: "make", Mobile: &domain.MobileAction{Service: "app", Do: domain.MobileLaunch},
+		Captures: []domain.Capture{{Name: "order_id", Element: "id"}}}
+	op := operation(t, "GET", "/orders/{id}")
+	cases, _ := edge.Generate(op, *s.Steps[1].Request)
+	c := find(t, cases, edge.UnknownID, "id")
+	// An unknown id needs no earlier step, so it is built.
+	if _, _, err := edge.Build(sc, s, "read", c, "PROJ-12-E01", "x"); err != nil {
+		t.Errorf("a case that needs no earlier value: %v", err)
+	}
+	op.Statuses = append(op.Statuses, "401")
+	cases, _ = edge.Generate(op, *s.Steps[1].Request)
+	c = find(t, cases, edge.NoSession, "")
+	if _, _, err := edge.Build(sc, s, "read", c, "PROJ-12-E02", "x"); err == nil || !strings.Contains(err.Error(), "reads a value on a device") {
+		t.Errorf("error = %v, want a refusal that names the device step", err)
 	}
 }

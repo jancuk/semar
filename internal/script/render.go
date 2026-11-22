@@ -343,6 +343,30 @@ func RenderWeb(w domain.WebAction, vars map[string]string) (domain.WebAction, er
 	return out, nil
 }
 
+// RenderMobile returns a copy of m with every {{name}} replaced in the link and the value. A variable
+// in a link is a name or an id, so it holds only letters, digits, and - . _ ~ . The value of a type is
+// text and holds anything.
+func RenderMobile(m domain.MobileAction, vars map[string]string) (domain.MobileAction, error) {
+	out := m
+	var err error
+	if m.Link != "" {
+		if out.Link, err = substitute(m.Link, vars, checkLinkValue); err != nil {
+			return domain.MobileAction{}, fmt.Errorf("link: %w", err)
+		}
+	}
+	if out.Value, err = substitute(m.Value, vars, nil); err != nil {
+		return domain.MobileAction{}, fmt.Errorf("value: %w", err)
+	}
+	return out, nil
+}
+
+func checkLinkValue(name, val string) error {
+	if val == "" || strings.IndexFunc(val, func(r rune) bool { return !isUnreserved(r) }) >= 0 {
+		return fmt.Errorf("variable %s cannot be used in a link: it is empty or holds a character other than a letter, a digit, - . _ ~", name)
+	}
+	return nil
+}
+
 // RenderLocator returns a copy of l with every {{name}} replaced in its fields. A name without a
 // value is an error that names the variable and the field.
 func RenderLocator(l domain.Locator, vars map[string]string) (domain.Locator, error) {
@@ -351,7 +375,8 @@ func RenderLocator(l domain.Locator, vars map[string]string) (domain.Locator, er
 		name string
 		to   *string
 		from string
-	}{{"testId", &out.TestID, l.TestID}, {"role", &out.Role, l.Role}, {"name", &out.Name, l.Name}, {"text", &out.Text, l.Text}, {"css", &out.CSS, l.CSS}} {
+	}{{"testId", &out.TestID, l.TestID}, {"role", &out.Role, l.Role}, {"name", &out.Name, l.Name}, {"text", &out.Text, l.Text}, {"css", &out.CSS, l.CSS},
+		{"id", &out.ID, l.ID}, {"desc", &out.Desc, l.Desc}, {"class", &out.Class, l.Class}, {"xpath", &out.XPath, l.XPath}} {
 		v, err := substitute(f.from, vars, nil)
 		if err != nil {
 			return domain.Locator{}, fmt.Errorf("%s: %w", f.name, err)
@@ -364,7 +389,7 @@ func RenderLocator(l domain.Locator, vars map[string]string) (domain.Locator, er
 // LocatorVariables lists the variable names in the fields of a locator, in order and without repeats.
 func LocatorVariables(l domain.Locator) []string {
 	var names []string
-	for _, text := range []string{l.TestID, l.Role, l.Name, l.Text, l.CSS} {
+	for _, text := range []string{l.TestID, l.Role, l.Name, l.Text, l.CSS, l.ID, l.Desc, l.Class, l.XPath} {
 		for _, m := range variablePattern.FindAllStringSubmatch(text, -1) {
 			if !slices.Contains(names, m[1]) {
 				names = append(names, m[1])

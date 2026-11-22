@@ -241,7 +241,7 @@ func chooseRun(ctx context.Context, stdout, stderr io.Writer, o options, in *lin
 			})
 		})
 	}
-	sel.gaps = surfaceGaps(sel.scenarios)
+	sel.gaps = surfaceGaps(o, f.dir, cfg, envName, sel.scenarios)
 	return sel, 0, nil
 }
 
@@ -290,17 +290,6 @@ func addCriticalJourneys(stderr io.Writer, f runFlags, sel *selection) error {
 	}
 	sel.journeys, sel.skipped = js, skipped
 	return nil
-}
-
-// surfaceGaps names the scenarios that cannot run on this machine.
-func surfaceGaps(scs []domain.Scenario) []string {
-	var out []string
-	for _, sc := range scs {
-		if sc.Surface == domain.SurfaceAndroid {
-			out = append(out, fmt.Sprintf("%s is an Android scenario, which cannot run here", sc.ID))
-		}
-	}
-	return out
 }
 
 // chooseChange selects the scenarios of the tickets of the change, and then the critical journeys.
@@ -376,7 +365,7 @@ func chooseChange(ctx context.Context, stdout, stderr io.Writer, o options, in *
 	if len(sel.input.NoTicket) > 0 {
 		sel.gaps = append(sel.gaps, status.NoTicketLine(sel.input.NoTicket))
 	}
-	sel.gaps = append(sel.gaps, surfaceGaps(sel.scenarios)...)
+	sel.gaps = append(sel.gaps, surfaceGaps(o, f.dir, cfg, envName, sel.scenarios)...)
 	code := ExitOK
 	if len(notPlanned) > 0 {
 		code = ExitUndecided

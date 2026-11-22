@@ -434,8 +434,11 @@ func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir strin
 	}
 	eng := rg.webEngine(o, dir, cfg, envName, env, headed)
 	defer eng.Close()
+	dev := rg.mobileEngine(o, dir, env, declared)
+	defer closeMobile(ctx, dev)
 	announce()
 	deps.Web, deps.Screens = eng, screenSource{repo: dir}
+	useMobile(&deps, dev, env)
 	jdeps := journey.Deps{Builds: rg.builds, Services: map[string]string{}, Clock: o.Clock, Sleep: o.Sleep, Accounts: deps.Accounts}
 	for _, s := range env.Services {
 		jdeps.Services[s.Name] = s.AuthProfile

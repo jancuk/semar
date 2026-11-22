@@ -16,14 +16,15 @@ The examples use a service named `orders`, a web application named `shop`, and t
 8. [Check every response against the API document](#check-every-response-against-the-api-document)
 9. [Prepare data with fixtures](#prepare-data-with-fixtures)
 10. [Test a web application](#test-a-web-application)
-11. [Test a business flow with a journey](#test-a-business-flow-with-a-journey)
-12. [See that nothing is skipped: the use case ledger](#see-that-nothing-is-skipped-the-use-case-ledger)
-13. [Keep a regression set with suites and retries](#keep-a-regression-set-with-suites-and-retries)
-14. [Results](#results)
-15. [Run in a pipeline](#run-in-a-pipeline)
-16. [Command reference](#command-reference)
-17. [The files of a repository](#the-files-of-a-repository)
-18. [When something goes wrong](#when-something-goes-wrong)
+11. [Test an Android app](#test-an-android-app)
+12. [Test a business flow with a journey](#test-a-business-flow-with-a-journey)
+13. [See that nothing is skipped: the use case ledger](#see-that-nothing-is-skipped-the-use-case-ledger)
+14. [Keep a regression set with suites and retries](#keep-a-regression-set-with-suites-and-retries)
+15. [Results](#results)
+16. [Run in a pipeline](#run-in-a-pipeline)
+17. [Command reference](#command-reference)
+18. [The files of a repository](#the-files-of-a-repository)
+19. [When something goes wrong](#when-something-goes-wrong)
 
 ## Features
 
@@ -48,6 +49,7 @@ The examples use a service named `orders`, a web application named `shop`, and t
 | A recorded web test | `semar record` writes a web test while you do the flow once | [Record a web test](#record-a-web-test) |
 | Web tests from a plan | A model does the flow in Chrome, and Semar writes it as a test that replays with no model | [Plan writes web tests](#plan-writes-web-tests) |
 | Web checks | A web test checks the text, the state, and the attributes of an element, and the path and the title of the page. Every web step leaves a screenshot | [Check a web page](#check-a-web-page) |
+| Android tests | Semar taps, types, and reads the screen of an app on an emulator or a device, with no model and no JVM. A result belongs to the APK that ran | [Test an Android app](#test-an-android-app) |
 | Journeys | A business flow across services runs leg by leg against one set of builds | [Test a business flow with a journey](#test-a-business-flow-with-a-journey) |
 | The use case ledger | Every use case of a change ends in one stated state, and `semar status` ends with `Ship: yes` or `Ship: no` | [The use case ledger](#see-that-nothing-is-skipped-the-use-case-ledger) |
 | Manual checks | What only a person can check has steps, an expected result, and a recorded answer | [The use case ledger](#see-that-nothing-is-skipped-the-use-case-ledger) |
@@ -58,7 +60,7 @@ The examples use a service named `orders`, a web application named `shop`, and t
 | Rules of an environment | Hosts, methods, and an effects policy limit what a test may do. A production environment is read only | [Configuration](#configuration) |
 | Model providers | Claude Code, Codex, the Anthropic API, or any server with the OpenAI chat format. A page on your machine manages them | [Choose the model](#choose-the-model) |
 
-Semar tests an HTTP API and a web application. A check on Android stays a manual check for now: the plan writes its steps, and a person records the result.
+Semar tests an HTTP API, a web application, and an Android app. A plan writes no Android test yet: an Android criterion stays a manual check with steps, and `semar record` does not record on a device.
 
 There are three ways to get tests. All of them end with the same `semar run`.
 
@@ -76,6 +78,7 @@ Semar is one static binary with no runtime dependency.
 
 * Go 1.26 or later. The build uses the toolchain named in `go.mod`, and Go downloads it on the first build.
 * `git`, and `make` to build from a clone.
+* `adb`, for an Android test. See [Test an Android app](#test-an-android-app).
 * Chrome, for a web test. Semar finds it on the machine, and `environments.<env>.web.chrome` names another path.
 * For `semar plan` only: a model provider. The default is [Claude Code](https://claude.com/claude-code), installed and signed in, with `claude` on your `PATH`. [Choose the model](#choose-the-model) lists the others. The other commands need no model.
 
@@ -154,7 +157,7 @@ A web step of such an account uses the browser profile of [`semar login`](#sign-
 
 **The build of a service on this machine.** A service with no build probe whose base URL is `localhost`, an address of `127.0.0.0/8`, or `::1` runs the working copy, so its build is the head commit of the repository. When tracked files differ from that commit, the build is the commit and a short digest of the difference, so a result from an earlier state of the files is `stale`. An untracked file is not part of it. `init` asks for nothing for such a service, and the header of a run, and its report, say that the build is the head commit and was not read from the service. `semar run --build <commit>` names another one.
 
-**Check a machine.** In a repository that has `.semar/semar.yaml`, `semar init` writes nothing. It checks this machine and prints one line for each item: `ok` or `missing` with the way to fix it. The exit code is 0 when nothing is missing and 2 otherwise. Run it after you clone a repository that a colleague set up.
+**Check a machine.** In a repository that has `.semar/semar.yaml`, `semar init` writes nothing. It checks this machine and prints one line for each item: `ok` or `missing` with the way to fix it. When a scenario or a journey leg runs on Android, it also checks `adb`, the device that a run would use, and the two server APKs, or that the server at `serverUrl` answers. The exit code is 0 when nothing is missing and 2 otherwise. Run it after you clone a repository that a colleague set up.
 
 ### Configuration
 
@@ -262,6 +265,8 @@ The file takes these keys too:
 | `environments.<env>.effects.reads` | None | Requests that only read although their method is not `GET`, such as `{method: POST, path: /v1/search}` |
 | `environments.<env>.web.chrome` | The Chrome that Semar finds on the machine | The path of the Chrome program |
 | `environments.<env>.web.timeout` | `5s` | How long a web check waits for its condition before it fails, from `0s` to `1m` |
+| `environments.<env>.android` | None | How a device is reached: `device`, `serverUrl`, `serverUser`, `serverKey`, `capabilities`, `uiautomator2ServerApk`, `uiautomator2ServerTestApk`, `timeout`, and `startTimeout`. See [Test an Android app](#test-an-android-app) |
+| `environments.<env>.services[].android` | None | The app of a service: `appPackage`, `appActivity`, `apk`, `app`, `reset`, `schemes`, and `permissions` |
 | `environments.<env>.checks.schema` | `fail` | `fail`, `warn`, or `off`: what a response that does not fit the API document does. See [Check every response against the API document](#check-every-response-against-the-api-document) |
 | `environments.<env>.checks.responseTime.limit` | None | The time limit of one response, such as `2s`. With none, the time is not checked |
 | `environments.<env>.checks.responseTime.on` | `warn` | `warn` or `fail`: what a response over the limit does |
@@ -1357,11 +1362,192 @@ web: left for a person: docs/tickets/SHOP-482.md:13: the card colour is a color 
 
 It does not explore a mobile screen, a flow across two tabs, a file upload, a hover in a recording, a custom checkbox that the page hides, or a color, slider, or file field, because the recorder does not hear them or a flow cannot type into them. A date or time field is filled with its value in the form that the field takes, and the page list shows the form. A flow types a [date variable](#values-that-follow-the-run) such as `{{local.plus1d}}` for a date near today, and a fixed date at least 10 years away when the page must show the date in its own words. The plan does not sign in through another site or with a second factor.
 
+## Test an Android app
+
+A scenario with the tag `@surface:android`, or a journey leg with `surface: android`, taps, types, and reads the screen of an app on an Android emulator or a device. Semar reads the native UI tree, finds each element in Go, and acts on its coordinates. A model is not needed to run it.
+
+A run needs `adb` and the two APKs of the UiAutomator2 server of Appium on your machine, or a server that you already have. The first step of a run starts the server on the device, and the end of the run stops it.
+
+### Set up
+
+**1. adb.** Semar finds `adb` in this order: the absolute path in `SEMAR_ADB_BIN`, `PATH`, `$ANDROID_HOME/platform-tools`, `$ANDROID_SDK_ROOT/platform-tools`, and the folder where Android Studio installs the SDK (`~/Library/Android/sdk` on macOS, `~/Android/Sdk` on Linux). The configuration cannot name the program, because it is a file of the repository under test, and a program inside that repository is refused.
+
+**2. The server APKs.** Semar downloads nothing. The tested version is v10.6.6 of the [UiAutomator2 server](https://github.com/appium/appium-uiautomator2-server/releases/tag/v10.6.6). Download these two files and save them under the names on the right, in the `android` folder of the Semar home (`~/.config/semar/android`, or `$SEMAR_HOME/android`):
+
+| Release file | Save as | Size | sha256 |
+| --- | --- | --- | --- |
+| `appium-uiautomator2-server-v10.6.6.apk` | `appium-uiautomator2-server.apk` | 17,968,807 bytes | `8ff760a2a86b487f53090fbdcd5b0360e67d02bb811887d527a9557b0d59c80d` |
+| `appium-uiautomator2-server-debug-androidTest.apk` | `appium-uiautomator2-server-test.apk` | 197,183 bytes | `e6f729287d72351388fd66597c35b69988b9091a7011954bf92a55d416cb1e1c` |
+
+Both files carry one signing key, so Semar installs them with no re-signing and no JVM. Keys of `semar.yaml` can name two other files instead (`uiautomator2ServerApk` and `uiautomator2ServerTestApk`, both or neither). A device that has the two packages already needs no file. Semar installs a package again only when the file on the device differs, and removes a server package only to clear a signature clash. It never uninstalls your app.
+
+**3. The app and the device.** Add an `android` block to the service that holds the app, and one to the environment when the defaults do not fit:
+
+```yaml
+environments:
+  uat:
+    hosts: ["shop.uat.example.com"]
+    android:                                  # all keys are optional
+      device: emulator-5554                   # ANDROID_SERIAL wins over it
+      timeout: 5s                             # how long a check waits, from 0s to 1m
+      startTimeout: 60s                       # how long the server may take to start, up to 5m
+    services:
+      - name: shop-app
+        baseUrl: https://shop.uat.example.com
+        android:
+          appPackage: com.example.shop        # required
+          appActivity: .MainActivity          # empty: the launcher activity
+          apk: app/build/outputs/apk/debug/app-debug.apk   # in the repository, or an absolute path
+          reset: restart                      # restart (default), clear, or none
+          schemes: [shop]                     # custom schemes that an open step may use
+          permissions: [android.permission.CAMERA]         # granted after each reset
+```
+
+| Key | Meaning |
+| --- | --- |
+| `android.device` | The serial of the device. With no serial, Semar uses the one running emulator. A physical device is used only when it is named here or in `ANDROID_SERIAL`, because a reset can delete data and Semar never picks a personal phone. Two emulators, an `offline` device, and an `unauthorized` one end the scenario as `blocked` with the reason |
+| `android.timeout`, `android.startTimeout` | The wait of a check, and the wait for the server to start |
+| `services[].android.appPackage` | The package of the app. Required |
+| `services[].android.appActivity` | The activity to start. Empty starts the launcher activity |
+| `services[].android.apk` | The file that Semar installs when the device has another one. See the build below |
+| `services[].android.reset` | What happens before each scenario. `restart` stops the app and keeps its data. `clear` also deletes its data. `none` leaves it as it is |
+| `services[].android.schemes` | The custom schemes, such as `shop`, that an `open` step may use. `http` and `https` follow the rules of the environment, and `file`, `content`, `intent`, and `javascript` are never opened |
+| `services[].android.permissions` | Permissions that Semar grants after each reset, because `clear` revokes them |
+
+`semar init` checks the machine for an Android scenario: `adb`, the device, and the server APKs. See [Check a machine](#set-up-a-repository).
+
+**The build is the APK.** A service with `apk`, no build probe, and no `--build` has the first 40 hexadecimal digits of the sha256 of that file as its build. Reading it needs no device, so `semar status` and an API-only run work with no emulator running. A new APK makes the earlier results `stale`. The order is the probe, then `--build`, then the APK, then the head commit of the repository. A missing file adds no APK build (falling back to the head commit when the service is on this machine), and the first step on a device still ends `blocked` because the file cannot be installed. Before the first step, Semar checks the file again, and it installs exactly that file.
+
+### Write a scenario
+
+The tags and the lines are those of any scenario. The action lines are free text, and a `Then` line is a check of an element:
+
+```gherkin
+  @id:AND-1 @ticket:SHOP-1 @surface:android @auth:default
+  Scenario: A customer signs in
+    Given Start the app
+    # step: start
+    When Type the email
+    # step: email
+    And Type the password
+    # step: password
+    And Tap sign in
+    # step: sign-in
+    Then the element welcome equals "Hi Ana"
+    # person
+```
+
+```yaml
+apiVersion: semar/v1
+kind: Script
+scenario: AND-1
+authoredBy: { instance: hand, model: none, harness: none }
+steps:
+  - step: start
+    mobile: { service: shop-app, app: shop-app, do: launch }
+  - step: email
+    mobile: { service: shop-app, app: shop-app, do: type, screen: SignIn, element: email, value: "ana@example.com" }
+  - step: password
+    mobile: { service: shop-app, app: shop-app, do: type, screen: SignIn, element: password, secret: env:SHOP_PASSWORD }
+  - step: sign-in
+    mobile: { service: shop-app, app: shop-app, do: tap, screen: SignIn, element: submit }
+```
+
+Add the script with `semar script add`, as for any scenario. A script step has `request`, `web`, or `mobile`, and only one. The rules:
+
+* The first `mobile` step of a service is `launch` or `open`.
+* An android scenario has no `web` step. It may have API steps, for setup.
+* A device has one signed-in account, so `as` on a `mobile` step must name the account of the scenario.
+* A step on a device checks and captures elements. It has no response and no page, so a `status`, a JSONPath, or a `page` check is refused.
+* `screen` is allowed on every action, because the checks of the step read that screen.
+
+### The screens file
+
+`.semar/screens/<app>.yaml` says how each element is found, as for a web application. One file may serve a web and an Android app of the same name. The locator keys for a device are these:
+
+| Key | Matches | Appium name |
+| --- | --- | --- |
+| `id` (or `testId`) | The resource id, whole or the part after `:id/` | `id` |
+| `desc` | The content description | `accessibility id` |
+| `role` and `name` | The role of the class, with the description, the text, the text of a child, or the hint as its name | none |
+| `text` | The exact visible text of the innermost node | none |
+| `class` | The Android class | `class name` |
+| `xpath` | A subset of XPath over the native tree: `/`, `//`, a class or `*`, `[@a='v']`, `contains(@a,'v')`, `starts-with(@a,'v')`, `and`, `[n]`, and `[last()]` | `xpath` |
+| `within` | Limits the search to another element of the screen | none |
+
+```yaml
+apiVersion: semar/v1
+kind: Screens
+app: shop-app
+screens:
+  SignIn:
+    email: { id: email }
+    password: { id: password }
+    submit: { desc: Sign in }
+    welcome: { id: welcome }
+```
+
+The first key that matches wins, in the order `id`, `desc`, `role` with `name`, `text`, `xpath`, `class`. `css` is for the web only, and a locator with no key that a device can use is refused before the step is sent. A password field gives no text.
+
+When an element is not found, `semar screens repair latest` proposes candidates from the screen that was read, as for a browser.
+
+### The actions
+
+A `mobile` step has one action in `do`:
+
+| `do` | Needs | What it does |
+| --- | --- | --- |
+| `launch` | None | Starts the app, after the reset of the scenario |
+| `open` | `link` | Opens a deep link with the app. An `http` or `https` link follows the rules of the environment, and another scheme must be in `schemes` |
+| `tap`, `longPress` | `screen`, `element` | Presses the element |
+| `type` | `screen`, `element`, and a `value` or a `secret: env:<NAME>` | Replaces the text of the field |
+| `swipe` | `value`: `up`, `down`, `left`, or `right` | Moves a finger in that direction, on `element` or on the screen |
+| `scroll` | `screen`, `element` | Swipes until the element is on the screen: at most 15 swipes, and it stops when the screen no longer changes. `within` names the list to move |
+| `press` | `value`: `back`, `home`, `enter`, `search`, `tab`, `delete`, or `hide-keyboard` | Sends a key |
+| `wait` | None, or `screen` and `element` | Waits up to 10 seconds for the element |
+
+**`scroll` and `swipe` point opposite ways.** `swipe` names the direction of the finger. `scroll` names where you read on: `scroll: down` shows what is below, so the finger moves up. `swipe: up` is the same gesture as `scroll: down`.
+
+`type` uses the text field action of the device, so a password with any character works, but a field that waits for key events, such as a box of a one-time code, may not react. An open keyboard can cover a target: add a `press` step with `hide-keyboard`.
+
+### Checks and captures
+
+The `Then` lines are those of [Check a web page](#check-a-web-page) that read an element: its text, that it exists or not, how many there are, a state, and an attribute. The attribute names are the native ones, such as `checked`, `enabled`, and `content-desc`. A check waits for its condition up to `android.timeout`, and a locator that matches several elements ends the step `inconclusive`. A capture reads the text of an element. A screen is asserted by an element that only that screen has.
+
+Every step of an Android test leaves a JPEG screenshot, at most 1280 pixels on the long side, below `screenshots/<scenario>/`. `report.md` has a `## Device steps` section, and `report.html` holds the screenshots inside. A screen that the app protects gives no screenshot, and the step still runs. A screenshot is not redacted.
+
+### A server instead of adb
+
+With `serverUrl`, Semar speaks the W3C WebDriver protocol to Appium, a farm, or any server that offers it, and uses no adb:
+
+```yaml
+environments:
+  uat:
+    hosts: ["shop.uat.example.com", "127.0.0.1:4723"]
+    android:
+      serverUrl: http://127.0.0.1:4723        # its host must be in hosts, and it holds no user name
+      serverUser: env:FARM_USER               # both or neither; https unless the server is on this machine
+      serverKey: env:FARM_KEY
+      capabilities: { "appium:deviceName": "Pixel 8" }
+```
+
+The server must know the Appium commands `mobile: activateApp`, `terminateApp`, `clearApp`, `deepLink`, `pressKey`, and `hideKeyboard`, and Semar says so when one is missing. With a `serverUrl` that is not on this machine, a service names `app: bs://abc` (or another reference of the server) in place of `apk`. Only the fake server of the tests, and Appium on this machine when you run it, are tested.
+
+### Limits
+
+* **Semar cannot see the requests of the app.** The `hosts`, `methods`, and `effects.deny` rules limit what Semar sends, and not what the app sends. A read-only or a production environment therefore refuses every action on a device.
+* One device runs one scenario at a time. A second run that wants the same device is `blocked`.
+* Starting the server ends another UiAutomator session on that device.
+* A typed sign-in stays in the app until a reset with `clear`.
+* An off-screen row needs a `scroll` step.
+* `semar record` and a live plan do not work on a device yet.
+* iOS is not built.
+
 ## Test a business flow with a journey
 
 A journey is a business flow that crosses services, such as "an order is placed, paid, and shown as paid". A scenario tests one service. No service owns a journey: a named person, the owner, does. A journey runs one leg at a time against one set of builds, and its result is valid only for those builds.
 
-API legs and web legs are built. A leg on Android is refused when the file loads.
+API legs, web legs, and Android legs are built. A leg on another surface, such as `ios`, is refused when the file loads with `this version runs api, web, and android legs`.
 
 **1. Write the journey** in `.semar/journeys/<id>.yaml`. The file name is the ID.
 
@@ -1414,6 +1600,7 @@ invariants:
 ```
 
 * `owner` and `criticality` (`critical` or `standard`) are required.
+* An Android leg has `surface: android`, the `service` that holds the app, and the `app` of its screens file. Each step has one `mobile` action, and no request, no hint, and no `wait`. A later step of the leg reads an output of an earlier leg as `{{<leg>.<output>}}` in a `link` or a `value`. A journey records the build of every service of its legs, so a service with an app needs `apk` in `semar.yaml`, a build probe, or `--build`.
 * A leg names its `service`. Its steps are scenario steps with a `request` and `captures` written in the file. `needs` lists the legs that must pass first. A later leg reads an output of a leg that it needs, directly or through other legs, as `{{<leg>.<output>}}`. Any other reference is refused when the file loads. A leg ID has no hyphen.
 * `wait` repeats the last step of the leg, which must be a `GET` or `HEAD`, until the condition holds or `timeout` ends (at most 15 minutes). When the time ends, the leg is `failed`.
 * An invariant checks what only a journey can see: the values are the same in every leg. Two values are equal when both are decimals with the same value, or both are the same text. A value that holds a redaction marker is not compared.
@@ -2231,7 +2418,7 @@ semar journey run (<id>... | --critical | --all)
 
 #### `semar screens repair`
 
-Read a stored run, and for each element that a web step did not find, print its locator beside up to three candidates that the browser found by role, by name, or by text. No model is used.
+Read a stored run, and for each element that a web or an Android step did not find, print its locator beside up to three candidates that the browser found by role, by name, or by text. No model is used.
 
 With --apply \<screen>.\<element>=\<n>, rewrite that element of the screens file with candidate n. Nothing else is touched: not a scenario, an expected result, or a step. The next run uses the file.
 
@@ -2310,7 +2497,7 @@ The layout of `.semar/`:
   plans/<head commit>/  plan.md and the accepted draft of one planned change
   runs/<run id>/        run.json, report.md, report.html, junit.xml, summary.md, activity.jsonl, screenshots/, and the recorded exchanges of one run
   store/                accepted scripts, fixture health, deferrals, and manual results
-  screens/              one YAML file per web application, with the locators of its elements
+  screens/              one YAML file per web or Android application, with the locators of its elements
   files/                the files that a web upload may use
   edge-dropped.yaml     the edge cases that a person dropped, so that a plan does not draft them again
 ```
@@ -2337,4 +2524,8 @@ Commit `semar.yaml`, `scenarios/`, `fixtures/`, `journeys/`, `obligations/`, `sc
 | `inconclusive` with "the locator matches 2 elements" | The locator of a web check finds several elements. Give the element a `data-testid`, or a locator that finds only it. See [Check a web page](#check-a-web-page) |
 | `passed` with "flaky, passed on attempt 2 of 3" | The test failed first and then passed. Read the first attempt in `report.html`. A slow service or shared data is a common cause |
 | `semar: no scenario is in the suite` | No scenario has that name in its `@suite:` tag. The message lists the suites that exist |
+| `blocked` with "adb was not found" | Install the Android platform tools, then put `adb` on `PATH`, set `ANDROID_HOME`, or set `SEMAR_ADB_BIN` to its absolute path |
+| `blocked` with "no device" or a list of emulators | Start an emulator. With several, or with a physical device, name one in `android.device` or `ANDROID_SERIAL` |
+| `blocked` with "the UiAutomator2 server is not on the device" | Save the two server APKs in the Semar home under `android/`. See [Test an Android app](#test-an-android-app) |
+| An Android step is refused with "makes requests that Semar cannot see" | The environment is read only or production. Run the Android test in a test environment |
 | `semar login --user` says that the account is written on one line | Write the `web` block of the account in `semar.yaml` by hand. See [Sign in to a web application](#sign-in-to-a-web-application) |

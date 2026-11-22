@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"slices"
 
 	"github.com/jancuk/semar/internal/build"
 	"github.com/jancuk/semar/internal/config"
@@ -14,6 +15,7 @@ import (
 type declaredBuilds struct {
 	commits map[string]string
 	local   []string // the services whose commit is the working copy
+	apk     []string // the services whose commit is the digest of their APK
 }
 
 // readDeclaredBuilds is the one place that gives every command that takes --build its builds. It
@@ -27,11 +29,13 @@ func readDeclaredBuilds(ctx context.Context, dir string, values []string, servic
 	if g, err := vcs.Open(dir); err == nil {
 		repo = g
 	}
-	commits, local, err := build.WithLocal(ctx, named, services, repo)
+	// The APK comes before the working copy: the app that runs is what a result belongs to.
+	withAPK, apk := build.WithAPK(named, services, dir)
+	commits, local, err := build.WithLocal(ctx, withAPK, services, repo)
 	if err != nil {
 		return declaredBuilds{}, err
 	}
-	return declaredBuilds{commits: commits, local: local}, nil
+	return declaredBuilds{commits: commits, local: local, apk: apk}, nil
 }
 
 // has reports whether the service has a build that no probe reads.
@@ -40,7 +44,10 @@ func (d declaredBuilds) has(service string) bool {
 	return ok
 }
 
+// isAPK reports whether the build of the service is the digest of its APK.
+func (d declaredBuilds) isAPK(service string) bool { return slices.Contains(d.apk, service) }
+
 // prober answers with the declared builds, and reads every other build from its probe.
 func (d declaredBuilds) prober(services []config.Service) build.Prober {
-	return build.NewDeclared(d.commits, build.NewHTTP(services, nil), d.local...)
+	return build.NewDeclared(d.commits, build.NewHTTP(services, nil), d.local...).APK(d.apk...)
 }

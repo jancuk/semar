@@ -247,3 +247,39 @@ func TestJSONPathValueStaysMaskedForTheRun(t *testing.T) {
 		})
 	}
 }
+
+func TestAMobileWriteIsClassifiedAsAWriteAndAReadIsNot(t *testing.T) {
+	for op, want := range map[string]effects.Class{"tap": effects.Write, "type": effects.Write, "press": effects.Write, "swipe": effects.Write,
+		"scroll": effects.Read, "launch": effects.Read, "open": effects.Read, "wait": effects.Read} {
+		sink := &fakeSink{}
+		rec := newRecorder(t, sink)
+		if _, err := rec.Record(domain.Action{Surface: domain.SurfaceAndroid, Op: op, Mobile: &domain.MobileRecord{Op: op}}); err != nil {
+			t.Fatal(err)
+		}
+		if len(sink.activities) != 1 {
+			t.Fatalf("%s: %d activities", op, len(sink.activities))
+		}
+		wrote := sink.activities[0].Verb == domain.VerbUpdate
+		if wrote != (want == effects.Write) {
+			t.Errorf("%s: verb %s, want a class of %v", op, sink.activities[0].Verb, want)
+		}
+	}
+}
+
+func TestATypedSecretNeverReachesAStoredMobileAction(t *testing.T) {
+	const secret = "s3cr3t-typed-value"
+	sink := &fakeSink{}
+	rec := newRecorder(t, sink, secret)
+	a := domain.Action{Surface: domain.SurfaceAndroid, Op: "type", Err: "could not type " + secret,
+		Mobile: &domain.MobileRecord{Op: "type", Screen: "SignIn", Elements: map[string]domain.ElementState{"pw": {Found: true, Count: 1, Text: secret}}}}
+	stored, err := rec.Record(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []any{stored, sink.actions, sink.activities} {
+		b, _ := json.Marshal(v)
+		if strings.Contains(string(b), secret) {
+			t.Errorf("the secret is in %s", b)
+		}
+	}
+}

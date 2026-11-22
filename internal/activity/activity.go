@@ -17,6 +17,9 @@ func FromAction(a domain.Action, class effects.Class, evidencePath string) domai
 	if a.Web != nil {
 		return fromWebAction(a, class, evidencePath)
 	}
+	if a.Mobile != nil {
+		return fromMobileAction(a, class, evidencePath)
+	}
 	method, target, template, realPath := "", "", "", ""
 	if a.Request != nil {
 		method = strings.ToUpper(a.Request.Method)

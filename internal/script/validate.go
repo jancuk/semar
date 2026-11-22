@@ -92,6 +92,7 @@ func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, 
 	captured := map[string]bool{}
 	unknown := variableCheck(sc, captured, outputs)
 	lastIndex, outOfOrder := -1, false
+	started := map[string]bool{} // services whose app a mobile step has started
 	for _, ss := range s.Steps {
 		i, known := index[ss.Step]
 		if !known {
@@ -107,10 +108,37 @@ func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, 
 		bound[ss.Step] = true
 
 		switch {
-		case ss.Request != nil && ss.Web != nil:
+		case ss.Request != nil && ss.Web != nil && ss.Mobile == nil:
 			add(ss.Step, "a step has a request or a web action, and not both")
-		case ss.Request == nil && ss.Web == nil && len(ss.Captures) > 0:
+		case ss.Mobile != nil && (ss.Request != nil || ss.Web != nil):
+			add(ss.Step, "a step has a request, a web action, or a mobile action, and not more than one")
+		case ss.Request == nil && ss.Web == nil && ss.Mobile == nil && len(ss.Captures) > 0:
 			add(ss.Step, "a capture needs a request or a web action")
+		}
+		if sc.Surface == domain.SurfaceAndroid && ss.Web != nil {
+			add(ss.Step, "an android scenario has no web action: use a mobile action, or a request to set up")
+		}
+		if ss.Mobile != nil {
+			for _, m := range ss.Mobile.Problems() {
+				add(ss.Step, "mobile: %s", m)
+			}
+			for _, name := range ss.Mobile.Variables() {
+				if msg := unknown(name); msg != "" {
+					add(ss.Step, "mobile: %s", msg)
+				}
+			}
+			if sc.Surface != domain.SurfaceAndroid {
+				add(ss.Step, "a mobile action needs a scenario with the surface android")
+			}
+			if known && sc.Steps[i].As != "" && sc.Steps[i].As != sc.AuthProfile {
+				add(ss.Step, "mobile: a device has one signed-in account, so as cannot be %s", sc.Steps[i].As)
+			}
+			if svc := ss.Mobile.Service; !started[svc] {
+				started[svc] = true
+				if do := ss.Mobile.Do; do != domain.MobileLaunch && do != domain.MobileOpenLink {
+					add(ss.Step, "mobile: the first mobile step of a service must be launch or open, and this one is %s", do)
+				}
+			}
 		}
 		if ss.Web != nil {
 			for _, m := range ss.Web.Problems() {
@@ -145,8 +173,8 @@ func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, 
 			case c.JSONPath != "" && c.Element != "":
 				add(ss.Step, "capture %s takes a jsonpath or an element, and not both", c.Name)
 			case c.Element != "":
-				if ss.Web == nil {
-					add(ss.Step, "capture %s names an element, so the step needs a web action", c.Name)
+				if ss.Web == nil && ss.Mobile == nil {
+					add(ss.Step, "capture %s names an element, so the step needs %s", c.Name, needsScreenAction(sc))
 				}
 			case c.JSONPath == "":
 				add(ss.Step, "capture %s needs a jsonpath or an element", c.Name)
@@ -156,6 +184,9 @@ func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, 
 				}
 				if ss.Web != nil {
 					add(ss.Step, "capture %s names a jsonpath, and a web step has no response to read: use an element", c.Name)
+				}
+				if ss.Mobile != nil {
+					add(ss.Step, "capture %s names a jsonpath, and a mobile step has no response to read: use an element", c.Name)
 				}
 			}
 			if c.Name != "" && (captured[c.Name] || seen[c.Name]) {
@@ -168,14 +199,21 @@ func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, 
 		}
 		if known {
 			for j, e := range sc.Steps[i].Expect {
-				if e.Check.Element != "" && ss.Web == nil {
-					add(ss.Step, "expect[%d] checks element %s, so the step needs a web action", j, e.Check.Element)
+				if e.Check.Element != "" && ss.Web == nil && ss.Mobile == nil {
+					add(ss.Step, "expect[%d] checks element %s, so the step needs %s", j, e.Check.Element, needsScreenAction(sc))
 				}
 				if e.Check.Page != "" && ss.Web == nil {
-					add(ss.Step, "expect[%d] checks the page %s, so the step needs a web action", j, e.Check.Page)
+					if ss.Mobile != nil {
+						add(ss.Step, "expect[%d] checks the page %s, and a mobile step has no page: check an element", j, e.Check.Page)
+					} else {
+						add(ss.Step, "expect[%d] checks the page %s, so the step needs a web action", j, e.Check.Page)
+					}
 				}
 				if ss.Web != nil && (e.Check.Status != nil || e.Check.JSONPath != "" || e.Check.Header != "") {
 					add(ss.Step, "expect[%d] reads a response, and a web step has none: check an element", j)
+				}
+				if ss.Mobile != nil && (e.Check.Status != nil || e.Check.JSONPath != "" || e.Check.Header != "") {
+					add(ss.Step, "expect[%d] reads a response, and a mobile step has none: check an element", j)
 				}
 				for _, o := range []struct {
 					op string
@@ -208,7 +246,17 @@ func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, 
 }
 
 func hasAction(s domain.Script, id domain.StepID) bool {
-	return slices.ContainsFunc(s.Steps, func(ss domain.ScriptStep) bool { return ss.Step == id && (ss.Request != nil || ss.Web != nil) })
+	return slices.ContainsFunc(s.Steps, func(ss domain.ScriptStep) bool {
+		return ss.Step == id && (ss.Request != nil || ss.Web != nil || ss.Mobile != nil)
+	})
+}
+
+// needsScreenAction names the action that a step needs to read an element, for a scenario.
+func needsScreenAction(sc domain.Scenario) string {
+	if sc.Surface == domain.SurfaceAndroid {
+		return "a mobile action"
+	}
+	return "a web action"
 }
 
 // RequestProblems holds the request rules of Validate that need no scenario step: a service, a

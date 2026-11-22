@@ -74,14 +74,8 @@ type Options struct {
 	Logger  *slog.Logger
 }
 
-// Watched is an element that a check or a capture of the step names. Presence is true when only its
-// existence or its number is asked: such an element that is absent is no reason for a repair.
-type Watched struct {
-	Element  string
-	Presence bool
-	// Attrs are the attributes of the element that a check reads.
-	Attrs []string
-}
+// Watched is an element that a check or a capture of the step names. It is shared with the device engine.
+type Watched = domain.Watched
 
 type Call struct {
 	Use    domain.UseCase

@@ -172,7 +172,7 @@ func TestJourneyListSaysWhenABuildCannotBeRead(t *testing.T) {
 func TestJourneyListShowsEveryInvalidFileWithItsLine(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
 	r.writeRel(t, ".semar/journeys/broken.yaml", strings.Replace(r.readJourney(t, "checkout"), "id: checkout", "id: broken\nschedule: nightly", 1))
-	r.writeRel(t, ".semar/journeys/web.yaml", strings.Replace(strings.Replace(r.readJourney(t, "checkout"), "id: checkout", "id: web", 1), "surface: api", "surface: android", 1))
+	r.writeRel(t, ".semar/journeys/web.yaml", strings.Replace(strings.Replace(r.readJourney(t, "checkout"), "id: checkout", "id: web", 1), "surface: api", "surface: ios", 1))
 	r.writeRel(t, ".semar/journeys/evil.yaml", "apiVersion: semar/v1\nkind: Journey\nid: evil\n\"x\\e[31mred\\u202eblue\": 1\n")
 
 	res := r.must(t, cli.ExitUndecided, "journey", "list")
@@ -186,7 +186,7 @@ func TestJourneyListShowsEveryInvalidFileWithItsLine(t *testing.T) {
 	line := regexp.MustCompile(`^invalid: \.semar/journeys/%s\.yaml:[0-9]+: `)
 	for name, msg := range map[string]string{
 		"broken": "unknown key schedule",
-		"web":    "android legs are not supported yet: this version runs api legs and web legs; android legs come in M3",
+		"web":    `surface "ios" is not known: this version runs api, web, and android legs`,
 	} {
 		l, ok := lines[".semar/journeys/"+name+".yaml"]
 		if !ok {

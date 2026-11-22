@@ -19,7 +19,8 @@ This page says what Semar does today, what comes next and in which order, and wh
 | Accounts | A step, a fixture step, and a journey leg can act as another account |
 | Web | Chrome on a profile of Semar's own, sign-in by itself, `semar record`, web tests from a plan, and a locator repair with no model. A check reads the text, the state, or an attribute of an element, that an element is absent, a count, and the path or the title of the page, and it waits for its condition. A step can select, hover, check, uncheck, and upload. Every web step leaves a screenshot |
 | Five commands for a day | `semar --help` lists `init`, `login`, `plan`, `run`, and `show` under "Every day", and five more under "Also". The other commands still work. `semar init` needs only the address, writes an account with no token for a web page, and names `semar login` as the next step. `semar login` needs no argument, ends when its last page is closed, and offers to add the hosts that the page asked for. A run and a plan name the hosts that the browser blocked. A service on this machine runs the head commit of the repository, so `semar run` needs no `--build` |
-| Journeys | A business flow across services, with API legs and web legs, runs against one set of builds |
+| Android | `@surface:android` scenarios and journey legs tap, type, scroll, and read an app on an emulator or a device over adb or a WebDriver server. The APK is the build. A screenshot of each step is in the report |
+| Journeys | A business flow across services, with API, web, and Android legs, runs against one set of builds |
 | The ledger | Every use case of a change ends in one state. Manual checks, deferrals, and retired tests are recorded with a name and a reason |
 | A regression set in a pipeline | Suites by a tag, retries with a flaky mark, and `semar run --ci`. Examples for GitHub Actions and GitLab CI |
 | Reports | Each run writes `report.md`, `report.html` with its screenshots inside, `junit.xml`, and `summary.md`, and `--report-dir` copies them for a pipeline. An activity log, a status page as one HTML file, and exports as CTRF, JUnit XML, and SARIF |
@@ -31,7 +32,7 @@ The order is the order of work. Each item says what a person does today in its p
 
 | # | Item | Today |
 | --- | --- | --- |
-| 1 | **Android tests.** A step taps and reads a screen on an emulator or a device, and a plan writes a test for an Android criterion. The first task is a trial of the ways to drive a device, to choose one | An Android criterion becomes a manual check. The plan writes its steps, and a person records the result with `semar check` |
+| 1 | **Android plan and record.** `semar plan` writes a test for an Android criterion, and `semar record` records a flow on a device | An Android criterion becomes a manual check. A person writes the scenario and the screens file, or records the result with `semar check` |
 | 2 | **Record a flow into a fixture.** A person does the preparation once, in a browser or with requests, and Semar writes the fixture | A person or a plan writes the fixture file. `semar import` turns a Postman collection or a HAR file into scenarios, and not into a fixture |
 | 3 | **A fixture that uses a fixture.** A paid order needs a customer, and the customer fixture is written once | Each fixture repeats the steps that it needs |
 | 4 | **Fixtures and status across repositories.** A team shares fixtures from one place, and one view shows the status of a ticket that touches several services. Tickets come from the tracker and not only from files | Fixtures live in the repository under test. A ticket is a file in `docs/tickets/`, and `semar status` reads one repository |
@@ -65,6 +66,7 @@ Each limit is described in the guide, in the section of its feature.
 * An approval covers the steps and the expected results of a scenario, and not the payload of its script.
 * The single pipeline writes every test again on a second plan.
 * A web test does not use a second tab, a color field, or a slider. A recording does not hear a hover or an upload, and a plan cannot use a custom checkbox that the page hides. A web test does not repeat a sign-in through another site or with a second factor. A person signs in in the window of `semar login`, and the session lasts in the profile until it ends. A pipeline has no window, so a web application there needs a user and a password variable.
+* An Android test does not see the requests of the app, so a read-only or a production environment refuses every action on a device. It uses one device at a time, no WebView, no pinch, no drag, and no video. Typed text may not fire key listeners. iOS is not built.
 * A screenshot is not redacted.
 * A web check of one element refuses a locator that matches several elements.
 * Edge cases come only from an API document, and a plan never tries a write. A plan drafts at most 6 for one operation and 20 in all.

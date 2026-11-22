@@ -122,8 +122,8 @@ func TestValidateRules(t *testing.T) {
 		{rule: "J6", name: "thirteen legs", edit: manyLegs(13), path: "legs", want: "13 legs; at most 12"},
 
 		{rule: "J7", name: "web without an app", edit: func(j *domain.Journey) { j.Legs[0].Surface = "web" }, path: "legs[0].app", want: "app is required for a web leg"},
-		{rule: "J7", name: "android", edit: func(j *domain.Journey) { j.Legs[0].Surface = "android" }, path: "legs[0].surface", want: "android legs are not supported yet: this version runs api legs and web legs; android legs come in M3"},
-		{rule: "J7", name: "unknown surface", edit: func(j *domain.Journey) { j.Legs[0].Surface = "ios" }, path: "legs[0].surface", want: `surface "ios" is not known: this version runs api legs and web legs`},
+		{rule: "J7", name: "android without an app", edit: func(j *domain.Journey) { j.Legs[0].Surface = "android" }, path: "legs[0].app", want: "app is required for an android leg"},
+		{rule: "J7", name: "unknown surface", edit: func(j *domain.Journey) { j.Legs[0].Surface = "ios" }, path: "legs[0].surface", want: `surface "ios" is not known: this version runs api, web, and android legs`},
 		{rule: "J7", name: "no surface", edit: func(j *domain.Journey) { j.Legs[0].Surface = "" }, path: "legs[0].surface", want: "surface is required"},
 
 		{rule: "J8", name: "no service", edit: func(j *domain.Journey) { j.Legs[0].Service = "" }, path: "legs[0].service", want: "service is required"},
@@ -318,11 +318,11 @@ func TestTheExampleHasNoProblems(t *testing.T) {
 	}
 }
 
-func TestAndroidSurfaceRefused(t *testing.T) {
+func TestIOSSurfaceRefused(t *testing.T) {
 	j := example(t)
-	j.Legs[1].Surface = domain.SurfaceAndroid
+	j.Legs[1].Surface = domain.Surface("ios")
 	j.Legs[1].Steps, j.Legs[1].Service = nil, ""
-	want := "android legs are not supported yet: this version runs api legs and web legs; android legs come in M3"
+	want := `surface "ios" is not known: this version runs api, web, and android legs`
 	if ps := Validate(j, nil); !hasProblem(ps, "legs[1].surface", want) {
 		t.Fatalf("problems = %v", ps)
 	}

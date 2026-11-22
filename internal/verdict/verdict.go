@@ -256,7 +256,7 @@ func setupFailure(a *domain.Action) string {
 		return "failed: " + a.Err
 	case !answered(a):
 		return "has no response"
-	case a.Web != nil:
+	case a.Web != nil || a.Mobile != nil:
 		return ""
 	case a.Response.Status >= 400:
 		return fmt.Sprintf("answered %d", a.Response.Status)
@@ -264,10 +264,10 @@ func setupFailure(a *domain.Action) string {
 	return ""
 }
 
-// answered is true for an action that got an answer: an HTTP response, or a browser action that ran
+// answered is true for an action that got an answer: an HTTP response, or a browser or device action that ran
 // and settled. A web action that failed or was refused has Err or Refused set.
 func answered(a *domain.Action) bool {
-	return hasResponse(a) || (a != nil && a.Web != nil)
+	return hasResponse(a) || (a != nil && (a.Web != nil || a.Mobile != nil))
 }
 
 // hasResponse: a status under 100 is not an HTTP response, for instance 0 from an empty stored object.

@@ -57,11 +57,15 @@ func Build(base domain.Scenario, bs domain.Script, step domain.StepID, c Case, i
 	keep := map[domain.StepID]bool{}
 	for i := at - 1; i >= 0; i-- {
 		ss, ok := scriptStepOf(bs, base.Steps[i].ID)
-		if !ok || ss.Request == nil && ss.Web == nil {
+		if !ok || ss.Request == nil && ss.Web == nil && ss.Mobile == nil {
 			continue
 		}
 		if !slices.ContainsFunc(ss.Captures, func(cp domain.Capture) bool { return slices.Contains(needed, cp.Name) }) {
 			continue
+		}
+		if ss.Mobile != nil {
+			// An edge case is an API scenario, and a step on a device cannot be one of its setup steps.
+			return domain.Scenario{}, domain.Script{}, fmt.Errorf("scenario %s: step %s reads a value on a device, and an edge case runs only API steps", base.ID, ss.Step)
 		}
 		keep[base.Steps[i].ID] = true
 		if ss.Request != nil {

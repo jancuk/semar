@@ -131,3 +131,12 @@ A browser action can change data. The list above holds the writes of the API onl
 - {{ .Scenario }}, step {{ .Step }}: {{ if .Why }}{{ .Why }} ({{ .Target }}){{ else }}{{ .Target }}{{ end }}: {{ .Result }}{{ if .Screenshot }}. [Screenshot]({{ .Screenshot }}){{ end }}
 {{ end -}}
 {{ end -}}
+{{ if .Device }}
+## Device steps
+
+A device action can change data, and the app makes requests that Semar cannot see. The list above holds the writes of the API only.
+
+{{ range .Device -}}
+- {{ .Scenario }}, step {{ .Step }}: {{ if .Why }}{{ .Why }} ({{ .Target }}){{ else }}{{ .Target }}{{ end }}: {{ .Result }}{{ if .Screenshot }}. [Screenshot]({{ .Screenshot }}){{ end }}
+{{ end -}}
+{{ end -}}

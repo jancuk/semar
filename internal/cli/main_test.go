@@ -15,6 +15,11 @@ func TestMain(m *testing.M) {
 		os.Exit(2)
 	}
 	os.Setenv("SEMAR_HOME", dir)
+	// A test never reaches the adb or the device of the machine that runs it. A test that wants a
+	// fake adb sets SEMAR_ADB_BIN itself.
+	for _, name := range []string{"SEMAR_ADB_BIN", "ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_SERIAL"} {
+		os.Setenv(name, "")
+	}
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)

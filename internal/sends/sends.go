@@ -17,7 +17,7 @@ import (
 )
 
 // Lines are what the step sends, one entry per line: for an API step its method and path and then
-// Details, for a web step its action and then its text. A step with neither request nor web action
+// Details, for a web or a mobile step its action and then its text. A step with none of them
 // sends nothing.
 func Lines(st domain.ScriptStep) []string {
 	switch {
@@ -25,6 +25,8 @@ func Lines(st domain.ScriptStep) []string {
 		return append([]string{st.Request.Method + " " + st.Request.Path}, Details(*st.Request)...)
 	case st.Web != nil:
 		return webLines(*st.Web)
+	case st.Mobile != nil:
+		return mobileLines(*st.Mobile)
 	}
 	return nil
 }
@@ -94,4 +96,34 @@ func secretWords(ref string) string {
 		return "the value of $" + name
 	}
 	return "the value of " + ref
+}
+
+func mobileLines(m domain.MobileAction) []string {
+	parts := []string{string(m.Do)}
+	if m.Link != "" {
+		parts = append(parts, m.Link)
+	}
+	if m.Do == domain.MobilePress {
+		parts = append(parts, m.Value)
+	}
+	if m.Element != "" {
+		parts = append(parts, m.Element)
+	}
+	if m.Within != "" {
+		parts = append(parts, "in", m.Within)
+	}
+	if m.Screen != "" {
+		parts = append(parts, "on screen", m.Screen)
+	}
+	out := []string{strings.Join(parts, " ")}
+	switch {
+	case m.Secret != "":
+		out = append(out, "text "+secretWords(m.Secret))
+	case m.Do == domain.MobilePress:
+	case m.Value != "" && (m.Do == domain.MobileType):
+		out = append(out, "text "+strconv.Quote(m.Value))
+	case m.Value != "":
+		out = append(out, "direction "+m.Value)
+	}
+	return out
 }

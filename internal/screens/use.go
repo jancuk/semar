@@ -7,41 +7,68 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 )
 
-// Use is one web step as the screens file sees it: where it is, its action, and the elements that its
-// checks and captures name. Those elements are read from the screen of the action.
+// Use is one step that reads a screen, as the screens file sees it: where it is, which surface runs
+// it, the screen it acts on, and every element that the action, the checks, and the captures name.
 type Use struct {
 	// Where names the step in a message, such as "step read" or "leg web_read, step read".
-	Where    string
-	Action   domain.WebAction
+	Where string
+	// Surface is the surface of the step. Empty means web.
+	Surface domain.Surface
+	// Screen is the screen of the action. Empty when the action names none.
+	Screen string
+	// Elements are the elements to find on Screen, with those of the action first.
 	Elements []string
+}
+
+// WebUse is the use of a web step: the elements of its action, then those of its checks and captures.
+func WebUse(where string, w domain.WebAction, others []string) Use {
+	return Use{Where: where, Surface: domain.SurfaceWeb, Screen: w.Screen, Elements: append(w.Elements(), others...)}
+}
+
+// MobileUse is the use of a mobile step, built as WebUse is.
+func MobileUse(where string, m domain.MobileAction, others []string) Use {
+	return Use{Where: where, Surface: domain.SurfaceAndroid, Screen: m.Screen, Elements: append(m.Elements(), others...)}
 }
 
 // Check says, in plain words, which screens and elements of the uses the screens file does not have.
 func Check(s domain.Screens, uses []Use) []string {
 	var out []string
 	for _, u := range uses {
-		named := append(u.Action.Elements(), u.Elements...)
-		if u.Action.Screen == "" {
+		if u.Screen == "" {
 			if len(u.Elements) > 0 {
 				out = append(out, say(u.Where, " ", "names element %s but has no screen", u.Elements[0]))
 			}
 			continue
 		}
-		elements, ok := s.Screens[u.Action.Screen]
+		elements, ok := s.Screens[u.Screen]
 		if !ok {
 			out = append(out, say(u.Where, ": ", "screen %s is not in the screens of %s; its screens are %s",
-				u.Action.Screen, s.App, list(s.ScreenNames())))
+				u.Screen, s.App, list(s.ScreenNames())))
 			continue
 		}
 		seen := map[string]bool{}
-		for _, name := range named {
+		var present []string
+		for _, name := range u.Elements {
 			if seen[name] {
 				continue
 			}
 			seen[name] = true
 			if _, ok := elements[name]; !ok {
 				out = append(out, say(u.Where, ": ", "element %s is not on screen %s of %s; its elements are %s",
-					name, u.Action.Screen, s.App, list(s.ElementNames(u.Action.Screen))))
+					name, u.Screen, s.App, list(s.ElementNames(u.Screen))))
+				continue
+			}
+			present = append(present, name)
+		}
+		for _, name := range Needed(s, u.Screen, present) {
+			l := elements[name]
+			switch {
+			case u.Surface == domain.SurfaceAndroid && !l.ForMobile():
+				out = append(out, say(u.Where, ": ", "element %s on screen %s of %s cannot be found on a device: give it id, desc, role, name, text, xpath, or class",
+					name, u.Screen, s.App))
+			case u.Surface != domain.SurfaceAndroid && !l.ForWeb():
+				out = append(out, say(u.Where, ": ", "element %s on screen %s of %s cannot be found in a browser: give it testId, role, name, text, or css",
+					name, u.Screen, s.App))
 			}
 		}
 	}

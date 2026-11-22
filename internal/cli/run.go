@@ -19,6 +19,7 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/api"
+	"github.com/jancuk/semar/internal/engine/mobile"
 	"github.com/jancuk/semar/internal/engine/web"
 	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/fixture"
@@ -132,6 +133,7 @@ func executeScenarios(ctx context.Context, stderr io.Writer, o options, dir stri
 		return finishedRun{}, err
 	}
 	defer r.web.Close()
+	defer closeMobile(ctx, r.mobile)
 	announce()
 	record := domain.Run{ID: r.id, Environment: envName, EnvironmentKind: env.Kind, StartedAt: o.Clock()}
 	results, start, end, runErr := r.runner.Run(ctx, scenarios)
@@ -246,6 +248,8 @@ type replayRig struct {
 	*envRig
 	runner *replay.Runner
 	web    *web.Engine
+	// mobile is nil when no service of the environment has an android app.
+	mobile *mobile.Engine
 }
 
 // newReplay builds every dependency of one run. The secrets come before anything
@@ -277,7 +281,9 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 	}
 	eng := rg.webEngine(o, repo, cfg, envName, env, headed)
 	deps.Web, deps.Screens = eng, screenSource{repo: repo}
-	return &replayRig{envRig: rg, runner: replay.New(deps), web: eng}, nil
+	dev := rg.mobileEngine(o, repo, env, declared)
+	useMobile(&deps, dev, env)
+	return &replayRig{envRig: rg, runner: replay.New(deps), web: eng, mobile: dev}, nil
 }
 
 // newEnvRig loads the sessions of the profiles named in needs, which maps a profile to whoever

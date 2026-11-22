@@ -53,6 +53,9 @@ func (r *Recorder) Record(a domain.Action) (domain.Action, error) {
 	if a.Web != nil && domain.WebOp(a.Web.Op).Writes() {
 		class = effects.Write
 	}
+	if a.Mobile != nil && domain.MobileOp(a.Mobile.Op).Writes() {
+		class = effects.Write
+	}
 	red := r.red.Action(a)
 	path, err := r.sink.WriteAction(red)
 	if err != nil {

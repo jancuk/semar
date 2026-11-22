@@ -67,6 +67,9 @@ func secretEnvNames(cfg config.Config) []string {
 			names = append(names, p.Web.PasswordEnv())
 		}
 	}
+	for _, env := range cfg.Environments {
+		names = append(names, env.Android.SecretEnvNames()...)
+	}
 	return names
 }
 

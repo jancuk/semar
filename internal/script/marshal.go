@@ -140,6 +140,20 @@ func (e *enc) step(path string, st domain.ScriptStep) (*yaml.Node, domain.Script
 		put(n, "web", wn)
 		want.Web = &w
 	}
+	if st.Mobile != nil {
+		m := *st.Mobile
+		mn := mapping()
+		for _, f := range []struct{ key, val string }{
+			{"service", m.Service}, {"app", m.App}, {"do", string(m.Do)}, {"link", m.Link},
+			{"screen", m.Screen}, {"element", m.Element}, {"within", m.Within}, {"value", m.Value}, {"secret", m.Secret},
+		} {
+			if f.val != "" {
+				put(mn, f.key, e.str(path+".mobile."+f.key, f.val))
+			}
+		}
+		put(n, "mobile", mn)
+		want.Mobile = &m
+	}
 	want.Captures = nil
 	if len(st.Captures) > 0 {
 		seq := sequence()

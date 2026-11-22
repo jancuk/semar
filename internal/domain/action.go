@@ -57,7 +57,9 @@ type Action struct {
 	Request  *HTTPRequest  `json:"request,omitempty"`
 	Response *HTTPResponse `json:"response,omitempty"`
 	// Web is set on an action of the web engine, which has no Request and no Response.
-	Web           *WebRecord        `json:"web,omitempty"`
+	Web *WebRecord `json:"web,omitempty"`
+	// Mobile is set on an action of the mobile engine, which has no Request and no Response either.
+	Mobile        *MobileRecord     `json:"mobile,omitempty"`
 	Captures      map[string]string `json:"captures,omitempty"`
 	Refused       string            `json:"refused,omitempty"`       // why policy refused it. No request was sent
 	Err           string            `json:"error,omitempty"`         // transport error
@@ -99,7 +101,7 @@ type Activity struct {
 	Why      string     `json:"why,omitempty"`
 	TraceID  string     `json:"traceId"`
 	Evidence string     `json:"evidence"` // path of the action file, relative to the run directory
-	// Screenshot is the path of the screenshot of a web action, relative to the run directory.
+	// Screenshot is the path of the screenshot of a web or a mobile action, relative to the run directory.
 	Screenshot string `json:"screenshot,omitempty"`
 	// Blocked lists the hosts that the browser refused to reach during a web action because the
 	// environment does not list them, in the form of a hosts entry.

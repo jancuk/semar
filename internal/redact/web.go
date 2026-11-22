@@ -20,31 +20,12 @@ func webRecord(s *scrubber, w domain.WebRecord) domain.WebRecord {
 	if w.Elements != nil {
 		elements := make(map[string]domain.ElementState, len(w.Elements))
 		for _, name := range slices.Sorted(maps.Keys(w.Elements)) {
-			st := w.Elements[name]
-			st.Text = s.text(st.Text)
-			if st.Attrs != nil {
-				attrs := make(map[string]string, len(st.Attrs))
-				for k, v := range st.Attrs {
-					attrs[k] = s.text(v)
-				}
-				st.Attrs = attrs
-			}
-			if st.Locator != nil {
-				l := locator(s, *st.Locator)
-				st.Locator = &l
-			}
-			elements[name] = st
+			elements[name] = elementState(s, w.Elements[name])
 		}
 		w.Elements = elements
 	}
 	if w.Repair != nil {
-		repair := make([]domain.Candidate, len(w.Repair))
-		for i, c := range w.Repair {
-			c.Locator = locator(s, c.Locator)
-			c.Why = s.text(c.Why)
-			repair[i] = c
-		}
-		w.Repair = repair
+		w.Repair = candidates(s, w.Repair)
 	}
 	if w.Blocked != nil {
 		blocked := make([]string, len(w.Blocked))
@@ -62,5 +43,6 @@ func webRecord(s *scrubber, w domain.WebRecord) domain.WebRecord {
 func locator(s *scrubber, l domain.Locator) domain.Locator {
 	l.TestID, l.Role, l.Name = s.text(l.TestID), s.text(l.Role), s.text(l.Name)
 	l.Text, l.CSS = s.text(l.Text), s.text(l.CSS)
+	l.ID, l.Desc, l.Class, l.XPath = s.text(l.ID), s.text(l.Desc), s.text(l.Class), s.text(l.XPath)
 	return l
 }

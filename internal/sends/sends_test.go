@@ -67,3 +67,22 @@ func TestDetailsOfARequestLeaveOutTheRoute(t *testing.T) {
 		t.Errorf("details %q, want %q", got, want)
 	}
 }
+
+func TestLinesOfAMobileStep(t *testing.T) {
+	for name, c := range map[string]struct {
+		m    domain.MobileAction
+		want []string
+	}{
+		"launch":      {domain.MobileAction{Do: domain.MobileLaunch}, []string{"launch"}},
+		"open":        {domain.MobileAction{Do: domain.MobileOpenLink, Link: "shop://cart/{{id}}"}, []string{"open shop://cart/{{id}}"}},
+		"tap":         {domain.MobileAction{Do: domain.MobileTap, Screen: "SignIn", Element: "submit"}, []string{"tap submit on screen SignIn"}},
+		"type":        {domain.MobileAction{Do: domain.MobileType, Screen: "S", Element: "email", Value: "a@b.c"}, []string{"type email on screen S", `text "a@b.c"`}},
+		"type secret": {domain.MobileAction{Do: domain.MobileType, Screen: "S", Element: "pw", Secret: "env:SHOP_PASSWORD"}, []string{"type pw on screen S", "text the value of $SHOP_PASSWORD"}},
+		"scroll":      {domain.MobileAction{Do: domain.MobileScroll, Screen: "S", Element: "row", Within: "list", Value: "down"}, []string{"scroll row in list on screen S", "direction down"}},
+		"press":       {domain.MobileAction{Do: domain.MobilePress, Value: "back"}, []string{"press back"}},
+	} {
+		if got := sends.Lines(domain.ScriptStep{Mobile: &c.m}); !slices.Equal(got, c.want) {
+			t.Errorf("%s: lines %q, want %q", name, got, c.want)
+		}
+	}
+}

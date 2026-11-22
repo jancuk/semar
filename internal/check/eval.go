@@ -47,7 +47,7 @@ func Eval(c domain.Check, a domain.Action) (res Result) {
 	}
 	res.Expected = short(describe(c, ops))
 	if c.Element != "" || c.Page != "" {
-		evalElement(&res, c, ops[0], a.Web)
+		evalElement(&res, c, ops[0], a.UI())
 		res.Observed = short(res.Observed)
 		return res
 	}

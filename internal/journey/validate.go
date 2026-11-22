@@ -58,7 +58,7 @@ const (
 	minEvery      = 100 * time.Millisecond
 	// No hyphen: a leg ID is the head of {{<leg>.<output>}}, and a variable name has none.
 	legIDRule = `^[a-z][a-z0-9_]*$`
-	notYet    = "legs are not supported yet: this version runs api legs and web legs; android legs come in M3"
+	runsLegs  = "this version runs api, web, and android legs"
 )
 
 var (
@@ -219,7 +219,7 @@ func (v *validator) legs() {
 		seen[l.ID] = true
 		v.needs(where, l)
 		v.surface(where, l)
-		if l.Surface != domain.SurfaceAPI && l.Surface != domain.SurfaceWeb {
+		if l.Surface != domain.SurfaceAPI && l.Surface != domain.SurfaceWeb && l.Surface != domain.SurfaceAndroid {
 			continue
 		}
 		v.app(where, l)
@@ -233,7 +233,7 @@ func (v *validator) legs() {
 		}
 		reach := v.reach(l)
 		v.steps(i, l, reach)
-		if l.Surface == domain.SurfaceWeb {
+		if l.Surface == domain.SurfaceWeb || l.Surface == domain.SurfaceAndroid {
 			v.screensOf(i, l)
 		}
 		v.wait(i, l)
@@ -281,30 +281,33 @@ func (v *validator) needs(where string, l domain.Leg) {
 func (v *validator) surface(where string, l domain.Leg) {
 	switch l.Surface {
 	case domain.SurfaceAPI:
-	case domain.SurfaceWeb:
-	case domain.SurfaceAndroid:
-		v.add(where+".surface", "%s "+notYet, l.Surface)
+	case domain.SurfaceWeb, domain.SurfaceAndroid:
 	case "":
-		v.add(where+".surface", "surface is required: it is api or web")
+		v.add(where+".surface", "surface is required: it is api, web, or android")
 	default:
-		v.add(where+".surface", "surface %q is not known: this version runs api legs and web legs; android legs come in M3", l.Surface)
+		v.add(where+".surface", "surface %q is not known: "+runsLegs, l.Surface)
 	}
 }
 
-// app checks the screens file that a web leg uses, and that an api leg uses none.
+// app checks the screens file that a web or an android leg uses, and that an api leg uses none.
 func (v *validator) app(where string, l domain.Leg) {
 	switch {
 	case l.Surface == domain.SurfaceWeb && l.App == "":
 		v.add(where+".app", "app is required for a web leg: it names the screens file .semar/screens/<app>.yaml")
-	case l.Surface == domain.SurfaceWeb:
+	case l.Surface == domain.SurfaceAndroid && l.App == "":
+		v.add(where+".app", "app is required for an android leg: it names the screens file .semar/screens/<app>.yaml")
+	case l.Surface == domain.SurfaceWeb || l.Surface == domain.SurfaceAndroid:
 		if err := idcheck.Check("app name", l.App); err != nil {
 			v.add(where+".app", "%v", err)
 		}
 	case l.App != "":
-		v.add(where+".app", "app is for a web leg: an api leg has no screens file")
+		v.add(where+".app", "app is for a web leg or an android leg: an api leg has no screens file")
 	}
 	if l.Surface == domain.SurfaceWeb && l.Wait != nil {
 		v.add(where+".wait", "a web leg cannot wait: a wait repeats the last request, and a web step has none. Use a step with do: wait for an element")
+	}
+	if l.Surface == domain.SurfaceAndroid && l.Wait != nil {
+		v.add(where+".wait", "an android leg cannot wait: a wait repeats the last request, and a step on a device has none. Use a step with do: wait for an element")
 	}
 }
 
@@ -348,11 +351,17 @@ func (v *validator) steps(li int, l domain.Leg, reach map[domain.LegID]bool) {
 	dup := false
 	for k, st := range l.Steps {
 		sp := fmt.Sprintf("%s.steps[%d]", base, k)
-		if l.Surface == domain.SurfaceWeb {
+		switch l.Surface {
+		case domain.SurfaceWeb:
 			v.webStep(sp, l, st)
-		} else {
+		case domain.SurfaceAndroid:
+			v.mobileStep(sp, l, st)
+		default:
 			if st.Web != nil {
 				v.add(sp+".web", "a step of an api leg has a request, and not a web action: web is for a leg with surface web")
+			}
+			if st.Mobile != nil {
+				v.add(sp+".mobile", "a step of an api leg has a request, and not a mobile action: mobile is for a leg with surface android")
 			}
 			if st.Hint == nil {
 				v.add(sp+".hint", "a step needs a hint: a method and a path template")
@@ -392,8 +401,11 @@ func (v *validator) steps(li int, l domain.Leg, reach map[domain.LegID]bool) {
 			}
 			if k, ok := stepAt[p.Step]; ok {
 				place, msg := "request", p.Message
-				if l.Steps[k].Web != nil {
+				switch {
+				case l.Steps[k].Web != nil:
 					place, msg = "web", strings.TrimPrefix(p.Message, "web: ")
+				case l.Steps[k].Mobile != nil:
+					place, msg = "mobile", strings.TrimPrefix(p.Message, "mobile: ")
 				}
 				v.add(fmt.Sprintf("%s.steps[%d].%s", base, k, place), "%s", msg)
 			} else {
@@ -415,6 +427,16 @@ func (v *validator) steps(li int, l domain.Leg, reach map[domain.LegID]bool) {
 				if head, _, dotted := strings.Cut(name, "."); dotted && name != "run.id" && head != "secret" && head != "data" && !datevar.Is(name) {
 					if msg := v.refProblem(l, reach, name); msg != "" {
 						v.add(fmt.Sprintf("%s.steps[%d].web", base, k), "%s", msg)
+					}
+				}
+			}
+			continue
+		}
+		if st.Mobile != nil {
+			for _, name := range st.Mobile.Variables() {
+				if head, _, dotted := strings.Cut(name, "."); dotted && name != "run.id" && head != "secret" && head != "data" && !datevar.Is(name) {
+					if msg := v.refProblem(l, reach, name); msg != "" {
+						v.add(fmt.Sprintf("%s.steps[%d].mobile", base, k), "%s", msg)
 					}
 				}
 			}
@@ -503,7 +525,7 @@ func (v *validator) wait(li int, l domain.Leg) {
 	case w.Timeout > 0 && w.Every > w.Timeout:
 		v.add(wp+".every", "wait every %s is above the timeout %s", w.Every, w.Timeout)
 	}
-	if n := len(l.Steps); n > 0 && l.Surface != domain.SurfaceWeb {
+	if n := len(l.Steps); n > 0 && l.Surface == domain.SurfaceAPI {
 		if m := l.Steps[n-1].Request.Method; m != "" && m != "GET" && m != "HEAD" {
 			v.add(wp, "the last step of leg %s is %s; a wait repeats the last step, which must read", l.ID, m)
 		}
@@ -606,11 +628,35 @@ func (v *validator) webStep(sp string, l domain.Leg, st domain.LegStep) {
 	}
 }
 
+// mobileStep checks the one action of a step of an android leg, and that the step has no request, no
+// web action, and no hint.
+func (v *validator) mobileStep(sp string, l domain.Leg, st domain.LegStep) {
+	switch {
+	case st.Mobile == nil:
+		v.add(sp+".mobile", "a step of an android leg needs mobile: its one action on the device")
+		return
+	case st.Hint != nil:
+		v.add(sp+".hint", "a step of an android leg has no hint: a hint is the method and the path of a request")
+	}
+	if st.Web != nil {
+		v.add(sp+".web", "a step of an android leg has a mobile action, and not a web action")
+	}
+	if !requestEmpty(st.Request) {
+		v.add(sp+".request", "a step of an android leg has a mobile action, and not a request")
+	}
+	if m := st.Mobile; m.Service != "" && m.Service != l.Service {
+		v.add(sp+".mobile.service", "%s differs from the leg's service %s: write the service on the leg", m.Service, l.Service)
+	}
+	if m := st.Mobile; m.App != "" && m.App != l.App {
+		v.add(sp+".mobile.app", "%s differs from the leg's app %s: write the app on the leg", m.App, l.App)
+	}
+}
+
 func requestEmpty(r domain.APIRequest) bool {
 	return r.Service == "" && r.Method == "" && r.Path == "" && len(r.Query) == 0 && len(r.Headers) == 0 && r.JSON == nil
 }
 
-// screensOf checks that the screens file of a web leg is there and has every screen and element that
+// screensOf checks that the screens file of a web or an android leg is there and has every screen and element that
 // the steps of the leg name.
 func (v *validator) screensOf(li int, l domain.Leg) {
 	if v.screens == nil || l.App == "" || idcheck.Check("app name", l.App) != nil {
@@ -627,7 +673,7 @@ func (v *validator) screensOf(li int, l domain.Leg) {
 		return
 	}
 	for k, st := range l.Steps {
-		if st.Web == nil {
+		if st.Web == nil && st.Mobile == nil {
 			continue
 		}
 		var elements []string
@@ -641,7 +687,13 @@ func (v *validator) screensOf(li int, l domain.Leg) {
 				elements = append(elements, c.Element)
 			}
 		}
-		for _, msg := range screens.Check(scr, []screens.Use{{Action: *st.Web, Elements: elements}}) {
+		if st.Mobile != nil {
+			for _, msg := range screens.Check(scr, []screens.Use{screens.MobileUse("", *st.Mobile, elements)}) {
+				v.add(fmt.Sprintf("%s.steps[%d].mobile", where, k), "%s", msg)
+			}
+			continue
+		}
+		for _, msg := range screens.Check(scr, []screens.Use{screens.WebUse("", *st.Web, elements)}) {
 			v.add(fmt.Sprintf("%s.steps[%d].web", where, k), "%s", msg)
 		}
 	}

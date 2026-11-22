@@ -66,7 +66,7 @@ type LegUntil struct {
 }
 
 // LegStep is a scenario step with the request, or the browser action, that carries it out. Exactly
-// one of Request and Web is set, and Web belongs to a leg with surface web.
+// one of Request, Web, and Mobile is set, and Web and Mobile belong to a leg with their surface.
 type LegStep struct {
 	ID       StepID        `yaml:"id"`
 	Setup    bool          `yaml:"setup,omitempty"`
@@ -75,6 +75,7 @@ type LegStep struct {
 	Expect   []Expectation `yaml:"expect,omitempty"`
 	Request  APIRequest    `yaml:"request"`
 	Web      *WebAction    `yaml:"web,omitempty"`
+	Mobile   *MobileAction `yaml:"mobile,omitempty"`
 	Captures []Capture     `yaml:"captures,omitempty"`
 	// As names an auth profile for this step. It wins over the leg's.
 	As string `yaml:"as,omitempty"`

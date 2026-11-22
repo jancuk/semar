@@ -219,20 +219,59 @@ func (w WebAction) Variables() []string {
 }
 
 // Locator says how to find one element of a screen. Every field may hold {{variables}}. The engine
-// tries TestID, then Role with Name, then Text, then CSS, and the first one that matches wins.
+// tries TestID, then Role with Name, then Text, then CSS, and the first one that matches wins. On a
+// device it tries ID or TestID, Desc, Role with Name, Text, XPath, and Class.
 type Locator struct {
 	TestID string `yaml:"testId,omitempty" json:"testId,omitempty"`
 	Role   string `yaml:"role,omitempty" json:"role,omitempty"`
 	Name   string `yaml:"name,omitempty" json:"name,omitempty"`
 	Text   string `yaml:"text,omitempty" json:"text,omitempty"`
 	CSS    string `yaml:"css,omitempty" json:"css,omitempty"`
+	// ID, Desc, Class, and XPath find an element of an app on a device. ID is the resource id on
+	// Android, and Desc is its content description. A browser ignores them, and a device ignores CSS.
+	ID    string `yaml:"id,omitempty" json:"id,omitempty"`
+	Desc  string `yaml:"desc,omitempty" json:"desc,omitempty"`
+	Class string `yaml:"class,omitempty" json:"class,omitempty"`
+	XPath string `yaml:"xpath,omitempty" json:"xpath,omitempty"`
 	// Within names another element of the same screen. The search is limited to it.
 	Within string `yaml:"within,omitempty" json:"within,omitempty"`
 }
 
 // Empty reports whether the locator has no way to find anything.
 func (l Locator) Empty() bool {
-	return l.TestID == "" && l.Role == "" && l.Name == "" && l.Text == "" && l.CSS == ""
+	return l.TestID == "" && l.Role == "" && l.Name == "" && l.Text == "" && l.CSS == "" &&
+		l.ID == "" && l.Desc == "" && l.Class == "" && l.XPath == ""
+}
+
+// ForWeb reports whether a browser can find the element with the locator.
+func (l Locator) ForWeb() bool { return len(l.Strategies()) > 0 }
+
+// ForMobile reports whether a device can find the element with the locator.
+func (l Locator) ForMobile() bool { return len(l.MobileStrategies()) > 0 }
+
+// MobileStrategies lists how the locator finds its element on a device, in the order that the engine
+// tries them. TestID is the same as ID there.
+func (l Locator) MobileStrategies() []string {
+	var out []string
+	if l.ID != "" || l.TestID != "" {
+		out = append(out, "id")
+	}
+	if l.Desc != "" {
+		out = append(out, "desc")
+	}
+	if l.Role != "" || l.Name != "" {
+		out = append(out, "role")
+	}
+	if l.Text != "" {
+		out = append(out, "text")
+	}
+	if l.XPath != "" {
+		out = append(out, "xpath")
+	}
+	if l.Class != "" {
+		out = append(out, "class")
+	}
+	return out
 }
 
 // Strategies lists how the locator finds its element, in the order that the engine tries them.
@@ -273,13 +312,18 @@ func (l Locator) String() string {
 	add("name", l.Name)
 	add("text", l.Text)
 	add("css", l.CSS)
+	add("id", l.ID)
+	add("desc", l.Desc)
+	add("class", l.Class)
+	add("xpath", l.XPath)
 	add("within", l.Within)
 	return "{ " + strings.Join(parts, ", ") + " }"
 }
 
 // Fields lists the strings of the locator that may hold variables, by field name.
 func (l Locator) Fields() map[string]string {
-	return map[string]string{"testId": l.TestID, "role": l.Role, "name": l.Name, "text": l.Text, "css": l.CSS}
+	return map[string]string{"testId": l.TestID, "role": l.Role, "name": l.Name, "text": l.Text, "css": l.CSS,
+		"id": l.ID, "desc": l.Desc, "class": l.Class, "xpath": l.XPath}
 }
 
 // Screens is the content of one .semar/screens/<app>.yaml: the elements of each screen of an app.

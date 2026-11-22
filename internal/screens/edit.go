@@ -54,7 +54,8 @@ func Replace(data []byte, app, screen, element string, loc domain.Locator) ([]by
 func pairs(loc domain.Locator) [][2]string {
 	var out [][2]string
 	for _, f := range [][2]string{
-		{"testId", loc.TestID}, {"role", loc.Role}, {"name", loc.Name}, {"text", loc.Text}, {"css", loc.CSS}, {"within", loc.Within},
+		{"testId", loc.TestID}, {"role", loc.Role}, {"name", loc.Name}, {"text", loc.Text}, {"css", loc.CSS},
+		{"id", loc.ID}, {"desc", loc.Desc}, {"class", loc.Class}, {"xpath", loc.XPath}, {"within", loc.Within},
 	} {
 		if f[1] != "" {
 			out = append(out, f)
@@ -211,6 +212,10 @@ func Repaired(file, resolved, candidate domain.Locator) domain.Locator {
 		Name:   keep(file.Name, resolved.Name, candidate.Name),
 		Text:   keep(file.Text, resolved.Text, candidate.Text),
 		CSS:    keep(file.CSS, resolved.CSS, candidate.CSS),
+		ID:     keep(file.ID, resolved.ID, candidate.ID),
+		Desc:   keep(file.Desc, resolved.Desc, candidate.Desc),
+		Class:  keep(file.Class, resolved.Class, candidate.Class),
+		XPath:  keep(file.XPath, resolved.XPath, candidate.XPath),
 		Within: file.Within,
 	}
 }

@@ -139,6 +139,10 @@ func (r *Redactor) Action(a domain.Action) domain.Action {
 		w := webRecord(s, *a.Web)
 		out.Web = &w
 	}
+	if a.Mobile != nil {
+		m := mobileRecord(s, *a.Mobile)
+		out.Mobile = &m
+	}
 	if a.Doc != nil {
 		d := *a.Doc
 		d.Misfits = make([]domain.Misfit, len(a.Doc.Misfits))

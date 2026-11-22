@@ -106,10 +106,10 @@ func TestCheckNamesWhatTheFileHas(t *testing.T) {
 		t.Fatal(err)
 	}
 	uses := []screens.Use{
-		{Where: "step a", Action: domain.WebAction{Do: domain.WebClick, Screen: "Cart", Element: "place-order"}},
-		{Where: "step b", Action: domain.WebAction{Do: domain.WebClick, Screen: "Nope", Element: "x"}},
-		{Where: "step c", Action: domain.WebAction{Do: domain.WebDrag, Screen: "Cart", Element: "line", To: "bin"}, Elements: []string{"gone"}},
-		{Where: "step d", Action: domain.WebAction{Do: domain.WebOpen, Path: "/"}, Elements: []string{"x"}},
+		screens.WebUse("step a", domain.WebAction{Do: domain.WebClick, Screen: "Cart", Element: "place-order"}, nil),
+		screens.WebUse("step b", domain.WebAction{Do: domain.WebClick, Screen: "Nope", Element: "x"}, nil),
+		screens.WebUse("step c", domain.WebAction{Do: domain.WebDrag, Screen: "Cart", Element: "line", To: "bin"}, []string{"gone"}),
+		screens.WebUse("step d", domain.WebAction{Do: domain.WebOpen, Path: "/"}, []string{"x"}),
 	}
 	got := screens.Check(s, uses)
 	want := []string{

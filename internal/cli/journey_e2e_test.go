@@ -208,11 +208,11 @@ func TestJourneyEndToEndBuildChangeIsStale(t *testing.T) {
 	contains(t, "the list", squash(list.stdout), "checkout critical team-commerce 3 legs stale (was stale in r-test-0001): orders 9f3c2ab then c0ffee1")
 }
 
-func TestJourneyEndToEndRefusesAnAndroidLeg(t *testing.T) {
+func TestJourneyEndToEndRefusesAnIOSLeg(t *testing.T) {
 	r := journeyRepo(t, sampleapp.Options{}, sampleapp.PaymentOptions{})
-	text := strings.Replace(strings.Replace(r.readJourney(t, "checkout"), "id: checkout", "id: web-flow", 1), "surface: api", "surface: android", 1)
+	text := strings.Replace(strings.Replace(r.readJourney(t, "checkout"), "id: checkout", "id: web-flow", 1), "surface: api", "surface: ios", 1)
 	r.writeRel(t, ".semar/journeys/web-flow.yaml", text)
-	const j7 = "legs[0].surface: android legs are not supported yet: this version runs api legs and web legs; android legs come in M3"
+	const j7 = `legs[0].surface: surface "ios" is not known: this version runs api, web, and android legs`
 
 	list := r.must(t, cli.ExitUndecided, "journey", "list")
 	contains(t, "the list", list.stdout, "invalid: .semar/journeys/web-flow.yaml:", j7)

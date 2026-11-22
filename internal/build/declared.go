@@ -20,22 +20,31 @@ var commitPattern = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 type Declared struct {
 	commits map[string]string
 	local   map[string]bool
+	apk     map[string]bool
 	next    Prober
 }
 
 // NewDeclared takes the commits, and the services among them whose commit is the working copy that
 // WithLocal read, not one that a person named.
 func NewDeclared(commits map[string]string, next Prober, local ...string) *Declared {
-	d := &Declared{commits: maps.Clone(commits), local: map[string]bool{}, next: next}
+	d := &Declared{commits: maps.Clone(commits), local: map[string]bool{}, apk: map[string]bool{}, next: next}
 	for _, name := range local {
 		d.local[name] = true
 	}
 	return d
 }
 
+// APK marks the services among the commits whose commit is the digest of their APK, which WithAPK read.
+func (d *Declared) APK(names ...string) *Declared {
+	for _, name := range names {
+		d.apk[name] = true
+	}
+	return d
+}
+
 func (d *Declared) Probe(ctx context.Context, service string) (domain.BuildRef, error) {
 	if commit, ok := d.commits[service]; ok {
-		return domain.BuildRef{Service: service, Commit: commit, Declared: true, Local: d.local[service]}, nil
+		return domain.BuildRef{Service: service, Commit: commit, Declared: true, Local: d.local[service], APK: d.apk[service]}, nil
 	}
 	if d.next == nil {
 		return domain.BuildRef{}, fmt.Errorf("build probe for service %q: the service has no build probe and no declared build", service)

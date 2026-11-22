@@ -67,7 +67,7 @@ type scenarioView struct {
 	// Attempts says how a scenario that ran more than once came out. Tries has one line for each attempt.
 	Attempts string
 	Tries    []string
-	// Shots are the screenshots of the browser steps that a reason or a check names.
+	// Shots are the screenshots of the browser and device steps that a reason or a check names.
 	Shots []shotView
 	// Class is the stored outcome. Ticket is the ticket of the scenario file. Lead is the reason that a
 	// result line shows. Flaky marks a scenario that passed after an attempt that did not.
@@ -85,13 +85,13 @@ type ledgerView struct {
 	Verb, Object, Scenario, Step, Status string
 }
 
-// browserStep is one action of the browser: the step's action text beside the operation and the target.
+// browserStep is one action of the browser or of a device: the step's action text beside the operation and the target.
 type browserStep struct {
 	Scenario, Step, Why, Target, Result, Screenshot string
 }
 
 type markdownView struct {
-	Browser                            []browserStep
+	Browser, Device                    []browserStep
 	Blocked                            []blockedView
 	DocChecks                          []docView
 	RunID, Environment, Started, Ended string
@@ -182,7 +182,8 @@ func (vw viewer) buildView(d Data) markdownView {
 	for _, row := range activity.Ledger(d.Activity) {
 		v.Ledger = append(v.Ledger, vw.ledgerViewOf(row))
 	}
-	v.Browser = vw.browserSteps(d.Activity)
+	v.Browser = vw.browserSteps(d.Activity, domain.SurfaceWeb)
+	v.Device = vw.browserSteps(d.Activity, domain.SurfaceAndroid)
 	v.Blocked = vw.blockedViews(d.Activity)
 	v.DocChecks = vw.docViews(d.Activity)
 	return v
@@ -196,7 +197,7 @@ func (vw viewer) shownAttemptReason(a domain.Attempt) string {
 	return ": " + vw.show(shownReason(a.Reasons))
 }
 
-// failedShots gives the screenshot of each browser step that a reason or a failed check of the result
+// failedShots gives the screenshot of each browser or device step that a reason or a failed check of the result
 // names, in the order of the steps that name them.
 func (vw viewer) failedShots(acts []domain.Activity, r domain.ScenarioResult) []shotView {
 	var steps []domain.StepID
@@ -217,7 +218,7 @@ func (vw viewer) failedShots(acts []domain.Activity, r domain.ScenarioResult) []
 	for _, id := range steps {
 		for i := len(acts) - 1; i >= 0; i-- {
 			e := acts[i]
-			if e.Surface == domain.SurfaceWeb && e.Use.Scenario == r.Scenario && e.Use.Step == id && screenshotPath.MatchString(e.Screenshot) {
+			if e.Surface.OnScreen() && e.Use.Scenario == r.Scenario && e.Use.Step == id && screenshotPath.MatchString(e.Screenshot) {
 				out = append(out, shotView{Step: vw.show(string(id)), Path: e.Screenshot})
 				break
 			}
@@ -321,6 +322,9 @@ func (vw viewer) builds(bs []domain.BuildRef) string {
 }
 
 func declaredBuild(b domain.BuildRef) string {
+	if b.APK {
+		return fmt.Sprintf("%s %s (the digest of the APK file of the service, not read from the service)", b.Service, b.Commit)
+	}
 	if b.Local {
 		from := "the head commit of the repository"
 		if strings.Contains(b.Commit, "+") {
@@ -348,10 +352,10 @@ func utc(t time.Time) string {
 // path is linked only when it has this form.
 var screenshotPath = regexp.MustCompile(`^screenshots/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.(png|jpg)$`)
 
-func (vw viewer) browserSteps(acts []domain.Activity) []browserStep {
+func (vw viewer) browserSteps(acts []domain.Activity, surface domain.Surface) []browserStep {
 	var out []browserStep
 	for _, e := range acts {
-		if e.Surface != domain.SurfaceWeb {
+		if e.Surface != surface {
 			continue
 		}
 		b := browserStep{
