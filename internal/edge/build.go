@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jancuk/semar/internal/datevar"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/script"
 )
@@ -71,6 +72,11 @@ func Build(base domain.Scenario, bs domain.Script, step domain.StepID, c Case, i
 		if ss.Request != nil {
 			needed = append(needed, variablesOf(*ss.Request)...)
 		}
+	}
+	// A flow is not read here, so a value that no step captures could come from one. An edge case does
+	// not run a flow, and must not drop what one supplies.
+	if err := flowSupplies(base, bs, at, needed); err != nil {
+		return domain.Scenario{}, domain.Script{}, err
 	}
 	var given []domain.Given
 	for _, g := range base.Given {
@@ -163,4 +169,32 @@ func Key(ticket string, hint *domain.RequestHint, kind Kind, on string) string {
 		route = strings.ToUpper(hint.Method) + " " + hint.Path
 	}
 	return strings.Join([]string{ticket, route, string(kind), on}, "|")
+}
+
+// flowSupplies refuses a base whose earlier use step may supply a variable that the case needs: a name
+// without a dot that no step before the case captures, and that is not a date variable.
+func flowSupplies(base domain.Scenario, bs domain.Script, at int, needed []string) error {
+	captured := map[string]bool{}
+	var use domain.StepID
+	for i := 0; i < at; i++ {
+		ss, ok := scriptStepOf(bs, base.Steps[i].ID)
+		if !ok {
+			continue
+		}
+		if ss.Use != "" && use == "" {
+			use = ss.Step
+		}
+		for _, c := range ss.Captures {
+			captured[c.Name] = true
+		}
+	}
+	if use == "" {
+		return nil
+	}
+	for _, n := range needed {
+		if !strings.Contains(n, ".") && !captured[n] && !datevar.Is(n) {
+			return fmt.Errorf("scenario %s: step %s uses a flow, and %s may come from it, but an edge case runs only API steps", base.ID, use, n)
+		}
+	}
+	return nil
 }

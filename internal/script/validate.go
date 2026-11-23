@@ -38,16 +38,19 @@ func Validate(sc domain.Scenario, s domain.Script) []Problem {
 // output names of its fixture. With nil outputs, any <as>.<name> of a declared alias is accepted.
 // run.id is always known. An alias counts as an earlier capture for every step.
 func ValidateWith(sc domain.Scenario, s domain.Script, outputs map[string][]string) []Problem {
-	return validate(sc, s, outputs, false)
+	return validate(sc, s, outputs, false, nil)
 }
 
 // ValidateShapeWith is ValidateWith for a script found by its shape hash: it requires
 // s.ShapeHash == domain.ShapeHash(sc) in place of the expectation-hash check.
 func ValidateShapeWith(sc domain.Scenario, s domain.Script, outputs map[string][]string) []Problem {
-	return validate(sc, s, outputs, true)
+	return validate(sc, s, outputs, true, nil)
 }
 
-func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, byShape bool) []Problem {
+// validate is the check of every Validate. flows resolves the flows that use steps name. With nil, a
+// use step is accepted as far as it can be without its flow: it is the only step that may follow, and it
+// may start the app.
+func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, byShape bool, flows FlowResolver) []Problem {
 	var ps []Problem
 	add := func(step domain.StepID, format string, args ...any) {
 		ps = append(ps, Problem{Step: step, Message: fmt.Sprintf(format, args...)})
@@ -90,9 +93,18 @@ func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, 
 
 	bound := map[domain.StepID]bool{}
 	captured := map[string]bool{}
-	unknown := variableCheck(sc, captured, outputs)
+	unknownVar := variableCheck(sc, captured, outputs)
 	lastIndex, outOfOrder := -1, false
 	started := map[string]bool{} // services whose app a mobile step has started
+	// startUnknown is set by a use step that was not looked into: the flow may have started any app and
+	// captured any name, so what follows is checked only as far as it can be without the flow.
+	startUnknown := false
+	unknown := func(name string) string {
+		if startUnknown && !strings.Contains(name, ".") {
+			return ""
+		}
+		return unknownVar(name)
+	}
 	for _, ss := range s.Steps {
 		i, known := index[ss.Step]
 		if !known {
@@ -108,12 +120,50 @@ func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, 
 		bound[ss.Step] = true
 
 		switch {
+		case ss.Use != "" && (ss.Request != nil || ss.Web != nil || ss.Mobile != nil):
+			add(ss.Step, "a step has a request, a web action, a mobile action, or a use, and not more than one")
 		case ss.Request != nil && ss.Web != nil && ss.Mobile == nil:
 			add(ss.Step, "a step has a request or a web action, and not both")
 		case ss.Mobile != nil && (ss.Request != nil || ss.Web != nil):
 			add(ss.Step, "a step has a request, a web action, or a mobile action, and not more than one")
-		case ss.Request == nil && ss.Web == nil && ss.Mobile == nil && len(ss.Captures) > 0:
+		case ss.Request == nil && ss.Web == nil && ss.Mobile == nil && ss.Use == "" && len(ss.Captures) > 0:
 			add(ss.Step, "a capture needs a request or a web action")
+		}
+		if len(ss.With) > 0 && ss.Use == "" {
+			add(ss.Step, "with belongs to a step that has use")
+		}
+		if ss.Use != "" {
+			switch {
+			case len(ss.Captures) > 0:
+				add(ss.Step, "use: a step that uses a flow takes no captures in this version: the flow captures what it needs, and a wait step after it can read the screen")
+			}
+			if known && len(sc.Steps[i].Expect) > 0 {
+				add(ss.Step, "use: a step that uses a flow takes no expected result in this version, because the flow ends on a screen that the step cannot name: put the expected result on a wait step after it")
+			}
+			if sc.Surface != domain.SurfaceAndroid {
+				add(ss.Step, "use: a flow runs on a device, so the scenario needs the surface android")
+			}
+			if known && sc.Steps[i].As != "" && sc.Steps[i].As != sc.AuthProfile {
+				add(ss.Step, "use: a device has one signed-in account, so as cannot be %s", sc.Steps[i].As)
+			}
+			for _, v := range WithVariables(ss.With) {
+				if msg := unknown(v); msg != "" {
+					add(ss.Step, "with: %s", msg)
+				}
+			}
+			for _, k := range sortedStringKeys(ss.With) {
+				if strings.Contains(variablePattern.ReplaceAllString(ss.With[k], ""), "{{") {
+					add(ss.Step, "with: the value of %s holds a malformed variable", k)
+				}
+			}
+			if flows == nil {
+				startUnknown = true
+			} else if f, err := flows(ss.Use); err != nil {
+				startUnknown = true
+				add(ss.Step, "use: flow %s: %v", ss.Use, err)
+			} else {
+				useProblems(ss, f, started, captured, func(format string, args ...any) { add(ss.Step, format, args...) })
+			}
 		}
 		if sc.Surface == domain.SurfaceAndroid && ss.Web != nil {
 			add(ss.Step, "an android scenario has no web action: use a mobile action, or a request to set up")
@@ -133,7 +183,7 @@ func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, 
 			if known && sc.Steps[i].As != "" && sc.Steps[i].As != sc.AuthProfile {
 				add(ss.Step, "mobile: a device has one signed-in account, so as cannot be %s", sc.Steps[i].As)
 			}
-			if svc := ss.Mobile.Service; !started[svc] {
+			if svc := ss.Mobile.Service; !started[svc] && !startUnknown {
 				started[svc] = true
 				if do := ss.Mobile.Do; do != domain.MobileLaunch && do != domain.MobileOpenLink {
 					add(ss.Step, "mobile: the first mobile step of a service must be launch or open, and this one is %s", do)
@@ -247,7 +297,7 @@ func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, 
 
 func hasAction(s domain.Script, id domain.StepID) bool {
 	return slices.ContainsFunc(s.Steps, func(ss domain.ScriptStep) bool {
-		return ss.Step == id && (ss.Request != nil || ss.Web != nil || ss.Mobile != nil)
+		return ss.Step == id && (ss.Request != nil || ss.Web != nil || ss.Mobile != nil || ss.Use != "")
 	})
 }
 

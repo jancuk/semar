@@ -47,6 +47,8 @@ The examples use a service named `orders`, a web application named `shop`, and t
 | Fixtures | A file finds or makes the data that a test needs, across services, and cleans it up | [Prepare data with fixtures](#prepare-data-with-fixtures) |
 | Web tests | Semar drives Chrome on a profile of its own, and signs in by itself. A web application needs no token | [Test a web application](#test-a-web-application) |
 | A recorded web test | `semar record` writes a web test while you do the flow once | [Record a web test](#record-a-web-test) |
+| A recorded Android test | `semar record` records an app on a device, in the terminal or in a local web studio, and writes the scenario, its script, and its screens | [Record an Android app](#record-an-android-app) |
+| Reusable flows | A flow is a sequence of device steps, such as a sign-in, kept in `.semar/flows`. A scenario runs it with `use:` | [Reusable flows](#reusable-flows) |
 | Web tests from a plan | A model does the flow in Chrome, and Semar writes it as a test that replays with no model | [Plan writes web tests](#plan-writes-web-tests) |
 | Web checks | A web test checks the text, the state, and the attributes of an element, and the path and the title of the page. Every web step leaves a screenshot | [Check a web page](#check-a-web-page) |
 | Android tests | Semar taps, types, and reads the screen of an app on an emulator or a device, with no model and no JVM. A result belongs to the APK that ran | [Test an Android app](#test-an-android-app) |
@@ -60,7 +62,7 @@ The examples use a service named `orders`, a web application named `shop`, and t
 | Rules of an environment | Hosts, methods, and an effects policy limit what a test may do. A production environment is read only | [Configuration](#configuration) |
 | Model providers | Claude Code, Codex, the Anthropic API, or any server with the OpenAI chat format. A page on your machine manages them | [Choose the model](#choose-the-model) |
 
-Semar tests an HTTP API, a web application, and an Android app. A plan writes no Android test yet: an Android criterion stays a manual check with steps, and `semar record` does not record on a device.
+Semar tests an HTTP API, a web application, and an Android app. A plan writes no Android test yet: an Android criterion stays a manual check with steps. `semar record` does record an app on a device: see [Record an Android app](#record-an-android-app).
 
 There are three ways to get tests. All of them end with the same `semar run`.
 
@@ -1327,7 +1329,7 @@ Semar writes the scenario with one line for each action and a `Then` line for ea
 * **The test counts at once.** A recording made in a minute can hold a mistake, so read the screens file and the scenario in the pull request. The command ends with `Next: semar run`, and `--covers <use case id>` also prints `semar check <use case id> --by <id>`. `record` prints the commands and does not run them.
 * **Safety.** `semar record` refuses a production environment and a read-only one, because it clicks and types. It refuses an ID that has a scenario unless `--replace` is set. It uses `--service` when the environment has several, `--ticket` for a ticket other than the group of the ID, and `--open <path>` for the first page.
 
-A date or time field (`date`, `datetime-local`, `time`, `month`, `week`) is recorded as one step with its value, whether the person keys it or picks it. A date that you type stays as you typed it: write a [date variable](#values-that-follow-the-run) in the script by hand when the test must follow the day of the run. A choice in a select list and a click on a checkbox are recorded as `select`, `check`, and `uncheck` steps. `semar record` does not record on Android, a wait of time, a check of anything but the text of an element, the clearing of such a field, a color field, a slider, a hover, a file upload, or a second tab. Add them to the files by hand, with the [actions and checks](#check-a-web-page) of a script.
+A date or time field (`date`, `datetime-local`, `time`, `month`, `week`) is recorded as one step with its value, whether the person keys it or picks it. A date that you type stays as you typed it: write a [date variable](#values-that-follow-the-run) in the script by hand when the test must follow the day of the run. A choice in a select list and a click on a checkbox are recorded as `select`, `check`, and `uncheck` steps. a wait of time, a check of anything but the text of an element, the clearing of such a field, a color field, a slider, a hover, a file upload, or a second tab. Add them to the files by hand, with the [actions and checks](#check-a-web-page) of a script.
 
 ### Plan writes web tests
 
@@ -1410,7 +1412,7 @@ environments:
 | `services[].android.appPackage` | The package of the app. Required |
 | `services[].android.appActivity` | The activity to start. Empty starts the launcher activity |
 | `services[].android.apk` | The file that Semar installs when the device has another one. See the build below |
-| `services[].android.reset` | What happens before each scenario. `restart` stops the app and keeps its data. `clear` also deletes its data. `none` leaves it as it is |
+| `services[].android.reset` | What happens before each scenario. `restart` stops the app and keeps its data. `clear` also deletes its data. `none` leaves it as it is. A `launch` step can name its own reset: see [The reset of a launch](#the-reset-of-a-launch) |
 | `services[].android.schemes` | The custom schemes, such as `shop`, that an `open` step may use. `http` and `https` follow the rules of the environment, and `file`, `content`, `intent`, and `javascript` are never opened |
 | `services[].android.permissions` | Permissions that Semar grants after each reset, because `clear` revokes them |
 
@@ -1497,7 +1499,7 @@ A `mobile` step has one action in `do`:
 
 | `do` | Needs | What it does |
 | --- | --- | --- |
-| `launch` | None | Starts the app, after the reset of the scenario |
+| `launch` | None, or `reset` | Starts the app, after the reset of the scenario. `reset` is `restart`, `clear`, or `none`, and it replaces the reset of the service for this launch |
 | `open` | `link` | Opens a deep link with the app. An `http` or `https` link follows the rules of the environment, and another scheme must be in `schemes` |
 | `tap`, `longPress` | `screen`, `element` | Presses the element |
 | `type` | `screen`, `element`, and a `value` or a `secret: env:<NAME>` | Replaces the text of the field |
@@ -1515,6 +1517,119 @@ A `mobile` step has one action in `do`:
 The `Then` lines are those of [Check a web page](#check-a-web-page) that read an element: its text, that it exists or not, how many there are, a state, and an attribute. The attribute names are the native ones, such as `checked`, `enabled`, and `content-desc`. A check waits for its condition up to `android.timeout`, and a locator that matches several elements ends the step `inconclusive`. A capture reads the text of an element. A screen is asserted by an element that only that screen has.
 
 Every step of an Android test leaves a JPEG screenshot, at most 1280 pixels on the long side, below `screenshots/<scenario>/`. `report.md` has a `## Device steps` section, and `report.html` holds the screenshots inside. A screen that the app protects gives no screenshot, and the step still runs. A screenshot is not redacted.
+
+### An app with no backend
+
+A service that has `android` needs no `baseUrl`. An app that works on its own, such as a notes app, is a service with a name and a package. When every service of an environment is such an app and the environment has no `serverUrl`, the environment needs no `hosts` either. Semar then sends no request of its own, and the environment still limits what it may do:
+
+```yaml
+version: 1
+environments:
+  uat:
+    kind: test
+    methods: [GET]
+    effects:
+      mode: test_data
+    services:
+      - name: notes
+        android:
+          appPackage: com.example.notes
+authProfiles:
+  default: {}
+```
+
+Give the service a `baseUrl` when the app talks to a backend that other steps or fixtures also use. Its host must then be in `hosts`.
+
+### The reset of a launch
+
+A `launch` step may carry its own `reset`: `restart`, `clear`, or `none`. It replaces the reset of the service for that launch. A flow that signs in starts with `reset: clear`, so a replay starts signed out and does not land on the home screen of the last session. When testing an Android input method (IME) app's own package, use `reset: none` so Android does not unbind the active keyboard during `am force-stop` or `pm clear`. No other action takes a `reset`.
+
+```yaml
+- step: open-app
+  mobile: { do: launch, reset: clear }
+```
+
+### Reusable flows
+
+A flow is a sequence of device steps that several scenarios share, such as a sign-in. It is a file, `.semar/flows/<id>.yaml`. A flow is for an app on a device only:
+
+```yaml
+apiVersion: semar/v1
+kind: Flow
+id: login
+surface: android
+service: shop-app
+app: shop-app
+params:
+  - name: email
+    default: ana@example.com        # a param with no default is required
+steps:
+  - step: open-app
+    mobile: { do: launch, reset: clear }
+  - step: type-email
+    mobile: { do: type, screen: SignIn, element: email, value: "{{email}}" }
+  - step: type-password
+    mobile: { do: type, screen: SignIn, element: password, secret: "env:SHOP_PASSWORD" }
+  - step: tap-sign-in
+    mobile: { do: tap, screen: SignIn, element: sign-in }
+```
+
+A script step runs a flow with `use`, and gives its params with `with`:
+
+```yaml
+steps:
+  - step: sign-in
+    use: login
+    with: { email: ana@example.com }
+  - step: open-orders
+    mobile: { do: tap, screen: Home, element: orders }
+```
+
+* **Where a flow is read.** A flow is a file that anyone can commit, so Semar reads it as untrusted input: a real file in a real folder, a size limit, and an ID that is a plain name.
+* **Params.** A `with` key that is no param, and a required param with no value, are errors. The values of `with` are read in the scope of the scenario first. Inside a flow only its params, its own captures, `{{run.id}}`, and the date variables are known.
+* **No check on a use step.** A `use` step carries no `expect` and no captures, because the screen after a flow is not one that a step can name. Put the check on the next step.
+* **No flow in a flow.** A flow does not use another flow.
+* **Evidence.** A step of a flow keeps the ID of the step that uses it. The report names the flow and its step, as in `flow login, step type-email`, and the run records the ID and the sha256 of the flow file. A change to a flow is not a change to the hash of the scenarios that use it, so the run is where you see which version ran.
+* **The action budget** of a run grows with the number of steps that the flows expand to.
+* **A flow completes and does not pass.** It has no check. A failed, refused, or blocked step of a flow ends the scenario at that step.
+
+A flow that types a secret names it as `secret: env:NAME`. Semar keeps the variable out of the environment of a harness, as it does for a secret of `semar.yaml`.
+
+### Record an Android app
+
+`semar record` records what you do on a device, and writes it as a flow or as a scenario. You write no locator. The recording acts through the same engine as a replay, so the policy of the environment applies, and what you record is what a replay does. A recording never starts from an unknown state: Semar resets the app first.
+
+```bash
+semar record --flow login                   # a flow, in the terminal
+semar record SHOP-482-07 --use login        # a scenario that starts by running the flow
+semar record --ui                           # the same, in a local web studio
+```
+
+**What is written.** A flow is written to `.semar/flows/<name>.yaml`. A scenario is written as a `.feature` file, a script, and the elements it uses, which are added to `.semar/screens/<app>.yaml` with the other lines of that file left as they are. An element that the file already has, with the same locator, is reused. A scenario needs at least one check. A flow cannot have one.
+
+**How an element is found.** Semar enables multi-window accessibility on Android, so soft keyboards (IMEs), system dialogs, and overlays appear alongside the app window. Semar finds the element under your tap and ranks the ways to find it: `id`, then `desc`, then `role` with `name`, then `text`, then `xpath`. A way that matches more than one visible element is not used, because a replay would refuse it. A field that has typed text prefers its id, description, or hint, and falls back to password xpath, unique class, or role with placeholder name for unlabeled Jetpack Compose fields. A text that looks like it changes, such as a date, an amount, or a relative duration (`1s`, `5m`), ranks low, and a clickable card with a ticking timestamp prefers a stable child label. Each element shows `strong`, `medium`, or `weak`, from the way that found it.
+
+**Secrets.** A password field takes a secret. You type its value once, and Semar keeps it in memory for the session. The files hold `env:NAME`, and the value is in no file, no log, and no answer of the studio. Any field can be a secret. A screen that shows the value, as when you tap "show password", is hidden from the studio, and a check of such a screen is refused. The value is sent to the device as a text, so a Go string holds it until the process ends. When you finish, set the same variable for the machine that replays.
+
+**Sign-in and reset.** A recording that types a secret is saved with `reset: clear` on its first launch, because a sign-in stays in the app until its data is cleared. On a physical device Semar asks first, because `clear` deletes the data of the app on it. Semar never chooses a personal phone: name the device.
+
+**Finish.** `finish` writes the files and runs them once on a clean session of the device. Semar gives the device away first, so a second session is possible, and takes it back after. A flow reports `completed`. A scenario is replayed as `semar run` replays it, with the secrets and the serial of the device that you recorded on. `undo` takes the last save back, once, and only while every file that the save wrote is as it left it. A later save, or an edit by hand, makes it refuse.
+
+**A flow after a flow.** To record the next activity on top of one that is saved, start it with the flow: `--use login`, or the flow menu of the studio. The flow runs live, and the scenario records a `use` step only when the flow completed.
+
+The terminal shows what the screen holds as a numbered list. The commands are `tap 3`, `long 3`, `type 2 text`, `secret 4 NAME`, `swipe up`, `scroll 5`, `press back`, `open <link>`, `wait`, `assert 5`, `capture`, `use <flow>`, `screen <Name>`, `list` (`ls`), `steps`, `delete`, `finish`, `undo`, and `quit`. `delete` takes off the last step only, because the device is where the later steps left it.
+
+#### The web studio
+
+`semar record --ui [environment]` serves a page on this machine and opens it in your browser. The address has the form `http://127.0.0.1:<port>/#token=<token>`, and the token is in the part after `#`, which a browser never sends in a request. Every call of the page carries it. The server listens on `127.0.0.1` only, refuses any other `Host` or `Origin`, and sends no CORS header. `--port` picks the port, and `--no-open` prints the address and opens no browser. Ctrl+C ends the studio, gives the device away, and drops the secrets.
+
+* **The device.** The page shows the screen of the device as a picture, with the elements over it. Move over one to see how it would be found, with its `strong`, `medium`, or `weak` mark. Click it to act, or to open a field for typing. A password field opens a secret. Shift and click holds. Alt and click, or the Assert mode, adds a check: that a text equals or contains a value, that the element exists or not, that it is visible, hidden, enabled, disabled, checked, or not checked, a count, or an attribute. Under the picture are Back, Enter, Hide keyboard, four swipes, Open link, and Wait. When the app changes the screen between your look and your click, nothing is done and the new screen is shown.
+* **Several devices and apps.** The device menu lists the emulators and the physical devices that adb sees, and marks a physical device. Starting on one asks you to confirm, because a reset can delete data. When an environment configures several Android services, the Start panel shows an app picker so you can choose or switch services without restarting the studio.
+* **The timeline.** Each step shows in the list. You can rename a step, its screen, and its element, turn a typed text into a secret, which erases the text, run a flow, and delete the last step. You cannot change a locator after the fact, because an old step has no screen to check it against.
+* **Guided setup.** When the repository has no `.semar/semar.yaml`, or no app on a device, the setup adds one: a name, a package, and optionally a base URL, an APK, and a reset. The package is read from the app in front, or chosen from the installed apps, and never guessed. The setup refuses a production environment and a read-only one. It writes no secret and no path of adb.
+* **Finish and save.** Choose a flow or a scenario, give it a name, and save. The page shows the files that were written. Then verify the replay, undo the save, or record the next activity. The next recording starts with a reset, and it can run a saved flow first.
+
+The studio does only what the terminal does. One person, one device, and one recording at a time: a second click waits for the first.
 
 ### A server instead of adb
 
@@ -1540,7 +1655,7 @@ The server must know the Appium commands `mobile: activateApp`, `terminateApp`, 
 * Starting the server ends another UiAutomator session on that device.
 * A typed sign-in stays in the app until a reset with `clear`.
 * An off-screen row needs a `scroll` step.
-* `semar record` and a live plan do not work on a device yet.
+* A live plan does not work on a device yet.
 * iOS is not built.
 
 ## Test a business flow with a journey
@@ -2216,10 +2331,17 @@ Click, type, press Enter or Escape, and drag as a user does. Hold Option and cli
 
 A password field is never read: the test types the value of an environment variable, named with --secret-env.
 
+With `--surface android`, `--flow`, or `--use`, Semar records an app on a device instead of a page in Chrome. It resets the app first, so the recording starts where a replay will. You act through a numbered list of what the screen shows (`tap 3`, `type 2 text`, `secret 4 NAME`, `assert 5`, `use <flow>`, `finish`, `undo`, `quit`). A password is typed with `secret`: its value stays in memory for the session, and the files hold `env:NAME`. A recording that signs in is saved with `reset: clear`, which deletes the data of the app, so a replay does not start signed in. On a physical device Semar asks first. `finish` saves the files and runs them once on a clean device session. A flow reports `completed`, because it has no check. A scenario reports as `semar run` does. `undo` takes back the last save while none of its files has changed.
+
+`--flow <name>` records a flow to .semar/flows/\<name>.yaml, and its only argument is the environment. `<scenario id> --use <flow>` records a scenario that starts by running a flow once. `--ui` serves a local web studio on `127.0.0.1` and opens it, and there you choose a flow or a scenario when you save. It takes no `--flow` and no `--use`. See [Record an Android app](#record-an-android-app).
+
 The test counts as soon as it is written. Its screens file and scenario are files to read in a pull request.
 
 ```text
 semar record <scenario id> [environment] [--open <path>] [--given <fixture>[ as <alias>]]
+semar record <scenario id> [environment] --surface android [--use <flow>]
+semar record --flow <name> [environment]
+semar record --ui [environment] [--port <number>] [--no-open]
 ```
 
 | Flag | Meaning |
@@ -2227,13 +2349,19 @@ semar record <scenario id> [environment] [--open <path>] [--given <fixture>[ as 
 | `--app <text>` | The screens file to add to, .semar/screens/\<app>.yaml; the default is the name of the service |
 | `--as <text>` | The account whose browser profile and session the recording uses: an auth profile of semar.yaml |
 | `--covers <text>` | The use case that the scenario covers: print the command that records the link |
+| `--flow <text>` | Record a flow of this name on a device, to .semar/flows/\<name>.yaml; the only argument is then the environment |
 | `--given <text>` | Make a fixture before the window opens, as \<fixture> or \<fixture> as \<alias>; repeat for more |
-| `--no-replay` | Do not replay the scenario once after it is written |
+| `--no-open` | Print the address of the studio and do not open a browser (with --ui) |
+| `--no-replay` | Do not replay the scenario once after it is written; on a device, do not verify the recording |
 | `--open <text>` | The first page, a path below the service; it may use {{variables}} of the fixtures |
-| `--replace` | Write over the scenario of this ID if there is one |
+| `--port <number>` | The port of the studio on this machine; the default is one that is free (with --ui) |
+| `--replace` | Write over the scenario or the flow of this ID if there is one |
 | `--secret-env <text>` | The environment variable that holds the password that you type |
 | `--service <text>` | The service to record against, when the environment has several |
+| `--surface <text>` | What to record: web, or android for an app on a device; --flow, --use, and --ui choose android themselves |
 | `--ticket <text>` | The ticket of the scenario; the default is the group of the ID, as SHOP-482 for SHOP-482-07 |
+| `--ui` | Record on a device in a local web studio, in place of the terminal |
+| `--use <text>` | Start the scenario on a device with this flow: it runs once while you record, and the scenario then uses it |
 
 #### `semar import`
 

@@ -231,6 +231,9 @@ func service(u *url.URL, services []config.Service) (config.Service, string, boo
 	var bestRel string
 	bestLen := -1
 	for _, s := range services {
+		if s.BaseURL == "" {
+			continue // an app on a device with no address of its own serves no request
+		}
 		base, err := url.Parse(s.BaseURL)
 		if err != nil || !hostrule.Allowed(u, []string{hostrule.Entry(base)}) {
 			continue

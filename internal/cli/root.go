@@ -40,9 +40,12 @@ type options struct {
 	// PlanEstimate says what planning will cost, for the offer of semar run. Nil reads the usage log.
 	PlanEstimate planEstimator
 	Environ      func() []string // the person's environment, for a harness that runs with their setup
-	Home         string          // where providers.yaml and usage.jsonl live; "" is $SEMAR_HOME or ~/.config/semar
-	Keychain     keychain.Store  // nil is the keychain of the operating system
-	HTTP         *http.Client    // the client of the build probe that init looks for; nil is a client that follows no redirect
+	// OpenBrowser opens an address in the person's browser, for semar record --ui. Nil starts the opener of
+	// the system. A test sets it to see the address and open nothing.
+	OpenBrowser func(url string) error
+	Home        string         // where providers.yaml and usage.jsonl live; "" is $SEMAR_HOME or ~/.config/semar
+	Keychain    keychain.Store // nil is the keychain of the operating system
+	HTTP        *http.Client   // the client of the build probe that init looks for; nil is a client that follows no redirect
 
 	StderrTerminal func() bool // whether standard error is a terminal that takes a status line
 	Tick           ticker      // the ticks of the progress line; nil is a real ticker
@@ -102,6 +105,9 @@ func (o options) withDefaults() options {
 	}
 	if o.Environ == nil {
 		o.Environ = os.Environ
+	}
+	if o.OpenBrowser == nil {
+		o.OpenBrowser = openBrowser
 	}
 	if o.Keychain == nil {
 		o.Keychain = keychain.OS()

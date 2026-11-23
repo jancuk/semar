@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
+<title>Semar · Recorder</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="style.css" />
+<script src="app.js" defer="defer"></script>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand"><span class="brand-mark" aria-hidden="true">S</span>Semar recorder</span>
+  <span class="chips" id="chips"></span>
+  <button type="button" class="btn" id="setup-open" hidden="hidden">Guided setup</button>
+  <span class="spacer"></span>
+  <label class="field-inline">Device
+    <select id="device" aria-label="Device"></select>
+  </label>
+  <span class="badge warn" id="physical" hidden="hidden" title="A physical device: resetting the app may delete its data.">Physical device</span>
+  <span class="seg" role="group" aria-label="Mode">
+    <button type="button" class="btn seg-on" id="mode-act" aria-pressed="true">Act</button>
+    <button type="button" class="btn" id="mode-assert" aria-pressed="false">Assert</button>
+  </span>
+  <button type="button" class="btn" id="refresh" disabled="disabled">Refresh</button>
+  <button type="button" class="btn" id="reset" disabled="disabled">Reset</button>
+  <button type="button" class="btn primary" id="finish" disabled="disabled">Finish &amp; Save</button>
+</header>
+
+<div class="banner" id="banner" role="alert" hidden="hidden"></div>
+
+<main class="work">
+  <section class="mirror" aria-label="Device">
+    <div class="empty" id="no-token" hidden="hidden">
+      <b>Open this page from Semar</b>
+      <span>Run <code>semar record --ui</code> in a terminal and open the address it prints.</span>
+    </div>
+    <div class="empty" id="start-panel" hidden="hidden">
+      <b id="start-title">Record an activity</b>
+      <span id="start-note">The app is reset first, so a replay starts where the recording does.</span>
+      <label class="field" id="start-service-row" hidden="hidden">App
+        <select id="start-service"></select>
+      </label>
+      <label class="field">Start with a flow
+        <select id="start-flow"></select>
+      </label>
+      <button type="button" class="btn primary" id="start">Start recording</button>
+    </div>
+    <div class="stage-wrap" id="stage-wrap" hidden="hidden">
+      <div class="stage" id="stage">
+        <img id="shot" alt="The screen of the device" />
+        <svg id="overlay" aria-label="Elements of the screen"></svg>
+        <div class="tip" id="tip" hidden="hidden"></div>
+        <div class="hidden-shot" id="shot-hidden" hidden="hidden">The screen shows a secret, so the picture is hidden.</div>
+      </div>
+      <div class="tools" id="tools"></div>
+      <p class="hint">Click an element to act. Shift+click presses and holds. Alt+click, or Assert mode, checks it.</p>
+    </div>
+  </section>
+
+  <aside class="side" aria-label="Timeline">
+    <label class="field">Screen name
+      <input type="text" id="screen-name" autocomplete="off" spellcheck="false" disabled="disabled" />
+    </label>
+    <div class="row">
+      <select id="flow-pick" aria-label="Flow to run"></select>
+      <input type="text" id="flow-with" placeholder="name=value, ..." aria-label="Params of the flow" autocomplete="off" />
+      <button type="button" class="btn" id="flow-run" disabled="disabled">Run flow</button>
+    </div>
+    <div class="section-head">
+      <h2>Timeline</h2>
+      <button type="button" class="btn" id="delete-last" disabled="disabled">Delete last step</button>
+    </div>
+    <ol class="steps" id="steps"></ol>
+    <p class="hint" id="steps-empty">No steps yet.</p>
+  </aside>
+</main>
+
+<dialog id="dlg-setup">
+  <form method="dialog" id="form-setup">
+    <h2>Guided setup</h2>
+    <p class="hint">Adds the app to .semar/semar.yaml. No secret is written. A standalone app needs no base URL.</p>
+    <label class="field">Name <input type="text" id="su-name" required="required" autocomplete="off" /></label>
+    <label class="field">Package <input type="text" id="su-package" list="su-packages" required="required" autocomplete="off" placeholder="com.example.shop" /></label>
+    <datalist id="su-packages"></datalist>
+    <label class="field">Base URL (optional) <input type="text" id="su-base" autocomplete="off" placeholder="http://10.0.2.2:8080" /></label>
+    <label class="field">APK (optional) <input type="text" id="su-apk" autocomplete="off" placeholder="app/build/outputs/apk/debug/app-debug.apk" /></label>
+    <label class="field">Reset between runs
+      <select id="su-reset"><option value="">restart (default)</option><option value="clear">clear (deletes app data)</option><option value="none">none</option></select>
+    </label>
+    <p class="error" id="su-error" hidden="hidden"></p>
+    <div class="actions"><button type="button" class="btn" data-close="dlg-setup">Cancel</button><button type="submit" class="btn primary">Add the app</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-type">
+  <form method="dialog" id="form-type">
+    <h2 id="type-title">Type in the field</h2>
+    <label class="field">Text <input type="text" id="type-value" autocomplete="off" spellcheck="false" /></label>
+    <label class="check"><input type="checkbox" id="type-secret" /> This is a secret: kept in memory only, saved as env:NAME</label>
+    <label class="field" id="type-env-row">Secret name <input type="text" id="type-env" autocomplete="off" spellcheck="false" /></label>
+    <p class="hint" id="type-hint"></p>
+    <div class="actions"><button type="button" class="btn" data-close="dlg-type">Cancel</button><button type="submit" class="btn primary">Type</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-assert">
+  <form method="dialog" id="form-assert">
+    <h2>Check this element</h2>
+    <p class="hint" id="assert-what"></p>
+    <label class="field">Check
+      <select id="assert-kind">
+        <option value="equals">text equals</option><option value="contains">text contains</option>
+        <option value="exists">exists</option><option value="not_exists">does not exist</option>
+        <option value="visible">is visible</option><option value="hidden">is hidden</option>
+        <option value="enabled">is enabled</option><option value="disabled">is disabled</option>
+        <option value="checked">is checked</option><option value="unchecked">is not checked</option>
+        <option value="count">count of matches</option><option value="attribute">attribute equals</option>
+      </select>
+    </label>
+    <label class="field" id="assert-attr-row">Attribute <input type="text" id="assert-attr" autocomplete="off" placeholder="resource-id" /></label>
+    <label class="field" id="assert-value-row">Value <input type="text" id="assert-value" autocomplete="off" /></label>
+    <p class="error" id="assert-error" hidden="hidden"></p>
+    <div class="actions"><button type="button" class="btn" data-close="dlg-assert">Cancel</button><button type="submit" class="btn primary">Add check</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-link">
+  <form method="dialog" id="form-link">
+    <h2>Open a link</h2>
+    <label class="field">Link <input type="text" id="link-value" autocomplete="off" placeholder="myapp://orders/42" /></label>
+    <div class="actions"><button type="button" class="btn" data-close="dlg-link">Cancel</button><button type="submit" class="btn primary">Open</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-confirm">
+  <form method="dialog" id="form-confirm">
+    <h2 id="confirm-title">Confirm</h2>
+    <p id="confirm-text"></p>
+    <div class="actions"><button type="button" class="btn" data-close="dlg-confirm">Cancel</button><button type="submit" class="btn primary" id="confirm-ok">Continue</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-finish">
+  <form method="dialog" id="form-finish">
+    <h2>Finish and save</h2>
+    <div class="seg" role="group" aria-label="What to save">
+      <label class="check"><input type="radio" name="fin-kind" value="flow" /> Reusable activity (flow)</label>
+      <label class="check"><input type="radio" name="fin-kind" value="scenario" checked="checked" /> Scenario</label>
+    </div>
+    <label class="field">Name (ID) <input type="text" id="fin-id" required="required" autocomplete="off" spellcheck="false" placeholder="login" /></label>
+    <label class="field" id="fin-ticket-row">Ticket <input type="text" id="fin-ticket" autocomplete="off" spellcheck="false" /></label>
+    <label class="field" id="fin-title-row">Title <input type="text" id="fin-title" autocomplete="off" /></label>
+    <label class="check" id="fin-replace-row"><input type="checkbox" id="fin-replace" /> Replace the files of this name</label>
+    <label class="check" id="fin-clear-row" hidden="hidden"><input type="checkbox" id="fin-clear" /> Allow reset: clear on this device (deletes the data of the app)</label>
+    <p class="error" id="fin-error" hidden="hidden"></p>
+    <div id="fin-result" hidden="hidden">
+      <h3>Saved</h3>
+      <div class="tabs" id="fin-tabs"></div>
+      <pre id="fin-preview" tabindex="0"></pre>
+      <div id="fin-verify"></div>
+    </div>
+    <div class="actions" id="fin-actions">
+      <button type="button" class="btn" data-close="dlg-finish">Close</button>
+      <button type="button" class="btn" id="fin-undo" hidden="hidden">Undo save</button>
+      <button type="button" class="btn" id="fin-verify-btn" hidden="hidden">Verify replay</button>
+      <button type="button" class="btn" id="fin-next" hidden="hidden">Record next activity</button>
+      <button type="submit" class="btn primary" id="fin-save">Save</button>
+    </div>
+  </form>
+</dialog>
+</body>
+</html>

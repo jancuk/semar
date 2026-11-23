@@ -23,6 +23,7 @@ import (
 	"github.com/jancuk/semar/internal/engine/web"
 	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/fixture"
+	"github.com/jancuk/semar/internal/flow"
 	"github.com/jancuk/semar/internal/recorder"
 	"github.com/jancuk/semar/internal/redact"
 	"github.com/jancuk/semar/internal/replay"
@@ -281,8 +282,9 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 	}
 	eng := rg.webEngine(o, repo, cfg, envName, env, headed)
 	deps.Web, deps.Screens = eng, screenSource{repo: repo}
-	dev := rg.mobileEngine(o, repo, env, declared)
+	dev := rg.mobileEngine(o, repo, env, declared, mobileBudget(scenarioSteps(scenarios), cfg.Replay.Retries, longestFlow(repo)))
 	useMobile(&deps, dev, env)
+	deps.Flows = flow.Loader(repo)
 	return &replayRig{envRig: rg, runner: replay.New(deps), web: eng, mobile: dev}, nil
 }
 

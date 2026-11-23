@@ -20,7 +20,10 @@ const minCloseName = 0.5
 
 // AXNode is one element of the accessibility tree, as the repair reads it. A browser gives roles such
 // as button and StaticText, and a device gives button and text.
-type AXNode struct{ Role, Name string }
+//
+// A device also gives ID (the resource id) and Desc (the content description) of a node when it has
+// them, so that an element that a screens file finds by id or by desc gets candidates of the same kind.
+type AXNode struct{ Role, Name, ID, Desc string }
 
 // Candidates proposes up to three locators for an element that was not found. It uses no model. It
 // reads the accessibility tree that the engine already has, and it looks for, in this order: the same
@@ -30,7 +33,7 @@ type AXNode struct{ Role, Name string }
 func Candidates(element string, old domain.Locator, tree []AXNode) []domain.Candidate {
 	var nodes []AXNode
 	for _, n := range tree {
-		if n.Name = strings.TrimSpace(n.Name); n.Name != "" {
+		if n.Name = strings.TrimSpace(n.Name); n.Name != "" || n.ID != "" {
 			nodes = append(nodes, n)
 		}
 	}
@@ -70,6 +73,67 @@ func Candidates(element string, old domain.Locator, tree []AXNode) []domain.Cand
 			}
 			add(loc, fmt.Sprintf("the text %q, which is close to %q", n.Name, old.Text))
 		}
+	}
+	out = append(out, byIDOrDesc(element, old, nodes, add)...)
+	return out
+}
+
+// byIDOrDesc proposes the id and the desc of a node that is close to the id or the desc that the old
+// locator names, on a screen that no longer has them. add decides whether a candidate is kept.
+func byIDOrDesc(element string, old domain.Locator, nodes []AXNode, add func(domain.Locator, string)) []domain.Candidate {
+	if oldID := firstOf(old.ID, old.TestID); oldID != "" {
+		for _, n := range rankBy(shortID(oldID), nodes, func(n AXNode) string { return shortID(n.ID) }) {
+			if n.ID != oldID && shortID(n.ID) != oldID {
+				add(domain.Locator{ID: n.ID}, fmt.Sprintf("the id %q, which is close to %q", n.ID, oldID))
+			}
+		}
+	}
+	if old.Desc != "" {
+		want := strings.Join(strings.Fields(old.Desc), " ")
+		for _, n := range rankBy(want, nodes, func(n AXNode) string { return strings.Join(strings.Fields(n.Desc), " ") }) {
+			if d := strings.Join(strings.Fields(n.Desc), " "); d != want {
+				add(domain.Locator{Desc: d}, fmt.Sprintf("the desc %q, which is close to %q", d, want))
+			}
+		}
+	}
+	return nil
+}
+
+func firstOf(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// shortID is the part of a resource id after :id/, which is how a person names it.
+func shortID(id string) string {
+	if _, short, ok := strings.Cut(id, ":id/"); ok {
+		return short
+	}
+	return id
+}
+
+// rankBy is rank on a field that key reads of each node. A node whose field is empty is left out.
+func rankBy(want string, nodes []AXNode, key func(AXNode) string) []AXNode {
+	type scored struct {
+		n AXNode
+		s float64
+	}
+	var list []scored
+	for _, n := range nodes {
+		k := key(n)
+		if k == "" {
+			continue
+		}
+		if s := Similarity(want, k); s >= minCloseName {
+			list = append(list, scored{n, s})
+		}
+	}
+	slices.SortStableFunc(list, func(a, b scored) int { return cmp.Compare(b.s, a.s) })
+	out := make([]AXNode, len(list))
+	for i, l := range list {
+		out[i] = l.n
 	}
 	return out
 }
@@ -122,6 +186,14 @@ func unique(loc domain.Locator, nodes []AXNode) bool {
 	n := 0
 	for _, node := range nodes {
 		switch {
+		case loc.ID != "":
+			if node.ID == loc.ID {
+				n++
+			}
+		case loc.Desc != "":
+			if strings.Join(strings.Fields(node.Desc), " ") == loc.Desc {
+				n++
+			}
 		case loc.Text != "":
 			if node.Name == loc.Text {
 				n++

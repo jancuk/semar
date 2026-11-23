@@ -381,7 +381,7 @@ func (e *Engine) run(ctx context.Context, d Driver, c Call, value, label string,
 	dispatched := false
 
 	if e.needsReset(m.Service) {
-		if err := d.Reset(actCtx); err != nil {
+		if err := e.resetApp(actCtx, d, m); err != nil {
 			opErr = fmt.Errorf("the app could not be reset: %w", err)
 		} else {
 			e.markReset(m.Service)
@@ -443,6 +443,19 @@ func (e *Engine) run(ctx context.Context, d Driver, c Call, value, label string,
 	return e.record(ctx, label, a, captured, missing)
 }
 
+// resetApp puts the app in its starting state. A launch that names a reset mode overrides the one of the
+// service, when the driver can reset with a mode.
+func (e *Engine) resetApp(ctx context.Context, d Driver, m domain.MobileAction) error {
+	if m.Do == domain.MobileLaunch && m.Reset != "" {
+		rw, ok := d.(ResetWither)
+		if !ok {
+			return fmt.Errorf("the driver cannot reset with the mode %s", m.Reset)
+		}
+		return rw.ResetWith(ctx, m.Reset)
+	}
+	return d.Reset(ctx)
+}
+
 // perform acts on the screen. It gives the element that it did not find, whether an input was sent
 // before the error (a write whose effect is not known), and the error.
 func (e *Engine) perform(ctx context.Context, d Driver, c Call, value string) (*notFoundMiss, bool, error) {
@@ -461,12 +474,7 @@ func (e *Engine) perform(ctx context.Context, d Driver, c Call, value string) (*
 	case domain.MobileScroll:
 		return e.scroll(ctx, d, c)
 	}
-	tree, err := d.Source(ctx)
-	if err != nil {
-		return nil, false, fmt.Errorf("the screen could not be read: %w", err)
-	}
-	rd := newReader(tree, c.Locators)
-	target, miss, err := e.target(rd, m.Element)
+	target, miss, err := e.waitTarget(ctx, d, c, m.Element)
 	if err != nil {
 		return miss, false, err
 	}
@@ -483,9 +491,41 @@ func (e *Engine) perform(ctx context.Context, d Driver, c Call, value string) (*
 		if err := e.o.Sleep(ctx, focusDelay); err != nil {
 			return nil, true, err
 		}
-		return nil, true, d.Type(ctx, value)
+		focusDeadline := e.o.Clock().Add(min(e.o.CheckTimeout, 2*time.Second))
+		for {
+			err := d.Type(ctx, value)
+			if err == nil || !strings.Contains(err.Error(), "no field has the focus") || !e.o.Clock().Before(focusDeadline) {
+				return nil, true, err
+			}
+			if serr := e.o.Sleep(ctx, checkPoll); serr != nil {
+				return nil, true, serr
+			}
+		}
 	}
 	return nil, false, fmt.Errorf("the action %s is not known", m.Do)
+}
+
+// waitTarget polls until name is uniquely visible on the screen, for at most CheckTimeout. A transition
+// after launch or a tap can take a second to draw; polling avoids failing on the first frame.
+func (e *Engine) waitTarget(ctx context.Context, d Driver, c Call, name string) (resolved, *notFoundMiss, error) {
+	deadline := e.o.Clock().Add(e.o.CheckTimeout)
+	for {
+		tree, err := d.Source(ctx)
+		if err != nil {
+			return resolved{}, nil, fmt.Errorf("the screen could not be read: %w", err)
+		}
+		rd := newReader(tree, c.Locators)
+		res, miss, err := e.target(rd, name)
+		if err == nil {
+			return res, nil, nil
+		}
+		if !isNotFound(err) || res.state.Count > 1 || !e.o.Clock().Before(deadline) {
+			return res, miss, err
+		}
+		if serr := e.o.Sleep(ctx, checkPoll); serr != nil {
+			return resolved{}, miss, serr
+		}
+	}
 }
 
 // target finds the one element that the action acts on. An element that is not there, or that matches

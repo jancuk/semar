@@ -50,7 +50,14 @@ type MobileAction struct {
 	Value  string `yaml:"value,omitempty"`
 	// Secret is a secret reference such as env:SHOP_PASSWORD. Only type takes one.
 	Secret string `yaml:"secret,omitempty"`
+	// Reset is how a launch resets the app before it starts, in place of the reset of the service:
+	// restart, clear, or none. Only a launch takes one. A scenario that must start from a clean install
+	// and one that must start signed in can live in the same repository.
+	Reset string `yaml:"reset,omitempty"`
 }
+
+// MobileResets are the values of the reset of a launch.
+var MobileResets = []string{"restart", "clear", "none"}
 
 // Writes reports whether the operation can change what the service holds. A tap may submit a form.
 func (o MobileOp) Writes() bool {
@@ -91,8 +98,14 @@ func (m MobileAction) Problems() []string {
 			add("%s needs the %s", m.Do, field)
 		}
 	}
+	if m.Reset != "" && m.Do != MobileLaunch {
+		add("%s takes no reset: only launch does", m.Do)
+	}
 	switch m.Do {
 	case MobileLaunch:
+		if m.Reset != "" && !slices.Contains(MobileResets, m.Reset) {
+			add("reset must be one of %s, got %q", strings.Join(MobileResets, ", "), m.Reset)
+		}
 		forbid("link", m.Link)
 		forbid("element", m.Element)
 		forbid("within", m.Within)

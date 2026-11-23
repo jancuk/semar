@@ -42,6 +42,12 @@ type Driver interface {
 	About() About
 }
 
+// ResetWither is a Driver that can reset its app with a mode other than the one of its service. A launch
+// that names a reset uses it: restart, clear, or none.
+type ResetWither interface {
+	ResetWith(ctx context.Context, mode string) error
+}
+
 // ErrSecure is the error of a screenshot of a screen that the app does not allow to be captured.
 var ErrSecure = errors.New("the screen is secure and cannot be captured")
 

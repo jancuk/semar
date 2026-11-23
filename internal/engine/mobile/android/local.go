@@ -303,10 +303,8 @@ func (p *Platform) Close(ctx context.Context) error {
 		cancel()
 	}
 	p.remote = map[string]*webdriver.Session{}
-	if p.child != nil {
-		p.child.Kill()
-		p.child = nil
-	}
+	// Stop the server packages while the instrumentation child is still attached so AndroidJUnitRunner
+	// does not hit a dead binder watcher and pop up a system "keeps stopping" crash dialog on Android 17.
 	if p.adb != nil {
 		for _, pkg := range []string{serverPackage, serverTestPackage} {
 			sctx, cancel := step()
@@ -315,14 +313,24 @@ func (p *Platform) Close(ctx context.Context) error {
 			}
 			cancel()
 		}
-		if p.port != 0 {
-			sctx, cancel := step()
-			if _, err := p.adb.out(sctx, "forward", "--remove", fmt.Sprintf("tcp:%d", p.port)); err != nil {
-				errs = append(errs, fmt.Errorf("the forward could not be removed: %w", err))
-			}
-			cancel()
-			p.port = 0
+	}
+	if p.child != nil {
+		t := time.NewTimer(500 * time.Millisecond)
+		select {
+		case <-p.child.Done():
+			t.Stop()
+		case <-t.C:
+			p.child.Kill()
 		}
+		p.child = nil
+	}
+	if p.adb != nil && p.port != 0 {
+		sctx, cancel := step()
+		if _, err := p.adb.out(sctx, "forward", "--remove", fmt.Sprintf("tcp:%d", p.port)); err != nil {
+			errs = append(errs, fmt.Errorf("the forward could not be removed: %w", err))
+		}
+		cancel()
+		p.port = 0
 	}
 	if p.release != nil {
 		p.release()

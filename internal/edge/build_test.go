@@ -178,3 +178,22 @@ func TestAValueReadOnADeviceCannotFeedAnEdgeCase(t *testing.T) {
 		t.Errorf("error = %v, want a refusal that names the device step", err)
 	}
 }
+
+func TestAFlowThatMayGiveTheValueIsRefusedAndNotDropped(t *testing.T) {
+	sc, s := refundBase()
+	// The step before the read uses a flow, and the case needs order_id, which no concrete step captures.
+	sc.Steps[0].Setup = false
+	s.Steps[0] = domain.ScriptStep{Step: "make", Use: "make-order"}
+	op := operation(t, "GET", "/orders/{id}")
+	op.Statuses = append(op.Statuses, "401")
+	cases, _ := edge.Generate(op, *s.Steps[1].Request)
+	c := find(t, cases, edge.NoSession, "")
+	if _, _, err := edge.Build(sc, s, "read", c, "PROJ-12-E01", "x"); err == nil || !strings.Contains(err.Error(), "uses a flow, and order_id may come from it") {
+		t.Errorf("error = %v, want a refusal that names the flow step and the value", err)
+	}
+	// A case that needs no earlier value is not affected by a flow.
+	c = find(t, cases, edge.UnknownID, "id")
+	if _, _, err := edge.Build(sc, s, "read", c, "PROJ-12-E02", "x"); err != nil {
+		t.Errorf("a case that needs no earlier value: %v", err)
+	}
+}

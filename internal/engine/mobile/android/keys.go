@@ -10,12 +10,10 @@ const (
 	keycodeEnter  = 66
 	keycodeDelete = 67
 	keycodeSearch = 84
-	// keycodeEscape closes a keyboard that is open.
-	keycodeEscape = 111
 )
 
-// keycodes maps the keys of a mobile step to Android key codes. hide-keyboard has none: it is the escape
-// key, and only when a keyboard is shown.
+// keycodes maps the keys of a mobile step to Android key codes. hide-keyboard sends back only when a
+// keyboard is shown.
 var keycodes = map[mobile.Key]int{
 	mobile.KeyBack:   keycodeBack,
 	mobile.KeyHome:   keycodeHome,

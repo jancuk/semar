@@ -48,7 +48,7 @@ func TestTheStartOrderAndTheCleanup(t *testing.T) {
 	if r.server.Sessions() != 1 || r.server.Capabilities()["platformName"] != "Android" {
 		t.Errorf("sessions %d, caps %v", r.server.Sessions(), r.server.Capabilities())
 	}
-	if s := r.server.Settings(); s["waitForIdleTimeout"] != float64(0) || s["waitForSelectorTimeout"] != float64(0) {
+	if s := r.server.Settings(); s["waitForIdleTimeout"] != float64(0) || s["waitForSelectorTimeout"] != float64(0) || s["enableMultiWindows"] != true {
 		t.Errorf("settings = %v", s)
 	}
 	// One more service call does not start anything again.
@@ -172,7 +172,7 @@ func TestLaunchUsesTheActivityOrTheLauncher(t *testing.T) {
 		t.Fatal(err)
 	}
 	last := r.adb.Shell()[len(r.adb.Shell())-1]
-	if last != "'am' 'start' '-W' '-n' 'com.example.shop/.ui.MainActivity' '-a' 'android.intent.action.MAIN' '-c' 'android.intent.category.LAUNCHER'" {
+	if last != "'am' 'start' '-W' '--activity-clear-task' '-n' 'com.example.shop/.ui.MainActivity' '-a' 'android.intent.action.MAIN' '-c' 'android.intent.category.LAUNCHER'" {
 		t.Errorf("launch = %s", last)
 	}
 
@@ -237,7 +237,7 @@ func TestKeysAndTheKeyboard(t *testing.T) {
 	if err := d.Key(ctx, mobile.KeyHideKeyboard); err != nil {
 		t.Fatal(err)
 	}
-	if got := r.server.Keycodes(); len(got) != 7 || got[6] != 111 {
+	if got := r.server.Keycodes(); len(got) != 7 || got[6] != 4 {
 		t.Errorf("an open keyboard is closed with escape: %v", got)
 	}
 	r.adb.Set("dumpsys", "  mInputShown=false\n")

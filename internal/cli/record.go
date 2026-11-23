@@ -43,18 +43,54 @@ type recordTestFlags struct {
 	replace   bool
 	noReplay  bool
 	dir       string
+
+	// The recording of an app on a device. surface is web or android, flow records a flow, use starts a
+	// scenario with a flow, and ui opens the local studio, with its port and without opening a browser.
+	surface string
+	flow    string
+	use     string
+	ui      bool
+	port    int
+	noOpen  bool
 }
 
 func newRecordCommand(o options) *cobra.Command {
 	var f recordTestFlags
 	cmd := &cobra.Command{
-		Use:   "record <scenario id> [environment] [--open <path>] [--given <fixture>[ as <alias>]]",
-		Short: "Record a web test by doing the flow once in Chrome",
+		Use:   "record <scenario id> [environment] [--open <path>] [--given <fixture>[ as <alias>]] | record --flow <name> [environment] | record <scenario id> --use <flow> [environment]",
+		Short: "Record a test by doing the flow once, in Chrome or on a device",
 		Long: "Open a Chrome window on Semar's own profile of the environment and the account, and record what you do until you close it. Semar then writes the screens file, the scenario, and the script, and replays the scenario once.\n" +
 			"Click, type, press Enter or Escape, and drag as a user does. Hold Option and click what must be true: that is a check, it does nothing on the page, and the text that the element shows becomes the expected result. A recording with no check writes nothing.\n" +
-			"A password field is never read: the test types the value of an environment variable, named with --secret-env.",
-		Args: cobra.RangeArgs(1, 2),
+			"A password field is never read: the test types the value of an environment variable, named with --secret-env.\n" +
+			"With --surface android, with --flow, or with --use, Semar records an app on a device instead: it resets the app, and you act through a numbered list of what the screen shows. --flow <name> records a flow, a reusable set of steps such as a sign-in, in .semar/flows. <scenario id> --use <flow> records a scenario that starts by running a flow. A password is typed with the secret command, kept in memory only, and saved as env:NAME.",
+		Args: func(cmd *cobra.Command, args []string) error {
+			// A flow has no scenario ID, and the studio chooses what it records, so the only argument is the environment.
+			if f.flow != "" || f.ui {
+				return cobra.MaximumNArgs(1)(cmd, args)
+			}
+			return cobra.RangeArgs(1, 2)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			switch f.surface {
+			case "", "web", "android":
+			default:
+				return fmt.Errorf("--surface %q must be web or android", f.surface)
+			}
+			if mobileRecording(f) || f.surface == "web" && (f.flow != "" || f.use != "" || f.ui) {
+				id, env := "", ""
+				switch {
+				case f.flow != "" || f.ui:
+					if len(args) == 1 {
+						env = args[0]
+					}
+				default:
+					id = args[0]
+					if len(args) == 2 {
+						env = args[1]
+					}
+				}
+				return recordMobile(cmd.Context(), cmd, o, f, id, env)
+			}
 			env := ""
 			if len(args) == 2 {
 				env = args[1]
@@ -71,7 +107,13 @@ func newRecordCommand(o options) *cobra.Command {
 	cmd.Flags().StringVar(&f.covers, "covers", "", "the use case that the scenario covers: print the command that records the link")
 	cmd.Flags().StringVar(&f.secretEnv, "secret-env", "", "the environment variable that holds the password that you type")
 	cmd.Flags().BoolVar(&f.replace, "replace", false, "write over the scenario of this ID if there is one")
-	cmd.Flags().BoolVar(&f.noReplay, "no-replay", false, "do not replay the scenario once after it is written")
+	cmd.Flags().BoolVar(&f.noReplay, "no-replay", false, "do not replay the scenario once after it is written; on a device, do not verify the recording")
+	cmd.Flags().StringVar(&f.surface, "surface", "", "what to record: web, or android for an app on a device; --flow, --use, and --ui choose android themselves")
+	cmd.Flags().StringVar(&f.flow, "flow", "", "record a flow of this name on a device, to .semar/flows/<name>.yaml; the only argument is then the environment")
+	cmd.Flags().StringVar(&f.use, "use", "", "start the scenario on a device with this flow: it runs once while you record, and the scenario then uses it")
+	cmd.Flags().BoolVar(&f.ui, "ui", false, "record on a device in a local web studio, in place of the terminal")
+	cmd.Flags().IntVar(&f.port, "port", 0, "the port of the studio on this machine; the default is one that is free (with --ui)")
+	cmd.Flags().BoolVar(&f.noOpen, "no-open", false, "print the address of the studio and do not open a browser (with --ui)")
 	addDirFlag(cmd, &f.dir)
 	return cmd
 }
@@ -124,6 +166,9 @@ func recordTest(ctx context.Context, cmd *cobra.Command, o options, f recordTest
 	svc, err := recordService(env, f.service)
 	if err != nil {
 		return err
+	}
+	if svc.BaseURL == "" {
+		return fmt.Errorf("the service %s is an app on a device with no address of its own, so Chrome has nothing to open: record it with --surface android", svc.Name)
 	}
 	account, authProfile, err := recordAccount(cfg, svc, f.as)
 	if err != nil {
@@ -453,7 +498,11 @@ func replayScenario(ctx context.Context, o options, dir, envName, id string, bui
 // replayOnce runs the scenario that was just written and says how it ended. A scenario that does not
 // replay stays written, so that the person can fix a step or record again.
 func replayOnce(ctx context.Context, out io.Writer, o options, f recordTestFlags, envName, app, id string) {
-	r := replayScenario(ctx, o, f.dir, envName, id, nil)
+	replayOnceWithBuilds(ctx, out, o, f, envName, app, id, nil)
+}
+
+func replayOnceWithBuilds(ctx context.Context, out io.Writer, o options, f recordTestFlags, envName, app, id string, builds []string) {
+	r := replayScenario(ctx, o, f.dir, envName, id, builds)
 	var exit exitError
 	switch {
 	case r.result == nil && r.err != nil && !errors.As(r.err, &exit):

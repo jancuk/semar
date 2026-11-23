@@ -13,7 +13,7 @@ type AXNode struct{ Role, Name string }
 func Candidates(element string, old domain.Locator, tree []AXNode) []domain.Candidate {
 	nodes := make([]uirepair.AXNode, len(tree))
 	for i, n := range tree {
-		nodes[i] = uirepair.AXNode(n)
+		nodes[i] = uirepair.AXNode{Role: n.Role, Name: n.Name}
 	}
 	return uirepair.Candidates(element, old, nodes)
 }

@@ -129,7 +129,7 @@ func TestSmokeAndroidSettings(t *testing.T) {
 
 	// Type in the search: tap the search bar, then type in the field that has the focus.
 	searchLocators := []domain.Locator{
-		{Text: "Search settings"}, {Desc: "Search settings"}, {Desc: "Search"}, {Role: "textbox"}, {XPath: "//*[contains(@resource-id,'search')]"},
+		{Text: "Search Settings"}, {Text: "Search settings"}, {Desc: "Search Settings"}, {Desc: "Search settings"}, {Desc: "Search"}, {Role: "textbox"}, {XPath: "//*[contains(@resource-id,'search')]"},
 	}
 	var search *mobile.Node
 	for _, loc := range searchLocators {

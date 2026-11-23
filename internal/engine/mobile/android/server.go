@@ -273,8 +273,9 @@ func (p *Platform) startServer(ctx context.Context, a *adb) *mobile.Unavailable 
 	}
 	p.session = sess
 	// A screen that animates, or that shows a spinner, would make the server wait for it to be idle before
-	// it answers /source: for ten seconds at times. Semar settles the screen itself.
-	if err := sess.Settings(ctx, map[string]any{"waitForIdleTimeout": 0, "waitForSelectorTimeout": 0}); err != nil {
+	// it answers /source: for ten seconds at times. Semar settles the screen itself. Multi-window mode
+	// lets Semar see soft keyboards (IMEs), system alerts, and floating overlays alongside the app.
+	if err := sess.Settings(ctx, map[string]any{"waitForIdleTimeout": 0, "waitForSelectorTimeout": 0, "enableMultiWindows": true}); err != nil {
 		p.o.Logger.DebugContext(ctx, "the server settings were not changed", "error", err)
 	}
 	return nil

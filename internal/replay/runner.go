@@ -81,6 +81,9 @@ type Deps struct {
 	// Retries is how many more times a scenario is replayed after an attempt that failed or was
 	// inconclusive. Zero replays nothing.
 	Retries int
+	// Flows gives the flows that the use steps of a script name. Without it, a scenario that uses a flow
+	// ends blocked.
+	Flows FlowSource
 	// Once says whether sending the call would use a request of the once list of the environment. Nil
 	// means the environment has none.
 	Once func(api.Call) bool
@@ -116,6 +119,7 @@ type replayed struct {
 	last       *api.Call         // the call of the last step that was sent
 	sentOnce   bool              // a request of the once list was sent, or may have been
 	earlier    []replayed        // the attempts before this one, oldest first
+	flows      []domain.FlowRef  // the flows that ran, with the digest of the file of each
 }
 
 // Run replays each scenario and returns one result per scenario, in input order.
@@ -191,6 +195,7 @@ func (r *Runner) decide(scenarios []domain.Scenario, runs []replayed, start, end
 		res.Outcome, res.Reasons, res.Checks, res.Actions = deciding.Outcome, deciding.Reasons, deciding.Checks, deciding.Actions
 		res.Flaky, res.Fixtures = flaky, fixtures
 		res.ScriptHash = run.scriptHash
+		res.Flows = run.flows
 		if len(attempts) > 1 {
 			res.Attempts, res.AttemptsAllowed = attempts, r.d.Retries+1
 		}
@@ -287,11 +292,11 @@ func (r *Runner) replay(ctx context.Context, sc domain.Scenario) (run replayed, 
 		return run, nil
 	}
 	run.scriptHash = s.ExpectHash
-	validate := script.ValidateWith
+	validate := script.ValidateWithFlows
 	if byShape {
-		validate = script.ValidateShapeWith
+		validate = script.ValidateShapeWithFlows
 	}
-	if blocked := scriptBlocked(validate(sc, s, r.outputs(sc))); len(blocked) > 0 {
+	if blocked := scriptBlocked(validate(sc, s, r.outputs(sc), r.flowResolver())); len(blocked) > 0 {
 		run.blocked = blocked
 		return run, nil
 	}
@@ -445,6 +450,13 @@ func (r *Runner) outputs(sc domain.Scenario) map[string][]string {
 // steps sends the steps of sc. A step that is not a setup step belongs to pass. It writes to vars
 // and to run, so each call needs its own.
 func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script, run *replayed, vars map[string]string, pass domain.Pass) error {
+	// A use step is read in first, so that the lock, the reset, and the check of the screens see the
+	// device steps of the flows as they see the script's own.
+	exp, blocked := r.expand(s)
+	if len(blocked) > 0 {
+		run.blocked = append(run.blocked, blocked...)
+		return nil
+	}
 	bound := make(map[domain.StepID]domain.ScriptStep, len(s.Steps))
 	for _, ss := range s.Steps {
 		bound[ss.Step] = ss
@@ -465,11 +477,11 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 		}
 	}
 	var mr *webRun
-	if slices.ContainsFunc(s.Steps, func(ss domain.ScriptStep) bool { return ss.Mobile != nil }) {
+	if slices.ContainsFunc(exp.flat.Steps, func(ss domain.ScriptStep) bool { return ss.Mobile != nil }) {
 		r.mobileMu.Lock()
 		defer r.mobileMu.Unlock()
 		var proceed bool
-		if mr, proceed = r.prepareMobile(sc, s, run); !proceed {
+		if mr, proceed = r.prepareMobile(sc, exp.flat, exp.where, run); !proceed {
 			return nil
 		}
 		if mr != nil {
@@ -481,9 +493,10 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 	// shown holds the variables as a report may show them: a capture is the redacted value of
 	// the stored action, so a secret that a response held is never printed.
 	shown := maps.Clone(vars)
+	rc := runCtx{ctx: ctx, sc: sc, run: run, wr: wr, mr: mr, pass: pass, note: note, doErr: &doErr, interrupted: &interrupted}
 	for i, step := range sc.Steps {
 		ss, ok := bound[step.ID]
-		if !ok || (ss.Request == nil && ss.Web == nil && ss.Mobile == nil) {
+		if !ok || (ss.Request == nil && ss.Web == nil && ss.Mobile == nil && ss.Use == "") {
 			what := "request"
 			switch sc.Surface {
 			case domain.SurfaceWeb:
@@ -493,6 +506,12 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 			}
 			note(step.ID, fmt.Sprintf("step %s has no %s in the script, so the later steps were not sent", step.ID, what))
 			break
+		}
+		if ss.Use != "" {
+			if r.useStep(rc, exp.uses[step.ID], step, ss, vars, shown) {
+				break
+			}
+			continue
 		}
 		res, err := r.send(ctx, wr, mr, run, sc, step, ss, vars, pass, note)
 		if !res.built {
@@ -504,20 +523,7 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 			maps.Copy(showing, res.Action.Captures)
 			run.steps[step.ID] = evaluate(step, res.Action, have, showing)
 		}
-		if err != nil {
-			if reason, blocked := blockedByBrowser(err); blocked {
-				run.blocked = append(run.blocked, reason)
-			} else if reason, blocked := blockedByDevice(err); blocked {
-				run.blocked = append(run.blocked, reason)
-			} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				interrupted = true
-			} else {
-				note(step.ID, fmt.Sprintf("step %s could not be sent or recorded", step.ID))
-				doErr = fmt.Errorf("replay %s step %s: %w", sc.ID, step.ID, err)
-			}
-			break
-		}
-		if a := res.Action; (a.UI() == nil && a.Response == nil) || a.Refused != "" || a.Err != "" {
+		if r.stopAfter(rc, step, res, err) {
 			break
 		}
 		maps.Copy(run.captured, res.Captured)
@@ -538,6 +544,41 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 	}
 	return doErr
 }
+
+// runCtx is what the steps of one scenario share while they are sent.
+type runCtx struct {
+	ctx         context.Context
+	sc          domain.Scenario
+	run         *replayed
+	wr, mr      *webRun
+	pass        domain.Pass
+	note        func(domain.StepID, string)
+	doErr       *error
+	interrupted *bool
+}
+
+// stopAfter says whether the steps stop after one was sent, and notes why. It stops on an engine error,
+// and on an action that has no answer, was refused, or failed. A device or a browser that cannot be used
+// blocks the scenario, and a cancelled context interrupts it.
+func (r *Runner) stopAfter(c runCtx, step domain.Step, res sent, err error) bool {
+	if err != nil {
+		if reason, blocked := blockedByBrowser(err); blocked {
+			c.run.blocked = append(c.run.blocked, reason)
+		} else if reason, blocked := blockedByDevice(err); blocked {
+			c.run.blocked = append(c.run.blocked, reason)
+		} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			*c.interrupted = true
+		} else {
+			c.note(step.ID, fmt.Sprintf("step %s could not be sent or recorded", step.ID))
+			*c.doErr = fmt.Errorf("replay %s step %s: %w", c.sc.ID, step.ID, err)
+		}
+		return true
+	}
+	a := res.Action
+	return (a.UI() == nil && a.Response == nil) || a.Refused != "" || a.Err != ""
+}
+
+func joinNames(names []string) string { return strings.Join(names, ", ") }
 
 // sent is the answer of an engine to one step, whichever engine it was. built is false when the step
 // could not be built, and the note says why.
@@ -569,6 +610,11 @@ func (r *Runner) send(ctx context.Context, wr, mr *webRun, run *replayed, sc dom
 		}
 		res, err := r.d.Mobile.Do(ctx, call)
 		return sent{res.Action, res.Captured, res.Missing, true}, err
+	}
+	if ss.Request == nil {
+		// A step that has use is read in before it is sent, so this is a step with no action at all.
+		note(step.ID, fmt.Sprintf("step %s could not be sent: the script has no action for it", step.ID))
+		return sent{}, nil
 	}
 	call, err := buildCall(sc, step, ss, vars, pass)
 	if err != nil {

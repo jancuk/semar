@@ -331,8 +331,8 @@ func TestAndroidLocalModeStartsInOrderAndCleansUp(t *testing.T) {
 	if strings.Join(got[:len(want)], "\n") != strings.Join(want, "\n") {
 		t.Errorf("adb log:\n%s\nwant it to start with:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	if !r.adb.Contains("shell", "'am' 'start' '-W' '-n' 'com.example.shop/.MainActivity' '-a' 'android.intent.action.MAIN' '-c' 'android.intent.category.LAUNCHER'") &&
-		!r.adb.Contains("shell", "'am' 'start' '-W' '-n' 'com.example.shop/.MainActivity'") {
+	if !r.adb.Contains("shell", "'am' 'start' '-W' '--activity-clear-task' '-n' 'com.example.shop/.MainActivity' '-a' 'android.intent.action.MAIN' '-c' 'android.intent.category.LAUNCHER'") &&
+		!r.adb.Contains("shell", "'am' 'start' '-W' '--activity-clear-task' '-n' 'com.example.shop/.MainActivity'") {
 		// The launcher activity is read from the device, and then started.
 		if r.adb.Count("shell") < len(want) {
 			t.Errorf("the app was not started:\n%s", adbLog(r))

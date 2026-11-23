@@ -11,7 +11,12 @@ import (
 )
 
 type StepEvidence struct {
-	Action     *domain.Action // nil when the step did not run
+	// Action is the evidence of the step. When a step ran more than one action, as a step that uses
+	// a flow does, it is the last one, or the one that failed or was refused.
+	Action *domain.Action // nil when the step did not run
+	// Prior holds the actions of the same step that came before Action, oldest first. Each is
+	// recorded for the same scenario and step, and listed in the result before Action.
+	Prior      []domain.Action
 	Checks     []check.Result // one per Step.Expect, in order
 	Invariants []check.Result
 }
@@ -94,6 +99,20 @@ func Compute(in Input) domain.ScenarioResult {
 		seen[step.ID] = true
 		ev := in.Steps[step.ID]
 		a := ev.Action
+		for _, p := range ev.Prior {
+			switch {
+			case p.ID == "":
+				add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("%s: step %s has an action without an ID", msgMismatch, step.ID))
+			case usedActions[p.ID]:
+				add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("%s: action %s of step %s was already used by an earlier step", msgMismatch, p.ID, step.ID))
+			default:
+				usedActions[p.ID] = true
+				res.Actions = append(res.Actions, p.ID)
+			}
+			if p.Use.Scenario != in.Scenario.ID || p.Use.Step != step.ID {
+				add(domain.OutcomeInconclusive, step.ID, fmt.Sprintf("%s: action %s was recorded for step %q of scenario %q, not for step %s of scenario %s", msgMismatch, p.ID, p.Use.Step, p.Use.Scenario, step.ID, in.Scenario.ID))
+			}
+		}
 		if a != nil {
 			switch {
 			case a.ID == "":

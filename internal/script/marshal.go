@@ -110,6 +110,10 @@ func (e *enc) step(path string, st domain.ScriptStep) (*yaml.Node, domain.Script
 	want := st
 	n := mapping()
 	put(n, "step", e.str(path+".step", string(st.Step)))
+	if st.Use != "" {
+		put(n, "use", e.str(path+".use", st.Use))
+	}
+	want.With = e.strings(path+".with", n, "with", st.With)
 	if st.Request != nil {
 		r := *st.Request
 		rn := mapping()
@@ -145,7 +149,7 @@ func (e *enc) step(path string, st domain.ScriptStep) (*yaml.Node, domain.Script
 		mn := mapping()
 		for _, f := range []struct{ key, val string }{
 			{"service", m.Service}, {"app", m.App}, {"do", string(m.Do)}, {"link", m.Link},
-			{"screen", m.Screen}, {"element", m.Element}, {"within", m.Within}, {"value", m.Value}, {"secret", m.Secret},
+			{"screen", m.Screen}, {"element", m.Element}, {"within", m.Within}, {"value", m.Value}, {"secret", m.Secret}, {"reset", m.Reset},
 		} {
 			if f.val != "" {
 				put(mn, f.key, e.str(path+".mobile."+f.key, f.val))

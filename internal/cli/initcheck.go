@@ -18,6 +18,7 @@ import (
 	"github.com/jancuk/semar/internal/engine/mobile/android"
 	"github.com/jancuk/semar/internal/engine/mobile/webdriver"
 	"github.com/jancuk/semar/internal/engine/web"
+	"github.com/jancuk/semar/internal/flow"
 	"github.com/jancuk/semar/internal/journey"
 )
 
@@ -57,6 +58,7 @@ func checkMachine(ctx context.Context, o options, stdout io.Writer, dir string) 
 	fmt.Fprintf(stdout, "%s exists: checking this machine.\n\n", configFileName)
 	var m machineCheck
 	m.tokens(o, cfg)
+	m.flowSecrets(o, dir)
 	m.services(ctx, o, cfg)
 	m.provider(ctx, o, dir, cfg)
 	m.chrome(dir, cfg)
@@ -110,6 +112,21 @@ func (m *machineCheck) tokens(o options, cfg config.Config) {
 	}
 }
 
+// flowSecrets checks the environment variable of each secret that a flow of .semar/flows types. A flow
+// types its password on a device, so a run needs the variable, and a harness must never inherit it.
+func (m *machineCheck) flowSecrets(o options, dir string) {
+	for _, env := range flow.SecretEnvNames(dir) {
+		if slices.ContainsFunc(m.items, func(it checkItem) bool { return strings.HasPrefix(it.text, env+" is ") }) {
+			continue
+		}
+		if v, set := o.LookupEnv(env); set && v != "" {
+			m.add(stateOK, "%s is set", env)
+			continue
+		}
+		m.add(stateMissing, "%s is not set: a flow types it as a secret, so export it before a run", env)
+	}
+}
+
 // services reads the build probe of each service of each test environment, and for a service with
 // none, one GET to its address to see that it answers.
 func (m *machineCheck) services(ctx context.Context, o options, cfg config.Config) {
@@ -131,6 +148,15 @@ func (m *machineCheck) services(ctx context.Context, o options, cfg config.Confi
 					continue
 				}
 				m.add(stateOK, "%s: %s answers, build %s", envName, s.Name, b.Commit[:min(7, len(b.Commit))])
+				continue
+			}
+			if s.BaseURL == "" {
+				// A standalone app on a device has no address to ask: its build is the APK, or the --build.
+				if s.Android != nil && s.Android.APK != "" {
+					m.add(stateOK, "%s: %s is an app on a device; its build comes from %s", envName, s.Name, s.Android.APK)
+				} else {
+					m.add(stateOK, "%s: %s is an app on a device with no address of its own; name its build with semar run --build <commit> or give it an apk", envName, s.Name)
+				}
 				continue
 			}
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.BaseURL, nil)
@@ -170,7 +196,7 @@ func (m *machineCheck) provider(ctx context.Context, o options, dir string, cfg 
 		m.add(stateMissing, "no model provider can plan: %v", err)
 		return
 	}
-	o.drop.set(append(secretEnvNames(cfg), keyEnvNames(src.file)...))
+	o.drop.set(append(secretEnvNamesIn(cfg, dir), keyEnvNames(src.file)...))
 	inst, err := o.Providers(dir).New(pc)
 	if err != nil {
 		m.add(stateMissing, "the provider %s cannot plan: %v", pc.ID, err)
@@ -235,7 +261,7 @@ func (m *machineCheck) android(ctx context.Context, o options, dir string, cfg c
 			n++
 		}
 	}
-	if n == 0 {
+	if n == 0 && !anyAndroidService(cfg) {
 		return
 	}
 	named := false
@@ -268,6 +294,18 @@ func (m *machineCheck) android(ctx context.Context, o options, dir string, cfg c
 	if !named {
 		m.add(stateMissing, "%s on a device, and no test environment has a service with an android app: add android.appPackage to a service in semar.yaml", androidScenariosWords(n))
 	}
+}
+
+// anyAndroidService reports whether a test environment has a service with an app on a device. The
+// device is checked for it even before the first scenario is written, because that is when a person
+// needs to know that the device is ready to record on.
+func anyAndroidService(cfg config.Config) bool {
+	for _, env := range cfg.Environments {
+		if env.Kind != config.KindProduction && len(androidServices(env)) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func androidScenariosWords(n int) string {

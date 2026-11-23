@@ -25,6 +25,9 @@ func TestMobileProblems(t *testing.T) {
 	}
 	ok(domain.MobileAction{Do: domain.MobileLaunch})
 	ok(domain.MobileAction{Do: domain.MobileLaunch, Screen: "Home"})
+	ok(domain.MobileAction{Do: domain.MobileLaunch, Reset: "clear"})
+	ok(domain.MobileAction{Do: domain.MobileLaunch, Reset: "restart"})
+	ok(domain.MobileAction{Do: domain.MobileLaunch, Reset: "none"})
 	ok(domain.MobileAction{Do: domain.MobileOpenLink, Link: "shop://cart/{{id}}"})
 	ok(domain.MobileAction{Do: domain.MobileTap, Screen: "S", Element: "e"})
 	ok(domain.MobileAction{Do: domain.MobileLongTap, Screen: "S", Element: "e"})
@@ -38,6 +41,8 @@ func TestMobileProblems(t *testing.T) {
 	ok(domain.MobileAction{Do: domain.MobileWait})
 	ok(domain.MobileAction{Do: domain.MobileWait, Screen: "S", Element: "e"})
 
+	bad("a reset that is not one", domain.MobileAction{Do: domain.MobileLaunch, Reset: "wipe"}, "reset must be one of restart, clear, none")
+	bad("a reset on a tap", domain.MobileAction{Do: domain.MobileTap, Screen: "S", Element: "e", Reset: "clear"}, "tap takes no reset")
 	bad("no do", domain.MobileAction{}, "do must be one of")
 	bad("an unknown do", domain.MobileAction{Do: "shake"}, "do must be one of")
 	bad("a web op", domain.MobileAction{Do: "click"}, "do must be one of")

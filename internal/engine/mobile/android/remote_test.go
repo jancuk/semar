@@ -86,7 +86,7 @@ func TestRemoteCapabilities(t *testing.T) {
 	if d.About().Device != "pixel-8-farm" || d.About().Package != pkgShop {
 		t.Errorf("about = %+v", d.About())
 	}
-	if s := r.server.Settings(); s["waitForIdleTimeout"] != float64(0) {
+	if s := r.server.Settings(); s["waitForIdleTimeout"] != float64(0) || s["enableMultiWindows"] != true {
 		t.Errorf("settings = %v", s)
 	}
 }

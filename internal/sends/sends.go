@@ -17,7 +17,8 @@ import (
 )
 
 // Lines are what the step sends, one entry per line: for an API step its method and path and then
-// Details, for a web or a mobile step its action and then its text. A step with none of them
+// Details, for a web or a mobile step its action and then its text, for a step that uses a flow the
+// flow and its values. A step with none of them
 // sends nothing.
 func Lines(st domain.ScriptStep) []string {
 	switch {
@@ -27,8 +28,25 @@ func Lines(st domain.ScriptStep) []string {
 		return webLines(*st.Web)
 	case st.Mobile != nil:
 		return mobileLines(*st.Mobile)
+	case st.Use != "":
+		return useLines(st)
 	}
 	return nil
+}
+
+// useLines says that a step runs a flow, and with which values. The values stay as the script writes
+// them, so a variable stays {{name}}.
+func useLines(st domain.ScriptStep) []string {
+	out := []string{"use flow " + st.Use}
+	if len(st.With) > 0 {
+		var b strings.Builder
+		b.WriteString("with")
+		for _, k := range slices.Sorted(maps.Keys(st.With)) {
+			fmt.Fprintf(&b, " %s=%s", k, st.With[k])
+		}
+		out = append(out, b.String())
+	}
+	return out
 }
 
 // Details are the query, the headers, and the JSON body of a request, in the form of a fixture step.

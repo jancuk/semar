@@ -1,6 +1,6 @@
 # Semar
 
-Semar gives testing by an AI agent one standard workflow. It goes from the ticket and the change to tests, evidence, a verdict, and a report, and the steps are the same whoever runs them and whichever model drafts. A model drafts each test from the ticket and the API document, and then the test replays with no model, on your machine or in a pipeline. Semar tests an HTTP API and a web application.
+Semar gives testing by an AI agent one standard workflow. It goes from the ticket and the change to tests, evidence, a verdict, and a report, and the steps are the same whoever runs them and whichever model drafts. A model drafts each test from the ticket and the API document, and then the test replays with no model, on your machine or in a pipeline. Semar tests an HTTP API, a web application, and an Android app.
 
 Code decides every result from recorded evidence. A model never says whether a test passed. A test counts as soon as it is written, and every result that a model wrote says `by model`.
 
@@ -115,7 +115,7 @@ The exit code is 0 when everything passed, 1 when a test failed, and 2 when a te
 
 ### Read the report
 
-`semar show` prints the report of the newest run. Every run also writes `report.html`, one file with the screenshots of the web steps inside, for a person with no command line.
+`semar show` prints the report of the newest run. Every run also writes `report.html`, one file with the screenshots of the web and Android steps inside, for a person with no command line.
 
 ```text
 $ semar show
@@ -161,7 +161,7 @@ HTML report: .semar/runs/r-20261119T003301Z-f910/report.html
 | Command | What it does |
 | --- | --- |
 | `semar check <id> pass` | Records what a person checked by hand |
-| `semar record` | Records a web test while you do the flow once in Chrome |
+| `semar record` | Records a web test in Chrome, or an Android flow or scenario in the terminal or a local web studio |
 | `semar import <file> --ticket <key>` | Starts the regression set from a Postman collection or a HAR file |
 | `semar rm <id> --reason <text>` | Retires a test, and keeps a record of why |
 | `semar log` | Lists the stored runs |
@@ -208,6 +208,24 @@ A test of a web application can do a click, a fill, a key press, a drag, a choic
 * the path and the title of the page.
 
 A web check waits for its condition, 5 seconds by default. Every web step leaves a screenshot in the run.
+
+A test of an Android app runs directly over `adb` with the UiAutomator2 server APKs (no Node.js or Appium server required), or against any W3C WebDriver `serverUrl`. An app with no backend needs no `baseUrl` or `hosts`. It can do a tap, a long press, typing (with secrets kept in environment variables), a swipe, a scroll, a key press (including `back`, `enter`, and `hide-keyboard`), a deep link, and a wait, across native views, Jetpack Compose, Flutter, WebView accessibility trees, soft keyboards (IMEs), and system dialogs. It can check:
+
+* element text (`equals` or `contains`), existence, count, attributes, and states (`visible`, `hidden`, `enabled`, `disabled`, `checked`, `unchecked`).
+
+Every Android step leaves a screenshot in the run, and broken locators can be repaired with no model using `semar screens repair latest --apply`.
+
+### Record Android flows and scenarios
+
+`semar record` also records an Android app live on an emulator or physical device, either in a local web studio or in the terminal:
+
+```bash
+semar record --ui                       # local web studio (guided setup, live mirror, verify, undo)
+semar record --flow login               # record a reusable flow into .semar/flows/login.yaml
+semar record SHOP-12 --use login        # record a scenario starting from a saved flow
+```
+
+Reusable flows live in `.semar/flows/<id>.yaml` and are invoked from scenarios with `use:` and `with:`. Password fields and secrets stay in memory only for the session and are written to files as `env:NAME`. Finishing a recording saves the files and immediately verifies them on a clean device session, with one-shot `undo` if you want to roll back. See [Test an Android app](docs/GUIDE.md#test-an-android-app) for setup and details.
 
 ## Install
 

@@ -44,6 +44,19 @@ func newReader(t *Tree, locs map[string]domain.Locator) *reader {
 	return &reader{tree: t, locs: locs, memo: map[string]resolved{}}
 }
 
+// Resolve finds the element name on the tree the way a replay does: the locators are tried in the
+// order of Find, within chains are followed, and the element is found only when exactly one visible
+// node matches. The state says how many nodes matched and how many of them are visible. The node is
+// nil when the element is not found. An error is a fault of the locator itself, not an absent element.
+// The recorder uses it so that a locator it saves is one that a replay resolves.
+func Resolve(t *Tree, locs map[string]domain.Locator, name string) (domain.ElementState, *Node, error) {
+	res, err := newReader(t, locs).resolve(name)
+	if err != nil {
+		return domain.ElementState{}, nil, err
+	}
+	return res.state, res.node, nil
+}
+
 func (r *reader) resolve(name string) (resolved, error) { return r.resolveDepth(name, 0) }
 
 func (r *reader) resolveDepth(name string, depth int) (resolved, error) {
@@ -295,12 +308,12 @@ func nameMatches(element string, nodes []*Node) []domain.Candidate {
 func axNodes(t *Tree) []uirepair.AXNode {
 	var out []uirepair.AXNode
 	t.Walk(func(n *Node) bool {
-		if name := n.AccName(); name != "" {
+		if name := n.AccName(); name != "" || n.ID != "" {
 			role := n.Role
 			if role == "" {
 				role = "generic"
 			}
-			out = append(out, uirepair.AXNode{Role: role, Name: name})
+			out = append(out, uirepair.AXNode{Role: role, Name: name, ID: n.ID, Desc: collapse(n.Desc)})
 		}
 		return true
 	})

@@ -135,7 +135,7 @@ func (p *Platform) remoteDriver(ctx context.Context, service string, app App) (*
 		return nil, &mobile.Unavailable{Reason: fmt.Sprintf("the server at %s did not start a session: %v", host, err)}
 	}
 	p.remote[service] = sess
-	if err := sess.Settings(ctx, map[string]any{"waitForIdleTimeout": 0, "waitForSelectorTimeout": 0}); err != nil {
+	if err := sess.Settings(ctx, map[string]any{"waitForIdleTimeout": 0, "waitForSelectorTimeout": 0, "enableMultiWindows": true}); err != nil {
 		p.o.Logger.DebugContext(ctx, "the server settings were not changed", "error", err)
 	}
 	return &driver{
@@ -180,8 +180,11 @@ func unsupported(e *webdriver.Error) bool {
 		strings.Contains(msg, "unknown mobile command") || strings.Contains(msg, "not implemented")
 }
 
-func (l *remoteLife) reset(ctx context.Context) error {
+func (l *remoteLife) reset(ctx context.Context, override string) error {
 	mode := l.app.resetMode()
+	if override != "" {
+		mode = override
+	}
 	if mode == config.ResetNone {
 		return nil
 	}

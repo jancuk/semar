@@ -281,7 +281,7 @@ func planChange(ctx context.Context, stdout, stderr io.Writer, o options, f plan
 		if err != nil {
 			return err
 		}
-		o.drop.set(append(secretEnvNames(cfg), keyEnvNames(src.file)...))
+		o.drop.set(append(secretEnvNamesIn(cfg, f.dir), keyEnvNames(src.file)...))
 		inst, err = o.Providers(f.dir).New(pc)
 		if err != nil {
 			return err

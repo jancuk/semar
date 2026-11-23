@@ -2,7 +2,11 @@ package cli
 
 import (
 	"context"
+	"io"
+	"io/fs"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -11,6 +15,8 @@ import (
 	"github.com/jancuk/semar/internal/codehost/github"
 	"github.com/jancuk/semar/internal/codehost/gitlab"
 	"github.com/jancuk/semar/internal/config"
+	"github.com/jancuk/semar/internal/domain"
+	"github.com/jancuk/semar/internal/flow"
 	"github.com/jancuk/semar/internal/keychain"
 	"github.com/jancuk/semar/internal/provider"
 	"github.com/jancuk/semar/internal/provider/anthropic"
@@ -18,6 +24,7 @@ import (
 	"github.com/jancuk/semar/internal/provider/codex"
 	"github.com/jancuk/semar/internal/provider/fake"
 	"github.com/jancuk/semar/internal/provider/openai"
+	"github.com/jancuk/semar/internal/script"
 	"github.com/jancuk/semar/internal/userconfig"
 	"github.com/jancuk/semar/internal/vcs"
 )
@@ -71,6 +78,78 @@ func secretEnvNames(cfg config.Config) []string {
 		names = append(names, env.Android.SecretEnvNames()...)
 	}
 	return names
+}
+
+// secretEnvNamesIn is secretEnvNames plus the variables that the flows and stored scripts of the
+// repository name as secrets. Any secret a flow or script types must never be inherited by a model harness.
+func secretEnvNamesIn(cfg config.Config, repo string) []string {
+	names := secretEnvNames(cfg)
+	for _, n := range flow.SecretEnvNames(repo) {
+		if !slices.Contains(names, n) {
+			names = append(names, n)
+		}
+	}
+	for _, n := range scriptSecretEnvNames(repo) {
+		if !slices.Contains(names, n) {
+			names = append(names, n)
+		}
+	}
+	return names
+}
+
+// scriptSecretEnvNames scans .semar/store/scripts for env: secret references in stored web and mobile steps.
+func scriptSecretEnvNames(repo string) []string {
+	if repo == "" {
+		return nil
+	}
+	root, err := os.OpenRoot(repo)
+	if err != nil {
+		return nil
+	}
+	defer root.Close()
+	const maxScriptBytes = 1 << 20
+	var names []string
+	_ = fs.WalkDir(root.FS(), ".semar/store/scripts", func(rel string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !d.Type().IsRegular() || !strings.HasSuffix(rel, ".yaml") {
+			return nil
+		}
+		f, err := root.Open(rel)
+		if err != nil {
+			return nil
+		}
+		data, rerr := io.ReadAll(io.LimitReader(f, maxScriptBytes+1))
+		f.Close()
+		if rerr != nil || len(data) > maxScriptBytes {
+			return nil
+		}
+		sc, err := script.Parse(data, rel)
+		if err != nil {
+			return nil
+		}
+		for _, st := range sc.Steps {
+			for _, ref := range []string{webSecret(st.Web), mobileSecret(st.Mobile)} {
+				if name, ok := strings.CutPrefix(ref, "env:"); ok && name != "" && !slices.Contains(names, name) {
+					names = append(names, name)
+				}
+			}
+		}
+		return nil
+	})
+	return names
+}
+
+func webSecret(w *domain.WebAction) string {
+	if w == nil {
+		return ""
+	}
+	return w.Secret
+}
+
+func mobileSecret(m *domain.MobileAction) string {
+	if m == nil {
+		return ""
+	}
+	return m.Secret
 }
 
 // keyEnvNames lists the variables that the providers of the person's own file name as keys.

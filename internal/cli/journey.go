@@ -19,6 +19,7 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/fixture"
+	"github.com/jancuk/semar/internal/flow"
 	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/journey"
 	"github.com/jancuk/semar/internal/replay"
@@ -434,11 +435,18 @@ func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir strin
 	}
 	eng := rg.webEngine(o, dir, cfg, envName, env, headed)
 	defer eng.Close()
-	dev := rg.mobileEngine(o, dir, env, declared)
+	legSteps := 0
+	for _, j := range chosen {
+		for _, l := range j.Legs {
+			legSteps += len(l.Steps)
+		}
+	}
+	dev := rg.mobileEngine(o, dir, env, declared, mobileBudget(legSteps, cfg.Replay.Retries, longestFlow(dir)))
 	defer closeMobile(ctx, dev)
 	announce()
 	deps.Web, deps.Screens = eng, screenSource{repo: dir}
 	useMobile(&deps, dev, env)
+	deps.Flows = flow.Loader(dir)
 	jdeps := journey.Deps{Builds: rg.builds, Services: map[string]string{}, Clock: o.Clock, Sleep: o.Sleep, Accounts: deps.Accounts}
 	for _, s := range env.Services {
 		jdeps.Services[s.Name] = s.AuthProfile

@@ -518,31 +518,8 @@ func writeInitConfig(dir string, data []byte) (path string, err error) {
 	return path, nil
 }
 
-// gitignoreText keeps on the machine what must not be published: the evidence, the key that makes a
-// redacted value unguessable, and the health of fixtures.
-const gitignoreText = `# Written by semar init. These stay on this machine.
-runs/
-store/redact.key
-store/fixture-health/
-semar.local.yaml
-`
-
 // ensureGitignore writes .semar/.gitignore when there is none, and never changes one that exists.
-func ensureGitignore(dir string) error {
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	rel := filepath.Join(".semar", ".gitignore")
-	if _, err := atomicfile.MkdirIn(root, filepath.Dir(rel)); err != nil {
-		return err
-	}
-	if err := atomicfile.WriteNewIn(root, rel, []byte(gitignoreText), atomicfile.FileMode); err != nil && !errors.Is(err, fs.ErrExist) {
-		return err
-	}
-	return nil
-}
+func ensureGitignore(dir string) error { return config.EnsureGitignore(dir) }
 
 // defaultServiceName is the repository directory's name, lowered, with every run of other
 // characters than [a-z0-9] made one hyphen.

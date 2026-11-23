@@ -24,16 +24,20 @@ const reasonNoDevice = "the scenario has steps on a device, and this run has no 
 // prepareMobile checks the device steps of a script before any step is sent, as prepareWeb does for a
 // browser: the screens file of each app, its screens and its elements, and the service of each step.
 // It returns nil for a scenario with no device step.
-func (r *Runner) prepareMobile(sc domain.Scenario, s domain.Script, run *replayed) (mr *webRun, proceed bool) {
+func (r *Runner) prepareMobile(sc domain.Scenario, s domain.Script, where []string, run *replayed) (mr *webRun, proceed bool) {
 	var apps []string
 	uses := map[string][]screens.Use{}
 	stepOf := map[domain.StepID]domain.Step{}
 	for _, st := range sc.Steps {
 		stepOf[st.ID] = st
 	}
-	for _, ss := range s.Steps {
+	for i, ss := range s.Steps {
 		if ss.Mobile == nil {
 			continue
+		}
+		label := "step " + string(ss.Step)
+		if i < len(where) {
+			label = where[i]
 		}
 		app := ss.Mobile.App
 		if app == "" {
@@ -50,7 +54,7 @@ func (r *Runner) prepareMobile(sc domain.Scenario, s domain.Script, run *replaye
 		if !slices.Contains(apps, app) {
 			apps = append(apps, app)
 		}
-		uses[app] = append(uses[app], screens.MobileUse("step "+string(ss.Step), *ss.Mobile, stepElements(stepOf[ss.Step], ss)))
+		uses[app] = append(uses[app], screens.MobileUse(label, *ss.Mobile, stepElements(stepOf[ss.Step], ss)))
 	}
 	if len(apps) == 0 && len(run.blocked) == 0 {
 		return nil, true

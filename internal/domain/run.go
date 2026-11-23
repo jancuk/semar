@@ -121,6 +121,9 @@ type ScenarioResult struct {
 	ScriptHash Hash `json:"scriptHash,omitempty"`
 	// Fixtures is what each given entry did. It is empty for a scenario without given.
 	Fixtures []FixtureRecord `json:"fixtures,omitempty"`
+	// Flows is the version of each flow that the deciding attempt ran. It is empty for a scenario
+	// that runs none, and in a result stored before flows existed.
+	Flows []FlowRef `json:"flows,omitempty"`
 }
 
 const (

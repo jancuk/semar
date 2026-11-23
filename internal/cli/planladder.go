@@ -123,7 +123,7 @@ func criteriaLadder(ctx context.Context, stderr io.Writer, o options, f planFlag
 			return nil, nil, nil, err
 		}
 	}
-	o.drop.set(append(secretEnvNames(cfg), keyEnvNames(src.file)...))
+	o.drop.set(append(secretEnvNamesIn(cfg, f.dir), keyEnvNames(src.file)...))
 	opened := map[string]provider.Instance{}
 	var rungs []plan.Rung
 	var configs []config.Provider

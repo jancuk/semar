@@ -10,6 +10,7 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/engine/mobile"
 	"github.com/jancuk/semar/internal/engine/mobile/android"
+	"github.com/jancuk/semar/internal/flow"
 	"github.com/jancuk/semar/internal/replay"
 )
 
@@ -60,10 +61,17 @@ func androidApps(repo string, env config.Environment, declared declaredBuilds) m
 // mobileEngine makes the engine of the app on a device. It starts nothing until the first step on a
 // device needs it, so a run with no such step never looks for adb. It is nil when no service of the
 // environment has an android app.
-func (rg *envRig) mobileEngine(o options, repo string, env config.Environment, declared declaredBuilds) *mobile.Engine {
+func (rg *envRig) mobileEngine(o options, repo string, env config.Environment, declared declaredBuilds, budget int) *mobile.Engine {
+	eng, _ := rg.mobileEngineOn(o, repo, env, declared, budget)
+	return eng
+}
+
+// mobileEngineOn is mobileEngine that also gives the platform that the engine acts on, for a caller that
+// reads the screen itself, as the recorder does.
+func (rg *envRig) mobileEngineOn(o options, repo string, env config.Environment, declared declaredBuilds, budget int) (*mobile.Engine, mobile.Platform) {
 	apps := androidApps(repo, env, declared)
 	if len(apps) == 0 {
-		return nil
+		return nil, nil
 	}
 	home, _ := o.home()
 	services := map[string]mobile.Service{}
@@ -97,10 +105,48 @@ func (rg *envRig) mobileEngine(o options, repo string, env config.Environment, d
 		Services:     services,
 		Kind:         env.Kind,
 		Run:          rg.id,
+		Budget:       budget,
 		CheckTimeout: env.Android.CheckTimeout(),
 		Clock:        o.Clock,
 		Sleep:        o.Sleep,
-	})
+	}), platform
+}
+
+const (
+	// actionsPerStep is how many device actions the budget allows for each step of a scenario. A step
+	// that uses a flow is many actions, and a retry replays them all, so a run that signs in with a flow
+	// in every scenario needs more than the default of the engine.
+	actionsPerStep = 8
+	// maxMobileBudget bounds the budget, so that a very large run still has a limit.
+	maxMobileBudget = 20000
+)
+
+// mobileBudget is the number of device actions that a run of steps scenario steps may take, retries
+// included. It never goes under the engine's default of 200.
+//
+// perStep is how many actions one step may take: the default, or the length of the longest flow of the
+// repository when that is more, because a step that uses a flow runs all its steps.
+func mobileBudget(steps, retries, perStep int) int {
+	return min(max(200, steps*max(perStep, actionsPerStep)*(max(retries, 0)+1)), maxMobileBudget)
+}
+
+// longestFlow is the number of steps of the longest flow of the repository, or 0 when it has none.
+func longestFlow(repo string) int {
+	flows, _ := flow.LoadAll(repo)
+	n := 0
+	for _, e := range flows {
+		n = max(n, len(e.Flow.Steps))
+	}
+	return n
+}
+
+// scenarioSteps counts the steps of the scenarios.
+func scenarioSteps(scenarios []domain.Scenario) int {
+	n := 0
+	for _, sc := range scenarios {
+		n += len(sc.Steps)
+	}
+	return n
 }
 
 // closeMobile ends what the device engine started. It runs on a context that the run's cancellation does

@@ -86,3 +86,14 @@ func TestLinesOfAMobileStep(t *testing.T) {
 		}
 	}
 }
+
+func TestLinesOfAStepThatUsesAFlow(t *testing.T) {
+	got := sends.Lines(domain.ScriptStep{Step: "login", Use: "login", With: map[string]string{"password": "{{pw}}", "email": "ana@example.com"}})
+	want := []string{"use flow login", "with email=ana@example.com password={{pw}}"}
+	if !slices.Equal(got, want) {
+		t.Errorf("lines = %q, want %q", got, want)
+	}
+	if got := sends.Lines(domain.ScriptStep{Step: "login", Use: "login"}); !slices.Equal(got, []string{"use flow login"}) {
+		t.Errorf("a flow with no values: %q", got)
+	}
+}

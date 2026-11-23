@@ -19,14 +19,41 @@ func initRig(t *testing.T, o androidOptions) *androidRig {
 	return r
 }
 
-func TestInitChecksNothingOfAndroidWithNoAndroidScenario(t *testing.T) {
+// An app on a device is checked as soon as semar.yaml lists it, before the first scenario is written: that
+// is when a person needs to know that the device is ready to record on.
+func TestInitChecksTheDeviceOfAnAndroidServiceWithNoScenarioYet(t *testing.T) {
 	r := initRig(t, androidOptions{local: true, scenarios: map[string]string{}})
-	res := r.semar(t, t.Context(), "init")
-	if strings.Contains(res.stdout, "adb") || strings.Contains(res.stdout, "device") || strings.Contains(res.stdout, "UiAutomator2") {
-		t.Errorf("init names the device although no scenario runs on one:\n%s", res.stdout)
-	}
-	if calls := r.adb.Calls(); len(calls) != 0 {
-		t.Errorf("init ran adb: %v", calls)
+	res := r.must(t, cli.ExitOK, "init")
+	contains(t, "stdout", res.stdout,
+		"  ok       adb is at "+r.adb.Path+"\n",
+		"  ok       local: the device emulator-5554 is ready\n",
+	)
+}
+
+// A service that is only an app has no address to ask. init reports it, and checks adb and the device.
+func TestInitDoesNotProbeTheAddressOfAStandaloneAndroidService(t *testing.T) {
+	r := initRig(t, androidOptions{local: true, scenarios: map[string]string{}})
+	r.write(t, ".semar/semar.yaml", `version: 1
+environments:
+  local:
+    kind: test
+    methods: [GET]
+    effects: {mode: test_data}
+    services:
+      - name: shop-app
+        android:
+          appPackage: com.example.shop
+authProfiles:
+  default: {}
+`)
+	res := r.must(t, cli.ExitOK, "init")
+	contains(t, "stdout", res.stdout,
+		"  ok       local: shop-app is an app on a device with no address of its own",
+		"  ok       adb is at "+r.adb.Path+"\n",
+		"  ok       local: the device emulator-5554 is ready\n",
+	)
+	if strings.Contains(res.stdout, "did not answer") || strings.Contains(res.stdout, "shop-app answers") {
+		t.Errorf("init probed an address that the service does not have:\n%s", res.stdout)
 	}
 }
 

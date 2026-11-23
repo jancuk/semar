@@ -33,6 +33,8 @@ type Replayed struct {
 	Blocked  []string
 	Notes    []domain.Reason
 	Last     *api.Call // the call of the last step sent, for a wait
+	// Flows are the flows that ran, with the digest of the file of each.
+	Flows []domain.FlowRef
 }
 
 // reservedHeads are not preset variables: run.id is the Runner's, the date variables are computed from it, and secret and data are refused in a script.
@@ -52,7 +54,7 @@ func (r *Runner) RunOne(ctx context.Context, in Single) (Replayed, error) {
 		}
 		return Replayed{
 			Steps: run.steps, Captured: run.captured, Blocked: run.blocked, Notes: run.notes,
-			Last: run.last,
+			Last: run.last, Flows: run.flows,
 		}, errors.Join(err, ctx.Err())
 	}
 
@@ -65,7 +67,7 @@ func (r *Runner) RunOne(ctx context.Context, in Single) (Replayed, error) {
 		return out(nil)
 	}
 	vars, outputs := presets(in.Vars)
-	if blocked := scriptBlocked(script.ValidateWith(withHeads(in), withHash(in), outputs)); len(blocked) > 0 {
+	if blocked := scriptBlocked(script.ValidateWithFlows(withHeads(in), withHash(in), outputs, r.flowResolver())); len(blocked) > 0 {
 		run.blocked = blocked
 		return out(nil)
 	}

@@ -41,7 +41,8 @@ func (a App) resetMode() string {
 
 // lifecycle is what differs between an app that adb controls and one that a server controls.
 type lifecycle interface {
-	reset(ctx context.Context) error
+	// reset puts the app in its starting state with the mode, or with the mode of the service for "".
+	reset(ctx context.Context, mode string) error
 	launch(ctx context.Context) error
 	open(ctx context.Context, link string) error
 	key(ctx context.Context, code int) error
@@ -60,10 +61,13 @@ type driver struct {
 	last    *mobile.Tree
 }
 
-func (d *driver) Reset(ctx context.Context) error             { return d.life.reset(ctx) }
-func (d *driver) Launch(ctx context.Context) error            { return d.life.launch(ctx) }
-func (d *driver) Open(ctx context.Context, link string) error { return d.life.open(ctx, link) }
-func (d *driver) About() mobile.About                         { return d.about }
+func (d *driver) Reset(ctx context.Context) error { return d.life.reset(ctx, "") }
+
+// ResetWith resets the app with a mode in place of the one of its service: restart, clear, or none.
+func (d *driver) ResetWith(ctx context.Context, mode string) error { return d.life.reset(ctx, mode) }
+func (d *driver) Launch(ctx context.Context) error                 { return d.life.launch(ctx) }
+func (d *driver) Open(ctx context.Context, link string) error      { return d.life.open(ctx, link) }
+func (d *driver) About() mobile.About                              { return d.about }
 
 // Source reads the tree. Two reads with the same bytes give the tree that was parsed the first time.
 func (d *driver) Source(ctx context.Context) (*mobile.Tree, error) {
@@ -135,8 +139,11 @@ type adbLife struct {
 
 var componentPattern = regexp.MustCompile(`^[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+$`)
 
-func (l *adbLife) reset(ctx context.Context) error {
+func (l *adbLife) reset(ctx context.Context, override string) error {
 	mode := l.app.resetMode()
+	if override != "" {
+		mode = override
+	}
 	if mode != config.ResetNone {
 		if _, err := l.a.shell(ctx, "am", "force-stop", l.app.Package); err != nil {
 			return err
@@ -187,7 +194,7 @@ func (l *adbLife) launch(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	out, err := l.a.shell(ctx, "am", "start", "-W", "-n", comp, "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER")
+	out, err := l.a.shell(ctx, "am", "start", "-W", "--activity-clear-task", "-n", comp, "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER")
 	return startResult("the app could not be started", out, err)
 }
 
@@ -241,7 +248,7 @@ func startResult(what, out string, err error) error {
 
 func (l *adbLife) key(ctx context.Context, code int) error { return l.sess.PressKeycode(ctx, code) }
 
-// hideKeyboard closes the keyboard when it is open, and does nothing when it is not: the escape key
+// hideKeyboard closes the keyboard when it is open, and does nothing when it is not: the back key
 // would otherwise leave the screen of the app.
 func (l *adbLife) hideKeyboard(ctx context.Context) error {
 	out, err := l.a.shell(ctx, "dumpsys", "input_method")
@@ -251,5 +258,5 @@ func (l *adbLife) hideKeyboard(ctx context.Context) error {
 	if !strings.Contains(out, "mInputShown=true") {
 		return nil
 	}
-	return l.sess.PressKeycode(ctx, keycodeEscape)
+	return l.sess.PressKeycode(ctx, keycodeBack)
 }

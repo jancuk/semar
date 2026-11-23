@@ -142,7 +142,7 @@ func validateEnvironment(name string, e Environment, profiles map[string]AuthPro
 	if e.Kind != KindTest && e.Kind != KindProduction {
 		add("%s.kind must be %s or %s, got %q", p, KindTest, KindProduction, e.Kind)
 	}
-	if len(e.Hosts) == 0 {
+	if len(e.Hosts) == 0 && !standaloneAndroid(e) {
 		add("%s.hosts needs at least one entry", p)
 	}
 	for i, h := range e.Hosts {
@@ -163,12 +163,16 @@ func validateEnvironment(name string, e Environment, profiles map[string]AuthPro
 		} else if err := idcheck.Check("service name", s.Name); err != nil {
 			add("%s.name: %v", sp, err)
 		}
-		u, err := url.Parse(s.BaseURL)
-		switch {
-		case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "":
-			add("%s.baseUrl must be an absolute http or https URL, got %q", sp, s.BaseURL)
-		case !hostrule.Allowed(u, e.Hosts):
-			add("%s: baseUrl host %s is not in hosts", sp, originHost(u))
+		if s.BaseURL == "" && s.Android != nil && s.Web == nil {
+			// An app on a device may have no address of its own: it is a standalone service.
+		} else {
+			u, err := url.Parse(s.BaseURL)
+			switch {
+			case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "":
+				add("%s.baseUrl must be an absolute http or https URL, got %q", sp, s.BaseURL)
+			case !hostrule.Allowed(u, e.Hosts):
+				add("%s: baseUrl host %s is not in hosts", sp, originHost(u))
+			}
 		}
 		if s.Web != nil {
 			if st := s.Web.Start; !strings.HasPrefix(st, "/") || strings.HasPrefix(st, "//") || strings.ContainsAny(st, " \t\r\n\\") {
@@ -191,6 +195,20 @@ func validateEnvironment(name string, e Environment, profiles map[string]AuthPro
 	validateAndroid(p, e, add)
 	validateData(p+".data", e.Data, add)
 	validateChecks(p+".checks", e.Checks, add)
+}
+
+// standaloneAndroid reports whether the environment holds only apps on a device that have no address
+// of their own, and no server that needs a host: such an environment has nothing to list in hosts.
+func standaloneAndroid(e Environment) bool {
+	if len(e.Services) == 0 || e.Android.ServerURL != "" {
+		return false
+	}
+	for _, s := range e.Services {
+		if s.BaseURL != "" || s.Android == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func validateChecks(p string, c Checks, add func(string, ...any)) {
@@ -521,3 +539,10 @@ func validateServiceAndroid(p string, a ServiceAndroid, env Android, add func(st
 		seen[perm] = true
 	}
 }
+
+// ValidAndroidPackage reports whether s is a package name such as com.example.shop. A caller that reads
+// one from a device checks it with this before it writes it anywhere.
+func ValidAndroidPackage(s string) bool { return androidPackagePattern.MatchString(s) }
+
+// ValidAndroidSerial reports whether s is a serial that android.device takes.
+func ValidAndroidSerial(s string) bool { return androidDevicePattern.MatchString(s) }
