@@ -166,7 +166,7 @@ HTML report: .semar/runs/r-20261119T003301Z-f910/report.html
 | `semar rm <id> --reason <text>` | Retires a test, and keeps a record of why |
 | `semar log` | Lists the stored runs |
 
-Every other command, such as `semar status` and `semar journey`, still works and is left out of the help. The [command reference](docs/GUIDE.md#command-reference) lists every command with every flag.
+Every other command, such as `semar status`, `semar journey`, and `semar mcp`, still works and is left out of the help. The [command reference](docs/GUIDE.md#command-reference) lists every command with every flag.
 
 ## Run the regression set in a pipeline
 
@@ -209,11 +209,13 @@ A test of a web application can do a click, a fill, a key press, a drag, a choic
 
 A web check waits for its condition, 5 seconds by default. Every web step leaves a screenshot in the run.
 
-A test of an Android app runs directly over `adb` with the UiAutomator2 server APKs (no Node.js or Appium server required), or against any W3C WebDriver `serverUrl`. An app with no backend needs no `baseUrl` or `hosts`. It can do a tap, a long press, typing (with secrets kept in environment variables), a swipe, a scroll, a key press (including `back`, `enter`, and `hide-keyboard`), a deep link, and a wait, across native views, Jetpack Compose, Flutter, WebView accessibility trees, soft keyboards (IMEs), and system dialogs. It can check:
+A test of an Android app runs directly over `adb` with the UiAutomator2 server APKs (no Node.js or Appium server required), or against any W3C WebDriver `serverUrl`. An app with no backend needs no `baseUrl` or `hosts`. It can do a tap, a long press, typing (with secrets kept in environment variables), a swipe, a scroll, a key press (including `back`, `enter`, and `hide-keyboard`), a double tap, a drag, a deep link, and a wait, across native views, Jetpack Compose, Flutter, WebView accessibility trees, soft keyboards (IMEs), and system dialogs. It can check:
 
 * element text (`equals` or `contains`), existence, count, attributes, and states (`visible`, `hidden`, `enabled`, `disabled`, `checked`, `unchecked`).
 
-Every Android step leaves a screenshot in the run, and broken locators can be repaired with no model using `semar screens repair latest --apply`.
+A step can also capture the text of an element into `{{name}}` for the steps after it.
+
+Every Android step leaves a screenshot in the run. When a step does not find its element, the report lists the elements of the screen that look most like it, and `semar screens repair latest` prints candidates for the broken locator with no model. `--apply <screen>.<element>=<n>` writes the one you pick to the screens file. `semar run --pause-on-fail` stops at a failed step on the device and waits for Enter, so you can look at the screen. When the app crashed, the run keeps the crash report of the device.
 
 ### Record Android flows and scenarios
 
@@ -223,13 +225,34 @@ Every Android step leaves a screenshot in the run, and broken locators can be re
 semar record --ui                       # local web studio (guided setup, live mirror, verify, undo)
 semar record --flow login               # record a reusable flow into .semar/flows/login.yaml
 semar record SHOP-12 --use login        # record a scenario starting from a saved flow
+semar record SHOP-12 --resume --at 3    # reopen a saved scenario, replay 3 steps, record on
 ```
 
-Reusable flows live in `.semar/flows/<id>.yaml` and are invoked from scenarios with `use:` and `with:`. Password fields and secrets stay in memory only for the session and are written to files as `env:NAME`. Finishing a recording saves the files and immediately verifies them on a clean device session, with one-shot `undo` if you want to roll back. See [Test an Android app](docs/GUIDE.md#test-an-android-app) for setup and details.
+Reusable flows live in `.semar/flows/<id>.yaml` and are invoked from scenarios and from other flows with `use:` and `with:`, up to 3 levels deep. A flow can hold checks, captures, and params. While you record, you can delete any step, go back to a step and record on from it, pick another locator, and capture a value from the screen. Password fields and secrets stay in memory only for the session and are written to files as `env:NAME`. Finishing a recording saves the files and immediately verifies them on a clean device session, with one-shot `undo` if you want to roll back. See [Test an Android app](docs/GUIDE.md#test-an-android-app) for setup and details.
+
+### Let an AI agent drive it
+
+`semar mcp` serves Semar's tools to an agent over MCP: an Android device, a web page, and an API, with the same rules as a run. The agent can record a scenario, a flow, a web test, or a journey. Code replays what it recorded with no model, and every check that the agent wrote says `by model`. A web test or a journey is kept only when that replay passes. With `--studio`, a person can watch the device, pause the agent, take over, and hand back.
+
+```bash
+claude mcp add semar -- semar mcp --dir .       # Claude Code
+semar mcp --dir . --http :8765                  # any client that speaks HTTP, token on stderr
+```
+
+```toml
+# Codex, in ~/.codex/config.toml
+[mcp_servers.semar]
+command = "semar"
+args = ["mcp", "--dir", "."]
+```
+
+Without `.semar/semar.yaml`, it serves the Android tools alone. In a repository it serves every tool group that the configuration allows (`mobile`, `web`, `api`, `journey`), and `--surfaces` picks among them. The start line on standard error names the groups it serves. Against a production or read-only environment, or with `--read-only`, the server only observes and refuses every tool that changes something.
+
+See [Drive a device from an AI agent](docs/GUIDE.md#drive-a-device-from-an-ai-agent) for Cursor, Gemini CLI, Windsurf, the tools, and the safety rules.
 
 ## Install
 
-Semar is one static binary. You need Go 1.26 or later and `git`.
+Semar is one static binary. You need Go 1.26 or later and `git`. An Android test also needs `adb`, and a web test needs Chrome.
 
 ```bash
 go install github.com/jancuk/semar/cmd/semar@latest

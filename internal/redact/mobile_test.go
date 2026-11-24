@@ -24,6 +24,7 @@ func TestMobileRecordHoldsNoSecret(t *testing.T) {
 			Op: "type", Link: "shop://login?token=" + secret, Package: "com.x." + secret, Device: "emulator-" + secret, Target: loc,
 			Elements: map[string]domain.ElementState{"pw": {Found: true, Count: 1, Text: secret, Locator: loc, Attrs: map[string]string{"hint": "k=" + secret}}},
 			Repair:   []domain.Candidate{{Element: "pw", Locator: *loc, Why: "same name " + secret}},
+			Crash:    &domain.MobileCrash{Summary: "IllegalStateException: bad token " + secret, File: "crash-3.txt"},
 		},
 	}
 	out := r.Action(a)
@@ -33,6 +34,12 @@ func TestMobileRecordHoldsNoSecret(t *testing.T) {
 	}
 	if strings.Contains(string(blob), secret) {
 		t.Errorf("the redacted action holds the secret: %s", blob)
+	}
+	if out.Mobile.Crash == nil || out.Mobile.Crash.File != "crash-3.txt" || !strings.Contains(out.Mobile.Crash.Summary, "IllegalStateException") {
+		t.Errorf("crash = %+v", out.Mobile.Crash)
+	}
+	if strings.Contains(a.Mobile.Crash.Summary, "redacted") {
+		t.Errorf("the caller's crash was changed")
 	}
 	if !redact.IsMarker(out.Mobile.Elements["pw"].Text) {
 		t.Errorf("text = %q, want a marker", out.Mobile.Elements["pw"].Text)

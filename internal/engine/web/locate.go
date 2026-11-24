@@ -135,6 +135,9 @@ func (r *reader) resolveDepth(name string, depth int) (resolved, error) {
 	if depth > maxWithin {
 		return resolved{}, errLocator{fmt.Sprintf("element %s is inside too many other elements", name)}
 	}
+	if loc.HasText != "" || loc.Index != 0 {
+		return resolved{}, errLocator{fmt.Sprintf("element %s: hasText and index are for a device", name)}
+	}
 	res := resolved{state: domain.ElementState{Locator: &loc}}
 	var scope runtime.RemoteObjectID
 	if loc.Within != "" {

@@ -295,7 +295,11 @@ func (r *Runner) read(ctx context.Context, services []string) (domain.Manifest, 
 	for _, s := range services {
 		b, err := r.d.Builds.Probe(ctx, s)
 		if err != nil {
-			problems = append(problems, fmt.Sprintf("the build of %s could not be read", s))
+			reason := fmt.Sprintf("the build of %s could not be read", s)
+			if errors.Is(err, build.ErrNoBuild) {
+				reason += fmt.Sprintf(": it has no build probe, no apk, and no declared build. Give it android.apk (the APK in the repository) or a build probe in .semar/semar.yaml, or run with --build %s=<commit>", s)
+			}
+			problems = append(problems, reason)
 			continue
 		}
 		m.Services = append(m.Services, b)

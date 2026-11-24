@@ -52,17 +52,21 @@ type recordTestFlags struct {
 	ui      bool
 	port    int
 	noOpen  bool
+	// resume reopens the saved scenario or flow, and at is the step to replay to: 0 is all of them.
+	resume bool
+	at     int
 }
 
 func newRecordCommand(o options) *cobra.Command {
 	var f recordTestFlags
 	cmd := &cobra.Command{
-		Use:   "record <scenario id> [environment] [--open <path>] [--given <fixture>[ as <alias>]] | record --flow <name> [environment] | record <scenario id> --use <flow> [environment]",
+		Use:   "record <scenario id> [environment] [--open <path>] [--given <fixture>[ as <alias>]] | record --flow <name> [environment] | record <scenario id> --use <flow> [environment] | record <scenario id> --resume [--at <step>] [environment]",
 		Short: "Record a test by doing the flow once, in Chrome or on a device",
 		Long: "Open a Chrome window on Semar's own profile of the environment and the account, and record what you do until you close it. Semar then writes the screens file, the scenario, and the script, and replays the scenario once.\n" +
 			"Click, type, press Enter or Escape, and drag as a user does. Hold Option and click what must be true: that is a check, it does nothing on the page, and the text that the element shows becomes the expected result. A recording with no check writes nothing.\n" +
 			"A password field is never read: the test types the value of an environment variable, named with --secret-env.\n" +
-			"With --surface android, with --flow, or with --use, Semar records an app on a device instead: it resets the app, and you act through a numbered list of what the screen shows. --flow <name> records a flow, a reusable set of steps such as a sign-in, in .semar/flows. <scenario id> --use <flow> records a scenario that starts by running a flow. A password is typed with the secret command, kept in memory only, and saved as env:NAME.",
+			"With --surface android, with --flow, or with --use, Semar records an app on a device instead: it resets the app, and you act through a numbered list of what the screen shows. --flow <name> records a flow, a reusable set of steps such as a sign-in, in .semar/flows. <scenario id> --use <flow> records a scenario that starts by running a flow. A password is typed with the secret command, kept in memory only, and saved as env:NAME.\n" +
+			"The terminal can edit what it records: delete any step, choose another locator for an element with loc and tap N.K, name screens, and send an element to the common section of the screens file. --resume reopens a saved scenario or flow (with --flow <name>), replays its steps on the device up to --at <step> (all of them by default), and records on from there. Only a scenario or a flow of steps on a device can be reopened, and saving writes the same files again. A password that it types is asked again, because no file holds it. With --ui, the studio has an Open existing menu that does the same.",
 		Args: func(cmd *cobra.Command, args []string) error {
 			// A flow has no scenario ID, and the studio chooses what it records, so the only argument is the environment.
 			if f.flow != "" || f.ui {
@@ -110,10 +114,12 @@ func newRecordCommand(o options) *cobra.Command {
 	cmd.Flags().BoolVar(&f.noReplay, "no-replay", false, "do not replay the scenario once after it is written; on a device, do not verify the recording")
 	cmd.Flags().StringVar(&f.surface, "surface", "", "what to record: web, or android for an app on a device; --flow, --use, and --ui choose android themselves")
 	cmd.Flags().StringVar(&f.flow, "flow", "", "record a flow of this name on a device, to .semar/flows/<name>.yaml; the only argument is then the environment")
-	cmd.Flags().StringVar(&f.use, "use", "", "start the scenario on a device with this flow: it runs once while you record, and the scenario then uses it")
+	cmd.Flags().StringVar(&f.use, "use", "", "start the scenario or the flow on a device with this flow: it runs once while you record, and the recording then uses it")
 	cmd.Flags().BoolVar(&f.ui, "ui", false, "record on a device in a local web studio, in place of the terminal")
 	cmd.Flags().IntVar(&f.port, "port", 0, "the port of the studio on this machine; the default is one that is free (with --ui)")
 	cmd.Flags().BoolVar(&f.noOpen, "no-open", false, "print the address of the studio and do not open a browser (with --ui)")
+	cmd.Flags().BoolVar(&f.resume, "resume", false, "reopen the saved scenario <id>, or the flow named by --flow, on a device: its steps are replayed, and you record on from there; with --ui, the studio opens saved recordings from its page")
+	cmd.Flags().IntVar(&f.at, "at", 0, "the step to replay to with --resume, from 1; the default is all the steps, and new steps go after it")
 	addDirFlag(cmd, &f.dir)
 	return cmd
 }

@@ -185,3 +185,21 @@ func (s *Session) Execute(ctx context.Context, script string, args map[string]an
 	v, _, err := s.c.call(ctx, http.MethodPost, s.path("/execute/sync"), map[string]any{"script": script, "args": []any{args}}, false)
 	return v, err
 }
+
+// Clipboard reads the text on the clipboard of the device: POST /session/{id}/appium/device/get_clipboard.
+// The server answers in base64. hush is set, because what the clipboard holds may be a secret.
+func (s *Session) Clipboard(ctx context.Context) (string, error) {
+	v, _, err := s.c.call(ctx, http.MethodPost, s.path("/appium/device/get_clipboard"), map[string]any{"contentType": "plaintext"}, true)
+	if err != nil {
+		return "", err
+	}
+	var b64 string
+	if err := json.Unmarshal(v, &b64); err != nil {
+		return "", errors.New("the clipboard is not text")
+	}
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return "", errors.New("the clipboard is not base64")
+	}
+	return string(data), nil
+}

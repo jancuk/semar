@@ -583,7 +583,12 @@ func capture(states map[string]domain.ElementState, caps []domain.Capture) (map[
 			missing = append(missing, c.Name)
 			continue
 		}
-		got[c.Name] = st.Text
+		v, ok := c.Extract(st.Text)
+		if !ok {
+			missing = append(missing, c.Name)
+			continue
+		}
+		got[c.Name] = v
 	}
 	return got, missing
 }

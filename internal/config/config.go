@@ -94,6 +94,9 @@ type Android struct {
 	Timeout time.Duration `yaml:"timeout"`
 	// StartTimeout is how long the start of the server on the device may take. Zero means 60 seconds.
 	StartTimeout time.Duration `yaml:"startTimeout"`
+	// LogcatOnFailure writes the last 200 log lines of the app to the run directory when a mobile step
+	// fails. The crash report is written without it.
+	LogcatOnFailure bool `yaml:"logcatOnFailure,omitempty"`
 }
 
 // The defaults of Android, which a zero value in the file stands for.

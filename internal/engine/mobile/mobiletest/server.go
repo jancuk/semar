@@ -76,6 +76,9 @@ type Server struct {
 	keycodes  []int
 	executed  []Executed
 	settings  map[string]any
+	// notReady is what /status says now, and expired makes every call of the session answer invalid
+	// session id until a new session is started.
+	notReady, expired bool
 
 	onTap     func(x, y int)
 	onTouch   func(Touch)
@@ -85,10 +88,12 @@ type Server struct {
 	onExecute func(script string, args map[string]any) (any, *Failure)
 }
 
-// Touch is one finger that a client sent: where it went down, where it came up, and for how long.
+// Touch is one finger that a client sent: where it went down, where it came up, and for how long. Taps
+// is the number of times the finger went down and up in a row, and is 1 for a swipe and a long press.
 type Touch struct {
 	From, To   [2]int
 	Hold, Move int // milliseconds
+	Taps       int
 }
 
 // Executed is one script that a client ran.
@@ -101,7 +106,7 @@ type Executed struct {
 // sets one.
 func NewServer(t testing.TB, o Options) *Server {
 	t.Helper()
-	s := &Server{t: t, o: o, failures: map[string]Failure{}, source: Hierarchy(), sessionID: "sess-1", settings: map[string]any{}}
+	s := &Server{t: t, o: o, failures: map[string]Failure{}, source: Hierarchy(), sessionID: "sess-1", settings: map[string]any{}, notReady: o.NotReady}
 	s.shot = tinyPNG()
 	s.srv = httptest.NewServer(http.HandlerFunc(s.serve))
 	s.URL = s.srv.URL
@@ -126,8 +131,37 @@ func (s *Server) SetScreenshot(data []byte) {
 	s.shot = data
 }
 
+// SetReady changes what /status says, after the server was made: false is a server that does not answer
+// as ready, such as one that hung.
+func (s *Server) SetReady(ready bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.notReady = !ready
+}
+
+// Expire makes every call of the session answer invalid session id, as a server does that lost its
+// session. A new session, which the client opens after a restart, ends it.
+func (s *Server) Expire() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expired = true
+}
+
 // OnTap runs fn for every touch that ends where it began, with the place. fn may call SetSource.
 func (s *Server) OnTap(fn func(x, y int)) { s.mu.Lock(); s.onTap = fn; s.mu.Unlock() }
+
+// DoubleTaps are the places where a client tapped two or more times in one gesture, in order.
+func (s *Server) DoubleTaps() [][2]int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out [][2]int
+	for _, t := range s.touches {
+		if t.Taps > 1 {
+			out = append(out, t.To)
+		}
+	}
+	return out
+}
 
 // OnTouch runs fn for every touch, a swipe included. fn may call SetSource.
 func (s *Server) OnTouch(fn func(Touch)) { s.mu.Lock(); s.onTouch = fn; s.mu.Unlock() }
@@ -268,7 +302,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	if suffix != "" {
 		suffix = "/" + suffix
 	}
-	if id != s.sessionID {
+	s.mu.Lock()
+	expired := s.expired
+	s.mu.Unlock()
+	if id != s.sessionID || expired {
 		fail(w, 404, "invalid session id", "no such session")
 		return
 	}
@@ -352,8 +389,11 @@ func (s *Server) failure(key string) (Failure, bool) {
 
 func (s *Server) status(w http.ResponseWriter) {
 	v := map[string]any{"message": "fake server"}
+	s.mu.Lock()
+	notReady := s.notReady
+	s.mu.Unlock()
 	if !s.o.NoStatusReady {
-		v["ready"] = !s.o.NotReady
+		v["ready"] = !notReady
 	}
 	reply(w, v)
 }
@@ -371,6 +411,7 @@ func (s *Server) newSession(w http.ResponseWriter, body []byte) {
 	}
 	s.mu.Lock()
 	s.sessions++
+	s.expired = false
 	s.caps = in.Capabilities.AlwaysMatch
 	s.mu.Unlock()
 	if s.o.Legacy {
@@ -405,19 +446,31 @@ func (s *Server) actions(w http.ResponseWriter, body []byte) {
 	}
 	var moves [][2]int
 	touch := Touch{}
+	downs, ups := 0, 0
 	for _, a := range in.Actions[0].Actions {
 		switch a.Type {
 		case "pointerMove":
 			moves = append(moves, [2]int{a.X, a.Y})
 			touch.Move = a.Duration
+		case "pointerDown":
+			downs++
+		case "pointerUp":
+			ups++
 		case "pause":
-			touch.Hold = a.Duration
+			if downs > ups { // a pause between the taps of a multi-tap is no hold
+				touch.Hold = a.Duration
+			}
 		}
 	}
-	if len(moves) != 2 {
+	switch {
+	case len(moves) == 1 && downs >= 1 && downs == ups: // taps at one place
+		moves = append(moves, moves[0])
+		touch.Move = 0
+	case len(moves) != 2:
 		fail(w, 400, "invalid argument", "a touch is a move, a down, a pause, a move, and an up")
 		return
 	}
+	touch.Taps = max(downs, 1)
 	touch.From, touch.To = moves[0], moves[1]
 	s.mu.Lock()
 	s.touches = append(s.touches, touch)

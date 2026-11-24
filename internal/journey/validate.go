@@ -88,12 +88,22 @@ func ValidateWithScreens(j domain.Journey, outputs func(domain.FixtureID) ([]str
 	return validateFull(j, "", outputs, screensOf)
 }
 
+// ValidateWithFlows is ValidateWithScreens with a lookup of the flows that the steps of an android leg
+// use. With a nil lookup, a use step is not looked into.
+func ValidateWithFlows(j domain.Journey, outputs func(domain.FixtureID) ([]string, bool), screensOf ScreensFunc, flows script.FlowResolver) []Problem {
+	return validateAll(j, "", outputs, screensOf, flows)
+}
+
 func validate(j domain.Journey, file string, outputs func(domain.FixtureID) ([]string, bool)) []Problem {
 	return validateFull(j, file, outputs, nil)
 }
 
 func validateFull(j domain.Journey, file string, outputs func(domain.FixtureID) ([]string, bool), screensOf ScreensFunc) []Problem {
-	v := &validator{file: file, j: j, outputs: outputs, screens: screensOf, aliases: map[string]alias{}, legIndex: map[domain.LegID]int{}}
+	return validateAll(j, file, outputs, screensOf, nil)
+}
+
+func validateAll(j domain.Journey, file string, outputs func(domain.FixtureID) ([]string, bool), screensOf ScreensFunc, flows script.FlowResolver) []Problem {
+	v := &validator{file: file, j: j, outputs: outputs, screens: screensOf, flows: flows, aliases: map[string]alias{}, legIndex: map[domain.LegID]int{}}
 	for i, l := range j.Legs {
 		if _, dup := v.legIndex[l.ID]; !dup {
 			v.legIndex[l.ID] = i
@@ -117,6 +127,7 @@ type validator struct {
 	file     string
 	j        domain.Journey
 	screens  ScreensFunc
+	flows    script.FlowResolver
 	outputs  func(domain.FixtureID) ([]string, bool)
 	aliases  map[string]alias
 	legIndex map[domain.LegID]int // the first leg with each ID
@@ -351,6 +362,12 @@ func (v *validator) steps(li int, l domain.Leg, reach map[domain.LegID]bool) {
 	dup := false
 	for k, st := range l.Steps {
 		sp := fmt.Sprintf("%s.steps[%d]", base, k)
+		if st.Use != "" && l.Surface != domain.SurfaceAndroid {
+			v.add(sp+".use", "use is for a step of an android leg: a flow runs on a device")
+		}
+		if len(st.With) > 0 && st.Use == "" {
+			v.add(sp+".with", "with belongs to a step that has use")
+		}
 		switch l.Surface {
 		case domain.SurfaceWeb:
 			v.webStep(sp, l, st)
@@ -392,7 +409,7 @@ func (v *validator) steps(li int, l domain.Leg, reach map[domain.LegID]bool) {
 		}
 	}
 	if !dup {
-		for _, p := range script.ValidateWith(sc, sr, nil) {
+		for _, p := range script.ValidateWithFlows(sc, sr, nil, v.flows) {
 			// A variable with a dot is judged below, with the leg's needs. The messages of
 			// script.ValidateWith for it speak of given entries only.
 			if strings.Contains(p.Message, " is not an output of fixture ") ||
@@ -404,6 +421,12 @@ func (v *validator) steps(li int, l domain.Leg, reach map[domain.LegID]bool) {
 				switch {
 				case l.Steps[k].Web != nil:
 					place, msg = "web", strings.TrimPrefix(p.Message, "web: ")
+				case l.Steps[k].Use != "":
+					place = "use"
+					if strings.HasPrefix(p.Message, "with: ") {
+						place = "with"
+					}
+					msg = strings.TrimPrefix(strings.TrimPrefix(p.Message, "use: "), "with: ")
 				case l.Steps[k].Mobile != nil:
 					place, msg = "mobile", strings.TrimPrefix(p.Message, "mobile: ")
 				}
@@ -422,6 +445,16 @@ func (v *validator) steps(li int, l domain.Leg, reach map[domain.LegID]bool) {
 		return v.refProblem(l, reach, name) == ""
 	}
 	for k, st := range l.Steps {
+		if st.Use != "" {
+			for _, name := range script.WithVariables(st.With) {
+				if head, _, dotted := strings.Cut(name, "."); dotted && name != "run.id" && head != "secret" && head != "data" && !datevar.Is(name) {
+					if msg := v.refProblem(l, reach, name); msg != "" {
+						v.add(fmt.Sprintf("%s.steps[%d].with", base, k), "%s", msg)
+					}
+				}
+			}
+			continue
+		}
 		if st.Web != nil {
 			for _, name := range st.Web.Variables() {
 				if head, _, dotted := strings.Cut(name, "."); dotted && name != "run.id" && head != "secret" && head != "data" && !datevar.Is(name) {
@@ -548,6 +581,11 @@ func (v *validator) legOutputs(li int, l domain.Leg) {
 		for _, c := range st.Captures {
 			captured[c.Name] = true
 		}
+		if st.Use != "" {
+			for _, name := range v.flowCaptures(st.Use, 1) {
+				captured[name] = true
+			}
+		}
 	}
 	seen := map[string]bool{}
 	for _, o := range l.Outputs {
@@ -561,6 +599,29 @@ func (v *validator) legOutputs(li int, l domain.Leg) {
 		}
 		seen[o] = true
 	}
+}
+
+// flowCaptures lists the names that the flow of an ID, and the flows it uses, capture. A flow that cannot be
+// read has none: the check of the step reports it.
+func (v *validator) flowCaptures(id string, depth int) []string {
+	if v.flows == nil || depth > 8 {
+		return nil
+	}
+	f, err := v.flows(id)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, st := range f.Steps {
+		if st.Use != "" {
+			out = append(out, v.flowCaptures(st.Use, depth+1)...)
+			continue
+		}
+		for _, c := range st.Captures {
+			out = append(out, c.Name)
+		}
+	}
+	return out
 }
 
 // invariants checks J15. Each entry is exactly one variable that names an output.
@@ -631,6 +692,21 @@ func (v *validator) webStep(sp string, l domain.Leg, st domain.LegStep) {
 // mobileStep checks the one action of a step of an android leg, and that the step has no request, no
 // web action, and no hint.
 func (v *validator) mobileStep(sp string, l domain.Leg, st domain.LegStep) {
+	if st.Use != "" {
+		// A step that uses a flow has no action of its own. The script check judges the flow, its with,
+		// its captures, and its checks.
+		switch {
+		case st.Mobile != nil:
+			v.add(sp+".mobile", "a step that uses a flow has no mobile action: use, or mobile, and not both")
+		case st.Hint != nil:
+			v.add(sp+".hint", "a step of an android leg has no hint: a hint is the method and the path of a request")
+		case st.Web != nil:
+			v.add(sp+".web", "a step of an android leg has a use, and not a web action")
+		case !requestEmpty(st.Request):
+			v.add(sp+".request", "a step of an android leg has a use, and not a request")
+		}
+		return
+	}
 	switch {
 	case st.Mobile == nil:
 		v.add(sp+".mobile", "a step of an android leg needs mobile: its one action on the device")

@@ -112,6 +112,9 @@ func stepElements(st domain.Step, ss domain.ScriptStep) []string {
 	for _, c := range ss.Captures {
 		add(c.Element)
 	}
+	for _, e := range ss.Expect { // a step of a flow
+		add(e.Check.Element)
+	}
 	return out
 }
 

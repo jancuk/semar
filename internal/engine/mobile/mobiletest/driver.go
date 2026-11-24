@@ -61,7 +61,9 @@ type FakeDriver struct {
 	OnReset func(mode string)
 	// Sources, when set, is a script of what Source returns, one per call. The last one repeats.
 	Sources []*mobile.Tree
-	Info    mobile.About
+	// Clip is what Clipboard reads.
+	Clip string
+	Info mobile.About
 
 	ResetErr, LaunchErr, OpenErr, SourceErr, TouchErr, TypeErr, KeyErr error
 	Shot                                                               []byte
@@ -276,3 +278,10 @@ func (p *FakePlatform) Close(context.Context) error {
 // Drivers is how many times a driver was asked for, and Closed how many times the platform was closed.
 func (p *FakePlatform) Drivers() int { p.mu.Lock(); defer p.mu.Unlock(); return p.drivers }
 func (p *FakePlatform) Closed() int  { p.mu.Lock(); defer p.mu.Unlock(); return p.closed }
+
+// Clipboard reads Clip, so that the fake is a mobile.ClipboardReader.
+func (f *FakeDriver) Clipboard(context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.Clip, nil
+}

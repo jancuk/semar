@@ -69,14 +69,22 @@ func sum(data []byte) string {
 func (s *Session) Save(o SaveOptions) (*Saved, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if gap, at := s.gapLocked(); gap {
+		return nil, &GapError{At: at}
+	}
 	d, err := s.buildLocked()
 	if err != nil {
 		return nil, err
+	}
+	// A reopened recording saves over its own files, and over no other.
+	if r := s.o.Resume; r != nil && (d.Kind == KindFlow && d.ID == r.Flow.ID || d.Kind == KindScenario && d.Scenario.ID == r.Scenario.ID) {
+		o.Replace = true
 	}
 	sv, err := writeDraft(s.o.Repo, d, o, s.o.Title)
 	if err != nil {
 		return nil, err
 	}
+	s.known = nil
 	s.last = sv
 	return sv, nil
 }
@@ -160,6 +168,13 @@ func writeDraft(repo string, d Draft, o SaveOptions, title string) (*Saved, erro
 			return nil, err
 		}
 		sv.ScenarioPath = filepath.ToSlash(filepath.Join(".semar", "scenarios", d.Scenario.Ticket, string(d.Scenario.ID)+".feature"))
+		if d.ScenarioPath != "" {
+			clean := filepath.Clean(filepath.FromSlash(d.ScenarioPath))
+			if !filepath.IsLocal(clean) || filepath.Ext(clean) != ".feature" {
+				return nil, fmt.Errorf("%s is not a feature file below the repository", d.ScenarioPath)
+			}
+			sv.ScenarioPath = filepath.ToSlash(clean)
+		}
 		files = append(files, file{rel: sv.ScenarioPath, data: feature, replace: o.Replace})
 	}
 

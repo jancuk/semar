@@ -1,0 +1,13 @@
+### settings
+com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+### dumpsys
+Current Input Method Manager state:
+  mCurMethodId=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+  mImeWindowVis=0x3
+  Input method service state for com.google.android.inputmethod.latin/.LatinIME:
+    mViewsCreated=true mDecorViewVisible=true mWindowVisible=true
+    mShowInputRequested=true mShowInputFlags=0x1
+    isInputViewShown=true
+    mLastShowInputRequested=true
+### want
+pkg=com.google.android.inputmethod.latin shown=true

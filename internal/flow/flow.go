@@ -28,6 +28,7 @@ import (
 	"github.com/jancuk/semar/internal/datevar"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/idcheck"
+	"github.com/jancuk/semar/internal/scenario"
 	"github.com/jancuk/semar/internal/script"
 	"github.com/jancuk/semar/internal/yamlfile"
 )
@@ -40,6 +41,8 @@ const (
 	// MaxSteps is the most steps that one flow may have.
 	MaxSteps  = 50
 	maxParams = 20
+	// MaxDepth is the most flows that nest: a flow, the flow it uses, and the flow that one uses.
+	MaxDepth = 3
 
 	apiVersion = "semar/v1"
 	kind       = "Flow"
@@ -112,8 +115,85 @@ func Parse(data []byte, name, id string) (domain.Flow, error) {
 
 // Validate returns every reason the flow cannot be used, in plain words. The variables of a step are
 // checked in a closed scope: only the params of the flow, the captures of its earlier steps, run.id,
-// and the date variables may be used. A flow does not use another flow.
-func Validate(f domain.Flow, id string) []Problem {
+// and the date variables may be used. A step that uses another flow is checked only as far as it can
+// be without that flow: ValidateWith looks into it.
+func Validate(f domain.Flow, id string) []Problem { return validate(f, id, nil) }
+
+// Resolver gives the flow of an ID, or an error that says why there is none.
+type Resolver func(id string) (domain.Flow, error)
+
+// ValidateWith is Validate with the flows that the steps use: each flow that a use step names must
+// exist, with must name its params and give the required ones, a flow must not use itself through
+// others, and flows nest at most MaxDepth deep. What a used flow captures is known to the steps after it.
+func ValidateWith(f domain.Flow, id string, resolve Resolver) []Problem {
+	ps := validate(f, id, resolve)
+	if resolve == nil {
+		return ps
+	}
+	var walk func(cur domain.Flow, path []string)
+	reported := map[string]bool{}
+	walk = func(cur domain.Flow, path []string) {
+		for i, st := range cur.Steps {
+			if st.Use == "" {
+				continue
+			}
+			where := ""
+			if len(path) == 1 {
+				where = fmt.Sprintf("steps[%d]", i)
+			}
+			if j := slices.Index(path, st.Use); j >= 0 {
+				chain := slices.Clone(path[j:])
+				text := "flow " + chain[0]
+				for _, c := range chain[1:] {
+					text += " uses " + c + ", which"
+				}
+				text += " uses " + st.Use + ": a flow cannot use itself"
+				if !reported[text] {
+					reported[text] = true
+					ps = append(ps, Problem{Path: where, Message: text})
+				}
+				continue
+			}
+			if len(path) >= MaxDepth {
+				text := fmt.Sprintf("flows are nested more than %d deep: %s > %s", MaxDepth, strings.Join(path, " > "), st.Use)
+				if !reported[text] {
+					reported[text] = true
+					ps = append(ps, Problem{Path: where, Message: text})
+				}
+				continue
+			}
+			inner, err := resolve(st.Use)
+			if err != nil {
+				continue // validate reported it, or it is below the first level
+			}
+			walk(inner, append(slices.Clone(path), st.Use))
+		}
+	}
+	walk(f, []string{f.ID})
+	return ps
+}
+
+// usedCaptures lists the names that a flow and the flows inside it capture, in order.
+func usedCaptures(f domain.Flow, resolve Resolver, depth int) []string {
+	var out []string
+	if depth > MaxDepth+1 {
+		return nil
+	}
+	for _, st := range f.Steps {
+		if st.Use != "" && resolve != nil {
+			if inner, err := resolve(st.Use); err == nil {
+				out = append(out, usedCaptures(inner, resolve, depth+1)...)
+			}
+			continue
+		}
+		for _, c := range st.Captures {
+			out = append(out, c.Name)
+		}
+	}
+	return out
+}
+
+func validate(f domain.Flow, id string, resolve Resolver) []Problem {
 	var ps []Problem
 	add := func(path, format string, args ...any) {
 		ps = append(ps, Problem{Path: path, Message: fmt.Sprintf(format, args...)})
@@ -156,6 +236,7 @@ func Validate(f domain.Flow, id string) []Problem {
 		add("steps", "%d steps; at most %d", n, MaxSteps)
 	}
 	names := map[string]bool{}
+	open := false // a step before this one uses a flow that is not looked into, so it may capture anything
 	for i, st := range f.Steps {
 		where := fmt.Sprintf("steps[%d]", i)
 		switch {
@@ -166,8 +247,52 @@ func Validate(f domain.Flow, id string) []Problem {
 		}
 		names[string(st.Step)] = true
 		switch {
-		case st.Use != "" || len(st.With) > 0:
-			add(where, "a flow does not use another flow: remove use and with")
+		case st.Use != "":
+			if err := CheckID(st.Use); err != nil {
+				add(where+".use", "%v", err)
+			}
+			if st.Request != nil || st.Web != nil || st.Mobile != nil {
+				add(where, "a step that uses a flow has no action of its own: use, or a mobile action, and not both")
+			}
+			if len(st.Captures) > 0 {
+				add(where+".captures", "a step that uses a flow takes no captures: the flow captures what it needs")
+			}
+			if len(st.Expect) > 0 {
+				add(where+".expect", "a step that uses a flow takes no checks: put them on a step after it")
+			}
+			for _, v := range script.WithVariables(st.With) {
+				if msg := unknown(v, scope, open); msg != "" {
+					add(where+".with", "%s", msg)
+				}
+			}
+			if resolve == nil {
+				open = true
+				break
+			}
+			inner, err := resolve(st.Use)
+			if err != nil {
+				add(where+".use", "flow %s: %v", st.Use, err)
+				open = true
+				break
+			}
+			for _, k := range sortedKeys(st.With) {
+				if _, ok := inner.Param(k); !ok {
+					add(where+".with", "flow %s has no param %s; its params are %s", inner.ID, k, paramNames(inner))
+				}
+			}
+			for _, p := range inner.Params {
+				if _, given := st.With[p.Name]; !given && p.Required() {
+					add(where+".with", "flow %s needs the param %s", inner.ID, p.Name)
+				}
+			}
+			for _, name := range usedCaptures(inner, resolve, 1) {
+				if scope[name] {
+					add(where+".use", "flow %s captures %s, which is already a param or a capture of this flow", inner.ID, name)
+				}
+				scope[name] = true
+			}
+		case len(st.With) > 0:
+			add(where, "with belongs to a step that has use")
 		case st.Request != nil || st.Web != nil:
 			add(where, "a flow step has a mobile action, and no request and no web action")
 		case st.Mobile == nil:
@@ -193,8 +318,23 @@ func Validate(f domain.Flow, id string) []Problem {
 				add(where+".mobile", "%s", msg)
 			}
 			for _, v := range m.Variables() {
-				if msg := unknown(v, scope); msg != "" {
+				if msg := unknown(v, scope, open); msg != "" {
 					add(where+".mobile", "%s", msg)
+				}
+			}
+		}
+		for j, e := range st.Expect {
+			ew := fmt.Sprintf("%s.expect[%d]", where, j)
+			if st.Mobile == nil {
+				if st.Use == "" {
+					add(ew, "a check belongs to a step with a mobile action")
+				}
+				continue
+			}
+			ps = append(ps, expectProblems(ew, e)...)
+			for _, v := range domain.OperandVariables(e.Check) {
+				if msg := unknown(v, scope, open); msg != "" {
+					add(ew+".check", "%s", msg)
 				}
 			}
 		}
@@ -216,6 +356,9 @@ func Validate(f domain.Flow, id string) []Problem {
 			case st.Mobile.Do == domain.MobileLaunch || st.Mobile.Do == domain.MobileOpenLink || st.Mobile.Do == domain.MobilePress:
 				add(cw, "capture %s reads an element of the screen of the step, and %s has no screen", c.Name, st.Mobile.Do)
 			}
+			if err := domain.CheckPattern(c.Pattern); err != nil {
+				add(cw+".pattern", "capture %s: %v", c.Name, err)
+			}
 			seen[c.Name] = true
 		}
 		for name := range seen {
@@ -225,9 +368,54 @@ func Validate(f domain.Flow, id string) []Problem {
 	return ps
 }
 
-// unknown gives the problem of a variable in a flow step, or "" when the flow may use it.
-func unknown(name string, scope map[string]bool) string {
-	if name == "run.id" || scope[name] || datevar.Is(name) {
+// expectProblems checks one check of a flow step: the source is person, and the check reads an element.
+func expectProblems(path string, e domain.Expectation) []Problem {
+	var ps []Problem
+	if e.Source != domain.SourcePerson {
+		ps = append(ps, Problem{Path: path + ".source", Message: "the source of a check of a flow must be person"})
+	}
+	c := e.Check
+	if c.Element == "" || c.SubjectCount() != 1 {
+		ps = append(ps, Problem{Path: path + ".check", Message: "a check of a flow reads an element: name an element, and no status, jsonpath, header, or page"})
+	}
+	// scenario.Validate holds the rules of a check. Its steps are not the flow's, so only the path of
+	// this expectation is kept.
+	probe := domain.Scenario{
+		APIVersion: "semar/v1", Kind: "Scenario", ID: "flow-check", Ticket: "flow", Surface: domain.SurfaceAndroid,
+		Steps: []domain.Step{{ID: "check", Expect: []domain.Expectation{e}}},
+	}
+	for _, p := range scenario.Validate(probe, scenario.FromFile) {
+		if rest, ok := strings.CutPrefix(p.Path, "steps[0].expect[0]"); ok && !strings.HasSuffix(p.Path, ".source") && !(rest == ".check" && p.Message == "a check needs exactly one of status, jsonpath, header, element, page") {
+			ps = append(ps, Problem{Path: path + rest, Message: p.Message})
+		}
+	}
+	return ps
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+func paramNames(f domain.Flow) string {
+	if len(f.Params) == 0 {
+		return "none"
+	}
+	names := make([]string, len(f.Params))
+	for i, p := range f.Params {
+		names[i] = p.Name
+	}
+	return strings.Join(names, ", ")
+}
+
+// unknown gives the problem of a variable in a flow step, or "" when the flow may use it. open says
+// that a flow that is not looked into may have captured the name.
+func unknown(name string, scope map[string]bool, open bool) string {
+	if name == "run.id" || scope[name] || datevar.Is(name) || (open && !strings.Contains(name, ".")) {
 		return ""
 	}
 	if strings.Contains(name, ".") {
@@ -237,7 +425,7 @@ func unknown(name string, scope map[string]bool) string {
 }
 
 // Steps gives the steps of the flow as concrete script steps: a step that names no service or app has
-// those of the flow. The result shares nothing with f.
+// those of the flow. The mobile actions, the captures, and the checks are copies, and the with of a use step is the one of f.
 func Steps(f domain.Flow) []domain.ScriptStep {
 	out := make([]domain.ScriptStep, len(f.Steps))
 	for i, st := range f.Steps {
@@ -253,6 +441,7 @@ func Steps(f domain.Flow) []domain.ScriptStep {
 			cp.Mobile = &m
 		}
 		cp.Captures = slices.Clone(st.Captures)
+		cp.Expect = slices.Clone(st.Expect)
 		out[i] = cp
 	}
 	return out
@@ -302,6 +491,9 @@ func normal(f domain.Flow) domain.Flow {
 		}
 		if len(st.With) == 0 {
 			st.With = nil
+		}
+		if len(st.Expect) == 0 {
+			st.Expect = nil
 		}
 		steps[i] = st
 	}
@@ -463,7 +655,8 @@ func SecretEnvNames(repo string) []string {
 type Source struct {
 	repo string
 	mu   sync.Mutex
-	got  map[string]loaded
+	raw  map[string]loaded // flows as Parse reads them
+	got  map[string]loaded // flows that also fit the flows they use
 }
 
 type loaded struct {
@@ -472,18 +665,46 @@ type loaded struct {
 }
 
 // Loader gives the source of the flows of a repository.
-func Loader(repo string) *Source { return &Source{repo: repo, got: map[string]loaded{}} }
+func Loader(repo string) *Source {
+	return &Source{repo: repo, raw: map[string]loaded{}, got: map[string]loaded{}}
+}
 
-// Entry gives the flow and its digest. The error says the flow is not there with ErrNotFound.
+// Entry gives the flow and its digest. The error says the flow is not there with ErrNotFound. A flow
+// that uses other flows is read together with them: it is refused when one is missing, when a with is
+// wrong, when flows use each other in a circle, or when they nest too deep.
 func (s *Source) Entry(id string) (Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if l, ok := s.got[id]; ok {
 		return l.e, l.err
 	}
-	e, err := Load(s.repo, id)
+	e, err := s.rawLocked(id)
+	if err == nil {
+		if ps := ValidateWith(e.Flow, id, s.resolveLocked); len(ps) > 0 {
+			lines := make([]string, len(ps))
+			for i, p := range ps {
+				lines[i] = Path(id) + ": " + p.String()
+			}
+			err = errors.New(strings.Join(lines, "\n"))
+			e = Entry{}
+		}
+	}
 	s.got[id] = loaded{e, err}
 	return e, err
+}
+
+func (s *Source) rawLocked(id string) (Entry, error) {
+	if l, ok := s.raw[id]; ok {
+		return l.e, l.err
+	}
+	e, err := Load(s.repo, id)
+	s.raw[id] = loaded{e, err}
+	return e, err
+}
+
+func (s *Source) resolveLocked(id string) (domain.Flow, error) {
+	e, err := s.rawLocked(id)
+	return e.Flow, err
 }
 
 // Flow gives the flow and its digest, as replay.FlowSource wants.

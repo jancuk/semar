@@ -1,0 +1,9 @@
+--------- beginning of main
+11-23 10:15:28.101  1234  1234 I ActivityManager: Start proc 5678:com.example.shop/u0a123 for activity {com.example.shop/.MainActivity}
+11-23 10:15:28.350  5678  5678 D ShopApp : onCreate
+11-23 10:15:28.351  5678  5700 W OkHttp  : slow response: 1200 ms
+11-23 10:15:29.002  5678  5678 E ShopApp : login failed: HTTP 500
+11-23 10:15:29.100  1234  1250 V WindowManager: layout pass
+--------- beginning of system
+11-23 10:15:30.000  5678  5678 I chatty  : uid=10123(com.example.shop) identical 3 lines
+11-23 10:15:30.500  5678  5678 F libc    : Fatal signal 11 (SIGSEGV), code 1

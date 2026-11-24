@@ -31,6 +31,9 @@ func TestMobileProblems(t *testing.T) {
 	ok(domain.MobileAction{Do: domain.MobileOpenLink, Link: "shop://cart/{{id}}"})
 	ok(domain.MobileAction{Do: domain.MobileTap, Screen: "S", Element: "e"})
 	ok(domain.MobileAction{Do: domain.MobileLongTap, Screen: "S", Element: "e"})
+	ok(domain.MobileAction{Do: domain.MobileDoubleTap, Screen: "S", Element: "e"})
+	ok(domain.MobileAction{Do: domain.MobileDrag, Screen: "S", Element: "e", To: "slot"})
+	ok(domain.MobileAction{Do: domain.MobileDrag, Screen: "S", Element: "e", To: "slot", Value: "800ms"})
 	ok(domain.MobileAction{Do: domain.MobileType, Screen: "S", Element: "e", Value: "x"})
 	ok(domain.MobileAction{Do: domain.MobileType, Screen: "S", Element: "e", Secret: "env:P"})
 	ok(domain.MobileAction{Do: domain.MobileSwipe, Value: "up"})
@@ -54,6 +57,17 @@ func TestMobileProblems(t *testing.T) {
 	bad("tap without element", domain.MobileAction{Do: domain.MobileTap, Screen: "S"}, "tap needs the element")
 	bad("tap with value", domain.MobileAction{Do: domain.MobileTap, Screen: "S", Element: "e", Value: "x"}, "tap takes no value")
 	bad("longPress with within", domain.MobileAction{Do: domain.MobileLongTap, Screen: "S", Element: "e", Within: "w"}, "longPress takes no within")
+	bad("doubleTap without element", domain.MobileAction{Do: domain.MobileDoubleTap, Screen: "S"}, "doubleTap needs the element")
+	bad("doubleTap with to", domain.MobileAction{Do: domain.MobileDoubleTap, Screen: "S", Element: "e", To: "t"}, "doubleTap takes no to")
+	bad("tap with to", domain.MobileAction{Do: domain.MobileTap, Screen: "S", Element: "e", To: "t"}, "tap takes no to")
+	bad("drag without to", domain.MobileAction{Do: domain.MobileDrag, Screen: "S", Element: "e"}, "drag needs the to")
+	bad("drag without screen", domain.MobileAction{Do: domain.MobileDrag, Element: "e", To: "t"}, "drag needs the screen")
+	bad("drag with link", domain.MobileAction{Do: domain.MobileDrag, Screen: "S", Element: "e", To: "t", Link: "a://b"}, "drag takes no link")
+	bad("drag with within", domain.MobileAction{Do: domain.MobileDrag, Screen: "S", Element: "e", To: "t", Within: "w"}, "drag takes no within")
+	bad("drag with secret", domain.MobileAction{Do: domain.MobileDrag, Screen: "S", Element: "e", To: "t", Secret: "env:P"}, "drag takes no secret")
+	bad("drag hold not a time", domain.MobileAction{Do: domain.MobileDrag, Screen: "S", Element: "e", To: "t", Value: "slow"}, "drag value must be a hold")
+	bad("drag hold too long", domain.MobileAction{Do: domain.MobileDrag, Screen: "S", Element: "e", To: "t", Value: "11s"}, "drag value must be a hold")
+	bad("drag bad to name", domain.MobileAction{Do: domain.MobileDrag, Screen: "S", Element: "e", To: "a b"}, "to \"a b\"")
 	bad("type without text", domain.MobileAction{Do: domain.MobileType, Screen: "S", Element: "e"}, "type needs a value or a secret")
 	bad("type with both", domain.MobileAction{Do: domain.MobileType, Screen: "S", Element: "e", Value: "x", Secret: "env:P"}, "not both")
 	bad("type with a bad secret", domain.MobileAction{Do: domain.MobileType, Screen: "S", Element: "e", Secret: "hunter2"}, "secret must be a secret reference")
@@ -74,6 +88,7 @@ func TestMobileProblems(t *testing.T) {
 func TestMobileWritesAndVariables(t *testing.T) {
 	writes := map[domain.MobileOp]bool{
 		domain.MobileLaunch: false, domain.MobileOpenLink: false, domain.MobileTap: true, domain.MobileLongTap: true,
+		domain.MobileDoubleTap: true, domain.MobileDrag: true,
 		domain.MobileType: true, domain.MobileSwipe: true, domain.MobileScroll: false, domain.MobilePress: true, domain.MobileWait: false,
 	}
 	for op, want := range writes {
@@ -85,7 +100,7 @@ func TestMobileWritesAndVariables(t *testing.T) {
 	if got := m.Variables(); !reflect.DeepEqual(got, []string{"a.b", "c", "d"}) {
 		t.Errorf("variables = %v", got)
 	}
-	if got := (domain.MobileAction{Element: "e", Within: "w"}).Elements(); !reflect.DeepEqual(got, []string{"e", "w"}) {
+	if got := (domain.MobileAction{Element: "e", Within: "w", To: "t"}).Elements(); !reflect.DeepEqual(got, []string{"e", "w", "t"}) {
 		t.Errorf("elements = %v", got)
 	}
 }
@@ -172,5 +187,36 @@ func TestAMobileActionRecordRoundTripsThroughJSON(t *testing.T) {
 	var out domain.Action
 	if err := json.Unmarshal(data, &out); err != nil || !reflect.DeepEqual(in, out) {
 		t.Errorf("round trip: %v\n%+v\n%+v", err, in, out)
+	}
+}
+
+func TestLocatorHasTextAndIndex(t *testing.T) {
+	l := domain.Locator{Role: "button", Name: "Delete", HasText: "Milk 2 l", Index: 2}
+	if got := l.String(); got != `{ role: button, name: Delete, hasText: "Milk 2 l", index: 2 }` {
+		t.Errorf("String = %s", got)
+	}
+	if got := l.Fields()["hasText"]; got != "Milk 2 l" {
+		t.Errorf("Fields hasText = %q", got)
+	}
+	if (domain.Locator{HasText: "x"}).ForMobile() || (domain.Locator{Index: 2}).ForMobile() || !(domain.Locator{HasText: "x", Index: 2}).Empty() {
+		t.Error("hasText or index counts as a way to find an element")
+	}
+	// The locator is a map key.
+	_ = map[domain.Locator]bool{l: true}
+}
+
+func TestScreensLocatorFallsBackToCommon(t *testing.T) {
+	s := domain.Screens{
+		Common:  map[string]domain.Locator{"back": {Desc: "Up"}, "nav": {ID: "nav"}},
+		Screens: map[string]map[string]domain.Locator{"Cart": {"back": {Desc: "Close"}}},
+	}
+	if l, ok := s.Locator("Cart", "back"); !ok || l.Desc != "Close" {
+		t.Errorf("shadow = %+v", l)
+	}
+	if l, ok := s.Locator("Cart", "nav"); !ok || l.ID != "nav" {
+		t.Errorf("fallback = %+v", l)
+	}
+	if _, ok := s.Locator("Cart", "none"); ok {
+		t.Error("found an element that is nowhere")
 	}
 }

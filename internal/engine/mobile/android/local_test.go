@@ -767,3 +767,145 @@ func TestADriverIsTheSameForTheSameService(t *testing.T) {
 
 var _ = webdriver.Point{}
 var _ domain.Surface
+
+func recoverer(t *testing.T, p *android.Platform) mobile.Recoverer {
+	t.Helper()
+	rc, ok := any(p).(mobile.Recoverer)
+	if !ok {
+		t.Fatal("the platform is not a Recoverer")
+	}
+	return rc
+}
+
+func TestHealthyJudgesOnlyASessionThatIsClearlyGone(t *testing.T) {
+	r := newRig(t)
+	p := r.platform()
+	r.driver(p)
+	rc := recoverer(t, p)
+	ctx := context.Background()
+	// An answer that is no sign of a dead server: the element is not found, or the server errs once.
+	for _, f := range []mobiletest.Failure{
+		{Status: 404, Code: "no such element", Message: "no element has the focus"},
+		{Status: 500, Code: "unknown error", Message: "something broke"},
+		{Status: 400, Code: "invalid argument", Message: "bad"},
+	} {
+		r.server.Fail("GET /element/active", f)
+		if !rc.Healthy(ctx) {
+			t.Errorf("a server that answered %d %s is not healthy", f.Status, f.Code)
+		}
+	}
+	// A session that the server lost, by any of the codes that say so.
+	for _, f := range []mobiletest.Failure{
+		{Status: 404, Code: "invalid session id", Message: "gone"},
+		{Status: 404, Code: "no such session", Message: "gone"},
+		{Status: 500, Code: "session not created", Message: "gone"},
+	} {
+		r.server.Fail("GET /element/active", f)
+		if rc.Healthy(ctx) {
+			t.Errorf("a server that answered %d %s is healthy", f.Status, f.Code)
+		}
+	}
+	r.server.Heal("GET /element/active")
+	// A caller that gave up is no sign of a dead server.
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	if !rc.Healthy(gone) {
+		t.Error("a cancelled call made the server unhealthy")
+	}
+	// A server that cannot be reached is unhealthy.
+	r.server.Close()
+	if rc.Healthy(ctx) {
+		t.Error("a server that is not there is healthy")
+	}
+}
+
+func TestRecoveryStartsTheInstrumentationAgainAndOpensASecondSession(t *testing.T) {
+	r := newRig(t)
+	p := r.platform()
+	first := r.driver(p)
+	rc := recoverer(t, p)
+	if !rc.Healthy(context.Background()) {
+		t.Fatal("a server that answers is not healthy")
+	}
+	r.server.SetReady(false)
+	if rc.Healthy(context.Background()) {
+		t.Fatal("a server that is not ready is healthy")
+	}
+	r.server.SetReady(true)
+	r.server.Expire()
+	if rc.Healthy(context.Background()) {
+		t.Fatal("a server that lost its session is healthy")
+	}
+	installs := r.adb.Count("install")
+	if err := rc.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	const instrument = "shell 'am' 'instrument' '-w' '-e' 'disableAnalytics' 'true' 'io.appium.uiautomator2.server.test/androidx.test.runner.AndroidJUnitRunner'"
+	// The fake adb logs the call when its process runs, which can be a moment after the platform went on.
+	for i := 0; i < 200 && r.adb.Count(instrument) < 2; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := r.adb.Count(instrument); n != 2 {
+		t.Errorf("the instrumentation started %d times, want 2", n)
+	}
+	if r.server.Sessions() != 2 {
+		t.Errorf("sessions = %d, want 2", r.server.Sessions())
+	}
+	if n := r.adb.Count("shell 'am' 'force-stop'"); n < 4 {
+		t.Errorf("the old server packages were stopped %d times in all", n)
+	}
+	if r.adb.Count("forward --remove") != 1 {
+		t.Errorf("the old forward was removed %d times", r.adb.Count("forward --remove"))
+	}
+	if r.adb.Count("install") != installs {
+		t.Error("an app or a server package was installed again")
+	}
+	if s := r.server.Settings(); s["enableMultiWindows"] != true {
+		t.Errorf("settings = %v", s)
+	}
+	if !rc.Healthy(context.Background()) {
+		t.Error("the server is not healthy after the restart")
+	}
+	// The driver that was handed out before points at a session that is gone. A new one is given.
+	second := r.driver(p)
+	if second == first {
+		t.Error("the platform gave the old driver after a restart")
+	}
+	if _, err := second.Source(context.Background()); err != nil {
+		t.Errorf("the new driver cannot read: %v", err)
+	}
+}
+
+func TestAFailedRecoveryLeavesThePlatformUnavailable(t *testing.T) {
+	r := newRig(t)
+	p := r.platform()
+	r.driver(p)
+	r.server.SetReady(false) // the new server never answers
+	if err := recoverer(t, p).Recover(context.Background()); err == nil {
+		t.Fatal("Recover worked on a server that does not answer")
+	}
+	if _, err := p.Driver(context.Background(), "shop"); err == nil {
+		t.Error("a driver was given after a restart that failed")
+	} else {
+		unavailable(t, err)
+	}
+}
+
+func TestAServerAtServerURLIsNotRestartedAndIsAlwaysHealthy(t *testing.T) {
+	r := newRemote(t, mobiletest.Options{}, android.App{Package: pkgShop}, config.Android{})
+	p := android.New(r.opts)
+	t.Cleanup(func() { _ = p.Close(context.Background()) })
+	r.driver(p)
+	rc := recoverer(t, p)
+	r.server.SetReady(false)
+	if !rc.Healthy(context.Background()) {
+		t.Error("a remote server is not Semar's to judge")
+	}
+	err := rc.Recover(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "not supported") {
+		t.Errorf("Recover = %v, want not supported", err)
+	}
+	if r.server.Sessions() != 1 {
+		t.Errorf("sessions = %d", r.server.Sessions())
+	}
+}

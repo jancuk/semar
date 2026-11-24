@@ -51,7 +51,7 @@ func (h *HTTP) Probe(ctx context.Context, service string) (domain.BuildRef, erro
 		return domain.BuildRef{}, fmt.Errorf("build probe for service %q: the service is not configured", service)
 	}
 	if svc.Build == nil {
-		return domain.BuildRef{}, fmt.Errorf("build probe for service %q: the service has no build probe configured", service)
+		return domain.BuildRef{}, fmt.Errorf("build probe for service %q: %w", service, ErrNoBuild)
 	}
 	if svc.Build.Probe != "http" {
 		return domain.BuildRef{}, fmt.Errorf("build probe for service %q: probe type %q is not supported, want http", service, svc.Build.Probe)

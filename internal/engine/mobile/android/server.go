@@ -238,6 +238,12 @@ func (p *Platform) startServer(ctx context.Context, a *adb) *mobile.Unavailable 
 		}
 	}
 
+	return p.launchServer(ctx, a)
+}
+
+// launchServer forwards a port, starts the instrumentation, waits until the server answers, opens a
+// session, and applies the settings. It is the part of the start that a restart repeats.
+func (p *Platform) launchServer(ctx context.Context, a *adb) *mobile.Unavailable {
 	// A server that is still running from another run, or from Appium, holds the port and the session.
 	for _, pkg := range []string{serverPackage, serverTestPackage} {
 		if _, err := a.shell(ctx, "am", "force-stop", pkg); err != nil && ctx.Err() == nil {
@@ -264,6 +270,7 @@ func (p *Platform) startServer(ctx context.Context, a *adb) *mobile.Unavailable 
 	if p.o.HTTP != nil {
 		client.HTTP = p.o.HTTP
 	}
+	p.local = client
 	if un := p.waitForServer(ctx, client, child); un != nil {
 		return un
 	}

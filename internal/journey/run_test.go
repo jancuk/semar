@@ -3,6 +3,7 @@ package journey
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -377,6 +378,34 @@ func TestInvariantMarkerBlocks(t *testing.T) {
 	for _, v := range jr.Invariants[0].Values {
 		if !redact.HasMarker(v) || strings.Contains(v, "1000") {
 			t.Errorf("a shown value is %q, want a redaction marker", v)
+		}
+	}
+}
+
+// noBuildProber answers ErrNoBuild for one service, as a service with no probe and no declared build does.
+type noBuildProber struct {
+	build.Prober
+	service string
+}
+
+func (p noBuildProber) Probe(ctx context.Context, service string) (domain.BuildRef, error) {
+	if service == p.service {
+		return domain.BuildRef{}, fmt.Errorf("build probe for service %q: %w", service, build.ErrNoBuild)
+	}
+	return p.Prober.Probe(ctx, service)
+}
+
+func TestManifestWithNoBuildSaysHowToGiveOne(t *testing.T) {
+	r := newRig(t, rigOptions{prober: func(next build.Prober) build.Prober { return noBuildProber{Prober: next, service: "payments"} }})
+	jr, _ := r.run(t, example(t))
+
+	if jr.Outcome != domain.JourneyBlocked || len(jr.Reasons) != 1 {
+		t.Fatalf("journey %s, reasons %+v", jr.Outcome, jr.Reasons)
+	}
+	got := jr.Reasons[0].Text
+	for _, want := range []string{"the build of payments could not be read", "android.apk", "--build payments=<commit>"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("reason %q lacks %q", got, want)
 		}
 	}
 }

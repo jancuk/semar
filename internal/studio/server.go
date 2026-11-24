@@ -48,6 +48,18 @@ type SessionRequest struct {
 	Replace bool
 	// ConfirmClear says that the person agreed to reset: clear on a physical device.
 	ConfirmClear bool
+	// Resume reopens the saved flow or scenario named by Kind and ID: its files are loaded, and the steps
+	// are replayed up to ResumeAt (0 is all of them) when the session starts.
+	Resume   bool
+	ResumeAt int
+}
+
+// Recording is a saved flow or scenario that the studio can reopen.
+type Recording struct {
+	// Kind is flow or scenario.
+	Kind  string `json:"kind"`
+	ID    string `json:"id"`
+	Title string `json:"title,omitempty"`
 }
 
 // Status is what the repository says about recording: whether there is a configuration, and which app.
@@ -91,8 +103,14 @@ type Deps struct {
 	Verify func(ctx context.Context, sess *mobilerec.Session, saved *mobilerec.Saved) (VerifyResult, error)
 	// Inspector lists the devices and the app in front. It is optional.
 	Inspector mobile.AppInspector
+	// Recordable lists the saved flows and the Android scenarios that can be reopened. It is optional.
+	Recordable func() ([]Recording, error)
 	// TicketOf is the default ticket of a scenario ID. It is optional.
 	TicketOf func(id string) string
+	// Live makes the studio a live one: a person watches an agent drive the device, takes it over, and
+	// hands it back. With only Live set (no Repo, Status, NewSession, or Verify) the studio serves the
+	// live page and nothing else. With both, the recording calls answer 409 while the agent owns the device.
+	Live LiveHost
 }
 
 // Server is the studio.
@@ -113,6 +131,8 @@ type Server struct {
 // New makes a studio with a new random token.
 func New(d Deps) (*Server, error) {
 	switch {
+	case d.Live != nil && d.Repo == "" && d.Status == nil && d.NewSession == nil && d.Verify == nil:
+		// A live-only studio: it serves the live page and has no recording to start.
 	case d.Repo == "":
 		return nil, errors.New("the studio needs the repository to record in")
 	case d.Status == nil, d.NewSession == nil, d.Verify == nil:
@@ -159,24 +179,15 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/{$}", localhttp.Allow(map[string]http.HandlerFunc{"GET": page("index.html")}))
 	mux.Handle("/app.js", localhttp.Allow(map[string]http.HandlerFunc{"GET": page("app.js")}))
 	mux.Handle("/style.css", localhttp.Allow(map[string]http.HandlerFunc{"GET": page("style.css")}))
+	mux.Handle("/live.js", localhttp.Allow(map[string]http.HandlerFunc{"GET": page("live.js")}))
 
 	api := http.NewServeMux()
-	handle := func(path string, methods map[string]http.HandlerFunc) { api.Handle(path, localhttp.Allow(methods)) }
-	handle("/api/state", map[string]http.HandlerFunc{"GET": s.getState})
-	handle("/api/devices", map[string]http.HandlerFunc{"GET": s.getDevices})
-	handle("/api/scaffold", map[string]http.HandlerFunc{"POST": s.postScaffold})
-	handle("/api/session/start", map[string]http.HandlerFunc{"POST": s.postStart})
-	handle("/api/session/refresh", map[string]http.HandlerFunc{"POST": s.postRefresh})
-	handle("/api/session/act", map[string]http.HandlerFunc{"POST": s.postAct})
-	handle("/api/session/assert", map[string]http.HandlerFunc{"POST": s.postAssert})
-	handle("/api/session/screen", map[string]http.HandlerFunc{"POST": s.postScreen})
-	handle("/api/session/use-flow", map[string]http.HandlerFunc{"POST": s.postUseFlow})
-	handle("/api/session/reset", map[string]http.HandlerFunc{"POST": s.postReset})
-	handle("/api/timeline/last", map[string]http.HandlerFunc{"DELETE": s.deleteLast})
-	handle("/api/timeline/{index}", map[string]http.HandlerFunc{"PATCH": s.patchStep})
-	handle("/api/finish", map[string]http.HandlerFunc{"POST": s.postFinish})
-	handle("/api/verify", map[string]http.HandlerFunc{"POST": s.postVerify})
-	handle("/api/undo", map[string]http.HandlerFunc{"POST": s.postUndo})
+	if s.d.Live != nil {
+		s.liveRoutes(func(path string, methods map[string]http.HandlerFunc) { api.Handle(path, localhttp.Allow(methods)) })
+	}
+	if s.d.Status != nil && s.d.NewSession != nil && s.d.Verify != nil {
+		s.recordingRoutes(api)
+	}
 	api.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		localhttp.Fail(w, http.StatusNotFound, "There is no such API path.")
 	})
@@ -187,20 +198,56 @@ func (s *Server) routes() http.Handler {
 	return localhttp.GuardAll("studio", localhttp.CSP, mux)
 }
 
+// recordingRoutes registers the calls that record. With a live host, each one that acts on the device or
+// changes the recording answers 409 while the agent owns the device.
+func (s *Server) recordingRoutes(api *http.ServeMux) {
+	handle := func(path string, methods map[string]http.HandlerFunc) {
+		guarded := make(map[string]http.HandlerFunc, len(methods))
+		for m, h := range methods {
+			guarded[m] = s.withHuman(h)
+		}
+		api.Handle(path, localhttp.Allow(guarded))
+	}
+	// What only reads the repository and the device list is open to the page at any time.
+	open := func(path string, methods map[string]http.HandlerFunc) { api.Handle(path, localhttp.Allow(methods)) }
+	open("/api/state", map[string]http.HandlerFunc{"GET": s.getState})
+	open("/api/devices", map[string]http.HandlerFunc{"GET": s.getDevices})
+	handle("/api/scaffold", map[string]http.HandlerFunc{"POST": s.postScaffold})
+	handle("/api/session/start", map[string]http.HandlerFunc{"POST": s.postStart})
+	handle("/api/session/refresh", map[string]http.HandlerFunc{"POST": s.postRefresh})
+	handle("/api/session/act", map[string]http.HandlerFunc{"POST": s.postAct})
+	handle("/api/session/assert", map[string]http.HandlerFunc{"POST": s.postAssert})
+	handle("/api/session/screen", map[string]http.HandlerFunc{"POST": s.postScreen})
+	handle("/api/session/use-flow", map[string]http.HandlerFunc{"POST": s.postUseFlow})
+	handle("/api/session/reset", map[string]http.HandlerFunc{"POST": s.postReset})
+	handle("/api/session/candidates", map[string]http.HandlerFunc{"GET": s.getCandidates})
+	handle("/api/session/capture", map[string]http.HandlerFunc{"POST": s.postCapture})
+	handle("/api/timeline/last", map[string]http.HandlerFunc{"DELETE": s.deleteLast})
+	handle("/api/timeline/goto", map[string]http.HandlerFunc{"POST": s.postGoto})
+	handle("/api/timeline/{index}", map[string]http.HandlerFunc{"PATCH": s.patchStep, "DELETE": s.deleteStep})
+	handle("/api/timeline/{index}/locators", map[string]http.HandlerFunc{"GET": s.getLocators})
+	handle("/api/timeline/{index}/locator", map[string]http.HandlerFunc{"POST": s.postLocator})
+	handle("/api/finish", map[string]http.HandlerFunc{"POST": s.postFinish})
+	handle("/api/verify", map[string]http.HandlerFunc{"POST": s.postVerify})
+	handle("/api/undo", map[string]http.HandlerFunc{"POST": s.postUndo})
+}
+
 // stateReply is what GET /api/state says. It never holds a secret, a value that was typed, or a picture.
 type stateReply struct {
-	Repo      string          `json:"repo"`
-	HasConfig bool            `json:"hasConfig"`
-	Env       string          `json:"env,omitempty"`
-	Service   string          `json:"service,omitempty"`
-	App       string          `json:"app,omitempty"`
-	Services  []string        `json:"services,omitempty"`
-	Problem   string          `json:"problem,omitempty"`
-	Flows     []string        `json:"flows"`
-	Screens   []screensReply  `json:"screens"`
-	Session   *sessionSummary `json:"session,omitempty"`
-	CanUndo   bool            `json:"canUndo"`
-	Physical  bool            `json:"physicalDevice"`
+	Repo      string   `json:"repo"`
+	HasConfig bool     `json:"hasConfig"`
+	Env       string   `json:"env,omitempty"`
+	Service   string   `json:"service,omitempty"`
+	App       string   `json:"app,omitempty"`
+	Services  []string `json:"services,omitempty"`
+	Problem   string   `json:"problem,omitempty"`
+	Flows     []string `json:"flows"`
+	// Recordings are the saved flows and Android scenarios that can be reopened.
+	Recordings []Recording     `json:"recordings"`
+	Screens    []screensReply  `json:"screens"`
+	Session    *sessionSummary `json:"session,omitempty"`
+	CanUndo    bool            `json:"canUndo"`
+	Physical   bool            `json:"physicalDevice"`
 }
 
 type screensReply struct {
@@ -214,6 +261,11 @@ type sessionSummary struct {
 	Device  string           `json:"device,omitempty"`
 	FrameID uint64           `json:"frameId,omitempty"`
 	Steps   []mobilerec.Step `json:"steps"`
+	// Cursor, Dirty, Common, and ScreenNames are as in the answer of a call.
+	Cursor      int      `json:"cursor"`
+	Dirty       bool     `json:"dirty,omitempty"`
+	Common      int      `json:"common"`
+	ScreenNames []string `json:"screenNames"`
 }
 
 func (s *Server) getState(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +277,12 @@ func (s *Server) getState(w http.ResponseWriter, r *http.Request) {
 	}
 	out := stateReply{
 		Repo: filepath.Base(s.d.Repo), HasConfig: st.HasConfig, Env: st.Environment, Service: st.Service, App: st.App,
-		Services: st.Services, Problem: st.Problem, Flows: []string{}, Screens: []screensReply{},
+		Services: st.Services, Problem: st.Problem, Flows: []string{}, Recordings: []Recording{}, Screens: []screensReply{},
+	}
+	if s.d.Recordable != nil {
+		if list, err := s.d.Recordable(); err == nil && list != nil {
+			out.Recordings = list
+		}
 	}
 	if ids, err := flow.IDs(s.d.Repo); err == nil && ids != nil {
 		out.Flows = ids
@@ -247,7 +304,10 @@ func (s *Server) getState(w http.ResponseWriter, r *http.Request) {
 		if out.Service == "" && s.service != "" {
 			out.Service = s.service
 		}
-		sum := &sessionSummary{Kind: sess.Kind(), ID: sess.ID(), Device: sess.Device(), Steps: sess.Steps()}
+		sum := &sessionSummary{
+			Kind: sess.Kind(), ID: sess.ID(), Device: sess.Device(), Steps: sess.Steps(),
+			Cursor: sess.Cursor(), Dirty: sess.Dirty(), Common: sess.CommonCount(), ScreenNames: sess.ScreenNames(),
+		}
 		if f := sess.Frame(); f != nil {
 			sum.FrameID = f.ID
 		}

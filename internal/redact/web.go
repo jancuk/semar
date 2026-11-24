@@ -44,5 +44,6 @@ func locator(s *scrubber, l domain.Locator) domain.Locator {
 	l.TestID, l.Role, l.Name = s.text(l.TestID), s.text(l.Role), s.text(l.Name)
 	l.Text, l.CSS = s.text(l.Text), s.text(l.CSS)
 	l.ID, l.Desc, l.Class, l.XPath = s.text(l.ID), s.text(l.Desc), s.text(l.Class), s.text(l.XPath)
+	l.HasText = s.text(l.HasText)
 	return l
 }

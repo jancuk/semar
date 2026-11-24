@@ -17,7 +17,9 @@ import (
 
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/fixture"
+	"github.com/jancuk/semar/internal/flow"
 	"github.com/jancuk/semar/internal/screens"
+	"github.com/jancuk/semar/internal/script"
 )
 
 const (
@@ -76,6 +78,7 @@ func Load(repo string) ([]domain.Journey, []Problem, error) {
 		return f.Outputs, ok
 	}
 
+	flows := flow.Loader(repo).Resolver()
 	var out []domain.Journey
 	for _, name := range names {
 		rel := relDir + "/" + name
@@ -92,7 +95,7 @@ func Load(repo string) ([]domain.Journey, []Problem, error) {
 			problems = append(problems, Problem{File: rel, Message: tooLarge})
 			continue
 		}
-		j, ps := decode(data, rel, outputs, func(app string) (domain.Screens, error) { return screens.Load(repo, app) })
+		j, ps := decode(data, rel, outputs, func(app string) (domain.Screens, error) { return screens.Load(repo, app) }, flows)
 		if len(ps) > 0 {
 			problems = append(problems, ps...)
 			continue
@@ -105,12 +108,12 @@ func Load(repo string) ([]domain.Journey, []Problem, error) {
 }
 
 // decode parses and validates one file. rel is how a problem names it.
-func decode(data []byte, rel string, outputs func(domain.FixtureID) ([]string, bool), screensOf ScreensFunc) (domain.Journey, []Problem) {
+func decode(data []byte, rel string, outputs func(domain.FixtureID) ([]string, bool), screensOf ScreensFunc, flows script.FlowResolver) (domain.Journey, []Problem) {
 	j, err := Parse(data, rel)
 	if err != nil {
 		return domain.Journey{}, parseProblems(err, rel)
 	}
-	ps := validateFull(j, rel, outputs, screensOf)
+	ps := validateAll(j, rel, outputs, screensOf, flows)
 	if len(ps) == 0 {
 		return j, nil
 	}

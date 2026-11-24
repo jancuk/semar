@@ -66,7 +66,7 @@ func WithVariables(with map[string]string) []string {
 
 // useProblems checks one use step against its flow, and reports what the scenario then holds: the
 // services that the flow starts, and the names that it captures. started and captured are changed.
-func useProblems(ss domain.ScriptStep, f domain.Flow, started, captured map[string]bool, add func(format string, args ...any)) {
+func useProblems(ss domain.ScriptStep, f domain.Flow, flows FlowResolver, started, captured map[string]bool, add func(format string, args ...any)) {
 	if f.Surface != domain.SurfaceAndroid {
 		add("use: flow %s is for the surface %q, and a scenario of the surface android needs an android flow", f.ID, f.Surface)
 	}
@@ -80,26 +80,43 @@ func useProblems(ss domain.ScriptStep, f domain.Flow, started, captured map[stri
 			add("with: flow %s needs the param %s", f.ID, p.Name)
 		}
 	}
+	walkFlow(f, flows, 0, started, captured, add)
+}
+
+// walkFlow reports the services that a flow and the flows inside it start, and the names that they
+// capture, in the order that they run. A flow that cannot be read is skipped: the flow check reports it.
+func walkFlow(f domain.Flow, flows FlowResolver, depth int, started, captured map[string]bool, add func(format string, args ...any)) {
+	if depth > 8 {
+		return
+	}
 	for _, st := range f.Steps {
-		if st.Mobile == nil {
+		if st.Use != "" {
+			if flows == nil {
+				continue
+			}
+			if inner, err := flows(st.Use); err == nil {
+				walkFlow(inner, flows, depth+1, started, captured, add)
+			}
 			continue
 		}
-		svc := st.Mobile.Service
-		if svc == "" {
-			svc = f.Service
-		}
-		if !started[svc] {
-			started[svc] = true
-			if do := st.Mobile.Do; do != domain.MobileLaunch && do != domain.MobileOpenLink {
-				add("use: the first mobile step of the service %s must be launch or open, and flow %s starts with %s", svc, f.ID, do)
+		if st.Mobile != nil {
+			svc := st.Mobile.Service
+			if svc == "" {
+				svc = f.Service
+			}
+			if !started[svc] {
+				started[svc] = true
+				if do := st.Mobile.Do; do != domain.MobileLaunch && do != domain.MobileOpenLink {
+					add("use: the first mobile step of the service %s must be launch or open, and flow %s starts with %s", svc, f.ID, do)
+				}
 			}
 		}
-	}
-	for _, name := range f.CaptureNames() {
-		if captured[name] {
-			add("use: flow %s captures %s, which an earlier step already captured: a flow that captures can be used once in a scenario", f.ID, name)
+		for _, c := range st.Captures {
+			if captured[c.Name] {
+				add("use: flow %s captures %s, which an earlier step already captured: a flow that captures can be used once in a scenario", f.ID, c.Name)
+			}
+			captured[c.Name] = true
 		}
-		captured[name] = true
 	}
 }
 

@@ -157,7 +157,7 @@ func findingRule(c domain.CheckResult) (int, bool) {
 	switch {
 	case c.Source == domain.SourceInvariant:
 		return ruleInvariant, true
-	case c.Index >= 0:
+	case c.Index >= 0 || c.Source == domain.SourceFlow:
 		return ruleExpectedNotMet, true
 	}
 	return 0, false
@@ -197,11 +197,11 @@ func sarifResultFor(r Run, sc Scenario, c domain.CheckResult, rule int) sarifRes
 }
 
 // fingerprint is the SHA-256 of the scenario, step, check index, and rule, so that a reader
-// matches one finding across runs. Every invariant has the index -1, so an invariant adds
+// matches one finding across runs. Every invariant and flow check has the index -1, so it adds
 // what it expected, which names it.
 func fingerprint(scenario string, c domain.CheckResult, rule string, ruleNo int) string {
 	parts := []string{scenario, string(c.Step), strconv.Itoa(c.Index), rule}
-	if ruleNo == ruleInvariant {
+	if ruleNo == ruleInvariant || c.Source == domain.SourceFlow {
 		parts = append(parts, c.Expected)
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))

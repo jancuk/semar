@@ -149,7 +149,7 @@ func (e *enc) step(path string, st domain.ScriptStep) (*yaml.Node, domain.Script
 		mn := mapping()
 		for _, f := range []struct{ key, val string }{
 			{"service", m.Service}, {"app", m.App}, {"do", string(m.Do)}, {"link", m.Link},
-			{"screen", m.Screen}, {"element", m.Element}, {"within", m.Within}, {"value", m.Value}, {"secret", m.Secret}, {"reset", m.Reset},
+			{"screen", m.Screen}, {"element", m.Element}, {"within", m.Within}, {"to", m.To}, {"value", m.Value}, {"secret", m.Secret}, {"reset", m.Reset},
 		} {
 			if f.val != "" {
 				put(mn, f.key, e.str(path+".mobile."+f.key, f.val))
@@ -171,6 +171,9 @@ func (e *enc) step(path string, st domain.ScriptStep) (*yaml.Node, domain.Script
 			}
 			if c.Element != "" {
 				put(cn, "element", e.str(p+".element", c.Element))
+			}
+			if c.Pattern != "" {
+				put(cn, "pattern", e.str(p+".pattern", c.Pattern))
 			}
 			seq.Content = append(seq.Content, cn)
 		}

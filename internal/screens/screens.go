@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,6 +26,8 @@ const (
 	MaxFileSize = 256 << 10
 	maxScreens  = 100
 	maxElements = 500
+	// maxIndex is the greatest index of a locator.
+	maxIndex = 200
 	// RelDir is how a message names the directory.
 	RelDir = ".semar/screens"
 )
@@ -90,12 +93,20 @@ func Validate(s domain.Screens, app string) []Problem {
 		add("app", "app %s does not match the file name %s.yaml", s.App, app)
 	}
 	switch n := len(s.Screens); {
-	case n == 0:
+	case n == 0 && len(s.Common) == 0:
 		add("screens", "a screens file needs at least one screen")
 	case n > maxScreens:
 		add("screens", "%d screens; at most %d", n, maxScreens)
 	}
-	total := 0
+	total := len(s.Common)
+	for _, en := range slices.Sorted(maps.Keys(s.Common)) {
+		where := "common." + en
+		if !namePattern.MatchString(en) {
+			add(where, "the element name %q must start with a letter or a digit and hold letters, digits, - and _", en)
+		}
+		ps = append(ps, locatorProblems(where, s.Common[en], s.Common, "common elements")...)
+	}
+	ps = append(ps, withinCycles("common", s.Common, nil)...)
 	for _, sn := range s.ScreenNames() {
 		if !namePattern.MatchString(sn) {
 			add("screens."+sn, "the screen name %q must start with a letter or a digit and hold letters, digits, - and _", sn)
@@ -110,9 +121,20 @@ func Validate(s domain.Screens, app string) []Problem {
 			if !namePattern.MatchString(en) {
 				add(where, "the element name %q must start with a letter or a digit and hold letters, digits, - and _", en)
 			}
-			ps = append(ps, locatorProblems(where, elements[en], elements)...)
+			siblings := "this screen"
+			if len(s.Common) > 0 {
+				siblings = "this screen or the common elements"
+			}
+			ps = append(ps, locatorProblems(where, elements[en], elementsWithCommon(elements, s.Common), siblings)...)
+			// A common element that another common element is inside is found in common only: a screen
+			// element of the same name would be a second element behind one name.
+			if _, common := s.Common[en]; common {
+				if inner := commonInside(s.Common, en); inner != "" {
+					add(where, "the element %s has the name of the common element that common.%s is inside: rename it", en, inner)
+				}
+			}
 		}
-		ps = append(ps, withinCycles(sn, elements)...)
+		ps = append(ps, withinCycles("screens."+sn, elements, s.Common)...)
 	}
 	if total > maxElements {
 		add("screens", "%d elements; at most %d", total, maxElements)
@@ -120,13 +142,44 @@ func Validate(s domain.Screens, app string) []Problem {
 	return ps
 }
 
-func locatorProblems(where string, l domain.Locator, siblings map[string]domain.Locator) []Problem {
+// commonInside gives the name of a common element whose within is name, or "".
+func commonInside(common map[string]domain.Locator, name string) string {
+	for _, k := range slices.Sorted(maps.Keys(common)) {
+		if common[k].Within == name {
+			return k
+		}
+	}
+	return ""
+}
+
+// elementsWithCommon is what a screen can find by name: its own elements, and the common ones that it
+// does not shadow.
+func elementsWithCommon(own, common map[string]domain.Locator) map[string]domain.Locator {
+	if len(common) == 0 {
+		return own
+	}
+	out := make(map[string]domain.Locator, len(own)+len(common))
+	maps.Copy(out, common)
+	maps.Copy(out, own)
+	return out
+}
+
+// locatorProblems checks one locator. siblings are the elements that its within may name, and
+// siblingsName says in plain words where they are.
+func locatorProblems(where string, l domain.Locator, siblings map[string]domain.Locator, siblingsName string) []Problem {
 	var ps []Problem
 	add := func(path, format string, args ...any) {
 		ps = append(ps, Problem{Path: path, Message: fmt.Sprintf(format, args...)})
 	}
 	if l.Empty() {
-		add(where, "the element has no way to be found: give it testId, role, name, text, css, id, desc, class, or xpath")
+		if l.HasText != "" {
+			add(where, "hasText only filters the matches of another field: give the element id, desc, role, name, text, xpath, or class as well")
+		} else {
+			add(where, "the element has no way to be found: give it testId, role, name, text, css, id, desc, class, or xpath")
+		}
+	}
+	if l.Index < 0 || l.Index > maxIndex {
+		add(where+".index", "index must be a number from 1 to %d", maxIndex)
 	}
 	for field, text := range l.Fields() {
 		if strings.Contains(variable.ReplaceAllString(text, ""), "{{") {
@@ -143,7 +196,7 @@ func locatorProblems(where string, l domain.Locator, siblings map[string]domain.
 	}
 	if l.Within != "" {
 		if _, ok := siblings[l.Within]; !ok {
-			add(where+".within", "within names %s, which is not an element of this screen", l.Within)
+			add(where+".within", "within names %s, which is not an element of %s", l.Within, siblingsName)
 		}
 	}
 	return ps
@@ -153,11 +206,13 @@ var variable = regexp.MustCompile(`\{\{([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)
 
 func isControl(r rune) bool { return r < 0x20 || r == 0x7f }
 
-// withinCycles reports an element that is, through within, inside itself.
-func withinCycles(screen string, elements map[string]domain.Locator) []Problem {
+// withinCycles reports an element that is, through within, inside itself. prefix is the place of the
+// elements in the file. A within that a screen does not answer itself is looked up in common.
+func withinCycles(prefix string, own, common map[string]domain.Locator) []Problem {
 	var ps []Problem
 	reported := map[string]bool{}
-	for name := range elements {
+	elements := elementsWithCommon(own, common)
+	for name := range own {
 		seen := []string{name}
 		for cur := elements[name].Within; cur != ""; cur = elements[cur].Within {
 			if _, ok := elements[cur]; !ok {
@@ -165,9 +220,10 @@ func withinCycles(screen string, elements map[string]domain.Locator) []Problem {
 			}
 			if slices.Contains(seen, cur) {
 				key := cur
-				if !reported[key] {
+				// A cycle of common elements is reported once, under common.
+				if _, mine := own[cur]; mine && !reported[key] {
 					reported[key] = true
-					ps = append(ps, Problem{Path: "screens." + screen + "." + cur + ".within", Message: "within leads back to the element itself: " + strings.Join(append(seen, cur), " -> ")})
+					ps = append(ps, Problem{Path: prefix + "." + cur + ".within", Message: "within leads back to the element itself: " + strings.Join(append(seen, cur), " -> ")})
 				}
 				break
 			}

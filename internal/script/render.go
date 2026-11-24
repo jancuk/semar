@@ -376,7 +376,7 @@ func RenderLocator(l domain.Locator, vars map[string]string) (domain.Locator, er
 		to   *string
 		from string
 	}{{"testId", &out.TestID, l.TestID}, {"role", &out.Role, l.Role}, {"name", &out.Name, l.Name}, {"text", &out.Text, l.Text}, {"css", &out.CSS, l.CSS},
-		{"id", &out.ID, l.ID}, {"desc", &out.Desc, l.Desc}, {"class", &out.Class, l.Class}, {"xpath", &out.XPath, l.XPath}} {
+		{"id", &out.ID, l.ID}, {"desc", &out.Desc, l.Desc}, {"class", &out.Class, l.Class}, {"xpath", &out.XPath, l.XPath}, {"hasText", &out.HasText, l.HasText}} {
 		v, err := substitute(f.from, vars, nil)
 		if err != nil {
 			return domain.Locator{}, fmt.Errorf("%s: %w", f.name, err)
@@ -389,7 +389,7 @@ func RenderLocator(l domain.Locator, vars map[string]string) (domain.Locator, er
 // LocatorVariables lists the variable names in the fields of a locator, in order and without repeats.
 func LocatorVariables(l domain.Locator) []string {
 	var names []string
-	for _, text := range []string{l.TestID, l.Role, l.Name, l.Text, l.CSS, l.ID, l.Desc, l.Class, l.XPath} {
+	for _, text := range []string{l.TestID, l.Role, l.Name, l.Text, l.CSS, l.ID, l.Desc, l.Class, l.XPath, l.HasText} {
 		for _, m := range variablePattern.FindAllStringSubmatch(text, -1) {
 			if !slices.Contains(names, m[1]) {
 				names = append(names, m[1])

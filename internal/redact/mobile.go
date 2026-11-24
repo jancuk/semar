@@ -29,6 +29,14 @@ func mobileRecord(s *scrubber, m domain.MobileRecord) domain.MobileRecord {
 	if m.Repair != nil {
 		m.Repair = candidates(s, m.Repair)
 	}
+	if m.Nearby != nil {
+		m.Nearby = candidates(s, m.Nearby)
+	}
+	if m.Crash != nil {
+		c := *m.Crash
+		c.Summary = s.text(c.Summary)
+		m.Crash = &c
+	}
 	return m
 }
 

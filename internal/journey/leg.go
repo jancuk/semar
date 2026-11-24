@@ -48,6 +48,10 @@ func legScenario(j domain.Journey, leg domain.Leg, authProfile string) (domain.S
 			sr.Steps[i] = domain.ScriptStep{Step: st.ID, Web: &w, Captures: st.Captures}
 			continue
 		}
+		if st.Use != "" {
+			sr.Steps[i] = domain.ScriptStep{Step: st.ID, Use: st.Use, With: maps.Clone(st.With), Captures: st.Captures}
+			continue
+		}
 		if st.Mobile != nil {
 			m := *st.Mobile
 			m.Service, m.App = leg.Service, leg.App

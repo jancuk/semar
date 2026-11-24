@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"regexp"
@@ -11,6 +12,9 @@ import (
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
 )
+
+// ErrNoBuild is what a probe wraps when the service has no build probe and no declared build.
+var ErrNoBuild = errors.New("the service has no build probe and no declared build")
 
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 
@@ -47,7 +51,7 @@ func (d *Declared) Probe(ctx context.Context, service string) (domain.BuildRef, 
 		return domain.BuildRef{Service: service, Commit: commit, Declared: true, Local: d.local[service], APK: d.apk[service]}, nil
 	}
 	if d.next == nil {
-		return domain.BuildRef{}, fmt.Errorf("build probe for service %q: the service has no build probe and no declared build", service)
+		return domain.BuildRef{}, fmt.Errorf("build probe for service %q: %w", service, ErrNoBuild)
 	}
 	return d.next.Probe(ctx, service)
 }

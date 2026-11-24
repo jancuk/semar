@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 )
 
 // MobileOp is what a mobile action does on a device.
@@ -16,6 +17,11 @@ const (
 	MobileOpenLink MobileOp = "open"
 	MobileTap      MobileOp = "tap"
 	MobileLongTap  MobileOp = "longPress"
+	// MobileDoubleTap taps the element twice, quickly.
+	MobileDoubleTap MobileOp = "doubleTap"
+	// MobileDrag presses the element, moves to the element that To names, and lets go. The Value is
+	// empty or the time to hold before the move, such as 800ms.
+	MobileDrag MobileOp = "drag"
 	// MobileType replaces the text of an input field with the Value, or with the Secret.
 	MobileType MobileOp = "type"
 	// MobileSwipe moves a finger in the direction that the Value names.
@@ -27,7 +33,10 @@ const (
 	MobileWait  MobileOp = "wait"
 )
 
-var mobileOps = []MobileOp{MobileLaunch, MobileOpenLink, MobileTap, MobileLongTap, MobileType, MobileSwipe, MobileScroll, MobilePress, MobileWait}
+var mobileOps = []MobileOp{MobileLaunch, MobileOpenLink, MobileTap, MobileLongTap, MobileDoubleTap, MobileDrag, MobileType, MobileSwipe, MobileScroll, MobilePress, MobileWait}
+
+// MobileDragHoldMax is the longest hold that a drag takes.
+const MobileDragHoldMax = 10 * time.Second
 
 // MobileDirections are the values of a swipe and of a scroll: where the finger goes.
 var MobileDirections = []string{"up", "down", "left", "right"}
@@ -47,7 +56,9 @@ type MobileAction struct {
 	Element string `yaml:"element,omitempty"`
 	// Within names the element of the same screen that a scroll moves.
 	Within string `yaml:"within,omitempty"`
-	Value  string `yaml:"value,omitempty"`
+	// To names the element of the same screen that a drag drops on.
+	To    string `yaml:"to,omitempty"`
+	Value string `yaml:"value,omitempty"`
 	// Secret is a secret reference such as env:SHOP_PASSWORD. Only type takes one.
 	Secret string `yaml:"secret,omitempty"`
 	// Reset is how a launch resets the app before it starts, in place of the reset of the service:
@@ -62,7 +73,7 @@ var MobileResets = []string{"restart", "clear", "none"}
 // Writes reports whether the operation can change what the service holds. A tap may submit a form.
 func (o MobileOp) Writes() bool {
 	switch o {
-	case MobileTap, MobileLongTap, MobileType, MobileSwipe, MobilePress:
+	case MobileTap, MobileLongTap, MobileDoubleTap, MobileDrag, MobileType, MobileSwipe, MobilePress:
 		return true
 	}
 	return false
@@ -71,7 +82,7 @@ func (o MobileOp) Writes() bool {
 // Elements lists the screen elements that the action acts on, in order.
 func (m MobileAction) Elements() []string {
 	var out []string
-	for _, e := range []string{m.Element, m.Within} {
+	for _, e := range []string{m.Element, m.Within, m.To} {
 		if e != "" {
 			out = append(out, e)
 		}
@@ -98,6 +109,9 @@ func (m MobileAction) Problems() []string {
 			add("%s needs the %s", m.Do, field)
 		}
 	}
+	if m.Do != MobileDrag {
+		forbid("to", m.To)
+	}
 	if m.Reset != "" && m.Do != MobileLaunch {
 		add("%s takes no reset: only launch does", m.Do)
 	}
@@ -117,13 +131,25 @@ func (m MobileAction) Problems() []string {
 		forbid("within", m.Within)
 		forbid("value", m.Value)
 		forbid("secret", m.Secret)
-	case MobileTap, MobileLongTap:
+	case MobileTap, MobileLongTap, MobileDoubleTap:
 		need("screen", m.Screen)
 		need("element", m.Element)
 		forbid("link", m.Link)
 		forbid("within", m.Within)
 		forbid("value", m.Value)
 		forbid("secret", m.Secret)
+	case MobileDrag:
+		need("screen", m.Screen)
+		need("element", m.Element)
+		need("to", m.To)
+		forbid("link", m.Link)
+		forbid("within", m.Within)
+		forbid("secret", m.Secret)
+		if m.Value != "" && !strings.Contains(m.Value, "{{") {
+			if d, err := time.ParseDuration(m.Value); err != nil || d <= 0 || d > MobileDragHoldMax {
+				add("the drag value must be a hold such as 800ms, up to %s, got %q", MobileDragHoldMax, m.Value)
+			}
+		}
 	case MobileType:
 		need("screen", m.Screen)
 		need("element", m.Element)
@@ -177,7 +203,7 @@ func (m MobileAction) Problems() []string {
 			add("%s holds a malformed variable", field)
 		}
 	}
-	for field, name := range map[string]string{"element": m.Element, "within": m.Within, "screen": m.Screen} {
+	for field, name := range map[string]string{"element": m.Element, "within": m.Within, "to": m.To, "screen": m.Screen} {
 		if name != "" && !webNamePattern.MatchString(name) {
 			add("%s %q must start with a letter or a digit and hold letters, digits, - and _", field, name)
 		}
@@ -237,6 +263,27 @@ type MobileRecord struct {
 	// Repair holds up to three candidates for each element that was not found, and names for the
 	// elements of a locator that matched several.
 	Repair []Candidate `json:"repair,omitempty"`
+	// Nearby holds up to five of the visible elements that look most like an element that was not found,
+	// whatever their likeness, so that a person sees what the screen held. Each names the element that
+	// was looked for. It is for reading: it never decides an outcome.
+	Nearby []Candidate `json:"nearby,omitempty"`
+	// Recovered is true when the UiAutomator2 server was restarted during the action. An action that was
+	// already sent then has an unknown effect.
+	Recovered bool `json:"recovered,omitempty"`
+	// Crash is the crash of the app that the device recorded during the run, found when the action or
+	// the step failed. It is evidence only and never changes the verdict.
+	Crash *MobileCrash `json:"crash,omitempty"`
+	// LogcatFile is the path of the log tail of the app, relative to the run directory, written when
+	// android.logcatOnFailure is on.
+	LogcatFile string `json:"logcatFile,omitempty"`
+}
+
+// MobileCrash says that the app crashed, or did not respond, and where the report of the device is.
+type MobileCrash struct {
+	// Summary is the line that says what happened, such as the exception.
+	Summary string `json:"summary"`
+	// File is the path of the report, relative to the run directory.
+	File string `json:"file,omitempty"`
 }
 
 // Watched is an element that a check or a capture of the step names. Presence is true when only its
@@ -259,6 +306,9 @@ type UIRead struct {
 	Title    string
 	Elements map[string]ElementState
 	Repair   []Candidate
+	// Nearby are the visible elements that look most like an element that was not found. Only a device
+	// gives them.
+	Nearby []Candidate
 	// Screenshot is the path of the screenshot, relative to the run directory.
 	Screenshot string
 	// Device is true when the read is of a device and not of a page.
@@ -273,7 +323,7 @@ func (a Action) UI() *UIRead {
 		return &UIRead{Op: w.Op, App: w.App, Screen: w.Screen, URL: w.URL, Title: w.Title, Elements: w.Elements, Repair: w.Repair, Screenshot: w.Screenshot}
 	case a.Mobile != nil:
 		m := a.Mobile
-		return &UIRead{Op: m.Op, App: m.App, Screen: m.Screen, Elements: m.Elements, Repair: m.Repair, Screenshot: m.Screenshot, Device: true}
+		return &UIRead{Op: m.Op, App: m.App, Screen: m.Screen, Elements: m.Elements, Repair: m.Repair, Nearby: m.Nearby, Screenshot: m.Screenshot, Device: true}
 	}
 	return nil
 }

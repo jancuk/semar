@@ -406,3 +406,43 @@ func TestBuildSelectsAndTicksAndHovers(t *testing.T) {
 		t.Errorf("the script does not fit its scenario: %+v", ps)
 	}
 }
+
+func TestBuildByModelWritesBaselineChecksAndTheAuthor(t *testing.T) {
+	o := options()
+	o.ByModel = true
+	o.Author = &domain.ProviderRef{Instance: "agent", Model: "mcp", Harness: "claude-code"}
+	d, err := record.Build(refundFlow(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Script.AuthoredBy != *o.Author {
+		t.Fatalf("authored by %+v", d.Script.AuthoredBy)
+	}
+	n := 0
+	for _, s := range d.Scenario.Steps {
+		for _, ex := range s.Expect {
+			n++
+			if ex.Source != domain.SourceBaseline || ex.By != "model" {
+				t.Fatalf("expectation %+v is not a baseline by model", ex)
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("the flow has no expectation")
+	}
+	// A person's recording stays as it was.
+	p, err := record.Build(refundFlow(), options())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Script.AuthoredBy.Instance != "person" {
+		t.Fatalf("authored by %+v", p.Script.AuthoredBy)
+	}
+	for _, s := range p.Scenario.Steps {
+		for _, ex := range s.Expect {
+			if ex.Source != domain.SourcePerson || ex.By != "" {
+				t.Fatalf("expectation %+v changed", ex)
+			}
+		}
+	}
+}

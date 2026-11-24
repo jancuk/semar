@@ -8,7 +8,9 @@ import (
 	"net"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -34,7 +36,7 @@ func recordStudio(ctx context.Context, cmd *cobra.Command, o options, f recordTe
 	b := &studioBackend{o: o, f: f, envArg: envArg}
 	srv, err := studio.New(studio.Deps{
 		Repo: repo, Status: b.status, NewSession: b.newSession, Verify: b.verify,
-		Inspector: &lazyInspector{o: o, repo: repo}, TicketOf: groupOf,
+		Inspector: &lazyInspector{o: o, repo: repo}, TicketOf: groupOf, Recordable: b.recordable,
 	})
 	if err != nil {
 		return err
@@ -97,6 +99,11 @@ type studioBackend struct {
 	o      options
 	f      recordTestFlags
 	envArg string
+	// author is set when an agent records over MCP: the script is authored by it and its checks are
+	// baselines by a model. It is nil for the terminal and the studio, which change nothing.
+	author *domain.ProviderRef
+	// reset overrides the reset of the first launch (restart, clear, none) when it is not empty.
+	reset string
 
 	mu  sync.Mutex
 	cur *studioCurrent
@@ -187,14 +194,24 @@ func (b *studioBackend) newSession(req studio.SessionRequest) (*mobilerec.Sessio
 			return nil, fmt.Errorf("the flow %s: %s", req.Use, oneLine(terminalSafe(err.Error())))
 		}
 	}
+	var resume *mobilerec.Loaded
+	if req.Resume {
+		if resume, err = loadResume(b.f.dir, req.Kind, req.ID, app); err != nil {
+			return nil, errors.New(oneLine(terminalSafe(err.Error())))
+		}
+	}
 	overlay := mobilerec.NewOverlay(b.o.LookupEnv)
 	if req.Serial != "" {
 		overlay.Pin(mobilerec.SerialEnv, req.Serial)
 	}
 	open := recordingFactory(b.o, b.f.dir, s.cfg, s.envName, s.env)
+	reset := s.svc.Android.ResetMode()
+	if b.reset != "" {
+		reset = b.reset
+	}
 	sess, err := mobilerec.New(mobilerec.Options{
 		Repo: b.f.dir, Kind: req.Kind, ID: req.ID, Ticket: req.Ticket, Title: req.Title, Service: s.svc.Name, App: app,
-		Open: open, Lookup: b.o.LookupEnv, Overlay: overlay, Reset: s.svc.Android.ResetMode(), Use: req.Use, UseWith: req.With, ConfirmClear: req.ConfirmClear,
+		Open: open, Lookup: b.o.LookupEnv, Overlay: overlay, Reset: reset, Author: b.author, Use: req.Use, UseWith: req.With, ConfirmClear: req.ConfirmClear, Resume: resume, ResumeAt: req.ResumeAt,
 		Clock: b.o.Clock, Sleep: b.o.Sleep, Now: b.o.Clock,
 	})
 	if err != nil {
@@ -206,8 +223,35 @@ func (b *studioBackend) newSession(req studio.SessionRequest) (*mobilerec.Sessio
 	return sess, nil
 }
 
+// recordable lists what the studio can reopen: the saved flows, and the scenarios that are for an Android
+// app. A file that cannot be read is left out, because the list is a convenience and the open says why.
+func (b *studioBackend) recordable() ([]studio.Recording, error) {
+	out := []studio.Recording{}
+	ids, err := flow.IDs(b.f.dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		out = append(out, studio.Recording{Kind: string(mobilerec.KindFlow), ID: id})
+	}
+	files, err := scenarioFiles(b.f.dir)
+	if err != nil {
+		return out, nil
+	}
+	var scenarios []studio.Recording
+	for id := range files {
+		sc, err := loadScenario(b.f.dir, id)
+		if err != nil || sc.Surface != domain.SurfaceAndroid {
+			continue
+		}
+		scenarios = append(scenarios, studio.Recording{Kind: string(mobilerec.KindScenario), ID: string(id), Title: oneLine(terminalSafe(sc.Title))})
+	}
+	slices.SortFunc(scenarios, func(a, c studio.Recording) int { return strings.Compare(a.ID, c.ID) })
+	return append(out, scenarios...), nil
+}
+
 // verify runs what was saved on a clean device session. The studio has given the device away, and takes
-// it back. A flow runs through flow.Run and completes: it has no check. A scenario is replayed by the
+// it back. A flow runs through flow.RunWith and completes: it never passes. A scenario is replayed by the
 // runner of semar run, with the secrets that were typed and the serial of the device.
 func (b *studioBackend) verify(ctx context.Context, sess *mobilerec.Session, _ *mobilerec.Saved) (studio.VerifyResult, error) {
 	b.mu.Lock()
@@ -232,7 +276,7 @@ func (b *studioBackend) verify(ctx context.Context, sess *mobilerec.Session, _ *
 			defer cancel()
 			_ = h.Close(cctx)
 		}()
-		res, err := flow.Run(ctx, h.Engine, screenSource{repo: b.f.dir}, entry.Flow, nil, map[string]string{"run.id": "verify-" + sess.ID()})
+		res, err := flow.RunWith(ctx, h.Engine, screenSource{repo: b.f.dir}, entry.Flow, nil, map[string]string{"run.id": "verify-" + sess.ID()}, flow.Options{Flows: flow.Loader(b.f.dir).Flow})
 		if err != nil {
 			return studio.VerifyResult{}, fmt.Errorf("the flow %s could not be run: %s", sess.ID(), clean(err.Error()))
 		}
@@ -250,7 +294,10 @@ func (b *studioBackend) verify(ctx context.Context, sess *mobilerec.Session, _ *
 		if res.Error != "" {
 			out.Message += " " + clean(res.Error)
 		}
-		if res.Status == flow.StatusCompleted {
+		switch {
+		case res.Status == flow.StatusCompleted && res.Checked > 0:
+			out.Message += fmt.Sprintf(" %s of the flow held. A flow completes and does not pass: a scenario still needs its own check.", plural(res.Checked, "check"))
+		case res.Status == flow.StatusCompleted:
 			out.Message += " A flow has no check, so it completes and does not pass."
 		}
 		return out, nil

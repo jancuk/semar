@@ -49,10 +49,14 @@ const (
 // SourceInvariant labels a CheckResult from a built-in invariant. It never appears in a file.
 const SourceInvariant = "invariant"
 
+// SourceFlow labels a CheckResult from a check of a flow step. It has the index -1, and is not one of
+// the expected results of the scenario. It never appears in a file.
+const SourceFlow = "flow"
+
 type CheckResult struct {
 	Step     StepID     `json:"step"`
-	Index    int        `json:"index"`  // position in Step.Expect. -1 for an invariant
-	Source   string     `json:"source"` // a Source, or "invariant"
+	Index    int        `json:"index"`  // position in Step.Expect. -1 for an invariant or a flow check
+	Source   string     `json:"source"` // a Source, "invariant", or "flow"
 	State    CheckState `json:"state"`
 	Expected string     `json:"expected"`
 	Observed string     `json:"observed"`

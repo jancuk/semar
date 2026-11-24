@@ -37,6 +37,8 @@ type exchangeView struct {
 type webView struct {
 	Why, Target, Result string
 	Shot                *shotEmbed
+	// Crash and Logcat are the paths of the files of evidence of a device step, linked from the page.
+	Crash, Logcat string
 }
 
 // shotEmbed is a screenshot of a web or a device step. Src is empty when the report leaves it out, and Path says where it is.
@@ -235,6 +237,12 @@ func (e *embedder) steps(vw viewer, d Data, res domain.ScenarioResult, all bool)
 				wv := webView{Why: vw.show(a.Why), Target: vw.show(a.Target), Result: vw.show(a.Result)}
 				if screenshotPath.MatchString(a.Screenshot) {
 					wv.Shot = e.shot(a.Screenshot, all || i == lastShot)
+				}
+				if evidenceFile.MatchString(a.CrashFile) {
+					wv.Crash = a.CrashFile
+				}
+				if evidenceFile.MatchString(a.LogcatFile) {
+					wv.Logcat = a.LogcatFile
 				}
 				sv.Web = append(sv.Web, wv)
 			default:

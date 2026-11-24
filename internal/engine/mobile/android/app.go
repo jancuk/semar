@@ -89,6 +89,9 @@ func (d *driver) Source(ctx context.Context) (*mobile.Tree, error) {
 }
 
 func (d *driver) Touch(ctx context.Context, g mobile.Gesture) error {
+	if g.Taps > 1 && g.From == g.To && g.Hold == 0 {
+		return d.sess.Tap(ctx, webdriver.Point(g.From), g.Taps)
+	}
 	return d.sess.Touch(ctx, webdriver.Point(g.From), webdriver.Point(g.To), g.Hold, g.Move)
 }
 
@@ -260,3 +263,7 @@ func (l *adbLife) hideKeyboard(ctx context.Context) error {
 	}
 	return l.sess.PressKeycode(ctx, keycodeBack)
 }
+
+// Clipboard reads the clipboard of the device through the session of the app. A recording holds that
+// session, so it is how a read gets to the device while a recording goes on.
+func (d *driver) Clipboard(ctx context.Context) (string, error) { return d.sess.Clipboard(ctx) }

@@ -87,6 +87,25 @@ type Deps struct {
 	// Once says whether sending the call would use a request of the once list of the environment. Nil
 	// means the environment has none.
 	Once func(api.Call) bool
+	// Pause is called right after a step on a device failed, or had a check that is false, while the
+	// device is still held and still shows the screen of the step. It returns when the person says to
+	// go on, or when the context ends. Nil never pauses. The outcome of the step does not depend on it.
+	Pause func(ctx context.Context, p Pause)
+}
+
+// Pause says where a run stopped to let a person look at the device.
+type Pause struct {
+	Scenario domain.ScenarioID
+	// Step is the step of the scenario, and Flow the flow that the failing step belongs to, or "".
+	Step domain.StepID
+	Flow string
+	// Reason is the first thing that went wrong.
+	Reason string
+	Screen string
+	// Screenshot is a path relative to the run directory.
+	Screenshot string
+	// Nearby are the visible elements that look most like an element that was not found.
+	Nearby []domain.Candidate
 }
 
 type Runner struct {
@@ -522,6 +541,7 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 			maps.Copy(have, res.Captured)
 			maps.Copy(showing, res.Action.Captures)
 			run.steps[step.ID] = evaluate(step, res.Action, have, showing)
+			r.pause(ctx, sc, step, ss, "", res.Action, run.steps[step.ID])
 		}
 		if r.stopAfter(rc, step, res, err) {
 			break
@@ -543,6 +563,37 @@ func (r *Runner) steps(ctx context.Context, sc domain.Scenario, s domain.Script,
 		note("", reasonInterrupted)
 	}
 	return doErr
+}
+
+// pause lets a person look at the device when a step on it did not work: the action failed and was not
+// refused, or a check of the step is false. It is the one place that calls Deps.Pause.
+func (r *Runner) pause(ctx context.Context, sc domain.Scenario, step domain.Step, ss domain.ScriptStep, flowID string, a domain.Action, ev verdict.StepEvidence) {
+	if r.d.Pause == nil || ss.Mobile == nil || a.Mobile == nil || ctx.Err() != nil {
+		return
+	}
+	reason := ""
+	switch {
+	case a.Refused != "":
+		return
+	case a.Err != "":
+		reason = "the step did not finish: " + a.Err
+	default:
+		for _, c := range ev.Checks {
+			if c.State == domain.CheckFalse {
+				reason = fmt.Sprintf("a check is false: expected %s, observed %s", c.Expected, c.Observed)
+				break
+			}
+		}
+		for _, c := range ev.FlowChecks {
+			if reason == "" && c.Result.State == domain.CheckFalse {
+				reason = fmt.Sprintf("a check of flow %s step %s is false: expected %s, observed %s", c.Flow, c.Step, c.Result.Expected, c.Result.Observed)
+			}
+		}
+	}
+	if reason == "" {
+		return
+	}
+	r.d.Pause(ctx, Pause{Scenario: sc.ID, Step: step.ID, Flow: flowID, Reason: reason, Screen: a.Mobile.Screen, Screenshot: a.Mobile.Screenshot, Nearby: a.Mobile.Nearby})
 }
 
 // runCtx is what the steps of one scenario share while they are sent.

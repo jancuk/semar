@@ -6,7 +6,7 @@ import (
 	"path"
 )
 
-//go:embed ui/index.html ui/app.js ui/style.css
+//go:embed ui/index.html ui/app.js ui/live.js ui/style.css
 var ui embed.FS
 
 var contentTypes = map[string]string{

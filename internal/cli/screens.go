@@ -39,7 +39,7 @@ func newScreensRepairCommand(o options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "repair <run id|latest> [--apply <screen>.<element>=<n>]...",
 		Short: "Show a proposal for each element that a run did not find, and rewrite a locator with --apply",
-		Long: "Read a stored run, and for each element that a web step did not find, print its locator beside up to three candidates that the browser found by role, by name, or by text. No model is used.\n" +
+		Long: "Read a stored run, and for each element that a web or an Android step did not find, print its locator beside up to three candidates that the browser or the device found by role, by name, or by text. When an Android step has no candidate, print the elements of the screen that look most like the missing one. No model is used.\n" +
 			"With --apply <screen>.<element>=<n>, rewrite that element of the screens file with candidate n. Nothing else is touched: not a scenario, an expected result, or a step. The next run uses the file.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -58,6 +58,8 @@ type miss struct {
 	step                 domain.StepID
 	looked               domain.Locator
 	candidates           []domain.Candidate
+	// nearby are the visible elements of a device screen that look most like the element.
+	nearby []domain.Candidate
 }
 
 func (m miss) key() string { return m.app + "/" + m.screen + "." + m.element }
@@ -86,6 +88,11 @@ func runMisses(store *evidence.Store, id domain.RunID, acts []domain.Activity) (
 			for _, c := range ui.Repair {
 				if c.Element == name {
 					m.candidates = append(m.candidates, c)
+				}
+			}
+			for _, c := range ui.Nearby {
+				if c.Element == name {
+					m.nearby = append(m.nearby, c)
 				}
 			}
 			out = slices.DeleteFunc(out, func(x miss) bool { return x.key() == m.key() })
@@ -142,6 +149,14 @@ func printMisses(stdout io.Writer, id domain.RunID, misses []miss) error {
 		fmt.Fprintf(stdout, "%s %s.%s was not found (scenario %s, step %s)\n", m.app, m.screen, m.element, m.scenario, m.step)
 		fmt.Fprintf(stdout, "  old: %s\n", terminalSafe(oneLine(m.looked.String())))
 		if len(m.candidates) == 0 {
+			if len(m.nearby) > 0 {
+				fmt.Fprintf(stdout, "  no candidate that finds one element. The closest elements on the screen were:\n")
+				for _, c := range m.nearby {
+					fmt.Fprintf(stdout, "    %s: %s\n", terminalSafe(oneLine(c.Why)), terminalSafe(oneLine(c.Locator.String())))
+				}
+				fmt.Fprintf(stdout, "  to point the element at one, edit %s by hand; --apply takes only a candidate\n", screens.Path(m.app))
+				continue
+			}
 			fmt.Fprintf(stdout, "  no candidate: the screen has nothing like it. Either the product changed or the script is out of date\n")
 			continue
 		}

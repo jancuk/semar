@@ -1,7 +1,9 @@
 package mobilerec
 
 import (
+	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -38,14 +40,23 @@ const (
 	TierText   = "text"
 	TierWithin = "within"
 	TierXPath  = "xpath"
+	// TierIndex is a position among the matches of another locator. It is never chosen on its own.
+	TierIndex = "index"
 )
 
 const (
 	probeName  = "target"
 	probeInner = "container"
-	maxString  = 200
+	// probeTo and probeToInner name the element that a drag drops on, and its container.
+	probeTo      = "to"
+	probeToInner = "toContainer"
+	maxString    = 200
 	// maxClimb is how many levels above the target a container is looked for.
 	maxClimb = 5
+	// maxLabels is how many labels of one ancestor are tried as the text that finds it.
+	maxLabels = 5
+	// maxLabel is the longest label that finds a container.
+	maxLabel = 60
 )
 
 // Container is the element that a within locator is searched in. It is saved as an element of the screen.
@@ -66,6 +77,13 @@ type Candidate struct {
 	Container *Container
 	// Dynamic is true when the string that the locator is made of looks like a date, an amount, or a number.
 	Dynamic bool
+	// Matches is how many visible elements the locator finds alone, for a locator that is ambiguous, and
+	// the number of elements that an index counts in.
+	Matches int
+	// Explicit is true for a locator that Semar offers but never picks: a position. A person has to choose it.
+	Explicit bool
+	// Note says in plain words what is special about the locator, such as "by position 2 of 3".
+	Note string
 }
 
 var (
@@ -122,14 +140,43 @@ func shortID(id string) string {
 //
 // target is the node that the purpose names, already: for ForTap the nearest clickable node.
 func Locate(t *mobile.Tree, target *mobile.Node, p Purpose, ov *Overlay) []Candidate {
+	all, _ := LocateAll(t, target, p, ov)
+	var out []Candidate
+	for _, c := range all {
+		if !c.Explicit {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// LocateAll gives what Locate gives, and more. found is the list of Locate, and ends with a position
+// (Explicit) when no other locator finds the target alone: the first locator that matches several
+// elements, with an index. ambiguous lists the locators that find the target among several visible
+// elements, with how many, in the order of the tiers. A replay refuses those, and so does the recorder.
+func LocateAll(t *mobile.Tree, target *mobile.Node, p Purpose, ov *Overlay) (found, ambiguous []Candidate) {
 	if t == nil || target == nil {
-		return nil
+		return nil, nil
 	}
 	editable := Editable(target)
 	var out []Candidate
 	seen := map[domain.Locator]bool{}
+	tried := map[domain.Locator]bool{}
+	// positions[i] is where the target is among the matches of ambiguous[i].
+	var positions []int
 	keep := func(c Candidate) {
-		if seen[c.Locator] || !c.Locator.ForMobile() || !confirms(t, c, target, p) {
+		if seen[c.Locator] || !c.Locator.ForMobile() {
+			return
+		}
+		if !confirms(t, c, target, p) {
+			if c.Container == nil && !tried[c.Locator] {
+				tried[c.Locator] = true
+				if matches, pos := ambiguity(t, c.Locator, target, p); pos > 0 {
+					c.Matches = matches
+					ambiguous = append(ambiguous, c)
+					positions = append(positions, pos)
+				}
+			}
 			return
 		}
 		seen[c.Locator] = true
@@ -190,7 +237,58 @@ func Locate(t *mobile.Tree, target *mobile.Node, p Purpose, ov *Overlay) []Candi
 			keep(Candidate{Locator: domain.Locator{Role: target.Role, Name: name}, Tier: TierRole, Stability: Weak, Dynamic: IsDynamic(name)})
 		}
 	}
-	return rankDynamic(out)
+	out = rankDynamic(out)
+	if len(out) == 0 {
+		if c, ok := byPosition(t, ambiguous, positions, target, p); ok {
+			out = append(out, c)
+		}
+	}
+	return out, ambiguous
+}
+
+// ambiguity says how many visible elements the locator finds, and the position of the one that the
+// purpose accepts as the target among them, counted from 1. The position is 0 when the locator finds
+// fewer than two elements or not the target.
+func ambiguity(t *mobile.Tree, loc domain.Locator, target *mobile.Node, p Purpose) (matches, pos int) {
+	nodes, err := mobile.Find(t, loc, nil)
+	if err != nil {
+		return 0, 0
+	}
+	var visible []*mobile.Node
+	for _, n := range nodes {
+		if n.Visible {
+			visible = append(visible, n)
+		}
+	}
+	if len(visible) < 2 {
+		return 0, 0
+	}
+	for i, n := range visible {
+		if (p == ForTap && tapAccepts(target, n)) || n == target {
+			return len(visible), i + 1
+		}
+	}
+	return len(visible), 0
+}
+
+// byPosition makes the position candidate from the first ambiguous locator that an index makes unique.
+// The locators that do not change between runs come first.
+func byPosition(t *mobile.Tree, ambiguous []Candidate, positions []int, target *mobile.Node, p Purpose) (Candidate, bool) {
+	for _, dynamic := range []bool{false, true} {
+		for i, a := range ambiguous {
+			if a.Dynamic != dynamic {
+				continue
+			}
+			loc := a.Locator
+			loc.Index = positions[i]
+			c := Candidate{Locator: loc, Tier: TierIndex, Stability: Weak, Dynamic: a.Dynamic, Matches: a.Matches, Explicit: true,
+				Note: fmt.Sprintf("by position %d of %d", positions[i], a.Matches)}
+			if confirms(t, c, target, p) {
+				return c, true
+			}
+		}
+	}
+	return Candidate{}, false
 }
 
 func stabilityOf(s string) string {
@@ -266,17 +364,30 @@ func tapLeaves(target *mobile.Node) []*mobile.Node {
 }
 
 // withinCandidates searches for the target inside the nearest ancestor that has a locator of its own
-// that finds it alone: an id or a description. The container is saved as an element, so it is unique by
-// itself, and the inner locator may then be a text that the whole screen shows twice.
+// that finds it alone: an id, a description, or a class with a text that the ancestor shows. The
+// container is saved as an element, so it is unique by itself, and the inner locator may then be a text
+// that the whole screen shows twice. It climbs past an ancestor in which no inner locator finds the
+// target.
 func withinCandidates(t *mobile.Tree, target *mobile.Node, p Purpose, ov *Overlay) []Candidate {
 	var out []Candidate
 	levels := 0
 	for anc := target.Parent; anc != nil && levels < maxClimb; anc, levels = anc.Parent, levels+1 {
-		cont := containerOf(t, anc, ov)
+		cont := containerOf(t, anc, target, ov)
 		if cont == nil {
 			continue
 		}
 		inner := []domain.Locator{}
+		if target.ID != "" {
+			if short := shortID(target.ID); short != target.ID && usable(ov, short) {
+				inner = append(inner, domain.Locator{ID: short})
+			}
+			if usable(ov, target.ID) {
+				inner = append(inner, domain.Locator{ID: target.ID})
+			}
+		}
+		if d := collapseSpace(target.Desc); usable(ov, d) {
+			inner = append(inner, domain.Locator{Desc: d})
+		}
 		name := target.AccName()
 		if target.Role != "" && usable(ov, name) {
 			inner = append(inner, domain.Locator{Role: target.Role, Name: name})
@@ -287,19 +398,24 @@ func withinCandidates(t *mobile.Tree, target *mobile.Node, p Purpose, ov *Overla
 		if target.Class != "" && usable(ov, target.Class) {
 			inner = append(inner, domain.Locator{Class: target.Class})
 		}
+		found := false
 		for _, loc := range inner {
 			loc.Within = probeInner
-			out = append(out, Candidate{Locator: loc, Tier: TierWithin, Stability: Weak, Container: cont, Dynamic: IsDynamic(loc.Text) || IsDynamic(loc.Name)})
+			c := Candidate{Locator: loc, Tier: TierWithin, Stability: Weak, Container: cont, Dynamic: IsDynamic(loc.Text) || IsDynamic(loc.Name) || IsDynamic(loc.Desc)}
+			out = append(out, c)
+			found = found || confirms(t, c, target, p)
 		}
-		if len(out) > 0 {
+		if found {
 			break
 		}
 	}
 	return out
 }
 
-// containerOf gives the locator of an ancestor that finds that ancestor alone, or nil.
-func containerOf(t *mobile.Tree, anc *mobile.Node, ov *Overlay) *Container {
+// containerOf gives the locator of an ancestor that finds that ancestor alone, or nil. It tries the
+// id, then the description, then the class of the ancestor with a text that the ancestor shows beside
+// the target.
+func containerOf(t *mobile.Tree, anc, target *mobile.Node, ov *Overlay) *Container {
 	try := func(loc domain.Locator, hint string) *Container {
 		st, got, err := mobile.Resolve(t, map[string]domain.Locator{probeName: loc}, probeName)
 		if err != nil || !st.Found || got != anc {
@@ -316,9 +432,51 @@ func containerOf(t *mobile.Tree, anc *mobile.Node, ov *Overlay) *Container {
 		}
 	}
 	if d := collapseSpace(anc.Desc); usable(ov, d) && !IsDynamic(d) {
-		return try(domain.Locator{Desc: d}, d)
+		if c := try(domain.Locator{Desc: d}, d); c != nil {
+			return c
+		}
+	}
+	if anc.Class != "" && usable(ov, anc.Class) {
+		for _, y := range labelsBeside(anc, target, ov) {
+			if c := try(domain.Locator{Class: anc.Class, HasText: y}, y); c != nil {
+				return c
+			}
+		}
 	}
 	return nil
+}
+
+// labelsBeside gives up to maxLabels texts or descriptions that the ancestor shows outside the target
+// and outside the nodes that hold the target, in the order of the tree. A label is short, does not look
+// like something that changes between runs, and may be part of a saved locator.
+func labelsBeside(anc, target *mobile.Node, ov *Overlay) []string {
+	var out []string
+	add := func(s string) {
+		s = collapseSpace(s)
+		if len(out) < maxLabels && usable(ov, s) && len([]rune(s)) <= maxLabel && !IsDynamic(s) && !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	var walk func(n *mobile.Node)
+	walk = func(n *mobile.Node) {
+		for _, k := range n.Children {
+			if k == target || !k.Visible || len(out) >= maxLabels {
+				continue
+			}
+			if inside(target, k) {
+				// k holds the target: its own labels hold the target's, and only what is inside it counts.
+				walk(k)
+				continue
+			}
+			add(k.Desc)
+			if len(k.Children) == 0 {
+				add(k.Text)
+			}
+			walk(k)
+		}
+	}
+	walk(anc)
+	return out
 }
 
 // xpaths gives the shortest xpaths that Semar can run and that hold the attribute of the node: a field

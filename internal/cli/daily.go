@@ -12,6 +12,7 @@ import (
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/obligation"
+	"github.com/jancuk/semar/internal/replay"
 	"github.com/jancuk/semar/internal/report"
 	"github.com/jancuk/semar/internal/status"
 )
@@ -88,7 +89,11 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 	var runs []finishedRun
 	scenarioExit := 0
 	if len(sel.scenarios) > 0 {
-		fin, err := executeScenarios(ctx, stderr, o, f.dir, cfg, envName, env, declared, sel.scenarios, f.headed, announce)
+		var pause func(context.Context, replay.Pause)
+		if f.pauseOnFail {
+			pause = pauseForPerson(stdout, answers)
+		}
+		fin, err := executeScenarios(ctx, stderr, o, f.dir, cfg, envName, env, declared, sel.scenarios, f.headed, pause, announce)
 		if err != nil {
 			return err
 		}
@@ -117,6 +122,7 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 		}
 		report.WriteBlocked(stdout, envName, "scenario", fin.blocked)
 		report.WriteDocWarnings(stdout, envName, fin.docs)
+		report.WriteMisses(stdout, string(fin.record.ID), fin.misses)
 		fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
 		sub := ""
 		if len(sel.scenarios) > 0 {
@@ -445,6 +451,34 @@ func printScenarioRun(stdout io.Writer, envName string, fin finishedRun) error {
 	}
 	report.WriteBlocked(stdout, envName, "scenario", fin.blocked)
 	report.WriteDocWarnings(stdout, envName, fin.docs)
+	report.WriteMisses(stdout, string(fin.record.ID), fin.misses)
 	fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
 	return nil
+}
+
+// pauseForPerson is the callback of --pause-on-fail. It says what went wrong and which elements of the
+// screen look most like the one that is missing, then waits for a line from the same reader that the run
+// asks its questions with. The read ends when the run is cancelled, so Ctrl+C still stops the run.
+func pauseForPerson(stdout io.Writer, answers *lineReader) func(context.Context, replay.Pause) {
+	return func(ctx context.Context, p replay.Pause) {
+		where := fmt.Sprintf("scenario %s step %s", p.Scenario, p.Step)
+		if p.Flow != "" {
+			where += " (flow " + p.Flow + ")"
+		}
+		fmt.Fprintf(stdout, "\npaused at %s: %s\n", terminalSafe(oneLine(where)), terminalSafe(oneLine(p.Reason)))
+		if p.Screen != "" {
+			fmt.Fprintf(stdout, "  screen: %s\n", terminalSafe(oneLine(p.Screen)))
+		}
+		if p.Screenshot != "" {
+			fmt.Fprintf(stdout, "  screenshot: %s, in the run directory\n", terminalSafe(oneLine(p.Screenshot)))
+		}
+		if len(p.Nearby) > 0 {
+			fmt.Fprintln(stdout, "  closest elements on the screen:")
+			for _, c := range p.Nearby {
+				fmt.Fprintf(stdout, "    %s\n", terminalSafe(oneLine(c.Why)))
+			}
+		}
+		fmt.Fprintln(stdout, "The device stays on this screen. Press Enter to go on.")
+		answers.read(ctx)
+	}
 }

@@ -359,6 +359,11 @@ func (s *scrubber) redact(src string, decode func(string) view, patterns bool) s
 
 func (s *scrubber) text(t string) string { return s.redact(t, sourceView, true) }
 
+// Text redacts free text: the secrets, the values that the run learned, and the configured patterns. It
+// is for output that is not an action, such as the text of a screen or a log line. It is safe to call
+// from several goroutines.
+func (r *Redactor) Text(s string) string { return r.newScrubber().text(s) }
+
 func (s *scrubber) replace(t string, spans []span) string {
 	sort.Slice(spans, func(i, j int) bool {
 		if spans[i].start != spans[j].start {

@@ -44,3 +44,21 @@ func TestWebRecordHoldsNoSecret(t *testing.T) {
 		t.Errorf("the caller's action was changed")
 	}
 }
+
+func TestALocatorHasTextHoldsNoSecret(t *testing.T) {
+	const secret = "hunter2-very-secret"
+	r, err := redact.New(config.Redact{}, func() []string { return []string{secret} }, []byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loc := domain.Locator{Class: "k", HasText: "Order " + secret, Index: 2}
+	a := domain.Action{Surface: domain.SurfaceWeb, Op: "click", Web: &domain.WebRecord{Op: "click", Target: &loc,
+		Repair: []domain.Candidate{{Element: "x", Locator: loc, Why: "w"}}}}
+	blob, err := json.Marshal(r.Action(a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(blob), secret) || !strings.Contains(string(blob), `"index":2`) {
+		t.Errorf("redacted action: %s", blob)
+	}
+}

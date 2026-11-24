@@ -33,6 +33,22 @@ type ADBConfig struct {
 	GrantOutput string
 	// Dumpsys is what dumpsys input_method prints.
 	Dumpsys string
+	// SDK is what getprop ro.build.version.sdk prints. The default is 34.
+	SDK string
+	// Canned are replies to shell commands, tried in order before the built-in ones.
+	Canned []Canned
+}
+
+// Canned is a reply to the shell commands whose quoted text holds Match, such as "'wm' 'size'" or
+// "'dumpsys' 'dropbox' '--print' 'data_app_crash'".
+type Canned struct {
+	Match string
+	// Out is written to stdout, and Err to stderr.
+	Out, Err string
+	// RC is the exit status.
+	RC int
+	// Hold makes the command keep running after it wrote Out, as logcat -T does, until it is killed.
+	Hold bool
 }
 
 // ADB is a fake adb: a shell script in a directory of its own, outside any repository, that logs what it
@@ -44,6 +60,8 @@ type ADB struct {
 	t   testing.TB
 	dir string
 	mu  sync.Mutex
+	// canned is how many canned replies were added.
+	canned int
 }
 
 const adbScript = `#!/bin/sh
@@ -82,9 +100,37 @@ case "$cmd" in
     echo "Success"
     exit 0 ;;
   uninstall) echo Success; exit 0 ;;
+  emu) exit 0 ;;
+  pull)
+    for last; do :; done
+    printf 'FAKE-MP4' > "$last"
+    echo "1 file pulled"
+    exit 0 ;;
   shell)
     c="$1"
+    for kf in "$D"/canned.*.key; do
+      [ -f "$kf" ] || continue
+      key="$(cat "$kf")"
+      case "$c" in
+        *"$key"*)
+          base="${kf%.key}"
+          [ -f "$base.out" ] && cat "$base.out"
+          [ -f "$base.err" ] && cat "$base.err" >&2
+          if [ -f "$base.hold" ]; then exec sleep 120; fi
+          rc=0
+          [ -f "$base.rc" ] && rc="$(cat "$base.rc")"
+          exit "$rc" ;;
+      esac
+    done
     case "$c" in
+      *"'getprop' 'ro.build.version.sdk'"*) if [ -f "$D/sdk" ]; then cat "$D/sdk"; else echo 34; fi ;;
+      *"'screenrecord' "*)
+        rm -f "$D/pkill"
+        touch "$D/recording"
+        while [ ! -f "$D/pkill" ]; do sleep 0.02; done
+        rm -f "$D/recording"
+        echo "Recording finished" ;;
+      *"'pkill' "*) touch "$D/pkill" ;;
       *"'getprop' 'sys.boot_completed'"*)
         if [ -f "$D/notbooted" ]; then echo 0; else echo 1; fi ;;
       *"'getprop' 'ro.build.version.release'"*) echo 14 ;;
@@ -153,7 +199,40 @@ func NewADB(t testing.TB, cfg ADBConfig) *ADB {
 	if cfg.Dumpsys != "" {
 		a.write("dumpsys", cfg.Dumpsys)
 	}
+	if cfg.SDK != "" {
+		a.write("sdk", cfg.SDK)
+	}
+	for _, c := range cfg.Canned {
+		a.Can(c)
+	}
 	return a
+}
+
+// Can adds a canned reply after the fake was made. A reply that was added first is tried first.
+func (a *ADB) Can(c Canned) {
+	a.mu.Lock()
+	n := a.canned
+	a.canned++
+	a.mu.Unlock()
+	base := fmt.Sprintf("canned.%04d", n)
+	a.write(base+".out", c.Out)
+	if c.Err != "" {
+		a.write(base+".err", c.Err)
+	}
+	if c.RC != 0 {
+		a.write(base+".rc", fmt.Sprint(c.RC))
+	}
+	if c.Hold {
+		a.write(base+".hold", "1")
+	}
+	// The key is written last: the script looks for keys, and finds a reply only when it is whole.
+	a.write(base+".key", c.Match)
+}
+
+// Recording reports whether a fake screenrecord is running.
+func (a *ADB) Recording() bool {
+	_, err := os.Stat(filepath.Join(a.dir, "recording"))
+	return err == nil
 }
 
 func (a *ADB) write(name, content string) {
@@ -232,3 +311,66 @@ func (a *ADB) Count(words ...string) int {
 
 // Contains reports whether any call is at least the words, in order.
 func (a *ADB) Contains(words ...string) bool { return a.Count(words...) > 0 }
+
+// QuotedWords splits a command that was sent to the shell of the device into its words. It gives false
+// unless every word is in single quotes, as shellCommand writes it, with a quote inside a word written
+// as '\”.
+func QuotedWords(cmd string) ([]string, bool) {
+	var words []string
+	i := 0
+	for i < len(cmd) {
+		if cmd[i] != '\'' {
+			return nil, false
+		}
+		var w strings.Builder
+		for {
+			i++ // past the opening quote
+			j := strings.IndexByte(cmd[i:], '\'')
+			if j < 0 {
+				return nil, false
+			}
+			w.WriteString(cmd[i : i+j])
+			i += j + 1
+			if strings.HasPrefix(cmd[i:], `\''`) { // '\'' is a quote in the word
+				w.WriteByte('\'')
+				i += 2
+				continue
+			}
+			break
+		}
+		words = append(words, w.String())
+		switch {
+		case i == len(cmd):
+		case cmd[i] == ' ':
+			i++
+			if i == len(cmd) {
+				return nil, false
+			}
+		default:
+			return nil, false
+		}
+	}
+	return words, len(words) > 0
+}
+
+// AssertQuoted fails the test for every command sent to the shell of the device that has a word that is
+// not in single quotes.
+func (a *ADB) AssertQuoted(t testing.TB) {
+	t.Helper()
+	for _, c := range a.Shell() {
+		if _, ok := QuotedWords(c); !ok {
+			t.Errorf("a shell command is not made of quoted words: %s", c)
+		}
+	}
+}
+
+// ShellWords gives the shell commands as their words, for a test that checks one word.
+func (a *ADB) ShellWords() [][]string {
+	var out [][]string
+	for _, c := range a.Shell() {
+		if w, ok := QuotedWords(c); ok {
+			out = append(out, w)
+		}
+	}
+	return out
+}

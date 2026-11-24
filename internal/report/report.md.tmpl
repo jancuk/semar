@@ -122,6 +122,17 @@ Each response was checked against the API document, and against the time limit w
 - {{ .Scenario }}, step {{ .Step }}, {{ .Operation }}: {{ .Text }} ({{ .Effect }})
 {{ end -}}
 {{ end -}}
+{{ if .Misses }}
+## Elements not found
+
+A step on a device looked for these elements and the screen did not have them. The closest elements are the visible ones that look most like what was looked for. No outcome was changed.
+
+{{ range .Misses -}}
+- {{ .Scenario }}, step {{ .Step }}: {{ .What }} (looked for {{ .Looked }}){{ if .Closest }}. Closest: {{ .Closest }}{{ end }}. Run `{{ .Command }}`
+{{ end -}}
+{{ if .MissesMore }}- and {{ .MissesMore }} more: `semar screens repair {{ $.RunID }}` lists them all
+{{ end -}}
+{{ end -}}
 {{ if .Browser }}
 ## Browser steps
 
@@ -137,6 +148,6 @@ A browser action can change data. The list above holds the writes of the API onl
 A device action can change data, and the app makes requests that Semar cannot see. The list above holds the writes of the API only.
 
 {{ range .Device -}}
-- {{ .Scenario }}, step {{ .Step }}: {{ if .Why }}{{ .Why }} ({{ .Target }}){{ else }}{{ .Target }}{{ end }}: {{ .Result }}{{ if .Screenshot }}. [Screenshot]({{ .Screenshot }}){{ end }}
+- {{ .Scenario }}, step {{ .Step }}: {{ if .Why }}{{ .Why }} ({{ .Target }}){{ else }}{{ .Target }}{{ end }}: {{ .Result }}{{ if .Screenshot }}. [Screenshot]({{ .Screenshot }}){{ end }}{{ if .Crash }}. [Crash report]({{ .Crash }}){{ end }}{{ if .Logcat }}. [Log of the app]({{ .Logcat }}){{ end }}
 {{ end -}}
 {{ end -}}

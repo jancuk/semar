@@ -130,6 +130,9 @@ func mobileLines(m domain.MobileAction) []string {
 	if m.Within != "" {
 		parts = append(parts, "in", m.Within)
 	}
+	if m.To != "" {
+		parts = append(parts, "to", m.To)
+	}
 	if m.Screen != "" {
 		parts = append(parts, "on screen", m.Screen)
 	}
@@ -138,6 +141,8 @@ func mobileLines(m domain.MobileAction) []string {
 	case m.Secret != "":
 		out = append(out, "text "+secretWords(m.Secret))
 	case m.Do == domain.MobilePress:
+	case m.Value != "" && m.Do == domain.MobileDrag:
+		out = append(out, "hold "+m.Value)
 	case m.Value != "" && (m.Do == domain.MobileType):
 		out = append(out, "text "+strconv.Quote(m.Value))
 	case m.Value != "":

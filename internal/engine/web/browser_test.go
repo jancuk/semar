@@ -891,3 +891,22 @@ func TestARunNeverReadsAScriptThatAnEarlierRunCached(t *testing.T) {
 		t.Errorf("the second run shows %q, want the script of the build that runs now", got)
 	}
 }
+
+func TestAHasTextOrIndexIsRefusedInABrowser(t *testing.T) {
+	needChrome(t)
+	r := newRig(t, rigOptions{})
+	r.do(open("/board"), nil)
+	for name, loc := range map[string]domain.Locator{
+		"hasText": {Role: "button", Name: "Add card", HasText: "Add"},
+		"index":   {Role: "button", Name: "Add card", Index: 1},
+	} {
+		res, err := r.try(act(domain.WebClick, "add"), map[string]domain.Locator{"add": loc})
+		got := res.Action.Err
+		if err != nil {
+			got += err.Error()
+		}
+		if !strings.Contains(got, "hasText and index are for a device") {
+			t.Errorf("%s: err = %q", name, got)
+		}
+	}
+}

@@ -7,6 +7,7 @@
 <title>Semar · Recorder</title>
 <link rel="icon" href="data:," />
 <link rel="stylesheet" href="style.css" />
+<script src="live.js" defer="defer"></script>
 <script src="app.js" defer="defer"></script>
 </head>
 <body>
@@ -22,6 +23,7 @@
   <span class="seg" role="group" aria-label="Mode">
     <button type="button" class="btn seg-on" id="mode-act" aria-pressed="true">Act</button>
     <button type="button" class="btn" id="mode-assert" aria-pressed="false">Assert</button>
+    <button type="button" class="btn" id="mode-capture" aria-pressed="false" title="Keep the text of an element, or a part of it, as {{name}} for the steps after it">Capture</button>
   </span>
   <button type="button" class="btn" id="refresh" disabled="disabled">Refresh</button>
   <button type="button" class="btn" id="reset" disabled="disabled">Reset</button>
@@ -42,10 +44,22 @@
       <label class="field" id="start-service-row" hidden="hidden">App
         <select id="start-service"></select>
       </label>
+      <label class="field">Record
+        <select id="start-kind"><option value="scenario">A scenario</option><option value="flow">A flow</option></select>
+      </label>
       <label class="field">Start with a flow
         <select id="start-flow"></select>
       </label>
       <button type="button" class="btn primary" id="start">Start recording</button>
+      <h3>Open existing</h3>
+      <label class="field">Saved flow or scenario
+        <select id="open-pick"></select>
+      </label>
+      <label class="field">Replay to step (empty: all the steps)
+        <input type="number" id="open-at" min="1" step="1" inputmode="numeric" disabled="disabled" />
+      </label>
+      <button type="button" class="btn" id="open-existing" disabled="disabled">Open and replay</button>
+      <span class="hint">The app is reset, the saved steps are replayed on the device, and new steps go after them. A password is asked again: no file holds it.</span>
     </div>
     <div class="stage-wrap" id="stage-wrap" hidden="hidden">
       <div class="stage" id="stage">
@@ -61,8 +75,22 @@
 
   <aside class="side" aria-label="Timeline">
     <label class="field">Screen name
-      <input type="text" id="screen-name" autocomplete="off" spellcheck="false" disabled="disabled" />
+      <input type="text" id="screen-name" list="screen-names" autocomplete="off" spellcheck="false" disabled="disabled" />
     </label>
+    <datalist id="screen-names"></datalist>
+    <label class="check"><input type="checkbox" id="screen-rename" disabled="disabled" /> Rename recorded steps on this screen</label>
+    <p class="warn-note" id="dirty-note" hidden="hidden">A step that the device had done was deleted, so the device is not where the steps say. Use Go here on a step.</p>
+    <p class="warn-note" id="repick-note" hidden="hidden">Click the element on the screen that the step should use.</p>
+    <section class="cands" id="cand-panel" aria-label="Locators" hidden="hidden">
+      <div class="section-head"><h2 id="cand-title">Locators</h2><button type="button" class="btn" id="cand-close">Close</button></div>
+      <p class="hint" id="cand-note"></p>
+      <ul class="cand-list" id="cand-list"></ul>
+    </section>
+    <section id="captured" hidden="hidden" aria-label="Captured values">
+      <h3>Captured values</h3>
+      <ul class="captured-list" id="captured-list"></ul>
+      <p class="hint">Kept in this page and in memory for this session. The files hold the name and the pattern only.</p>
+    </section>
     <div class="row">
       <select id="flow-pick" aria-label="Flow to run"></select>
       <input type="text" id="flow-with" placeholder="name=value, ..." aria-label="Params of the flow" autocomplete="off" />
@@ -123,6 +151,29 @@
     <label class="field" id="assert-value-row">Value <input type="text" id="assert-value" autocomplete="off" /></label>
     <p class="error" id="assert-error" hidden="hidden"></p>
     <div class="actions"><button type="button" class="btn" data-close="dlg-assert">Cancel</button><button type="submit" class="btn primary">Add check</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-capture">
+  <form method="dialog" id="form-capture">
+    <h2>Capture a value</h2>
+    <p class="hint" id="cap-what"></p>
+    <p>The element shows: <code id="cap-text"></code></p>
+    <label class="field">Name <input type="text" id="cap-name" required="required" autocomplete="off" spellcheck="false" placeholder="orderRef" /></label>
+    <label class="field">Regular expression (optional) <input type="text" id="cap-pattern" autocomplete="off" spellcheck="false" placeholder="Order #([A-Z0-9]+)" /></label>
+    <p class="hint">The value is the first group of the expression, or the whole match when it has none. Later steps write it as {{name}}.</p>
+    <p class="preview" id="cap-preview"></p>
+    <p class="error" id="cap-error" hidden="hidden"></p>
+    <div class="actions"><button type="button" class="btn" data-close="dlg-capture">Cancel</button><button type="submit" class="btn primary">Capture</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-values">
+  <form method="dialog" id="form-values">
+    <h2>Values that no file holds</h2>
+    <p class="hint">The steps need these to go through. A secret is kept in memory for this session only, and is saved nowhere.</p>
+    <div id="values-fields"></div>
+    <div class="actions"><button type="button" class="btn" data-close="dlg-values">Cancel</button><button type="submit" class="btn primary">Go on</button></div>
   </form>
 </dialog>
 

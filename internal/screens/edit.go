@@ -25,6 +25,9 @@ func Replace(data []byte, app, screen, element string, loc domain.Locator) ([]by
 		return nil, fmt.Errorf("the screens file is empty")
 	}
 	node := child(child(child(doc.Content[0], "screens"), screen), element)
+	if node == nil {
+		node = child(child(doc.Content[0], "common"), element)
+	}
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("screen %s has no element %s in the screens file", screen, element)
 	}
@@ -56,10 +59,14 @@ func pairs(loc domain.Locator) [][2]string {
 	for _, f := range [][2]string{
 		{"testId", loc.TestID}, {"role", loc.Role}, {"name", loc.Name}, {"text", loc.Text}, {"css", loc.CSS},
 		{"id", loc.ID}, {"desc", loc.Desc}, {"class", loc.Class}, {"xpath", loc.XPath}, {"within", loc.Within},
+		{"hasText", loc.HasText},
 	} {
 		if f[1] != "" {
 			out = append(out, f)
 		}
+	}
+	if loc.Index != 0 {
+		out = append(out, [2]string{"index", strconv.Itoa(loc.Index)})
 	}
 	return out
 }
@@ -71,10 +78,19 @@ func scalar(v string) string {
 	return v
 }
 
+// pairText is a field of a locator as the file writes it. The index is a number and stays unquoted: a
+// quoted index does not decode into one.
+func pairText(p [2]string) string {
+	if p[0] == "index" {
+		return p[0] + ": " + p[1]
+	}
+	return p[0] + ": " + scalar(p[1])
+}
+
 func flowText(loc domain.Locator) string {
 	var parts []string
 	for _, p := range pairs(loc) {
-		parts = append(parts, p[0]+": "+scalar(p[1]))
+		parts = append(parts, pairText(p))
 	}
 	return "{ " + strings.Join(parts, ", ") + " }"
 }
@@ -82,7 +98,7 @@ func flowText(loc domain.Locator) string {
 func blockText(loc domain.Locator, indent int) string {
 	var lines []string
 	for i, p := range pairs(loc) {
-		line := p[0] + ": " + scalar(p[1])
+		line := pairText(p)
 		if i > 0 {
 			line = strings.Repeat(" ", indent) + line
 		}
@@ -217,5 +233,8 @@ func Repaired(file, resolved, candidate domain.Locator) domain.Locator {
 		Class:  keep(file.Class, resolved.Class, candidate.Class),
 		XPath:  keep(file.XPath, resolved.XPath, candidate.XPath),
 		Within: file.Within,
+		// The index is the candidate's own, and a text to filter by is kept like the other fields.
+		HasText: keep(file.HasText, resolved.HasText, candidate.HasText),
+		Index:   candidate.Index,
 	}
 }

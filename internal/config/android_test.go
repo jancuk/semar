@@ -166,3 +166,23 @@ func TestIsLoopbackHost(t *testing.T) {
 		}
 	}
 }
+
+func TestAndroidLogcatOnFailure(t *testing.T) {
+	cfg, err := loadText(t, androidText("      logcatOnFailure: true\n", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Environments["uat"].Android.LogcatOnFailure {
+		t.Error("logcatOnFailure: true was not read")
+	}
+	cfg, err = loadText(t, androidText("", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Environments["uat"].Android.LogcatOnFailure {
+		t.Error("logcatOnFailure must default to false")
+	}
+	if _, err := loadText(t, androidText("      logcatOnFailure: maybe\n", "")); err == nil {
+		t.Error("a logcatOnFailure that is not a boolean must be refused")
+	}
+}

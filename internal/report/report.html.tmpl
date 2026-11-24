@@ -83,6 +83,9 @@ ul { padding-left: 1.25rem; margin: .25rem 0; }
 <ul>{{ range .Blocked }}<li>{{ .Host }}{{ if .Met }}: {{ .Met }}{{ end }}</li>{{ end }}</ul>
 {{ end }}{{ if .DocChecks }}<h2>Checks against the API document</h2>
 <ul>{{ range .DocChecks }}<li>{{ .Scenario }}, step {{ .Step }}, {{ .Operation }}: {{ .Text }} ({{ .Effect }})</li>{{ end }}</ul>
+{{ end }}{{ if .Misses }}<h2>Elements not found</h2>
+<p>A step on a device looked for these elements and the screen did not have them. The closest elements are the visible ones that look most like what was looked for. No outcome was changed.</p>
+<ul>{{ range .Misses }}<li>{{ .Scenario }}, step {{ .Step }}: {{ .What }} (looked for <code>{{ .Looked }}</code>){{ if .Closest }}. Closest: {{ .Closest }}{{ end }}. Run <code>{{ .Command }}</code></li>{{ end }}{{ if .MissesMore }}<li>and {{ .MissesMore }} more: <code>semar screens repair {{ .RunID }}</code> lists them all</li>{{ end }}</ul>
 {{ end }}</body>
 </html>
 {{ define "groups" }}{{ range . }}<h3>{{ .Ticket }}</h3>
@@ -106,7 +109,7 @@ Received: <code>{{ .Observed }}</code>{{ if .Detail }}<br>{{ .Detail }}{{ end }}
 <pre>{{ .Request }}</pre>
 <h3>Response {{ .N }}</h3>
 <pre>{{ .Response }}</pre>
-{{ end }}{{ range .Web }}<p>{{ if .Why }}{{ .Why }} ({{ .Target }}){{ else }}{{ .Target }}{{ end }}: {{ .Result }}</p>
+{{ end }}{{ range .Web }}<p>{{ if .Why }}{{ .Why }} ({{ .Target }}){{ else }}{{ .Target }}{{ end }}: {{ .Result }}{{ if .Crash }} <a href="{{ .Crash }}">Crash report</a>{{ end }}{{ if .Logcat }} <a href="{{ .Logcat }}">Log of the app</a>{{ end }}</p>
 {{ with .Shot }}{{ if .Src }}<img alt="Screenshot of the step" src="{{ .Src }}">{{ else }}<p class="muted">Screenshot left out: <code>{{ .Path }}</code></p>{{ end }}{{ end }}
 {{ end }}</div>
 </details>

@@ -249,3 +249,99 @@ func TestFlowDriverIsTheFakeThatOtherPackagesShare(t *testing.T) {
 	var _ mobile.Driver = (*mobiletest.FakeDriver)(nil)
 	var _ mobile.Platform = (*mobiletest.FakePlatform)(nil)
 }
+
+func outerFlow(expect ...domain.Expectation) domain.Flow {
+	return domain.Flow{
+		APIVersion: "semar/v1", Kind: "Flow", ID: "outer", Surface: domain.SurfaceAndroid, Service: "shop-app", App: "shop-app",
+		Params: []domain.FlowParam{{Name: "who"}},
+		Steps: []domain.ScriptStep{
+			{Step: "sign-in", Use: "login", With: map[string]string{"email": "{{who}}@example.com"}},
+			{
+				Step:   "home-ready",
+				Mobile: &domain.MobileAction{Do: domain.MobileWait, Screen: "SignIn", Element: "welcome"},
+				Expect: expect,
+			},
+			{
+				Step:   "greeting",
+				Mobile: &domain.MobileAction{Do: domain.MobileWait, Screen: "SignIn", Element: "welcome"},
+				Captures: []domain.Capture{
+					{Name: "greeted", Element: "welcome", Pattern: `Hi (\w+)`},
+				},
+			},
+		},
+	}
+}
+
+func nestedFlows(outer domain.Flow) func(string) (domain.Flow, string, error) {
+	login := validFlowForRun()
+	return func(id string) (domain.Flow, string, error) {
+		switch id {
+		case "login":
+			return login, "sha256:login", nil
+		case "outer":
+			return outer, "sha256:outer", nil
+		}
+		return domain.Flow{}, "", flow.ErrNotFound
+	}
+}
+
+func validFlowForRun() domain.Flow {
+	f, err := flow.Parse([]byte(loginYAML), "login.yaml", "login")
+	if err != nil {
+		panic(err)
+	}
+	return f
+}
+
+func TestRunRunsAFlowInsideAFlowWithItsOwnScope(t *testing.T) {
+	d := shop()
+	eng, _, _ := engine(t, d, secrets{"env:SHOP_PASSWORD": "pw"}, false)
+	outer := outerFlow(domain.Expectation{Check: domain.Check{Element: "welcome", Contains: "Hi"}, Source: domain.SourcePerson})
+	res, err := flow.RunWith(t.Context(), eng, screenFiles{shopScreens}, outer, map[string]string{"who": "ana"}, map[string]string{"run.id": "run-1"}, flow.Options{Flows: nestedFlows(outer)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != flow.StatusCompleted || res.Error != "" || res.Checked != 1 {
+		t.Fatalf("status = %q, error = %q, checked = %d", res.Status, res.Error, res.Checked)
+	}
+	// The inner flow got its param from with, rendered in the scope of the outer flow.
+	if got := d.Typed(); len(got) == 0 || got[0] != "ana@example.com" {
+		t.Errorf("typed = %q", got)
+	}
+	// What the inner flow captured, and what the outer one captured through a pattern, is kept.
+	if res.Captured["shown"] != "Hi Ana" || res.Captured["greeted"] != "Ana" {
+		t.Errorf("captured = %v", res.Captured)
+	}
+	if !strings.Contains(res.Steps[1].Action.Why, "flow outer > flow login, step email") {
+		t.Errorf("why = %q", res.Steps[1].Action.Why)
+	}
+	if len(res.Steps) != 6 {
+		t.Errorf("%d steps ran, want 4 of login and 2 of outer", len(res.Steps))
+	}
+}
+
+func TestRunFailsWhenACheckOfAFlowIsFalse(t *testing.T) {
+	d := shop()
+	eng, _, _ := engine(t, d, secrets{"env:SHOP_PASSWORD": "pw"}, false)
+	outer := outerFlow(domain.Expectation{Check: domain.Check{Element: "welcome", Equals: "Hi Bob"}, Source: domain.SourcePerson})
+	res, err := flow.RunWith(t.Context(), eng, screenFiles{shopScreens}, outer, map[string]string{"who": "ana"}, map[string]string{"run.id": "run-1"}, flow.Options{Flows: nestedFlows(outer)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != flow.StatusFailed || !strings.Contains(res.Error, "step home-ready: expected") || !strings.Contains(res.Error, "observed") {
+		t.Fatalf("status = %q, error = %q", res.Status, res.Error)
+	}
+	if res.Captured["greeted"] != "" {
+		t.Errorf("a step after the false check ran: %v", res.Captured)
+	}
+}
+
+func TestRunNeedsTheFlowsItUses(t *testing.T) {
+	d := shop()
+	eng, _, _ := engine(t, d, secrets{"env:SHOP_PASSWORD": "pw"}, false)
+	outer := outerFlow()
+	_, err := flow.Run(t.Context(), eng, screenFiles{shopScreens}, outer, map[string]string{"who": "ana"}, map[string]string{"run.id": "run-1"})
+	if err == nil || !strings.Contains(err.Error(), "no flows") {
+		t.Errorf("err = %v", err)
+	}
+}

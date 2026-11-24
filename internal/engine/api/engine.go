@@ -502,6 +502,10 @@ func capture(body []byte, caps []domain.Capture) (map[string]string, []string) {
 			missing = append(missing, c.Name)
 			continue
 		}
+		if v, ok = c.Extract(v); !ok {
+			missing = append(missing, c.Name)
+			continue
+		}
 		captured[c.Name] = v
 	}
 	return captured, missing

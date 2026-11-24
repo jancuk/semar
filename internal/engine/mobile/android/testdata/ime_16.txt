@@ -1,0 +1,12 @@
+### settings
+com.samsung.android.honeyboard/.service.HoneyBoardService
+### dumpsys
+Current Input Method Manager state:
+  mCurMethodId=com.samsung.android.honeyboard/.service.HoneyBoardService
+  mImeWindowVis=0x0
+  Input method service state for com.samsung.android.honeyboard/.service.HoneyBoardService:
+    mViewsCreated=true mDecorViewVisible=false mWindowVisible=false
+    mShowInputRequested=false mShowInputFlags=0x0
+    isInputViewShown=false
+### want
+pkg=com.samsung.android.honeyboard shown=false

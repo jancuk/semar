@@ -327,6 +327,9 @@ func (v *validator) captures(where, phase string, cs []domain.Capture, seen map[
 		if _, err := jsonpath.Parse(c.JSONPath); err != nil {
 			v.add(cp, "capture %s: jsonpath does not parse: %v", c.Name, err)
 		}
+		if err := domain.CheckPattern(c.Pattern); err != nil {
+			v.add(cp, "capture %s: %v", c.Name, err)
+		}
 		if _, isParam := v.f.Params[c.Name]; isParam {
 			v.add(cp, "capture %s has the name of a parameter", c.Name)
 		}

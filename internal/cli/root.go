@@ -207,7 +207,7 @@ func newRoot(stdout, stderr io.Writer, o options) *cobra.Command {
 	// The help shows the commands of a normal day. The others still work, and the guide describes them.
 	for _, c := range []*cobra.Command{newDeferCommand(o), newStatusCommand(o), newChangesCommand(), newExportCommand(),
 		newFixtureCommand(o), newJourneyCommand(o), newProvidersCommand(o), newDashboardCmd(o), newScenariosCommand(), newScreensCommand(o),
-		newScriptCommand(), version} {
+		newScriptCommand(), newMCPCommand(o), version} {
 		c.Hidden = true
 		root.AddCommand(c)
 	}

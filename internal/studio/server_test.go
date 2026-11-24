@@ -25,11 +25,13 @@ import (
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/mobile"
 	"github.com/jancuk/semar/internal/engine/mobile/mobiletest"
+	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/flow"
 	"github.com/jancuk/semar/internal/localhttp"
 	"github.com/jancuk/semar/internal/mobilerec"
 	"github.com/jancuk/semar/internal/recorder"
 	"github.com/jancuk/semar/internal/redact"
+	"github.com/jancuk/semar/internal/scenario"
 	"github.com/jancuk/semar/internal/screens"
 	"github.com/jancuk/semar/internal/secret"
 	"github.com/jancuk/semar/internal/studio"
@@ -231,10 +233,26 @@ func (r *rig) deps(verifies *[]string) studio.Deps {
 			}
 			return id
 		},
+		Recordable: func() ([]studio.Recording, error) {
+			out := []studio.Recording{}
+			if ids, err := flow.IDs(r.repo); err == nil {
+				for _, id := range ids {
+					out = append(out, studio.Recording{Kind: "flow", ID: id})
+				}
+			}
+			return out, nil
+		},
 		NewSession: func(req studio.SessionRequest) (*mobilerec.Session, error) {
+			var resume *mobilerec.Loaded
+			if req.Resume {
+				var err error
+				if resume, err = r.loaded(req.Kind, req.ID); err != nil {
+					return nil, err
+				}
+			}
 			return mobilerec.New(mobilerec.Options{
 				Repo: r.repo, Kind: req.Kind, ID: req.ID, Ticket: req.Ticket, Title: req.Title, Service: "shop-app", App: "shop-app",
-				Open: open, Use: req.Use, UseWith: req.With, ConfirmClear: req.ConfirmClear,
+				Open: open, Use: req.Use, UseWith: req.With, ConfirmClear: req.ConfirmClear, Resume: resume, ResumeAt: req.ResumeAt,
 				Sleep: func(ctx context.Context, _ time.Duration) error { return ctx.Err() },
 			})
 		},
@@ -267,6 +285,46 @@ func (r *rig) deps(verifies *[]string) studio.Deps {
 			return out, nil
 		},
 	}
+}
+
+// loaded reads the files of a saved flow or scenario, as the command does to reopen one.
+func (r *rig) loaded(kind mobilerec.Kind, id string) (*mobilerec.Loaded, error) {
+	scr, err := screens.Load(r.repo, "shop-app")
+	if err != nil {
+		return nil, err
+	}
+	l := &mobilerec.Loaded{Screens: scr}
+	if kind == mobilerec.KindFlow {
+		entry, err := flow.Load(r.repo, id)
+		if err != nil {
+			return nil, err
+		}
+		l.Flow, l.Path = entry.Flow, flow.Path(id)
+		return l, nil
+	}
+	var rel string
+	_ = filepath.WalkDir(filepath.Join(r.repo, ".semar", "scenarios"), func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && d.Name() == id+".feature" {
+			rel, _ = filepath.Rel(r.repo, p)
+		}
+		return nil
+	})
+	if rel == "" {
+		return nil, fmt.Errorf("the scenario %s is not saved", id)
+	}
+	if l.Scenario, err = scenario.Load(filepath.Join(r.repo, rel)); err != nil {
+		return nil, err
+	}
+	store, err := evidence.Open(filepath.Join(r.repo, ".semar"))
+	if err != nil {
+		return nil, err
+	}
+	var ok bool
+	if l.Script, ok, err = store.Script(l.Scenario.ID, domain.ExpectHash(l.Scenario)); err != nil || !ok {
+		return nil, fmt.Errorf("no stored script: %v", err)
+	}
+	l.Path = filepath.ToSlash(rel)
+	return l, nil
 }
 
 // --- the studio over HTTP ---
@@ -347,11 +405,26 @@ type frameBody struct {
 		} `json:"elements"`
 	} `json:"frame"`
 	Steps []struct {
-		N    int    `json:"n"`
-		ID   string `json:"id"`
-		Text string `json:"text"`
-		Kind string `json:"kind"`
+		N       int    `json:"n"`
+		ID      string `json:"id"`
+		Text    string `json:"text"`
+		Kind    string `json:"kind"`
+		Screen  string `json:"screen"`
+		Pending bool   `json:"pending"`
+		Shared  bool   `json:"shared"`
+		Locator string `json:"locator"`
 	} `json:"steps"`
+	Cursor       int      `json:"cursor"`
+	Dirty        bool     `json:"dirty"`
+	Common       int      `json:"common"`
+	ScreenNames  []string `json:"screenNames"`
+	Notice       string   `json:"notice"`
+	NeedsSecrets []string `json:"needsSecrets"`
+	NeedsParams  []string `json:"needsParams"`
+	Captured     *struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	} `json:"captured"`
 	Kind    string `json:"kind"`
 	CanUndo bool   `json:"canUndo"`
 	Flow    string `json:"flow"`
@@ -880,5 +953,437 @@ func TestStudioServeGivesTheDeviceAwayOnShutdown(t *testing.T) {
 	}
 	if r.openHandles() != 0 {
 		t.Errorf("the device was not given away: %d open", r.openHandles())
+	}
+}
+
+// signInRecording records a flow on the sign-in screen: the launch, a literal email, a secret password, and
+// the tap that signs in. It returns the frame after the last step.
+func signInRecording(t *testing.T, c *client, kind string, id string) frameBody {
+	t.Helper()
+	f := c.call("POST", "/api/session/start", m{"kind": kind, "id": id}, 200)
+	f = c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "type", "index": f.find(t, byID("email")), "value": "ana@example.com"}, 200)
+	f = c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "type", "index": f.find(t, byID("password")), "secretEnv": "SHOP_PASSWORD", "ephemeralSecret": canary}, 200)
+	return c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "tap", "index": f.find(t, byDesc("Sign in"))}, 200)
+}
+
+func TestStudioEditsTheTimeline(t *testing.T) {
+	r := newRig(t)
+	var verifies []string
+	c, _ := start(t, r.deps(&verifies))
+	f := signInRecording(t, c, "scenario", "")
+	greeting := f.find(t, func(id, _ string) bool { return strings.HasSuffix(id, ":id/welcome") })
+	f = c.call("POST", "/api/session/assert", m{"frameId": f.Frame.ID, "index": greeting, "kind": "equals"}, 200)
+	if len(f.Steps) != 5 || f.Cursor != 5 || f.Dirty || f.Common != 0 || !contains(f.ScreenNames, "SignIn") || !contains(f.ScreenNames, "Home") {
+		t.Fatalf("answer = steps %d cursor %d dirty %v common %d names %v", len(f.Steps), f.Cursor, f.Dirty, f.Common, f.ScreenNames)
+	}
+	if f.Steps[3].Locator == "" || f.Steps[0].Locator != "" {
+		t.Errorf("a step with an element shows its locator, and the launch has none: %+v", f.Steps)
+	}
+
+	// The locators of the tap, and of a step that has no element.
+	var locs struct {
+		Locators []struct {
+			K       int    `json:"k"`
+			Locator string `json:"locator"`
+			Current bool   `json:"current"`
+		} `json:"locators"`
+	}
+	code, data := c.do("GET", "/api/timeline/3/locators", nil)
+	if code != 200 || json.Unmarshal(data, &locs) != nil || len(locs.Locators) == 0 || !locs.Locators[0].Current || locs.Locators[0].K != 1 {
+		t.Fatalf("locators = %d %s", code, data)
+	}
+	if code, data := c.do("GET", "/api/timeline/0/locators", nil); code != 400 || !bytes.Contains(data, []byte("no element")) {
+		t.Errorf("locators of a launch = %d %s", code, data)
+	}
+	c.call("POST", "/api/timeline/3/locator", m{"choice": 1}, 200)
+	if code, _ := c.do("POST", "/api/timeline/3/locator", m{"choice": 9}); code != 400 {
+		t.Errorf("a locator that is not listed gave %d, want 400", code)
+	}
+	if code, _ := c.do("POST", "/api/timeline/3/locator", m{}); code != 400 {
+		t.Errorf("a locator call with nothing in it gave %d, want 400", code)
+	}
+
+	// A step shared with every screen, and taken back. A locator is still refused in an edit.
+	f = c.call("PATCH", "/api/timeline/3", m{"common": true}, 200)
+	if !f.Steps[3].Shared {
+		t.Errorf("the step is not shared: %+v", f.Steps[3])
+	}
+	f = c.call("PATCH", "/api/timeline/3", m{"common": false}, 200)
+	if f.Steps[3].Shared {
+		t.Errorf("the step is still shared")
+	}
+	for _, body := range []m{{"locator": m{"id": "x"}}, {"hasText": "Milk"}, {"index": 2}, {"within": "card"}} {
+		if code, _ := c.do("PATCH", "/api/timeline/3", body); code != 400 {
+			t.Errorf("an edit with %v gave %d, want 400", body, code)
+		}
+	}
+
+	// Deleting the literal email, an action that the device did, leaves the session out of sync.
+	f = c.call("DELETE", "/api/timeline/1", m{}, 200)
+	if !f.Dirty || len(f.Steps) != 4 || f.Cursor != 4 {
+		t.Fatalf("after the delete: dirty %v steps %d cursor %d", f.Dirty, len(f.Steps), f.Cursor)
+	}
+	for _, s := range f.Steps {
+		if strings.Contains(s.Text, "ana@example.com") {
+			t.Errorf("the deleted step is still there: %+v", s)
+		}
+	}
+	for _, p := range []string{"/api/timeline/99", "/api/timeline/x"} {
+		if code, _ := c.do("DELETE", p, m{}); code != 404 && code != 400 {
+			t.Errorf("DELETE %s = %d", p, code)
+		}
+	}
+
+	// Go here: the app is reset, the steps up to the 3rd are replayed (the launch, the password, the tap), and
+	// the cursor is there. The secret was kept in the session, so nothing is asked.
+	r.signed = false // the app of a real recording that signs in is reset with clear: it is signed out again
+	f = c.call("POST", "/api/timeline/goto", m{"n": 3}, 200)
+	if f.Dirty || f.Cursor != 3 || !f.Steps[3].Pending || f.Steps[2].Pending || f.Frame.Screen != "Home" {
+		t.Fatalf("goto = cursor %d dirty %v pending %v screen %q", f.Cursor, f.Dirty, f.Steps[3].Pending, f.Frame.Screen)
+	}
+	// A new step goes at the cursor, before the check that was already there.
+	f = c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "tap", "index": f.find(t, byDesc("Sign out"))}, 200)
+	if len(f.Steps) != 5 || f.Steps[3].Kind != "tap" || f.Steps[4].Kind != "assert" || f.Cursor != 4 {
+		t.Fatalf("the new step is not in the middle: %+v cursor %d", f.Steps, f.Cursor)
+	}
+	if code, _ := c.do("POST", "/api/timeline/goto", m{"n": 40}); code != 400 {
+		t.Errorf("goto past the end gave %d, want 400", code)
+	}
+	f = c.call("DELETE", "/api/timeline/last", m{}, 200)
+	if len(f.Steps) != 4 {
+		t.Errorf("delete last left %d steps", len(f.Steps))
+	}
+	if strings.Contains(c.seen.String(), canary) {
+		t.Errorf("the secret is in an answer")
+	}
+}
+
+func TestStudioListsCandidatesAndTakesAChoice(t *testing.T) {
+	r := newRig(t)
+	var verifies []string
+	c, _ := start(t, r.deps(&verifies))
+	f := c.call("POST", "/api/session/start", m{}, 200)
+	btn := f.find(t, byDesc("Sign in"))
+	var list struct {
+		Usable []struct {
+			K       int    `json:"k"`
+			Locator string `json:"locator"`
+			Matches int    `json:"matches"`
+		} `json:"usable"`
+	}
+	path := fmt.Sprintf("/api/session/candidates?frameId=%d&index=%d&do=tap", f.Frame.ID, btn)
+	code, data := c.do("GET", path, nil)
+	if code != 200 || json.Unmarshal(data, &list) != nil || len(list.Usable) == 0 || list.Usable[0].K != 1 {
+		t.Fatalf("candidates = %d %s", code, data)
+	}
+	for _, p := range []string{"/api/session/candidates", "/api/session/candidates?frameId=1", fmt.Sprintf("/api/session/candidates?frameId=%d&index=999", f.Frame.ID)} {
+		if code, _ := c.do("GET", p, nil); code != 400 {
+			t.Errorf("GET %s = %d, want 400", p, code)
+		}
+	}
+	// A choice that is not in the list is refused, and the screen is as it was.
+	if code, data := c.do("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "tap", "index": btn, "candidate": 99}); code != 400 || !bytes.Contains(data, []byte("no locator 99")) {
+		t.Errorf("a candidate that is not listed = %d %s", code, data)
+	}
+	f = c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "tap", "index": btn, "candidate": 1}, 200)
+	if f.Frame.Screen != "Home" {
+		t.Errorf("the tap with the first candidate left the screen on %q", f.Frame.Screen)
+	}
+	greeting := f.find(t, func(id, _ string) bool { return strings.HasSuffix(id, ":id/welcome") })
+	if code, data := c.do("POST", "/api/session/assert", m{"frameId": f.Frame.ID, "index": greeting, "kind": "exists", "candidate": 99}); code != 400 {
+		t.Errorf("an assert with a candidate that is not listed = %d %s", code, data)
+	}
+	c.call("POST", "/api/session/assert", m{"frameId": f.Frame.ID, "index": greeting, "kind": "exists", "candidate": 1}, 200)
+
+	// Repick: the device is at the step before the tap only when the cursor is there, so the call is refused here.
+	if code, data := c.do("POST", "/api/timeline/1/locator", m{"frameId": f.Frame.ID, "element": greeting}); code != 409 || !bytes.Contains(data, []byte("goto")) {
+		t.Errorf("a repick away from the step = %d %s", code, data)
+	}
+}
+
+func TestStudioNamesScreensAndRenamesTheSteps(t *testing.T) {
+	r := newRig(t)
+	var verifies []string
+	c, _ := start(t, r.deps(&verifies))
+	f := c.call("POST", "/api/session/start", m{}, 200)
+	f = c.call("POST", "/api/session/screen", m{"name": "Landing"}, 200)
+	if f.Frame.Screen != "Landing" || !contains(f.ScreenNames, "Landing") {
+		t.Fatalf("screen = %q %v", f.Frame.Screen, f.ScreenNames)
+	}
+	f = c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "tap", "index": f.find(t, byDesc("Sign in"))}, 200)
+	var onLanding bool
+	for _, s := range f.Steps {
+		onLanding = onLanding || s.Screen == "Landing"
+	}
+	if !onLanding {
+		t.Fatalf("no step is on Landing: %+v", f.Steps)
+	}
+	f = c.call("POST", "/api/session/screen", m{"name": "Welcome", "rename": true, "from": "Landing"}, 200)
+	for _, s := range f.Steps {
+		if s.Screen == "Landing" {
+			t.Errorf("a step is still on Landing: %+v", s)
+		}
+	}
+	if !contains(f.ScreenNames, "Welcome") {
+		t.Errorf("screen names = %v", f.ScreenNames)
+	}
+	if code, _ := c.do("POST", "/api/session/screen", m{"name": "bad name!"}); code != 400 {
+		t.Errorf("a bad screen name gave %d, want 400", code)
+	}
+	if code, _ := c.do("POST", "/api/session/screen", m{"name": "Same", "rename": true, "from": "Same"}); code != 400 {
+		t.Errorf("a rename to the same name gave %d, want 400", code)
+	}
+}
+
+func TestStudioCapturesAValueAndMakesAParam(t *testing.T) {
+	r := newRig(t)
+	var verifies []string
+	c, _ := start(t, r.deps(&verifies))
+
+	// A scenario: capture the first word after Hi, and a second capture of the same name is refused.
+	f := signInRecording(t, c, "scenario", "")
+	greeting := f.find(t, func(id, _ string) bool { return strings.HasSuffix(id, ":id/welcome") })
+	f = c.call("POST", "/api/session/capture", m{"frameId": f.Frame.ID, "index": greeting, "name": "who", "pattern": "Hi (\\w+)"}, 200)
+	if f.Captured == nil || f.Captured.Name != "who" || f.Captured.Value != "Ana" || f.Steps[len(f.Steps)-1].Kind != "capture" {
+		t.Fatalf("capture = %+v steps %+v", f.Captured, f.Steps)
+	}
+	for _, body := range []m{
+		{"frameId": f.Frame.ID, "index": greeting, "name": "who"},
+		{"frameId": f.Frame.ID, "index": greeting, "name": "other", "pattern": "Bye (\\w+)"},
+		{"frameId": f.Frame.ID, "index": greeting, "name": "bad name"},
+		{"frameId": f.Frame.ID, "index": greeting, "name": "other", "pattern": "(["},
+		{"frameId": f.Frame.ID, "name": "other"},
+	} {
+		if code, data := c.do("POST", "/api/session/capture", body); code != 400 {
+			t.Errorf("capture %v = %d %s, want 400", body, code, data)
+		}
+	}
+	// A scenario has no params.
+	if code, data := c.do("PATCH", "/api/timeline/1", m{"param": "email"}); code != 400 || !bytes.Contains(data, []byte("no params")) {
+		t.Errorf("a param in a scenario = %d %s", code, data)
+	}
+
+	// A flow: the email becomes a param with its text as the default, and the notice names nothing else.
+	r.signed = false
+	f = signInRecording(t, c, "flow", "login")
+	if code, data := c.do("PATCH", "/api/timeline/1", m{"param": "email", "required": false}); code != 200 || !bytes.Contains(data, []byte("{{email}}")) {
+		t.Fatalf("param = %d %s", code, data)
+	}
+	// A secret is never a param, a name that is used is refused, and a step with no text is refused.
+	for _, c2 := range []struct {
+		step int
+		body m
+	}{{2, m{"param": "pw"}}, {1, m{"param": "email"}}, {0, m{"param": "x"}}} {
+		if code, data := c.do("PATCH", fmt.Sprintf("/api/timeline/%d", c2.step), c2.body); code != 400 {
+			t.Errorf("param %v on step %d = %d %s, want 400", c2.body, c2.step, code, data)
+		}
+	}
+	// A flow takes a check, and it can be saved.
+	f = c.call("POST", "/api/session/refresh", m{}, 200)
+	greeting = f.find(t, func(id, _ string) bool { return strings.HasSuffix(id, ":id/welcome") })
+	f = c.call("POST", "/api/session/assert", m{"frameId": f.Frame.ID, "index": greeting, "kind": "equals"}, 200)
+	if f.Steps[len(f.Steps)-1].Kind != "assert" {
+		t.Fatalf("a flow took no check: %+v", f.Steps)
+	}
+	c.call("POST", "/api/finish", m{"kind": "flow", "id": "login"}, 200)
+	text, _ := os.ReadFile(filepath.Join(r.repo, ".semar", "flows", "login.yaml"))
+	if !strings.Contains(string(text), "{{email}}") || !strings.Contains(string(text), "expect") || strings.Contains(r.allFiles(), canary) {
+		t.Errorf("the flow file is wrong or holds the secret:\n%s", text)
+	}
+}
+
+func TestStudioReopensARecordingAndAsksForWhatNoFileHolds(t *testing.T) {
+	r := newRig(t)
+	var verifies []string
+	d := r.deps(&verifies)
+	c, _ := start(t, d)
+
+	// A flow with a secret, a literal made a required param, and a check.
+	signInRecording(t, c, "flow", "login")
+	c.call("PATCH", "/api/timeline/1", m{"param": "email", "required": true}, 200)
+	f := c.call("POST", "/api/session/refresh", m{}, 200)
+	greeting := f.find(t, func(id, _ string) bool { return strings.HasSuffix(id, ":id/welcome") })
+	f = c.call("POST", "/api/session/assert", m{"frameId": f.Frame.ID, "index": greeting, "kind": "equals"}, 200)
+	steps := len(f.Steps)
+	c.call("POST", "/api/finish", m{"kind": "flow", "id": "login"}, 200)
+
+	// The state lists what can be reopened.
+	var st struct {
+		Recordings []struct {
+			Kind string `json:"kind"`
+			ID   string `json:"id"`
+		} `json:"recordings"`
+	}
+	code, data := c.do("GET", "/api/state", nil)
+	if code != 200 || json.Unmarshal(data, &st) != nil || len(st.Recordings) != 1 || st.Recordings[0].ID != "login" || st.Recordings[0].Kind != "flow" {
+		t.Fatalf("state = %d %s", code, data)
+	}
+
+	// Reopen at step 1: only the launch is replayed, the steps are loaded, and the rest are pending.
+	f = c.call("POST", "/api/session/start", m{"resume": m{"kind": "flow", "id": "login", "at": 1}}, 200)
+	if f.Kind != "flow" || len(f.Steps) != steps || f.Cursor != 1 || f.Steps[1].Pending != true || f.Steps[0].Pending {
+		t.Fatalf("reopened = kind %q steps %d cursor %d", f.Kind, len(f.Steps), f.Cursor)
+	}
+	if code, _ := c.do("POST", "/api/session/start", m{"resume": m{"kind": "flow", "id": "nope"}}); code != 400 {
+		t.Errorf("reopening what is not saved gave %d, want 400", code)
+	}
+	if code, _ := c.do("POST", "/api/session/start", m{"resume": m{"kind": "flow", "id": "login"}, "useFlows": []string{"login"}}); code != 400 {
+		t.Errorf("a reopen with a flow to start with gave %d, want 400", code)
+	}
+	// The failed start gave the device away, and the next one is a new recording: reopen again.
+	c.call("POST", "/api/session/start", m{"resume": m{"kind": "flow", "id": "login", "at": 1}}, 200)
+
+	// Replaying the steps that type the password needs it, and the param: 428 names them, and holds no value.
+	typedBefore := len(r.d.Typed())
+	code, data = c.do("POST", "/api/timeline/goto", m{"n": steps})
+	var need frameBody
+	_ = json.Unmarshal(data, &need)
+	if code != http.StatusPreconditionRequired || !contains(need.NeedsSecrets, "SHOP_PASSWORD") || !contains(need.NeedsParams, "email") || bytes.Contains(data, []byte(canary)) {
+		t.Fatalf("goto without the values = %d %s", code, data)
+	}
+	if typed := r.d.Typed(); len(typed) != typedBefore {
+		t.Errorf("a text reached the device before the values were given: %q", typed)
+	}
+	f = c.call("POST", "/api/timeline/goto", m{"n": steps, "secrets": m{"SHOP_PASSWORD": canary}, "params": m{"email": "bo@example.com"}}, 200)
+	if f.Cursor != steps || f.Dirty || f.Frame.Screen != "Home" {
+		t.Fatalf("goto with the values = cursor %d dirty %v screen %q", f.Cursor, f.Dirty, f.Frame.Screen)
+	}
+	if typed := r.d.Typed()[typedBefore:]; !contains(typed, canary) || !contains(typed, "bo@example.com") {
+		t.Errorf("the device was not given the values: %q", typed)
+	}
+	// A name that is no secret name, and a param that the flow lacks, are refused.
+	if code, _ := c.do("POST", "/api/timeline/goto", m{"n": 1, "secrets": m{"bad name": "x"}}); code != 400 {
+		t.Errorf("a bad secret name gave %d, want 400", code)
+	}
+	if code, _ := c.do("POST", "/api/timeline/goto", m{"n": 1, "params": m{"nope": "x"}}); code != 400 {
+		t.Errorf("an unknown param gave %d, want 400", code)
+	}
+	if strings.Contains(c.seen.String(), canary) || strings.Contains(r.allFiles(), canary) || strings.Contains(r.sink.text(), canary) {
+		t.Errorf("the secret is in an answer, a file, or the evidence")
+	}
+
+	// A flow records on top of another flow, now that a flow may use one.
+	r.signed = false
+	f = c.call("POST", "/api/session/start", m{"kind": "flow", "id": "nav"}, 200)
+	f = c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "tap", "index": f.find(t, byDesc("Sign in"))}, 200)
+	c.call("POST", "/api/finish", m{"kind": "flow", "id": "nav"}, 200)
+	r.signed = false
+	f = c.call("POST", "/api/session/start", m{"kind": "flow", "id": "outer", "useFlows": []string{"nav"}}, 200)
+	if f.Kind != "flow" || len(f.Steps) == 0 || f.Steps[len(f.Steps)-1].Kind != "use" {
+		t.Errorf("a flow that starts with a flow = %+v", f)
+	}
+}
+
+func TestStudioReopensAScenarioAndSavesItAgain(t *testing.T) {
+	r := newRig(t)
+	var verifies []string
+	c, _ := start(t, r.deps(&verifies))
+	r.signed = true
+	f := c.call("POST", "/api/session/start", m{"id": "SHOP-9"}, 200)
+	greeting := f.find(t, func(id, _ string) bool { return strings.HasSuffix(id, ":id/welcome") })
+	c.call("POST", "/api/session/assert", m{"frameId": f.Frame.ID, "index": greeting, "kind": "equals"}, 200)
+	f = c.call("POST", "/api/finish", m{"kind": "scenario", "id": "SHOP-9", "title": "Greets"}, 200)
+	feature := ".semar/scenarios/SHOP/SHOP-9.feature"
+	if !contains(f.Files, feature) {
+		t.Fatalf("files = %v", f.Files)
+	}
+	before, _ := os.ReadFile(filepath.Join(r.repo, filepath.FromSlash(feature)))
+
+	r.signed = true
+	f = c.call("POST", "/api/session/start", m{"resume": m{"kind": "scenario", "id": "SHOP-9"}}, 200)
+	if f.Kind != "scenario" || len(f.Steps) != 3 || f.Cursor != 3 || f.Steps[2].Kind != "assert" {
+		t.Fatalf("reopened = %+v cursor %d", f.Steps, f.Cursor)
+	}
+	// It saves again under its own name with no replace, and the files are as they were.
+	c.call("POST", "/api/finish", m{"kind": "scenario", "id": "SHOP-9", "title": "Greets"}, 200)
+	after, _ := os.ReadFile(filepath.Join(r.repo, filepath.FromSlash(feature)))
+	if string(before) != string(after) {
+		t.Errorf("a reopen and a save changed the feature:\n%s\n---\n%s", before, after)
+	}
+}
+
+// The page names every path that the studio serves for editing, locators, screen names, and captures.
+func TestStudioPageUsesTheEditingAPI(t *testing.T) {
+	r := newRig(t)
+	var verifies []string
+	c, _ := start(t, r.deps(&verifies))
+	res, err := http.Get(c.base + "/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	js := string(body)
+	for _, want := range []string{
+		"'/api/timeline/goto'", "'/api/timeline/' + i + '/locators'", "'/api/timeline/' + i + '/locator'", "'DELETE', '/api/timeline/' + i",
+		"'DELETE', '/api/timeline/last'", "'/api/session/candidates?", "'/api/session/capture'", "'/api/session/screen'",
+		"'PATCH', '/api/timeline/' + i", "resume:", "candidate", "rename: true", "common", "param", "required", "needsSecrets", "'mode-capture'",
+		"recording here", "Go here", "Make parameter", "screenNames", "recordings", "'/api/session/start'",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("app.js does not use %s", want)
+		}
+	}
+	res, err = http.Get(c.base + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	for _, id := range []string{"mode-capture", "open-pick", "open-at", "open-existing", "screen-names", "screen-rename", "cand-panel", "dlg-capture", "dlg-values", "start-kind"} {
+		if !strings.Contains(string(page), `id="`+id+`"`) {
+			t.Errorf("index.html has no %s", id)
+		}
+		if !strings.Contains(js, "$('"+id+"')") && id != "screen-names" && id != "start-kind" && id != "dlg-values" && id != "dlg-capture" {
+			t.Errorf("app.js never uses %s", id)
+		}
+	}
+}
+
+func TestStudioAsksForTheValuesOfAReopenedRecordingBeforeItStarts(t *testing.T) {
+	r := newRig(t)
+	var verifies []string
+	c, _ := start(t, r.deps(&verifies))
+	signInRecording(t, c, "flow", "login")
+	c.call("PATCH", "/api/timeline/1", m{"param": "email", "required": true}, 200)
+	c.call("POST", "/api/finish", m{"kind": "flow", "id": "login"}, 200)
+
+	// Reopening all of it needs the password and the param: 428 names them, and nothing was started.
+	typedBefore := len(r.d.Typed())
+	code, data := c.do("POST", "/api/session/start", m{"resume": m{"kind": "flow", "id": "login"}})
+	var need frameBody
+	_ = json.Unmarshal(data, &need)
+	if code != http.StatusPreconditionRequired || !contains(need.NeedsSecrets, "SHOP_PASSWORD") || !contains(need.NeedsParams, "email") || bytes.Contains(data, []byte(canary)) {
+		t.Fatalf("reopen without the values = %d %s", code, data)
+	}
+	if len(r.d.Typed()) != typedBefore {
+		t.Errorf("a text reached the device before the values were given: %q", r.d.Typed())
+	}
+	r.signed = false
+	f := c.call("POST", "/api/session/start", m{
+		"resume": m{"kind": "flow", "id": "login"}, "secrets": m{"SHOP_PASSWORD": canary}, "params": m{"email": "bo@example.com"},
+	}, 200)
+	if f.Cursor != len(f.Steps) || f.Frame.Screen != "Home" {
+		t.Errorf("reopened = cursor %d of %d, screen %q", f.Cursor, len(f.Steps), f.Frame.Screen)
+	}
+	if strings.Contains(c.seen.String(), canary) {
+		t.Error("the secret is in an answer")
+	}
+
+	// A goto to a step that is not there is refused before any value is kept.
+	if code, _ := c.do("POST", "/api/timeline/goto", m{"n": 0, "secrets": m{"SHOP_OTHER": "x"}}); code != 400 {
+		t.Errorf("goto 0 gave %d, want 400", code)
+	}
+	// The dirty flag is always in the answer, so that the page never keeps a stale one.
+	code, data = c.do("DELETE", "/api/timeline/1", m{})
+	if code != 200 || !bytes.Contains(data, []byte(`"dirty":true`)) {
+		t.Fatalf("delete = %d %s", code, data)
+	}
+	code, data = c.do("POST", "/api/timeline/goto", m{"n": 1})
+	if code != 200 || !bytes.Contains(data, []byte(`"dirty":false`)) {
+		t.Errorf("goto = %d, the answer lacks dirty:false: %.200s", code, data)
+	}
+	if code, _ := c.do("DELETE", "/api/timeline/99", m{}); code != 404 {
+		t.Errorf("deleting a step that is not there gave %d, want 404", code)
 	}
 }

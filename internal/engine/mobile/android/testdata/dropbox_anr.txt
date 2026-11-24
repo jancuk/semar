@@ -1,0 +1,16 @@
+Drop box contents: 1 entries
+
+========================================
+2026-11-23 11:02:44 data_app_anr (text, 4096 bytes)
+Process: com.example.shop
+PID: 8123
+Flags: 0x38e83e46
+Package: com.example.shop v42 (2.4.1)
+Foreground: Yes
+Subject: Input dispatching timed out (com.example.shop/com.example.shop.MainActivity, Waiting because no window has focus)
+Build: google/sdk_gphone64_arm64/emu64a:14/UE1A.230829.036/11228894:userdebug/dev-keys
+
+ANR in com.example.shop (com.example.shop/.MainActivity)
+PID: 8123
+Reason: Input dispatching timed out (Waiting because no window has focus)
+Load: 0.5 / 0.4 / 0.3

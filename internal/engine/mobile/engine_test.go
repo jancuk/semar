@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -109,6 +110,80 @@ func TestLongPressHolds(t *testing.T) {
 	r.do(call("go", act(domain.MobileLongTap, "SignIn", "submit"), locSubmit))
 	if len(r.d.touches) != 1 || r.d.touches[0].Hold < 500*time.Millisecond {
 		t.Errorf("touches = %+v", r.d.touches)
+	}
+}
+
+func TestDoubleTapSendsOneGestureOfTwoTaps(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	r.d.screen = screen(pay())
+	res := r.do(call("go", act(domain.MobileDoubleTap, "SignIn", "submit"), locSubmit))
+	if res.Action.Err != "" {
+		t.Fatalf("err = %q", res.Action.Err)
+	}
+	if len(r.d.touches) != 1 || r.d.touches[0].Taps != 2 || r.d.touches[0].From != (mobile.Point{X: 450, Y: 850}) || r.d.touches[0].To != r.d.touches[0].From || r.d.touches[0].Hold != 0 {
+		t.Errorf("touches = %+v", r.d.touches)
+	}
+	if res.Action.Mobile.Op != "doubleTap" {
+		t.Errorf("record = %+v", res.Action.Mobile)
+	}
+}
+
+func dragRig(t *testing.T) (*rig, map[string]domain.Locator) {
+	r := newRig(t, rigOptions{})
+	slot := button("Slot", 700, 1200)
+	slot.Desc = "Slot"
+	r.d.screen = screen(pay(), slot)
+	return r, map[string]domain.Locator{"submit": {Desc: "Sign in"}, "slot": {Desc: "Slot"}}
+}
+
+func TestDragHoldsMovesFromTheElementToTheTarget(t *testing.T) {
+	r, locs := dragRig(t)
+	a := act(domain.MobileDrag, "SignIn", "submit")
+	a.To = "slot"
+	res := r.do(call("go", a, locs))
+	if res.Action.Err != "" {
+		t.Fatalf("err = %q", res.Action.Err)
+	}
+	if len(r.d.touches) != 1 {
+		t.Fatalf("touches = %+v", r.d.touches)
+	}
+	g := r.d.touches[0]
+	if g.From != (mobile.Point{X: 450, Y: 850}) || g.To != (mobile.Point{X: 750, Y: 1250}) || g.Hold != 600*time.Millisecond || g.Move != 500*time.Millisecond || g.Taps != 0 {
+		t.Errorf("gesture = %+v", g)
+	}
+	// A hold in the value replaces the default.
+	r, locs = dragRig(t)
+	a.Value = "800ms"
+	if res = r.do(call("go", a, locs)); res.Action.Err != "" || r.d.touches[0].Hold != 800*time.Millisecond {
+		t.Errorf("err = %q, touches = %+v", res.Action.Err, r.d.touches)
+	}
+	r, locs = dragRig(t)
+	a.Value = "forever"
+	if _, err := r.e.Do(context.Background(), call("go", a, locs)); err == nil || !strings.Contains(err.Error(), "must be a hold") || len(r.d.touches) != 0 {
+		t.Errorf("a bad hold: err = %v, touches = %+v", err, r.d.touches)
+	}
+}
+
+func TestADragWhoseTargetIsMissingIsAMissWithRepair(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	slot := button("Slot", 700, 1200)
+	slot.Desc = "Slot"
+	r.d.screen = screen(pay(), slot)
+	a := act(domain.MobileDrag, "SignIn", "submit")
+	a.To = "slot"
+	res := r.do(call("go", a, map[string]domain.Locator{"submit": {Desc: "Sign in"}, "slot": {Role: "button", Name: "Slott"}}))
+	if !strings.HasPrefix(res.Action.Err, check.NotFound) || len(r.d.touches) != 0 || res.Action.EffectUnknown {
+		t.Fatalf("err = %q, touches %d, effectUnknown %v", res.Action.Err, len(r.d.touches), res.Action.EffectUnknown)
+	}
+	if st, ok := res.Action.Mobile.Elements["slot"]; !ok || st.Count != 0 {
+		t.Errorf("the miss is not in the record: %+v", res.Action.Mobile.Elements)
+	}
+	found := false
+	for _, c := range res.Action.Mobile.Repair {
+		found = found || c.Element == "slot"
+	}
+	if !found {
+		t.Errorf("repair = %+v", res.Action.Mobile.Repair)
 	}
 }
 
@@ -316,7 +391,7 @@ func TestOpenACustomSchemeNeedsTheServiceToListIt(t *testing.T) {
 
 func TestEveryActionIsRefusedInAReadOnlyOrProductionEnvironment(t *testing.T) {
 	for name, o := range map[string]rigOptions{"read only": {readOnly: true}, "production": {kind: config.KindProduction}} {
-		for _, do := range []domain.MobileOp{domain.MobileLaunch, domain.MobileOpenLink, domain.MobileTap, domain.MobileLongTap, domain.MobileType,
+		for _, do := range []domain.MobileOp{domain.MobileLaunch, domain.MobileOpenLink, domain.MobileTap, domain.MobileLongTap, domain.MobileDoubleTap, domain.MobileDrag, domain.MobileType,
 			domain.MobileSwipe, domain.MobileScroll, domain.MobilePress, domain.MobileWait} {
 			r := newRig(t, o)
 			r.d.screen = screen(pay())
@@ -324,8 +399,10 @@ func TestEveryActionIsRefusedInAReadOnlyOrProductionEnvironment(t *testing.T) {
 			switch do {
 			case domain.MobileOpenLink:
 				a.Link = "https://shop.example.com/"
-			case domain.MobileTap, domain.MobileLongTap, domain.MobileScroll:
+			case domain.MobileTap, domain.MobileLongTap, domain.MobileDoubleTap, domain.MobileScroll:
 				a.Screen, a.Element = "S", "submit"
+			case domain.MobileDrag:
+				a.Screen, a.Element, a.To = "S", "submit", "submit"
 			case domain.MobileType:
 				a.Screen, a.Element, a.Value = "S", "submit", "x"
 			case domain.MobileSwipe:
@@ -374,6 +451,21 @@ func TestTheBudgetEndsTheRun(t *testing.T) {
 	}
 	if res := r.do(launch); res.Action.Refused != "action budget reached" {
 		t.Errorf("refused = %q", res.Action.Refused)
+	}
+}
+
+func TestRefillingTheBudgetLetsTheNextReplayRun(t *testing.T) {
+	r := newRig(t, rigOptions{budget: 1})
+	launch := call("x", domain.MobileAction{Service: "shop-app", Do: domain.MobileLaunch}, nil)
+	if res := r.do(launch); res.Action.Refused != "" {
+		t.Fatalf("first action refused: %q", res.Action.Refused)
+	}
+	if res := r.do(launch); res.Action.Refused != "action budget reached" {
+		t.Fatalf("refused = %q", res.Action.Refused)
+	}
+	r.e.RefillBudget()
+	if res := r.do(launch); res.Action.Refused != "" {
+		t.Errorf("an action after a refill was refused: %q", res.Action.Refused)
 	}
 }
 
@@ -518,6 +610,27 @@ func TestCapturesTakeTheTextOfAFoundElement(t *testing.T) {
 	}
 }
 
+func TestACapturePatternTakesAGroupAndNoMatchIsMissing(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	ref := n("android.widget.TextView", "Order #A1B2 placed", 100, 500)
+	ref.ID = "com.shop:id/ref"
+	r.d.screen = screen(ref)
+	c := call("read", domain.MobileAction{Service: "shop-app", Do: domain.MobileWait}, map[string]domain.Locator{"ref": {ID: "ref"}})
+	c.Watch = []domain.Watched{{Element: "ref"}}
+	c.Captures = []domain.Capture{
+		{Name: "orderRef", Element: "ref", Pattern: `Order #([A-Z0-9]+)`},
+		{Name: "whole", Element: "ref", Pattern: `#[A-Z0-9]+`},
+		{Name: "nomatch", Element: "ref", Pattern: `Invoice (\d+)`},
+	}
+	res := r.do(c)
+	if res.Captured["orderRef"] != "A1B2" || res.Captured["whole"] != "#A1B2" || len(res.Missing) != 1 || res.Missing[0] != "nomatch" {
+		t.Errorf("captured = %v, missing = %v", res.Captured, res.Missing)
+	}
+	if res.Action.Captures["orderRef"] != "A1B2" {
+		t.Errorf("the stored action has captures %v", res.Action.Captures)
+	}
+}
+
 func TestACheckWaitsForItsConditionAndTheEngineRecordsTheLastReading(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	welcome := n("android.widget.TextView", "Hi Ana", 100, 500)
@@ -654,5 +767,203 @@ func TestClosePassesOnToThePlatformAndIsSafeTwice(t *testing.T) {
 	r.p.closeErr = errors.New("cleanup failed")
 	if err := r.e.Close(context.Background()); err == nil || r.p.closed != 2 {
 		t.Errorf("error = %v, closed %d", err, r.p.closed)
+	}
+}
+
+// diagPlatform is a platform that can say why the app stopped.
+type diagPlatform struct {
+	*fakePlatform
+	mu          sync.Mutex
+	crashes     []mobile.Crash
+	crashErr    error
+	front       string
+	frontErr    error
+	tail        string
+	asked       int
+	tails       int
+	foregrounds int
+	since       time.Time
+	pkg         string
+}
+
+func (p *diagPlatform) Crashes(_ context.Context, pkg string, since time.Time) ([]mobile.Crash, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.asked++
+	p.since, p.pkg = since, pkg
+	return p.crashes, p.crashErr
+}
+
+func (p *diagPlatform) LogTail(_ context.Context, _ string, lines int) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.tails++
+	if lines != 200 {
+		return "", errors.New("wrong number of lines")
+	}
+	return p.tail, nil
+}
+
+func (p *diagPlatform) Foreground(context.Context) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.foregrounds++
+	return p.front, p.frontErr
+}
+
+const crashSecret = "s3cr3t-token-value"
+
+func diagRig(t *testing.T, tune ...func(*mobile.Options)) (*rig, *diagPlatform) {
+	t.Helper()
+	var dp *diagPlatform
+	tune = append([]func(*mobile.Options){func(o *mobile.Options) {
+		dp.fakePlatform = o.Platform.(*fakePlatform)
+		o.Platform = dp
+	}}, tune...)
+	dp = &diagPlatform{front: "com.example.shop", crashes: []mobile.Crash{{
+		ID: "data_app_crash@1", Process: "com.example.shop", Time: time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC),
+		Summary: "java.lang.IllegalStateException: Cart is empty, token=" + crashSecret,
+		Body:    "java.lang.IllegalStateException: Cart is empty\n\tat com.example.shop.Cart.checkout(Cart.kt:88)\nAuthorization: Bearer " + crashSecret,
+	}}}
+	r := newRig(t, rigOptions{secrets: []string{crashSecret}}, tune...)
+	return r, dp
+}
+
+func TestAFailedActionGetsTheCrashOfTheApp(t *testing.T) {
+	r, dp := diagRig(t)
+	r.d.screen = screen(pay())
+	r.d.touchErr = errors.New("the server stopped")
+	res := r.do(call("pay", act(domain.MobileTap, "SignIn", "submit"), locSubmit))
+	if res.Action.Err == "" {
+		t.Fatal("the action did not fail")
+	}
+	m := res.Action.Mobile
+	if m.Crash == nil || m.Crash.File != "crash-pay.txt" || !strings.Contains(m.Crash.Summary, "IllegalStateException: Cart is empty") {
+		t.Fatalf("crash = %+v", m.Crash)
+	}
+	if strings.Contains(m.Crash.Summary, crashSecret) {
+		t.Errorf("the summary holds the secret: %q", m.Crash.Summary)
+	}
+	body := string(r.files.files["crash-pay.txt"])
+	if !strings.Contains(body, "Cart.checkout(Cart.kt:88)") || !strings.Contains(body, "IllegalStateException") {
+		t.Errorf("crash file = %q", body)
+	}
+	if strings.Contains(body, crashSecret) {
+		t.Errorf("the crash file holds the secret: %q", body)
+	}
+	if m.LogcatFile != "" || dp.tails != 0 {
+		t.Errorf("the log was read without the option: %q, %d", m.LogcatFile, dp.tails)
+	}
+	if want := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC); !dp.since.Equal(want) {
+		t.Errorf("since = %s, want the start of the run %s", dp.since, want)
+	}
+	if dp.pkg != "com.example.shop" {
+		t.Errorf("pkg = %q", dp.pkg)
+	}
+	if dp.foregrounds != 0 {
+		t.Error("the foregroundsd was read for an action that failed")
+	}
+}
+
+func TestACrashIsReportedOnlyOnce(t *testing.T) {
+	r, dp := diagRig(t)
+	r.d.screen = screen(pay())
+	r.d.touchErr = errors.New("the server stopped")
+	first := r.do(call("one", act(domain.MobileTap, "SignIn", "submit"), locSubmit))
+	second := r.do(call("two", act(domain.MobileTap, "SignIn", "submit"), locSubmit))
+	if first.Action.Mobile.Crash == nil {
+		t.Fatal("no crash on the first step")
+	}
+	if second.Action.Mobile.Crash != nil {
+		t.Errorf("the same crash was reported twice: %+v", second.Action.Mobile.Crash)
+	}
+	if _, ok := r.files.files["crash-two.txt"]; ok {
+		t.Error("a file was written for no crash")
+	}
+	dp.crashes = append(dp.crashes, mobile.Crash{ID: "data_app_crash@2", Summary: "second", Body: "second body"})
+	third := r.do(call("one", act(domain.MobileTap, "SignIn", "submit"), locSubmit))
+	if c := third.Action.Mobile.Crash; c == nil || c.Summary != "second" || c.File != "crash-one-2.txt" {
+		t.Errorf("third = %+v", c)
+	}
+}
+
+func TestAMissingTargetLooksForACrashOnlyWhenTheAppLeftTheFront(t *testing.T) {
+	// The app is in front: the screen differs, and nothing is asked of the device log.
+	r, dp := diagRig(t)
+	r.d.screen = screen()
+	res := r.do(call("go", act(domain.MobileTap, "SignIn", "submit"), locSubmit))
+	if !strings.HasPrefix(res.Action.Err, "an element was not found") {
+		t.Fatalf("err = %q", res.Action.Err)
+	}
+	if res.Action.Mobile.Crash != nil || dp.asked != 0 || dp.foregrounds != 1 {
+		t.Errorf("crash = %+v, asked %d, foregroundsd %d", res.Action.Mobile.Crash, dp.asked, dp.foregrounds)
+	}
+
+	// The launcher is in front: the app is gone, and the crash is the evidence.
+	r2, dp2 := diagRig(t)
+	dp2.front = ""
+	r2.d.screen = screen()
+	res = r2.do(call("go", act(domain.MobileTap, "SignIn", "submit"), locSubmit))
+	if res.Action.Mobile.Crash == nil || dp2.asked != 1 {
+		t.Fatalf("crash = %+v, asked %d", res.Action.Mobile.Crash, dp2.asked)
+	}
+	if !strings.HasPrefix(res.Action.Err, "an element was not found") {
+		t.Errorf("the crash changed the error: %q", res.Action.Err)
+	}
+
+	// A foregroundsd that cannot be read is no proof that the app left.
+	r3, dp3 := diagRig(t)
+	dp3.frontErr = errors.New("dumpsys failed")
+	r3.d.screen = screen()
+	res = r3.do(call("go", act(domain.MobileTap, "SignIn", "submit"), locSubmit))
+	if res.Action.Mobile.Crash != nil || dp3.asked != 0 {
+		t.Errorf("crash = %+v, asked %d", res.Action.Mobile.Crash, dp3.asked)
+	}
+}
+
+func TestASuccessfulStepAsksNothing(t *testing.T) {
+	r, dp := diagRig(t)
+	r.d.screen = screen(pay())
+	res := r.do(call("go", act(domain.MobileTap, "SignIn", "submit"), locSubmit))
+	if res.Action.Err != "" || res.Action.Mobile.Crash != nil || dp.asked != 0 || dp.foregrounds != 0 {
+		t.Errorf("err %q crash %+v asked %d foregroundsd %d", res.Action.Err, res.Action.Mobile.Crash, dp.asked, dp.foregrounds)
+	}
+}
+
+func TestLogcatOnFailureWritesTheTail(t *testing.T) {
+	r, dp := diagRig(t, func(o *mobile.Options) { o.LogcatOnFailure = true })
+	dp.tail = "11-23 10:15:30.120  1  1 E AndroidRuntime: FATAL EXCEPTION\n11-23 10:15:30.121  1  1 I Auth: bearer " + crashSecret
+	r.d.screen = screen(pay())
+	r.d.touchErr = errors.New("the server stopped")
+	res := r.do(call("pay", act(domain.MobileTap, "SignIn", "submit"), locSubmit))
+	m := res.Action.Mobile
+	if m.LogcatFile != "logcat-pay.txt" || m.Crash == nil {
+		t.Fatalf("record = %+v", m)
+	}
+	got := string(r.files.files["logcat-pay.txt"])
+	if !strings.Contains(got, "FATAL EXCEPTION") || strings.Contains(got, crashSecret) {
+		t.Errorf("log file = %q", got)
+	}
+
+	// With no crash the log is still written: it is the evidence that there is.
+	r2, dp2 := diagRig(t, func(o *mobile.Options) { o.LogcatOnFailure = true })
+	dp2.crashes = nil
+	dp2.tail = "I App: nothing special"
+	r2.d.screen = screen(pay())
+	r2.d.touchErr = errors.New("the server stopped")
+	res = r2.do(call("pay", act(domain.MobileTap, "SignIn", "submit"), locSubmit))
+	if res.Action.Mobile.Crash != nil || res.Action.Mobile.LogcatFile != "logcat-pay.txt" {
+		t.Errorf("record = %+v", res.Action.Mobile)
+	}
+}
+
+func TestADiagnosisThatFailsLeavesTheStepAlone(t *testing.T) {
+	r, dp := diagRig(t)
+	dp.crashErr = errors.New("adb is gone")
+	r.d.screen = screen(pay())
+	r.d.touchErr = errors.New("the server stopped")
+	res := r.do(call("pay", act(domain.MobileTap, "SignIn", "submit"), locSubmit))
+	if res.Action.Mobile.Crash != nil || res.Action.Err == "" {
+		t.Errorf("record = %+v, err %q", res.Action.Mobile, res.Action.Err)
 	}
 }

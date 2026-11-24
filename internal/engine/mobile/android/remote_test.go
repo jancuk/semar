@@ -2,6 +2,7 @@ package android_test
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 
@@ -327,4 +328,9 @@ func TestAWebdriverServerThatSpeaksTheLegacyDialectWorks(t *testing.T) {
 	if err := d.Type(context.Background(), "x"); err != nil {
 		t.Errorf("type with an ELEMENT id: %v", err)
 	}
+}
+
+func (r refuseRunner) Stream(context.Context, string, ...string) (io.ReadCloser, func() error, error) {
+	r.t.Error("adb was streamed in serverUrl mode")
+	return nil, nil, nil
 }

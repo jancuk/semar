@@ -17,13 +17,16 @@
   let shotURL = '';
   let finished = null; // the answer of the last save
   let editing = -1;
+  let captures = []; // what the capture mode took in this page, for a look: {name, value}
+  let chosen = null; // the locator that the person picked in the panel: {k, frameId, index}, for the next call on that element
+  let repicking = -1; // the step whose element the next click on the screen replaces
 
   // --- small helpers ---
 
   function h(tag, attrs, ...kids) {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs || {})) {
-      if (v === false || v == null) continue;
+      if (v == null || (v === false && k !== 'spellcheck')) continue;
       if (k === 'text') el.textContent = v;
       else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
       else if (k in el && k !== 'list') el[k] = v;
@@ -77,9 +80,15 @@
     $('setup-open').hidden = !(state && !state.hasConfig || state && state.problem);
     $('mode-act').classList.toggle('seg-on', mode === 'act');
     $('mode-assert').classList.toggle('seg-on', mode === 'assert');
+    $('mode-capture').classList.toggle('seg-on', mode === 'capture');
     $('mode-act').setAttribute('aria-pressed', String(mode === 'act'));
     $('mode-assert').setAttribute('aria-pressed', String(mode === 'assert'));
+    $('mode-capture').setAttribute('aria-pressed', String(mode === 'capture'));
     document.body.classList.toggle('assert-mode', mode === 'assert');
+    document.body.classList.toggle('capture-mode', mode === 'capture');
+    $('screen-rename').disabled = !live || busy;
+    $('dirty-note').hidden = !(session && session.dirty);
+    $('repick-note').hidden = repicking < 0;
   }
 
   function drawChips() {
@@ -139,12 +148,39 @@
     }
   }
 
+  function drawRecordings() {
+    const list = (state && state.recordings) || [];
+    const sel = $('open-pick');
+    const keep = sel.value;
+    clear(sel);
+    sel.append(h('option', { value: '', text: list.length ? 'Open a saved flow or scenario' : 'Nothing saved to open yet' }));
+    for (const r of list) sel.append(h('option', { value: r.kind + ':' + r.id, text: r.kind + ' ' + r.id + (r.title ? ' (' + r.title + ')' : '') }));
+    if (list.some((r) => r.kind + ':' + r.id === keep)) sel.value = keep;
+    $('open-existing').disabled = !sel.value || busy;
+    $('open-at').disabled = !sel.value;
+  }
+
+  function drawScreenNames() {
+    const dl = $('screen-names');
+    clear(dl);
+    for (const n of (session && session.screenNames) || []) dl.append(h('option', { value: n }));
+  }
+
+  function drawCaptured() {
+    const box = $('captured');
+    const ul = $('captured-list');
+    clear(ul);
+    box.hidden = captures.length === 0;
+    for (const c of captures) ul.append(h('li', {}, h('code', { text: '{{' + c.name + '}}' }), document.createTextNode(' = ' + c.value)));
+  }
+
   function drawMirror() {
     const live = !!session && !!frame;
     $('no-token').hidden = !!token;
     $('start-panel').hidden = !token || live;
     $('stage-wrap').hidden = !live;
     if (!live) {
+      drawRecordings();
       const ready = state && state.hasConfig && !state.problem;
       $('start').disabled = !ready || busy;
       $('start-note').textContent = ready
@@ -164,6 +200,7 @@
     drawTools();
     const name = $('screen-name');
     if (document.activeElement !== name) name.value = frame.screen || '';
+    drawScreenNames();
   }
 
   const SVGNS = 'http://www.w3.org/2000/svg';
@@ -194,6 +231,7 @@
       r.addEventListener('mouseenter', () => showTip(e, r));
       r.addEventListener('mouseleave', () => { $('tip').hidden = true; r.classList.remove('on'); });
       r.addEventListener('click', (ev) => { ev.stopPropagation(); onPick({ element: e }, ev); });
+      r.addEventListener('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); openCandidates(e); });
       svg.append(r);
     }
   }
@@ -203,7 +241,7 @@
   function describeLocator(l) {
     if (!l) return 'no locator finds it alone';
     const parts = [];
-    for (const k of ['id', 'desc', 'role', 'name', 'text', 'xpath', 'class', 'within']) if (l[k]) parts.push(k + ': ' + l[k]);
+    for (const k of ['id', 'desc', 'role', 'name', 'text', 'hasText', 'index', 'xpath', 'class', 'within']) if (l[k]) parts.push(k + ': ' + l[k]);
     return parts.join(', ') || 'a locator';
   }
 
@@ -219,6 +257,8 @@
       tip.append(h('span', { class: 'badge weak', text: 'no locator' }));
     }
     tip.append(h('div', { text: describeLocator(e.locator) }));
+    if (e.warning) tip.append(h('div', { class: 'warning', text: e.warning }));
+    tip.append(h('div', { class: 'hint', text: 'Right-click to see every locator and pick one.' }));
     tip.hidden = false;
   }
 
@@ -240,17 +280,93 @@
     clear(ol);
     const steps = (session && session.steps) || [];
     $('steps-empty').hidden = steps.length > 0;
+    const cursor = session && typeof session.cursor === 'number' ? session.cursor : steps.length;
+    const marker = () => h('li', { class: 'cursor-mark', text: 'recording here' });
+    if (steps.length && cursor === 0) ol.append(marker());
     steps.forEach((st, i) => {
-      const li = h('li', { class: 'step' });
+      const li = h('li', { class: 'step' + (st.pending ? ' pending' : '') });
       li.append(h('div', { class: 'step-head' },
         h('span', { class: 'step-n', text: String(st.n) }),
         h('span', { class: 'step-kind', text: st.kind }),
         h('span', { class: 'step-text', text: st.text }),
+      ));
+      if (st.locator) {
+        li.append(h('div', { class: 'step-loc' },
+          h('code', { text: st.locator }),
+          st.stability ? h('span', { class: 'badge ' + st.stability, text: st.stability }) : null,
+          st.shared ? h('span', { class: 'badge strong', text: 'shared' }) : null,
+        ));
+      }
+      li.append(h('div', { class: 'step-actions' },
+        h('button', { type: 'button', class: 'btn', text: 'Go here', title: 'Reset the app and take the device through the steps up to this one', disabled: busy, onclick: () => gotoStep(st.n) }),
+        st.locator ? h('button', { type: 'button', class: 'btn', text: 'Locator', disabled: busy, onclick: () => openStepLocators(i) }) : null,
         h('button', { type: 'button', class: 'btn', text: editing === i ? 'Close' : 'Edit', onclick: () => { editing = editing === i ? -1 : i; drawSteps(); } }),
+        h('button', { type: 'button', class: 'btn danger', text: 'Delete', disabled: busy, onclick: () => deleteStep(i) }),
       ));
       if (editing === i) li.append(stepEditor(i, st));
       ol.append(li);
+      if (cursor === st.n && st.n < steps.length) ol.append(marker());
     });
+  }
+
+  function deleteStep(i) {
+    if (busy) return Promise.resolve();
+    // The steps shift, so no edit or repick that points at a number is still the same one.
+    repicking = -1;
+    editing = -1;
+    closeCandidates();
+    return run('DELETE', '/api/timeline/' + i);
+  }
+
+  // gotoStep resets the app and takes the device through the first n steps. A step that needs a secret or a
+  // param that no file holds asks for it: the value is sent once and kept in memory by the server only.
+  async function gotoStep(n, values, confirmClear) {
+    if (busy) return;
+    setBusy(true);
+    banner('');
+    const r = await api('POST', '/api/timeline/goto', Object.assign({ n }, values || {}, confirmClear ? { confirmClear: true } : {}));
+    setBusy(false);
+    if (r.ok) { take(r.data); banner('The device is at step ' + n + '. New steps go after it.'); return r; }
+    if (r.status === 428 && r.data.needsConfirm) {
+      // Any value that was sent is kept by the server, so the call goes again without it.
+      confirm('Physical device', r.data.error, 'Confirm', () => gotoStep(n, null, true));
+    } else if (r.status === 428 && (r.data.needsSecrets || r.data.needsParams)) {
+      askValues(r.data, (v) => gotoStep(n, v, confirmClear));
+    } else if (r.data.session) {
+      take(r.data.session);
+      banner(r.data.error || 'A step did not go through.', true);
+    } else {
+      banner(r.data.error || 'The call failed.', true);
+    }
+    return r;
+  }
+
+  // askValues asks for the secrets and the params that a replay lacks. A secret is a password field that is
+  // emptied as soon as it is sent.
+  function askValues(need, fn) {
+    const box = $('values-fields');
+    clear(box);
+    const inputs = [];
+    for (const n of need.needsSecrets || []) {
+      const input = h('input', { type: 'password', autocomplete: 'off', spellcheck: false, 'aria-label': 'Secret ' + n });
+      inputs.push({ kind: 'secrets', name: n, input });
+      box.append(h('label', { class: 'field', text: 'Secret ' + n + ' (memory only, never saved)' }), input);
+    }
+    for (const n of need.needsParams || []) {
+      const input = h('input', { type: 'text', autocomplete: 'off', 'aria-label': 'Param ' + n });
+      inputs.push({ kind: 'params', name: n, input });
+      box.append(h('label', { class: 'field', text: 'Param ' + n }), input);
+    }
+    $('form-values').onsubmit = (ev) => {
+      ev.preventDefault();
+      const v = { secrets: {}, params: {} };
+      for (const i of inputs) { v[i.kind][i.name] = i.input.value; i.input.value = ''; }
+      clear(box);
+      closeOn('dlg-values');
+      fn(v);
+    };
+    $('dlg-values').showModal();
+    if (inputs.length) inputs[0].input.focus();
   }
 
   function stepEditor(i, st) {
@@ -258,17 +374,32 @@
     const screen = h('input', { type: 'text', value: st.screen || '', 'aria-label': 'Screen name' });
     const element = h('input', { type: 'text', placeholder: 'Element name', 'aria-label': 'Element name' });
     const secret = h('input', { type: 'text', placeholder: 'NAME: make the typed text a secret', 'aria-label': 'Secret name' });
+    const common = h('input', { type: 'checkbox', checked: !!st.shared, 'aria-label': 'Shared element' });
+    const param = h('input', { type: 'text', placeholder: 'name: make the typed text a param', 'aria-label': 'Param name' });
+    const required = h('input', { type: 'checkbox', 'aria-label': 'Required param' });
     const form = h('div', { class: 'step-edit' },
       h('label', { class: 'field', text: 'Step ID' }), h('label', { class: 'field', text: 'Screen' }), id, screen,
       h('label', { class: 'field wide', text: 'Element name' }), h('div', { class: 'wide' }, element),
     );
+    if (st.locator) {
+      form.append(h('label', { class: 'check wide' }, common, document.createTextNode(' Shared element (common): every screen can find it, as a back button or a tab bar')));
+    }
     if (st.kind === 'type') form.append(h('div', { class: 'wide' }, secret), h('p', { class: 'hint wide', text: 'A literal text becomes a secret: the text is erased from the recording and kept in memory for this session.' }));
+    if (st.kind === 'type' && session && session.kind === 'flow') {
+      form.append(
+        h('div', { class: 'wide' }, param),
+        h('label', { class: 'check wide' }, required, document.createTextNode(' Required: no default, a scenario that uses the flow must give a value')),
+        h('p', { class: 'hint wide', text: 'Make parameter: the step types {{name}}, and the param gets the typed text as its default. A secret is never a param.' }),
+      );
+    }
     form.append(h('button', { type: 'button', class: 'btn primary wide', text: 'Save changes', onclick: async () => {
       const body = {};
       if (id.value && id.value !== st.id) body.id = id.value;
       if (screen.value && screen.value !== (st.screen || '')) body.screen = screen.value;
       if (element.value) body.element = element.value;
       if (secret.value) body.secretEnv = secret.value;
+      if (st.locator && common.checked !== !!st.shared) body.common = common.checked;
+      if (param.value) { body.param = param.value; body.required = required.checked; }
       if (!Object.keys(body).length) { editing = -1; drawSteps(); return; }
       const r = await api('PATCH', '/api/timeline/' + i, body);
       if (!r.ok) { banner(r.data.error, true); return; }
@@ -279,10 +410,110 @@
     return form;
   }
 
+  // --- locators ---
+
+  function closeCandidates() { $('cand-panel').hidden = true; chosen = null; }
+
+  function candRow(info, pick, label) {
+    const row = h('li', { class: 'cand' + (info.current ? ' current' : '') + (!info.k ? ' refused' : '') });
+    row.append(h('code', { text: info.locator }));
+    if (info.stability) row.append(h('span', { class: 'badge ' + info.stability, text: info.stability }));
+    // A refused row says so once: the server's note for it is that same text.
+    const note = info.k ? (info.matches > 1 ? info.matches + ' matches' : '1 match') : (info.matches || '?') + ' matches (refused)';
+    const extra = info.k && info.note ? ', ' + info.note : '';
+    row.append(h('span', { class: 'hint', text: note + (info.explicit ? ', by position: use it only on purpose' : '') + extra }));
+    if (info.k && pick) row.append(h('button', { type: 'button', class: 'btn', text: info.current ? 'In use' : label, disabled: !!info.current || busy, onclick: () => pick(info.k) }));
+    return row;
+  }
+
+  // openCandidates lists every locator that finds an element of the frame, with how many elements each one
+  // finds, and lets the person pick one for the next action, check, or capture. It is the way out of an
+  // element that has no locator of its own, or that has one that is scoped.
+  async function openCandidates(e, forDo) {
+    if (busy || !frame) return;
+    // The mode decides what the locator is for: a field is typed in only when the person acts.
+    const op = forDo || (mode === 'assert' || mode === 'capture' ? 'assert' : e.editable || e.password ? 'type' : 'tap');
+    chosen = null;
+    const r = await api('GET', '/api/session/candidates?frameId=' + frame.frameId + '&index=' + e.index + '&do=' + encodeURIComponent(op));
+    if (!r.ok) {
+      if (r.status === 409) { await run('POST', '/api/session/refresh', {}); banner('The screen changed. This is the screen now.'); return; }
+      banner(r.data.error || 'The locators could not be listed.', true);
+      return;
+    }
+    const panel = $('cand-panel');
+    const list = $('cand-list');
+    clear(list);
+    $('cand-title').textContent = 'Locators of ' + (e.text || e.desc || e.hint || e.id || e.class);
+    const target = { index: e.index };
+    const frameId = frame.frameId;
+    const pick = (k) => {
+      closeCandidates();
+      // The choice is for this element of this frame, and no other call takes it.
+      chosen = { k, frameId, index: e.index };
+      if (mode === 'assert') { openAssert(e, target); return; }
+      if (mode === 'capture') { openCapture(e, target); return; }
+      if (op === 'type') { openType(e, target); return; }
+      act(Object.assign({ do: 'tap' }, target));
+    };
+    const usable = r.data.usable || [];
+    for (const u of usable) list.append(candRow(u, pick, mode === 'act' && op === 'tap' ? 'Tap with this' : 'Use this'));
+    for (const u of r.data.refused || []) list.append(candRow(u, null, ''));
+    $('cand-note').textContent = usable.length
+      ? 'Pick the one to use. A locator that finds several elements is refused by a replay.'
+      : 'No locator finds this element alone. A card or a position may be offered above, or the app needs an id or a description.';
+    panel.hidden = false;
+  }
+
+  // takeCandidate gives the locator that the person picked, once, and only for the element that it was
+  // picked for on the frame that was shown then.
+  function takeCandidate(t) {
+    const c = chosen;
+    chosen = null;
+    return c && frame && t && c.frameId === frame.frameId && c.index === t.index ? c.k : 0;
+  }
+
+  async function openStepLocators(i) {
+    if (busy) return;
+    chosen = null;
+    const r = await api('GET', '/api/timeline/' + i + '/locators');
+    if (!r.ok) { banner(r.data.error || 'The locators could not be listed.', true); return; }
+    const list = $('cand-list');
+    clear(list);
+    $('cand-title').textContent = 'Locators of step ' + (i + 1);
+    for (const info of r.data.locators || []) {
+      list.append(candRow(info, async (k) => {
+        const s = await run('POST', '/api/timeline/' + i + '/locator', { choice: k });
+        if (s.ok) { banner('Step ' + (i + 1) + ' uses that locator. The screens file is not rewritten: the element gets a new name when you save.'); closeCandidates(); }
+      }, 'Use this'));
+    }
+    const sel = h('li', { class: 'cand' }, h('button', { type: 'button', class: 'btn', text: 'Pick another element', onclick: () => {
+      repicking = i;
+      closeCandidates();
+      banner('Click the element on the screen that step ' + (i + 1) + ' is on. ' + (i === 0
+        ? 'The device must be before the first step, where the cursor is at the top of the list.'
+        : 'The device must be at step ' + i + ': use Go here on step ' + i + ' first.'));
+      syncControls();
+    } }));
+    list.append(sel);
+    $('cand-note').textContent = 'The locators that were found when the step was recorded. A change never rewrites an entry of the screens file.';
+    $('cand-panel').hidden = false;
+  }
+
+  async function repickTo(pick) {
+    const i = repicking;
+    repicking = -1;
+    const body = pick.element ? { frameId: frame.frameId, element: pick.element.index } : Object.assign({ frameId: frame.frameId }, pick.point);
+    const r = await run('POST', '/api/timeline/' + i + '/locator', body);
+    if (r.ok) banner('Step ' + (i + 1) + ' now points at that element.');
+    syncControls();
+  }
+
   function render() {
     drawChips();
     drawServices();
     drawFlows();
+    drawRecordings();
+    drawCaptured();
     drawPhysical();
     drawMirror();
     drawSteps();
@@ -292,8 +523,13 @@
   // take adopts an answer that holds the recording.
   function take(data) {
     session = Object.assign({}, session, data);
+    // The answer always says whether the device is where the steps say: an old yes must not stay.
+    if (Array.isArray(data.steps)) session.dirty = !!data.dirty;
     if (data.frame) frame = data.frame;
+    if (data.frame && data.frame.notice) banner(data.frame.notice);
+    if (data.dirty) banner('A step that the device had done was deleted, so the device is not where the steps say. Use Go here on a step to take it through the steps that are left.');
     if (data.flow) banner('The flow ' + data.flow + '.');
+    if (data.notice) banner(data.notice);
     render();
   }
 
@@ -305,7 +541,8 @@
     state = r.data;
     if (state.session && !session) {
       // A page that was reloaded shows the recording that the server holds.
-      session = { steps: state.session.steps, kind: state.session.kind, id: state.session.id, physicalDevice: state.physicalDevice };
+      const ss = state.session;
+      session = { steps: ss.steps, kind: ss.kind, id: ss.id, cursor: ss.cursor, dirty: ss.dirty, common: ss.common, screenNames: ss.screenNames, physicalDevice: state.physicalDevice };
       const f = await api('POST', '/api/session/refresh', {});
       if (f.ok) take(f.data);
     }
@@ -334,6 +571,8 @@
       banner('The screen changed, so nothing was done. This is the screen now.');
     } else if (r.status === 428 && r.data.needsConfirm) {
       confirm('Physical device', r.data.error, 'Confirm', () => retry && retry(true));
+    } else if (r.status === 428 && (r.data.needsSecrets || r.data.needsParams)) {
+      askValues(r.data, (v) => retry && retry(v));
     } else {
       banner(r.data.error || 'The call failed.', true);
     }
@@ -342,19 +581,29 @@
 
   function act(a) {
     if (!frame) return Promise.resolve();
-    return run('POST', '/api/session/act', Object.assign({ frameId: frame.frameId }, a));
+    const k = takeCandidate(a);
+    return run('POST', '/api/session/act', Object.assign({ frameId: frame.frameId }, k ? { candidate: k } : {}, a));
   }
 
   function onPick(pick, ev) {
     if (busy || !frame) return;
+    if (repicking >= 0) { repickTo(pick); return; }
     const t = pick.element ? { index: pick.element.index } : pick.point;
+    if (mode === 'capture') {
+      if (pick.element) openCapture(pick.element, t); else banner('Pick an element to capture.');
+      return;
+    }
     if (mode === 'assert' || ev.altKey) {
       if (pick.element) openAssert(pick.element, t); else banner('Pick an element to check.');
       return;
     }
     const e = pick.element;
     if (e && (e.editable || e.password)) { openType(e, t); return; }
-    act(Object.assign({ do: ev.shiftKey ? 'longPress' : 'tap' }, t));
+    const doing = ev.shiftKey ? 'longPress' : 'tap';
+    act(Object.assign({ do: doing }, t)).then((r) => {
+      // No locator finds the element alone: show the ways to find it, so that the person can pick one.
+      if (r && r.status === 422 && !r.data.needsSecret && e) openCandidates(e, 'tap');
+    });
   }
 
   // --- dialogs ---
@@ -421,15 +670,71 @@
     $('form-assert').onsubmit = async (ev) => {
       ev.preventDefault();
       const body = Object.assign({ frameId: frame.frameId, kind: kind.value, value: $('assert-value-row').hidden ? '' : $('assert-value').value, attribute: $('assert-attr-row').hidden ? '' : $('assert-attr').value }, t);
+      const keep = chosen;
+      const k = takeCandidate(t);
+      if (k) body.candidate = k;
       setBusy(true);
       const r = await api('POST', '/api/session/assert', body);
       setBusy(false);
       if (r.ok) { closeOn('dlg-assert'); take(r.data); banner('Check added.'); return; }
       if (r.status === 409 && r.data.stale) { closeOn('dlg-assert'); take(r.data.session); banner('The screen changed, so nothing was done. This is the screen now.'); return; }
+      chosen = keep; // the dialog stays open, so a second try keeps the locator that was picked
       $('assert-error').textContent = r.data.error || 'The check was not added.';
       $('assert-error').hidden = false;
     };
     $('dlg-assert').showModal();
+  }
+
+  // openCapture asks for the name and the optional regular expression of a value to keep from an element.
+  // The preview is what a browser regular expression finds in the text that the element shows: Semar reads
+  // the real value, and refuses a pattern that does not match.
+  function openCapture(e, t) {
+    const text = e.text || e.desc || '';
+    const name = $('cap-name');
+    const pattern = $('cap-pattern');
+    $('cap-what').textContent = 'On: ' + (e.text || e.desc || e.hint || e.id || e.class);
+    $('cap-text').textContent = text;
+    name.value = '';
+    pattern.value = '';
+    $('cap-error').hidden = true;
+    const preview = () => {
+      const out = $('cap-preview');
+      if (!pattern.value) { out.textContent = text ? 'Value: ' + text : 'The element shows no text.'; return; }
+      try {
+        const m = new RegExp(pattern.value).exec(text);
+        out.textContent = !m ? 'The pattern does not match this text.' : 'Value: ' + (m.length > 1 ? (m[1] === undefined ? '' : m[1]) : m[0]);
+      } catch (err) {
+        out.textContent = 'This pattern cannot be previewed here. Semar checks it when you capture.';
+      }
+    };
+    pattern.oninput = preview;
+    preview();
+    $('form-capture').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const body = Object.assign({ frameId: frame.frameId, name: name.value, pattern: pattern.value }, t);
+      const keep = chosen;
+      const k = takeCandidate(t);
+      if (k) body.candidate = k;
+      setBusy(true);
+      const r = await api('POST', '/api/session/capture', body);
+      setBusy(false);
+      if (r.ok) {
+        closeOn('dlg-capture');
+        take(r.data);
+        if (r.data.captured) {
+          captures = captures.filter((c) => c.name !== r.data.captured.name).concat([r.data.captured]);
+          drawCaptured();
+          banner('Captured {{' + r.data.captured.name + '}} = ' + r.data.captured.value + '. Later steps may type it or check it as {{' + r.data.captured.name + '}}.');
+        }
+        return;
+      }
+      if (r.status === 409 && r.data.stale) { closeOn('dlg-capture'); take(r.data.session); banner('The screen changed, so nothing was done. This is the screen now.'); return; }
+      chosen = keep; // the dialog stays open, so a second try keeps the locator that was picked
+      $('cap-error').textContent = r.data.error || 'The value was not captured.';
+      $('cap-error').hidden = false;
+    };
+    $('dlg-capture').showModal();
+    name.focus();
   }
 
   async function openSetup() {
@@ -569,8 +874,34 @@
       history.replaceState(null, '', location.pathname + location.search);
     }
     for (const b of document.querySelectorAll('[data-close]')) b.addEventListener('click', () => closeOn(b.dataset.close));
+    // Any way that a dialog ends, Escape too, drops the locator that was picked for it and what was typed in it.
+    for (const d of document.querySelectorAll('dialog')) {
+      d.addEventListener('close', () => {
+        chosen = null;
+        if (d.id === 'dlg-values') clear($('values-fields'));
+        if (d.id === 'dlg-type') $('type-value').value = '';
+      });
+    }
     $('mode-act').onclick = () => { mode = 'act'; syncControls(); };
     $('mode-assert').onclick = () => { mode = 'assert'; syncControls(); };
+    $('mode-capture').onclick = () => { mode = 'capture'; syncControls(); };
+    $('cand-close').onclick = closeCandidates;
+    $('open-pick').onchange = drawRecordings;
+    $('open-existing').onclick = function reopen(confirmClear) {
+      const [kind, ...rest] = $('open-pick').value.split(':');
+      const id = rest.join(':');
+      if (!id) return;
+      const at = parseInt($('open-at').value, 10);
+      const service = $('start-service').value || (state && state.service) || '';
+      const body = { service, deviceSerial: $('device').value, confirmClear: confirmClear === true, resume: { kind, id, at: at > 0 ? at : 0 } };
+      captures = [];
+      // The server asks for the secrets and the params that no file holds before it starts, and for a
+      // confirmation on a physical device: the call goes again with what was asked.
+      const again = (x) => x === true
+        ? reopen(true)
+        : run('POST', '/api/session/start', Object.assign({}, body, x), (y) => y === true ? reopen(true) : undefined).then(refreshState);
+      run('POST', '/api/session/start', body, again).then(refreshState);
+    };
     $('device').onchange = drawPhysical;
     $('setup-open').onclick = openSetup;
     $('refresh').onclick = () => run('POST', '/api/session/refresh', {});
@@ -580,7 +911,13 @@
       if (!steps.length) { next($('flow-pick').value); return; }
       confirm('Reset the recording', 'The ' + steps.length + ' recorded steps are dropped and the app is reset. Save first to keep them.', 'Reset', () => next($('flow-pick').value));
     };
-    $('delete-last').onclick = () => run('DELETE', '/api/timeline/last');
+    $('delete-last').onclick = () => {
+      if (busy) return;
+      repicking = -1;
+      editing = -1;
+      closeCandidates();
+      run('DELETE', '/api/timeline/last');
+    };
     $('flow-run').onclick = () => {
       const flow = $('flow-pick').value;
       if (!flow) { banner('Pick a flow to run.'); return; }
@@ -593,11 +930,15 @@
     };
     $('screen-name').onchange = () => {
       const name = $('screen-name').value.trim();
-      if (name) run('POST', '/api/session/screen', { name });
+      if (!name) return;
+      const rename = $('screen-rename').checked && !!frame && !!frame.screen && frame.screen !== name;
+      $('screen-rename').checked = false;
+      run('POST', '/api/session/screen', rename ? { name, rename: true, from: frame.screen } : { name });
     };
     $('start').onclick = function start(confirmClear) {
       const service = $('start-service').value || (state && state.service) || '';
-      const body = { kind: 'scenario', service, deviceSerial: $('device').value, useFlows: $('start-flow').value ? [$('start-flow').value] : [], confirmClear: confirmClear === true };
+      const body = { kind: $('start-kind').value || 'scenario', service, deviceSerial: $('device').value, useFlows: $('start-flow').value ? [$('start-flow').value] : [], confirmClear: confirmClear === true };
+      captures = [];
       run('POST', '/api/session/start', body, (yes) => start(yes)).then(refreshState);
     };
     $('form-link').onsubmit = (ev) => {

@@ -138,7 +138,7 @@ func TestRecordMobileFlags(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"flow with a scenario id and use", []string{"record", "--flow", "login", "--use", "x"}, "does not use another flow"},
+		{"flow that uses a flow that is not saved", []string{"record", "--flow", "login", "--use", "x"}, "--use x"},
 		{"ui with a flow", []string{"record", "--ui", "--flow", "login"}, "leave out --flow and --use"},
 		{"port without ui", []string{"record", "--flow", "x", "--port", "8123"}, "belong to --ui"},
 		{"bad port", []string{"record", "--ui", "--port", "70000"}, "is not a port"},

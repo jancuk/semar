@@ -69,8 +69,8 @@ func GuardAll(name, csp string, next http.Handler) http.Handler {
 	})
 }
 
-// HostAllowed reports whether the Host header is the loopback address or localhost with the port that
-// the request arrived on.
+// HostAllowed reports whether the Host header is the loopback address (127.0.0.1 or [::1]) or
+// localhost with the port that the request arrived on.
 func HostAllowed(r *http.Request) bool {
 	addr, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
 	if !ok {
@@ -80,7 +80,22 @@ func HostAllowed(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	return r.Host == "127.0.0.1:"+port || r.Host == "localhost:"+port
+	return r.Host == "127.0.0.1:"+port || r.Host == "localhost:"+port || r.Host == "[::1]:"+port
+}
+
+// BearerOrHeader returns the token of an "Authorization: Bearer <token>" header, or else the
+// X-Semar-Token header, or "" when neither is set.
+func BearerOrHeader(r *http.Request) string {
+	if auth := r.Header.Get("Authorization"); len(auth) > len("Bearer ") && strings.EqualFold(auth[:len("Bearer ")], "Bearer ") {
+		return strings.TrimSpace(auth[len("Bearer "):])
+	}
+	return r.Header.Get(TokenHeader)
+}
+
+// TokenEqual compares two tokens in constant time. An empty token never matches, not even another
+// empty one.
+func TokenEqual(a, b string) bool {
+	return a != "" && b != "" && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 // GuardAPI checks the token and the origin, and that a change is a small JSON body of at most

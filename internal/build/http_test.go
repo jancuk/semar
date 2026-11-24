@@ -2,6 +2,7 @@ package build_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -95,6 +96,9 @@ func TestProbeErrors(t *testing.T) {
 			_, err := p.Probe(t.Context(), tt.service)
 			if err == nil {
 				t.Fatal("no error")
+			}
+			if got := errors.Is(err, build.ErrNoBuild); got != (tt.service == "billing") {
+				t.Errorf("errors.Is(err, build.ErrNoBuild) = %v for %s", got, tt.service)
 			}
 			for _, w := range tt.want {
 				if !strings.Contains(err.Error(), w) {

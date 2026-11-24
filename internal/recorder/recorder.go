@@ -31,6 +31,9 @@ func New(sink Sink, red *redact.Redactor, classify func(method string, u *url.UR
 	return &Recorder{sink: sink, red: red, classify: classify, run: run}
 }
 
+// Redact removes the secrets from a text that is stored beside the actions, such as the report of a crash.
+func (r *Recorder) Redact(text string) string { return r.red.Text(text) }
+
 // Record sets Seq and ID, redacts, stores the action, appends its activity entry, and returns the redacted action.
 // A Seq whose sink call failed is not reused: the action file may already exist under it.
 func (r *Recorder) Record(a domain.Action) (domain.Action, error) {

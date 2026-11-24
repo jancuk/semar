@@ -306,3 +306,22 @@ func TestSARIFDeterministic(t *testing.T) {
 		t.Error("two writes of the same run differ")
 	}
 }
+
+func TestSARIFFlowCheck(t *testing.T) {
+	r := oneOutcome(domain.OutcomeFailed)
+	r.Scenarios[0].Result.Checks = []domain.CheckResult{
+		{Step: "login", Index: -1, Source: domain.SourceFlow, State: domain.CheckFalse, Expected: "element welcome equals Hi Ana", Observed: "Hi Bob"},
+		{Step: "login", Index: -1, Source: domain.SourceFlow, State: domain.CheckTrue, Expected: "element home exists", Observed: "true"},
+		{Step: "login", Index: -1, Source: domain.SourceFlow, State: domain.CheckFalse, Expected: "element tab exists", Observed: "false"},
+	}
+	res := *decodeSARIF(t, render(t, writeSARIF, r)).Runs[0].Results
+	if len(res) != 2 || res[0].RuleID != "semar/expected-result-not-met" {
+		t.Fatalf("results = %+v, want the two false flow checks", res)
+	}
+	if got := res[0].Message.Text; !strings.Contains(got, "Hi Bob") || !strings.Contains(got, "(source flow)") {
+		t.Errorf("message = %q", got)
+	}
+	if res[0].PartialFingerprints["semar/v1"] == res[1].PartialFingerprints["semar/v1"] {
+		t.Error("two flow checks of one step share a fingerprint")
+	}
+}

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -16,11 +15,9 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/effects"
 	"github.com/jancuk/semar/internal/engine/web"
-	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/pagelist"
 	"github.com/jancuk/semar/internal/record"
 	"github.com/jancuk/semar/internal/report"
-	"github.com/jancuk/semar/internal/screens"
 	"github.com/jancuk/semar/internal/stage/plan"
 )
 
@@ -134,76 +131,25 @@ func (w *webExplorer) write(ctx context.Context, req plan.WebRequest, end plan.F
 		}
 		claims[i] = record.Claim{Expect: expect, Cite: req.Cite}
 	}
-	vars := fx.vars()
-	opts := record.Options{
-		ID: req.ID, Ticket: req.Ticket, App: w.app, Service: w.svc.Name, BaseURL: w.svc.BaseURL,
-		AuthProfile: w.authProfile, Given: fx.given, Values: record.NewValues(vars), Date: w.o.Clock(), Claims: claims,
-	}
-	var err error
-	if opts.Existing, err = screens.Load(w.dir, w.app); err != nil && !errors.Is(err, screens.ErrNotFound) {
-		return plan.WebOutcome{}, err
-	}
-	draft, err := record.Build(events, opts)
-	switch {
-	case errors.Is(err, record.ErrNoCheck):
-		return manual("the browser heard no check, so nothing proves the criterion"), nil
-	case errors.Is(err, record.ErrSecretName):
-		return manual("the model typed into a password field, which a test cannot keep"), nil
-	case err != nil:
-		return manual("the recording could not be made into a test: %s", terminalSafe(oneLine(err.Error()))), nil
-	}
-	draft.Scenario.Title = oneLine(end.Done.Title)
-	draft.Scenario.Intent = oneLine(end.Done.Intent)
-	draft.Script.ExpectHash = domain.ExpectHash(draft.Scenario)
-	draft.Script.ShapeHash = domain.ShapeHash(draft.Scenario)
-	if err := checkDraft(draft); err != nil {
-		return manual("%s", strings.TrimPrefix(err.Error(), "nothing was written: ")), nil
-	}
-	written, err := persistDraft(w.dir, draft, w.app, valueOr(req.Subject, req.Ticket), nil)
+	res, err := writeWebTest(ctx, w.o, w.dir, w.envName, webWriteRequest{
+		ID: req.ID, Ticket: req.Ticket, Subject: valueOr(req.Subject, req.Ticket), App: w.app, Service: w.svc.Name,
+		BaseURL: w.svc.BaseURL, AuthProfile: w.authProfile, Given: fx.given, Vars: fx.vars(), Claims: claims,
+		Title: end.Done.Title, Intent: end.Done.Intent, Retitle: true, Verify: true, Builds: w.builds,
+	}, events)
 	if err != nil {
 		return plan.WebOutcome{}, err
 	}
-	remove := func() error { return w.remove(written, req.ID) }
-	r := replayScenario(ctx, w.o, w.dir, w.envName, string(req.ID), w.builds)
-	if ctx.Err() != nil {
-		_ = remove()
-		return plan.WebOutcome{}, ctx.Err()
-	}
-	want := domain.OutcomePassed
-	if len(draft.FailsNow) > 0 {
-		want = domain.OutcomeFailed
-	}
-	if r.result == nil || r.result.Outcome != want {
-		why := "it did not finish"
-		if r.result != nil {
-			why = "it ended " + string(r.result.Outcome)
-			if len(r.result.Reasons) > 0 {
-				why += ": " + terminalSafe(oneLine(r.result.Reasons[0].Text))
-			}
-		} else if r.err != nil {
-			why = "it could not run: " + terminalSafe(oneLine(r.err.Error()))
-		}
-		_ = remove()
-		return manual("the replay of the written test did not end as the recording predicts, %s was expected and %s, so the test was removed", want, why), nil
+	if res.Manual != "" {
+		return plan.WebOutcome{Manual: res.Manual}, nil
 	}
 	t := &plan.WebTest{
-		Scenario: draft.Scenario, ScenarioPath: written.ScenarioPath, ScreensPath: written.ScreensPath,
-		Replay: string(r.result.Outcome), Cite: req.Cite, Remove: remove,
+		Scenario: res.Draft.Scenario, ScenarioPath: res.Written.ScenarioPath, ScreensPath: res.Written.ScreensPath,
+		Replay: res.Replay, Cite: req.Cite, Remove: res.Remove,
 	}
-	for _, f := range draft.FailsNow {
+	for _, f := range res.Draft.FailsNow {
 		t.FailsNow = append(t.FailsNow, plan.FailsNow{Element: f.Element, Expect: f.Expect, Shown: f.Shown, Cite: f.Cite, Rule: f.Rule})
 	}
 	return plan.WebOutcome{Test: t}, nil
-}
-
-// remove puts the repository back as it was before the test was written.
-func (w *webExplorer) remove(written record.Written, id domain.ScenarioID) error {
-	err := written.Undo()
-	store, serr := evidence.Open(semarDir(w.dir))
-	if serr == nil {
-		_, serr = store.RemoveScripts(id)
-	}
-	return errors.Join(err, serr)
 }
 
 // flowFixtures are the fixtures that one flow made. The browser makes them when the model names them in

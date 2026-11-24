@@ -1,0 +1,5 @@
+Supported states: [
+  DeviceState{identifier=1, name='FOLDED', app_accessible=true, flags=[FLAG_CANCEL_WHEN_REQUESTER_NOT_ON_TOP]},
+  DeviceState{identifier=2, name='HALF_FOLDED', app_accessible=true, flags=[]},
+  DeviceState{identifier=3, name='UNFOLDED', app_accessible=true, flags=[]}
+]

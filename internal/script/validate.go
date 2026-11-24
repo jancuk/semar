@@ -129,6 +129,9 @@ func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, 
 		case ss.Request == nil && ss.Web == nil && ss.Mobile == nil && ss.Use == "" && len(ss.Captures) > 0:
 			add(ss.Step, "a capture needs a request or a web action")
 		}
+		if len(ss.Expect) > 0 {
+			add(ss.Step, "expect belongs to a step of a flow: a scenario keeps its expected results on its own steps")
+		}
 		if len(ss.With) > 0 && ss.Use == "" {
 			add(ss.Step, "with belongs to a step that has use")
 		}
@@ -162,7 +165,7 @@ func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, 
 				startUnknown = true
 				add(ss.Step, "use: flow %s: %v", ss.Use, err)
 			} else {
-				useProblems(ss, f, started, captured, func(format string, args ...any) { add(ss.Step, format, args...) })
+				useProblems(ss, f, flows, started, captured, func(format string, args ...any) { add(ss.Step, format, args...) })
 			}
 		}
 		if sc.Surface == domain.SurfaceAndroid && ss.Web != nil {
@@ -238,6 +241,9 @@ func validate(sc domain.Scenario, s domain.Script, outputs map[string][]string, 
 				if ss.Mobile != nil {
 					add(ss.Step, "capture %s names a jsonpath, and a mobile step has no response to read: use an element", c.Name)
 				}
+			}
+			if err := domain.CheckPattern(c.Pattern); err != nil {
+				add(ss.Step, "capture %s: %v", c.Name, err)
 			}
 			if c.Name != "" && (captured[c.Name] || seen[c.Name]) {
 				add(ss.Step, "capture %s is defined more than once", c.Name)

@@ -44,6 +44,7 @@ const gitignoreText = `# Written by semar init. These stay on this machine.
 runs/
 store/redact.key
 store/fixture-health/
+mcp/
 semar.local.yaml
 `
 

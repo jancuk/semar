@@ -161,6 +161,27 @@ func TestMobileScriptRoundTrips(t *testing.T) {
 	}
 }
 
+func TestADragAndADoubleTapRoundTripWithTheirDropElement(t *testing.T) {
+	sc := mobileScenario()
+	s := mobileScript(sc)
+	s.Steps[1].Mobile = &domain.MobileAction{Service: "shop-app", App: "shop-app", Do: domain.MobileDrag, Screen: "Home", Element: "card", To: "slot", Value: "800ms"}
+	s.Steps[2].Mobile = &domain.MobileAction{Service: "shop-app", App: "shop-app", Do: domain.MobileDoubleTap, Screen: "Home", Element: "card"}
+	data, err := script.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "to: slot") || !strings.Contains(string(data), "do: drag") || !strings.Contains(string(data), "do: doubleTap") {
+		t.Errorf("the script lacks the drag:\n%s", data)
+	}
+	back, err := script.Parse(data, "sign-in.yaml")
+	if err != nil {
+		t.Fatalf("parse:\n%s\n%v", data, err)
+	}
+	if *back.Steps[1].Mobile != *s.Steps[1].Mobile || *back.Steps[2].Mobile != *s.Steps[2].Mobile {
+		t.Errorf("round trip lost the drag:\n%s", data)
+	}
+}
+
 func TestRenderMobileLinkAndValue(t *testing.T) {
 	vars := map[string]string{"id": "b-1", "bad": "a b", "slash": "x/y", "text": "any thing; 'quoted'"}
 	got, err := script.RenderMobile(domain.MobileAction{Do: domain.MobileOpenLink, Link: "shop://order/{{id}}?v={{id}}"}, vars)
@@ -189,6 +210,19 @@ func TestRenderLocatorKnowsTheMobileFields(t *testing.T) {
 	}
 	vs := script.LocatorVariables(domain.Locator{ID: "{{a}}", Desc: "{{b}}", Class: "{{a}}", XPath: "{{c}}"})
 	if strings.Join(vs, ",") != "a,b,c" {
+		t.Errorf("variables = %v", vs)
+	}
+}
+
+func TestRenderLocatorFillsHasText(t *testing.T) {
+	got, err := script.RenderLocator(domain.Locator{Class: "k", HasText: "Order {{ref}}", Index: 2}, map[string]string{"ref": "A1"})
+	if err != nil || got.HasText != "Order A1" || got.Index != 2 {
+		t.Errorf("locator = %+v, %v", got, err)
+	}
+	if _, err := script.RenderLocator(domain.Locator{Class: "k", HasText: "{{nobody}}"}, nil); err == nil || !strings.Contains(err.Error(), "hasText") {
+		t.Errorf("error = %v", err)
+	}
+	if vs := script.LocatorVariables(domain.Locator{Class: "{{a}}", HasText: "{{b}} {{a}}"}); strings.Join(vs, ",") != "a,b" {
 		t.Errorf("variables = %v", vs)
 	}
 }

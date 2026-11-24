@@ -1,0 +1,14 @@
+### settings
+com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+### dumpsys
+Current Input Method Manager state:
+  Input Methods:
+    mMethodMap:
+      InputMethodInfo{com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME}
+  mCurMethodId=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+  mCurFocusedWindow=Window{4f2c1a1 u0 com.aura.keyboard.fixture/com.aura.keyboard.fixture.MainActivity}
+  mShowRequested=true mShowExplicitlyRequested=true mShowForced=false
+  mInputShown=true
+  mImeWindowVis=3 mBackDisposition=0 mShowImeWithHardKeyboard=false
+### want
+pkg=com.google.android.inputmethod.latin shown=true

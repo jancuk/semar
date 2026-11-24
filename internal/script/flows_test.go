@@ -277,3 +277,65 @@ func TestTheResetOfALaunchSurvivesMarshalAndParse(t *testing.T) {
 		t.Errorf("step = %+v", got.Steps[0].Mobile)
 	}
 }
+
+func TestACapturePatternIsCheckedAndWritten(t *testing.T) {
+	sc, s := useScenario()
+	s.Steps[1].Captures = []domain.Capture{{Name: "ref", Element: "welcome", Pattern: `Order #([A-Z0-9]+)`}}
+	if ps := script.ValidateWithFlows(sc, s, nil, flowsOf(login())); len(ps) > 0 {
+		t.Fatalf("problems:\n%s", problemText(ps))
+	}
+	data, err := script.Marshal(s)
+	if err != nil || !strings.Contains(string(data), `pattern: "Order #([A-Z0-9]+)"`) {
+		t.Fatalf("err = %v\n%s", err, data)
+	}
+	again, err := script.Parse(data, "task")
+	if err != nil || again.Steps[1].Captures[0].Pattern != `Order #([A-Z0-9]+)` {
+		t.Fatalf("round trip: %v\n%+v", err, again.Steps)
+	}
+	for name, pattern := range map[string]string{"bad": "([a-z", "long": strings.Repeat("a", 201)} {
+		s.Steps[1].Captures[0].Pattern = pattern
+		ps := script.ValidateWithFlows(sc, s, nil, flowsOf(login()))
+		if !strings.Contains(problemText(ps), "capture ref: the pattern") {
+			t.Errorf("%s pattern:\n%s", name, problemText(ps))
+		}
+	}
+}
+
+func TestAScenarioStepHasNoFlowChecks(t *testing.T) {
+	sc, s := useScenario()
+	s.Steps[1].Expect = []domain.Expectation{{Check: domain.Check{Element: "welcome", Exists: boolPtr(true)}, Source: domain.SourcePerson}}
+	if ps := script.ValidateWithFlows(sc, s, nil, flowsOf(login())); !strings.Contains(problemText(ps), "expect belongs to a step of a flow") {
+		t.Errorf("problems:\n%s", problemText(ps))
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+func TestTheCapturesAndServicesOfFlowsInsideAFlowJoinTheScenario(t *testing.T) {
+	inner := capturing()
+	outer := domain.Flow{
+		APIVersion: "semar/v1", Kind: "Flow", ID: "outer", Surface: domain.SurfaceAndroid, Service: "shop-app", App: "shop-app",
+		Params: []domain.FlowParam{{Name: "email"}},
+		Steps:  []domain.ScriptStep{{Step: "in", Use: "login", With: map[string]string{"email": "{{email}}"}}},
+	}
+	sc, s := useScenario()
+	s.Steps[0].Use = "outer"
+	s.Steps[1].Mobile = &domain.MobileAction{Service: "shop-app", App: "shop-app", Do: domain.MobileType, Screen: "SignIn", Element: "email", Value: "{{shown}}"}
+	if ps := script.ValidateWithFlows(sc, s, nil, flowsOf(inner, outer)); len(ps) > 0 {
+		t.Fatalf("a capture of an inner flow must be known after the outer one:\n%s", problemText(ps))
+	}
+	// The service is started by the inner flow, so a flow that starts nothing is refused.
+	inner.Steps = inner.Steps[1:]
+	ps := script.ValidateWithFlows(sc, s, nil, flowsOf(inner, outer))
+	if !strings.Contains(problemText(ps), "the first mobile step of the service shop-app must be launch or open, and flow login starts with type") {
+		t.Errorf("problems:\n%s", problemText(ps))
+	}
+	// Using the outer flow twice repeats the capture.
+	sc.Steps = append(sc.Steps, domain.Step{ID: "again", Action: "again"})
+	s.ExpectHash = domain.ExpectHash(sc)
+	s.Steps = append(s.Steps, domain.ScriptStep{Step: "again", Use: "outer", With: map[string]string{"email": "x@y.z"}})
+	ps = script.ValidateWithFlows(sc, s, nil, flowsOf(capturing(), outer))
+	if !strings.Contains(problemText(ps), "captures shown, which an earlier step already captured") {
+		t.Errorf("problems:\n%s", problemText(ps))
+	}
+}

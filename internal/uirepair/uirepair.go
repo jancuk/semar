@@ -245,3 +245,98 @@ func distance(a, b []rune) int {
 	}
 	return prev[len(b)]
 }
+
+// Closest gives up to n of the nodes that look most like the old locator, the most alike first. It is
+// for a person who reads why an element was not found, so it has no threshold: it gives n nodes even
+// when none is alike, and the order of the tree breaks a tie. Each locator is the one that names the
+// node best, as in a name for a locator that matched several: id, then desc, then role and name, then
+// text. A node that has none of them is left out, and a locator that two nodes share is given once and
+// says how many matched. The caller gives only the nodes that are visible, and sets Element.
+func Closest(old domain.Locator, nodes []AXNode, n int) []domain.Candidate {
+	if n <= 0 {
+		return nil
+	}
+	type scored struct {
+		loc   domain.Locator
+		why   string
+		score float64
+	}
+	var list []scored
+	matches := map[domain.Locator]int{}
+	for _, node := range nodes {
+		loc, label, ok := nodeLocator(node)
+		if !ok {
+			continue
+		}
+		matches[loc]++
+		if matches[loc] > 1 {
+			continue
+		}
+		role := node.Role
+		if role == "" || role == "generic" {
+			role = "element"
+		}
+		list = append(list, scored{loc: loc, why: fmt.Sprintf("%s %q", role, clipLabel(label)), score: likeness(old, node)})
+	}
+	slices.SortStableFunc(list, func(a, b scored) int { return cmp.Compare(b.score, a.score) })
+	var out []domain.Candidate
+	for _, s := range list {
+		if len(out) == n {
+			break
+		}
+		why := s.why
+		if m := matches[s.loc]; m > 1 {
+			why += fmt.Sprintf(" (%d matches)", m)
+		}
+		out = append(out, domain.Candidate{Locator: s.loc, Why: why})
+	}
+	return out
+}
+
+// maxLabel is the most characters of an element's text that a line for a person shows.
+const maxLabel = 60
+
+// clipLabel cuts a label to maxLabel characters, so that a long text of the screen is never a long line of a
+// report or of the output of a run.
+func clipLabel(s string) string {
+	if r := []rune(s); len(r) > maxLabel {
+		return string(r[:maxLabel]) + "..."
+	}
+	return s
+}
+
+// nodeLocator is the locator that names a node, and the label that a person reads.
+func nodeLocator(n AXNode) (domain.Locator, string, bool) {
+	name := strings.Join(strings.Fields(n.Name), " ")
+	switch {
+	case n.ID != "":
+		return domain.Locator{ID: n.ID}, shortID(n.ID), true
+	case n.Desc != "" && len([]rune(n.Desc)) <= 60:
+		return domain.Locator{Desc: n.Desc}, n.Desc, true
+	case Meaningful(n.Role) && name != "":
+		return domain.Locator{Role: n.Role, Name: name}, name, true
+	case name != "" && len([]rune(name)) <= 60:
+		return domain.Locator{Text: name}, name, true
+	}
+	return domain.Locator{}, "", false
+}
+
+// likeness is how alike a node is to what the old locator names, from 0 to 1. Each field of the old
+// locator is compared with the field of the node that holds the same kind of text.
+func likeness(old domain.Locator, n AXNode) float64 {
+	best := 0.0
+	try := func(want, have string) {
+		if want != "" && have != "" {
+			best = max(best, Similarity(want, have))
+		}
+	}
+	try(old.Name, n.Name)
+	try(old.Text, n.Name)
+	try(old.HasText, n.Name)
+	try(old.Desc, n.Desc)
+	try(old.Desc, n.Name)
+	if oldID := firstOf(old.ID, old.TestID); oldID != "" && n.ID != "" {
+		try(shortID(oldID), shortID(n.ID))
+	}
+	return best
+}

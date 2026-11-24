@@ -52,6 +52,8 @@ type runFlags struct {
 	base       string
 	dir        string
 	headed     bool
+	// pauseOnFail is the value of --pause-on-fail.
+	pauseOnFail bool
 	// done is told how the scenarios of the run ended, and where the report is. semar record uses it to
 	// say how the replay of a new recording went.
 	done func(fin finishedRun)
@@ -67,6 +69,7 @@ func newRunCommand(o options) *cobra.Command {
 			"A ticket of the change that has a ticket file and no use cases is not planned. On a terminal, run offers to plan it and asks first. With no terminal, or with --no-plan, it never plans, and its exit code is at least 2.\n" +
 			"--suite <name> runs every scenario whose @suite: tag names it, whatever the change is, and no journey; repeat it for more suites. --retries <n> runs a scenario again that failed, was inconclusive, or was blocked by a failed setup step, up to n more times, with a clean browser and session; a scenario that passes on a later attempt passes and is marked flaky. A scenario that sent a request of effects.once is never run again.\n" +
 			"--ci asks no question, plans nothing, and prints where the report is.\n" +
+			"--pause-on-fail stops a scenario that has steps on a device at each step that fails or has a false check, prints what went wrong and the elements on the screen that look most like the missing one, and waits for Enter before it goes on. The device keeps the screen of the step meanwhile, and Ctrl+C ends the run. It needs a terminal and cannot be used with --ci. It does not apply to journeys.\n" +
 			"Every run writes report.md, report.html, junit.xml and summary.md in its run directory. --report-dir <dir> copies the four files to <dir>, which a pipeline can keep as an artifact; a run of journeys that follows a run of scenarios goes to <dir>/journeys. When GITHUB_STEP_SUMMARY names a file, run appends summary.md to it.\n" +
 			"Exit 0 when everything that ran passed, 1 when something failed, and 2 otherwise.",
 		Args: cobra.MaximumNArgs(1),
@@ -88,6 +91,14 @@ func newRunCommand(o options) *cobra.Command {
 					return fmt.Errorf("the suite name %q must have lower-case letters, digits, and - only", name)
 				}
 			}
+			if f.pauseOnFail {
+				switch {
+				case f.ci:
+					return errors.New("--pause-on-fail waits for a person and --ci asks no question: use one of them")
+				case !o.Terminal():
+					return errors.New("--pause-on-fail needs a terminal to read Enter from: this run has none")
+				}
+			}
 			if f.ci {
 				f.noPlan = true
 			}
@@ -105,6 +116,7 @@ func newRunCommand(o options) *cobra.Command {
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to run against (the same as the argument); needed when there are several, and always for a production environment")
 	cmd.Flags().StringArrayVar(&f.builds, "build", nil, "the commit that a service with no build probe runs, as <commit> or <service>=<commit>; repeat for more")
 	cmd.Flags().StringVar(&f.base, "base", "", "the branch that the change is measured against (default: change.base, else the default branch of origin, else main)")
+	cmd.Flags().BoolVar(&f.pauseOnFail, "pause-on-fail", false, "stop at a step on a device that failed, show the closest elements, and wait for Enter; needs a terminal, and not with --ci")
 	cmd.Flags().BoolVar(&f.headed, "headed", false, "show the browser window of a web step")
 	addDirFlag(cmd, &f.dir)
 	return cmd
@@ -117,19 +129,20 @@ type finishedRun struct {
 	interrupted bool
 	coverage    string // the use case line of the report
 	blocked     []report.BlockedHost
+	misses      []report.Miss
 	docs        []report.DocFinding
 	reports     reportSet
 }
 
 // executeScenarios replays the scenarios against one environment, writes the report, and closes the
 // run. It prints nothing but the line that names the target on stderr.
-func executeScenarios(ctx context.Context, stderr io.Writer, o options, dir string, cfg config.Config, envName string, env config.Environment, declared declaredBuilds, scenarios []domain.Scenario, headed bool, announce func()) (finishedRun, error) {
+func executeScenarios(ctx context.Context, stderr io.Writer, o options, dir string, cfg config.Config, envName string, env config.Environment, declared declaredBuilds, scenarios []domain.Scenario, headed bool, pause func(context.Context, replay.Pause), announce func()) (finishedRun, error) {
 	cat, err := runCatalogue(stderr, dir, cfg, scenarios)
 	if err != nil {
 		return finishedRun{}, err
 	}
 	fmt.Fprintf(stderr, "semar: running against %s (%s, %s)\n", envName, env.Kind, effectsWords(env.Effects.Mode))
-	r, err := newReplay(ctx, o, dir, cfg, envName, env, declared, scenarios, cat, headed)
+	r, err := newReplay(ctx, o, dir, cfg, envName, env, declared, scenarios, cat, headed, pause)
 	if err != nil {
 		return finishedRun{}, err
 	}
@@ -176,7 +189,7 @@ func executeScenarios(ctx context.Context, stderr io.Writer, o options, dir stri
 			return finishedRun{}, err
 		}
 	}
-	return finishedRun{record: record, reportPath: filepath.Join(r.store.Root(), "runs", string(r.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts), docs: report.DocFindings(acts), reports: set}, nil
+	return finishedRun{record: record, reportPath: filepath.Join(r.store.Root(), "runs", string(r.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts), misses: report.Misses(acts), docs: report.DocFindings(acts), reports: set}, nil
 }
 
 // effectsWords says what a test may change in an environment of this effects mode.
@@ -256,7 +269,7 @@ type replayRig struct {
 // newReplay builds every dependency of one run. The secrets come before anything
 // is created or sent, so a missing secret leaves no trace. The redactor follows
 // the store, which holds its key. cat is nil when no scenario names a fixture.
-func newReplay(ctx context.Context, o options, repo string, cfg config.Config, envName string, env config.Environment, declared declaredBuilds, scenarios []domain.Scenario, cat *fixture.Catalogue, headed bool) (*replayRig, error) {
+func newReplay(ctx context.Context, o options, repo string, cfg config.Config, envName string, env config.Environment, declared declaredBuilds, scenarios []domain.Scenario, cat *fixture.Catalogue, headed bool, pause func(context.Context, replay.Pause)) (*replayRig, error) {
 	rg, err := newEnvRig(ctx, o, repo, cfg, env, declared, sessionNeeds(cfg, env, scenarios, cat))
 	if err != nil {
 		return nil, err
@@ -272,6 +285,7 @@ func newReplay(ctx context.Context, o options, repo string, cfg config.Config, e
 		Run:      rg.id,
 		Accounts: slices.Sorted(maps.Keys(cfg.AuthProfiles)),
 		NoToken:  noTokenAccounts(cfg),
+		Pause:    pause,
 	}
 	if cat != nil {
 		fx, err := rg.resolver(o, envName, env, *cat)

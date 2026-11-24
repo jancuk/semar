@@ -3,6 +3,7 @@ package android_test
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -111,4 +112,8 @@ func TestParseForegroundRefusesAnInvalidPackage(t *testing.T) {
 	if _, _, ok := android.ParseForeground("mResumedActivity: ActivityRecord{1 u0 bad;pkg/.Main t1}"); ok {
 		t.Error("an invalid package was taken")
 	}
+}
+
+func (s *scriptRunner) Stream(context.Context, string, ...string) (io.ReadCloser, func() error, error) {
+	return nil, nil, nil
 }

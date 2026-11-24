@@ -235,6 +235,11 @@ type Locator struct {
 	XPath string `yaml:"xpath,omitempty" json:"xpath,omitempty"`
 	// Within names another element of the same screen. The search is limited to it.
 	Within string `yaml:"within,omitempty" json:"within,omitempty"`
+	// HasText keeps only the matches that show this text or description, or hold a visible element that
+	// does, and of those the innermost. Index picks the nth visible match, counted from 1, in the order of
+	// the screen. Both are for a device only, and HasText cannot be used alone.
+	HasText string `yaml:"hasText,omitempty" json:"hasText,omitempty"`
+	Index   int    `yaml:"index,omitempty" json:"index,omitempty"`
 }
 
 // Empty reports whether the locator has no way to find anything.
@@ -317,26 +322,36 @@ func (l Locator) String() string {
 	add("class", l.Class)
 	add("xpath", l.XPath)
 	add("within", l.Within)
+	add("hasText", l.HasText)
+	if l.Index != 0 {
+		parts = append(parts, "index: "+strconv.Itoa(l.Index))
+	}
 	return "{ " + strings.Join(parts, ", ") + " }"
 }
 
 // Fields lists the strings of the locator that may hold variables, by field name.
 func (l Locator) Fields() map[string]string {
 	return map[string]string{"testId": l.TestID, "role": l.Role, "name": l.Name, "text": l.Text, "css": l.CSS,
-		"id": l.ID, "desc": l.Desc, "class": l.Class, "xpath": l.XPath}
+		"id": l.ID, "desc": l.Desc, "class": l.Class, "xpath": l.XPath, "hasText": l.HasText}
 }
 
 // Screens is the content of one .semar/screens/<app>.yaml: the elements of each screen of an app.
 type Screens struct {
-	APIVersion string                        `yaml:"apiVersion"`
-	Kind       string                        `yaml:"kind"`
-	App        string                        `yaml:"app"`
-	Screens    map[string]map[string]Locator `yaml:"screens"`
+	APIVersion string `yaml:"apiVersion"`
+	Kind       string `yaml:"kind"`
+	App        string `yaml:"app"`
+	// Common holds the elements that every screen can find. An element of a screen with the same name
+	// wins over it.
+	Common  map[string]Locator            `yaml:"common,omitempty"`
+	Screens map[string]map[string]Locator `yaml:"screens"`
 }
 
-// Locator gives the locator of an element of a screen.
+// Locator gives the locator of an element of a screen, or else of the common elements.
 func (s Screens) Locator(screen, element string) (Locator, bool) {
-	l, ok := s.Screens[screen][element]
+	if l, ok := s.Screens[screen][element]; ok {
+		return l, true
+	}
+	l, ok := s.Common[element]
 	return l, ok
 }
 

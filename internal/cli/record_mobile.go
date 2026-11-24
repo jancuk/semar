@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -13,9 +15,11 @@ import (
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/engine/mobile"
+	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/flow"
 	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/mobilerec"
+	"github.com/jancuk/semar/internal/screens"
 )
 
 // recordingBudget is how many device actions a recording session may take: a person acts slowly, and a
@@ -25,7 +29,7 @@ const recordingBudget = 2000
 // mobileRecording says whether semar record records an app on a device: with --surface android, or with a
 // flag that only a device has. It is decided before Chrome is looked for.
 func mobileRecording(f recordTestFlags) bool {
-	return f.surface == "android" || f.flow != "" || f.use != "" || f.ui
+	return f.surface == "android" || f.flow != "" || f.use != "" || f.ui || f.resume
 }
 
 // checkMobileFlags refuses a flag that does not go with recording on a device, in plain words.
@@ -36,13 +40,19 @@ func checkMobileFlags(f recordTestFlags, id string) error {
 		return fmt.Errorf("--surface %q must be web or android", f.surface)
 	}
 	if f.surface == "web" {
-		return errors.New("--surface web records in Chrome: --flow, --use, and --ui record an app on a device, and a flow is android only")
+		return errors.New("--surface web records in Chrome: --flow, --use, --resume, and --ui record an app on a device, and a flow is android only")
 	}
 	switch {
+	case f.at != 0 && !f.resume:
+		return errors.New("--at says how many steps --resume replays: add --resume")
+	case f.at < 0:
+		return fmt.Errorf("--at %d is not a step: it counts from 1", f.at)
+	case f.ui && f.at != 0:
+		return errors.New("--at is for the terminal: the studio asks for the step to replay to in its page, when you open a saved recording")
+	case f.resume && f.use != "":
+		return errors.New("--resume reopens the steps that the recording has: leave out --use")
 	case f.ui && (f.flow != "" || f.use != ""):
 		return errors.New("--ui lets you choose in the studio what to record and which flow to start with: leave out --flow and --use")
-	case f.flow != "" && f.use != "":
-		return errors.New("--flow records a flow, and a flow does not use another flow: leave out --use")
 	case f.flow != "" && id != "":
 		return errors.New("--flow takes a name and no scenario ID: its only argument is the environment")
 	case f.flow == "" && !f.ui && id == "":
@@ -147,12 +157,17 @@ func recordMobile(ctx context.Context, cmd *cobra.Command, o options, f recordTe
 	if err := idcheck.Check("app name", app); err != nil {
 		return err
 	}
-	if kind == mobilerec.KindScenario {
+	var resume *mobilerec.Loaded
+	switch {
+	case f.resume:
+		if resume, err = loadResume(f.dir, kind, name, app); err != nil {
+			return err
+		}
+	case kind == mobilerec.KindScenario:
 		if _, err := existingScenario(f.dir, id, f.replace); err != nil {
 			return err
 		}
-	}
-	if kind == mobilerec.KindFlow && !f.replace {
+	case !f.replace:
 		if _, err := flow.Read(f.dir, name); err == nil {
 			return fmt.Errorf("the flow %s exists already: %s; use --replace to record it again", name, flow.Path(name))
 		}
@@ -163,11 +178,16 @@ func recordMobile(ctx context.Context, cmd *cobra.Command, o options, f recordTe
 		}
 	}
 
+	if resume != nil && kind == mobilerec.KindScenario && f.ticket == "" && resume.Scenario.Ticket != "" {
+		// A reopened scenario keeps the ticket of its file, unless --ticket says another.
+		ticket = resume.Scenario.Ticket
+	}
 	overlay := mobilerec.NewOverlay(o.LookupEnv)
 	open := recordingFactory(o, f.dir, cfg, envName, env)
 	sess, err := mobilerec.New(mobilerec.Options{
 		Repo: f.dir, Kind: kind, ID: name, Ticket: ticket, Service: svc.Name, App: app,
 		Open: open, Lookup: o.LookupEnv, Overlay: overlay, Reset: svc.Android.ResetMode(), Use: f.use,
+		Resume: resume, ResumeAt: f.at,
 		Clock: o.Clock, Sleep: o.Sleep, Now: o.Clock,
 	})
 	if err != nil {
@@ -180,15 +200,38 @@ func recordMobile(ctx context.Context, cmd *cobra.Command, o options, f recordTe
 	if kind == mobilerec.KindScenario {
 		what = "the scenario " + id
 	}
-	fmt.Fprintf(out, "Recording %s on a device. The app is reset first, so the recording starts where a replay will.\n", what)
-	if _, err := sess.Start(ctx); err != nil {
+	if resume != nil {
+		upTo := f.at
+		if n := len(sess.Steps()); upTo == 0 || upTo > n {
+			upTo = n
+		}
+		fmt.Fprintf(out, "Reopening %s: its %s, and the first %d are replayed on the device. New steps go after them.\n", what, plural(len(sess.Steps()), "step"), upTo)
+	} else {
+		fmt.Fprintf(out, "Recording %s on a device. The app is reset first, so the recording starts where a replay will.\n", what)
+	}
+	in := o.Stdin
+	_, err = sess.Start(ctx)
+	if errors.Is(err, mobilerec.ErrNeedsConfirm) && resume != nil {
+		// A reopened recording that resets with clear on a physical device asks first, on the line that the
+		// recorder reads next, so that no input is lost between the two.
+		br := bufio.NewReader(o.Stdin)
+		in = br
+		fmt.Fprintf(out, "Replaying these steps resets with clear, which deletes the data of the app on %s.\nType yes to allow it: ", sess.Device())
+		answer, _ := br.ReadString('\n')
+		if !strings.EqualFold(strings.TrimSpace(answer), "yes") {
+			return errors.New("nothing was reopened: the data of the app was not cleared")
+		}
+		sess.ConfirmClear()
+		_, err = sess.Start(ctx)
+	}
+	if err != nil {
 		var un *mobile.Unavailable
 		if errors.As(err, &un) {
 			return fmt.Errorf("nothing was recorded: %s", terminalSafe(oneLine(un.Reason)))
 		}
 		return fmt.Errorf("nothing was recorded: %w", err)
 	}
-	repl := &mobilerec.REPL{Session: sess, In: o.Stdin, Out: out, Replace: f.replace}
+	repl := &mobilerec.REPL{Session: sess, In: in, Out: out, Replace: f.replace || f.resume}
 	if !f.noReplay {
 		repl.Verify = func(ctx context.Context, sv *mobilerec.Saved) (string, error) {
 			return verifyRecording(ctx, o, f, sess, overlay, open, envName, kind, name, app)
@@ -265,7 +308,7 @@ func verifyFlow(ctx context.Context, dir string, overlay *mobilerec.Overlay, ope
 		defer cancel()
 		_ = h.Close(cctx)
 	}()
-	res, err := flow.Run(ctx, h.Engine, screenSource{repo: dir}, entry.Flow, nil, map[string]string{"run.id": "verify-" + id})
+	res, err := flow.RunWith(ctx, h.Engine, screenSource{repo: dir}, entry.Flow, nil, map[string]string{"run.id": "verify-" + id}, flow.Options{Flows: flow.Loader(dir).Flow})
 	if err != nil {
 		return "", fmt.Errorf("the flow %s could not be run: %s", id, terminalSafe(oneLine(overlay.Scrub(err.Error()))))
 	}
@@ -273,7 +316,10 @@ func verifyFlow(ctx context.Context, dir string, overlay *mobilerec.Overlay, ope
 	if res.Error != "" {
 		text += "\n  " + terminalSafe(oneLine(overlay.Scrub(res.Error)))
 	}
-	if res.Status == flow.StatusCompleted {
+	switch {
+	case res.Status == flow.StatusCompleted && res.Checked > 0:
+		text += fmt.Sprintf("\n  %s of the flow held. A flow completes and does not pass: a scenario still needs its own check.", plural(res.Checked, "check"))
+	case res.Status == flow.StatusCompleted:
 		text += "\n  A flow has no check, so it completes and does not pass."
 	}
 	return text, nil
@@ -298,4 +344,70 @@ func recordVerifyBuilds(dir, envName string) []string {
 		}
 	}
 	return out
+}
+
+// loadResume reads the files of a saved scenario or flow, to reopen it. A scenario needs its stored
+// script: the one of its expectation hash, else the newest one of the same shape, which is what semar run
+// uses for a scenario that was edited after it was recorded. The screens file is the one of the app. Path
+// is relative to the repository.
+func loadResume(dir string, kind mobilerec.Kind, id, app string) (*mobilerec.Loaded, error) {
+	scr, err := screens.Load(dir, app)
+	if err != nil {
+		return nil, fmt.Errorf("the screens file of the app %s: %w", app, err)
+	}
+	l := &mobilerec.Loaded{Screens: scr}
+	if kind == mobilerec.KindFlow {
+		entry, err := flow.Load(dir, id)
+		if err != nil {
+			if errors.Is(err, flow.ErrNotFound) {
+				return nil, fmt.Errorf("--resume: the flow %s is not saved: nothing to reopen (%s)", id, flow.Path(id))
+			}
+			return nil, err
+		}
+		l.Flow, l.Path = entry.Flow, flow.Path(id)
+		return l, nil
+	}
+	files, err := scenarioFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(files[domain.ScenarioID(id)]) == 0 {
+		return nil, fmt.Errorf("--resume: the scenario %s is not saved: nothing to reopen", id)
+	}
+	sc, err := loadScenario(dir, domain.ScenarioID(id))
+	if err != nil {
+		return nil, err
+	}
+	if sc.Surface != domain.SurfaceAndroid {
+		return nil, fmt.Errorf("--resume: the scenario %s is for %q, and only an Android scenario is reopened", id, sc.Surface)
+	}
+	store, err := evidence.Open(filepath.Join(dir, ".semar"))
+	if err != nil {
+		return nil, err
+	}
+	sc2, ok, err := store.Script(sc.ID, domain.ExpectHash(sc))
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		all, err := store.ScriptsOf(sc.ID)
+		if err != nil {
+			return nil, err
+		}
+		shape := domain.ShapeHash(sc)
+		for _, c := range all {
+			if c.ShapeHash == shape && (!ok || c.StoredAt.After(sc2.StoredAt)) {
+				sc2, ok = c, true
+			}
+		}
+	}
+	if !ok {
+		return nil, fmt.Errorf("--resume: no stored script fits the scenario %s: record it again with --replace", id)
+	}
+	rel, err := filepath.Rel(dir, files[sc.ID][0])
+	if err != nil {
+		return nil, err
+	}
+	l.Scenario, l.Script, l.Path = sc, sc2, filepath.ToSlash(rel)
+	return l, nil
 }

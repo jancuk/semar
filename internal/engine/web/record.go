@@ -320,6 +320,59 @@ func (r *Recorder) Events() []record.Event {
 	return append([]record.Event(nil), r.events...)
 }
 
+// Screenshot takes a JPEG of what the tab shows, at most 1280 pixels wide.
+func (r *Recorder) Screenshot(ctx context.Context) ([]byte, error) {
+	c, cancel := context.WithCancel(r.tab)
+	defer cancel()
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancel()
+		case <-c.Done():
+		}
+	}()
+	return captureJPEG(c)
+}
+
+// Mark is how many events have been heard so far. A caller that wants the events of one stretch keeps it
+// and asks EventsFrom for what came after.
+func (r *Recorder) Mark() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.events)
+}
+
+// EventsFrom gives a copy of the events from index i on. An index past the end gives none.
+func (r *Recorder) EventsFrom(i int) []record.Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(r.events) {
+		return nil
+	}
+	return append([]record.Event(nil), r.events[i:]...)
+}
+
+// Location is the address of the page that the tab shows now.
+func (r *Recorder) Location(ctx context.Context) (string, error) {
+	c, cancel := context.WithCancel(r.tab)
+	defer cancel()
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancel()
+		case <-c.Done():
+		}
+	}()
+	return chromedp.Run(c, chromedp.Location())
+}
+
+// Goto moves the tab to an address as a person does who types it: the move is a step. Unlike Open it
+// does not sign in again and does not start the recording over.
+func (r *Recorder) Goto(rawURL string) error { return r.navigate(r.tab, rawURL) }
+
 // Wait returns when the person has closed the window.
 func (r *Recorder) Wait(ctx context.Context) error {
 	err := waitWindowClosed(ctx, r.tab, r.o.Poll, true, nil)

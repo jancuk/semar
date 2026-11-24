@@ -108,6 +108,23 @@ type Activity struct {
 	Blocked []string `json:"blocked,omitempty"`
 	// Doc is the finding of the check against the API document, as the action holds it.
 	Doc *DocCheck `json:"doc,omitempty"`
+	// Misses are the elements that a device action looked for and did not find, with what the screen held.
+	Misses []ElementMiss `json:"misses,omitempty"`
+	// CrashFile and LogcatFile are the paths, relative to the run directory, of the crash report and of the
+	// log of the app that a device action kept as evidence of why it failed.
+	CrashFile  string `json:"crashFile,omitempty"`
+	LogcatFile string `json:"logcatFile,omitempty"`
+}
+
+// ElementMiss is an element that a device step looked for and did not find. Repair holds the locators
+// that would find one element, Nearby the visible elements that look most like it.
+type ElementMiss struct {
+	App     string      `json:"app,omitempty"`
+	Screen  string      `json:"screen,omitempty"`
+	Element string      `json:"element"`
+	Looked  Locator     `json:"looked"`
+	Repair  []Candidate `json:"repair,omitempty"`
+	Nearby  []Candidate `json:"nearby,omitempty"`
 }
 
 type ObjectRef struct {

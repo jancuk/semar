@@ -53,6 +53,11 @@ type Options struct {
 	// the order of the events. A check of a recording with claims is a ticket expectation with the cite
 	// of its claim, written by a model, and it expects the claim and not what the page showed.
 	Claims []Claim
+	// ByModel marks a recording that an agent drove: a check with no claim becomes a baseline expectation
+	// written by a model, and not one that a person made.
+	ByModel bool
+	// Author, when set, is who wrote the script. Without it the script is a person's recording.
+	Author *domain.ProviderRef
 }
 
 // Claim is what a check is meant to prove: the text that the element must show, which comes from the
@@ -136,6 +141,9 @@ func Build(events []Event, o Options) (Draft, error) {
 	b.draft.Script = domain.Script{
 		APIVersion: "semar/v1", Kind: "Script", Scenario: o.ID, ExpectHash: domain.ExpectHash(b.draft.Scenario), ShapeHash: domain.ShapeHash(b.draft.Scenario),
 		AuthoredBy: domain.ProviderRef{Instance: "person", Harness: "record"}, Steps: b.script,
+	}
+	if o.Author != nil {
+		b.draft.Script.AuthoredBy = *o.Author
 	}
 	return b.draft, nil
 }
@@ -276,6 +284,9 @@ func (b *builder) check(it item) {
 		last++
 	}
 	ex := domain.Expectation{Check: domain.Check{Element: name, Equals: it.ev.Value}, Source: domain.SourcePerson}
+	if b.o.ByModel {
+		ex.Source, ex.By = domain.SourceBaseline, "model"
+	}
 	if len(b.o.Claims) > 0 {
 		c := b.o.Claims[b.claimed]
 		b.claimed++

@@ -17,17 +17,38 @@ type Element struct {
 	Locator domain.Locator
 }
 
-// Addition is the elements to put on one screen, in order. The screen may be new.
+// Addition is the elements to put on one screen, in order. The screen may be new. With Common set, the
+// elements go to the common section, which every screen can find, and Screen is not used.
 type Addition struct {
 	Screen   string
+	Common   bool
 	Elements []Element
 }
 
 // New is the text of a screens file that holds only the additions.
 func New(app string, adds []Addition) ([]byte, error) {
 	var b strings.Builder
-	b.WriteString("apiVersion: semar/v1\nkind: Screens\napp: " + app + "\nscreens:\n")
+	b.WriteString("apiVersion: semar/v1\nkind: Screens\napp: " + app + "\n")
 	for _, a := range adds {
+		if !a.Common {
+			continue
+		}
+		if !strings.Contains(b.String(), "\ncommon:") {
+			b.WriteString("common:\n")
+		}
+		for _, e := range a.Elements {
+			b.WriteString("  " + e.Name + ": " + flowText(e.Locator) + "\n")
+		}
+	}
+	started := false
+	for _, a := range adds {
+		if a.Common {
+			continue
+		}
+		if !started {
+			b.WriteString("screens:\n")
+			started = true
+		}
 		b.WriteString("  " + a.Screen + ":\n")
 		for _, e := range a.Elements {
 			b.WriteString("    " + e.Name + ": " + flowText(e.Locator) + "\n")
@@ -66,7 +87,14 @@ func addOne(data []byte, a Addition) ([]byte, error) {
 	if len(doc.Content) == 0 {
 		return nil, errors.New("the screens file is empty")
 	}
+	if a.Common {
+		return addCommon(data, doc.Content[0], a)
+	}
 	screens := child(doc.Content[0], "screens")
+	if screens == nil && child(doc.Content[0], "common") != nil {
+		// A file that holds only the common elements gets its first screen in a new section at the end.
+		return addFirstScreen(data, doc.Content[0], a)
+	}
 	if screens == nil || screens.Kind != yaml.MappingNode || len(screens.Content) < 2 || screens.Style&yaml.FlowStyle != 0 {
 		return nil, errors.New("the screens of the file are not written as a list of screens that Semar can add to: add the elements by hand")
 	}
@@ -110,6 +138,84 @@ func addOne(data []byte, a Addition) ([]byte, error) {
 		text.WriteString(nl + strings.Repeat(" ", screenIndent) + a.Screen + ":")
 		for _, e := range a.Elements {
 			text.WriteString(nl + strings.Repeat(" ", elementIndent) + e.Name + ": " + flowText(e.Locator))
+		}
+	}
+	return append(append(append([]byte{}, data[:at]...), text.String()...), data[at:]...), nil
+}
+
+// addFirstScreen puts the elements on a new screen, in a new screens section at the end of a file that
+// has none.
+func addFirstScreen(data []byte, root *yaml.Node, a Addition) ([]byte, error) {
+	if root.Kind != yaml.MappingNode || len(root.Content) < 2 {
+		return nil, errors.New("the screens file is not written as a mapping that Semar can add to: add the elements by hand")
+	}
+	nl := "\n"
+	if bytes.Contains(data, []byte("\r\n")) {
+		nl = "\r\n"
+	}
+	end, err := valueEnd(data, root.Content[len(root.Content)-1])
+	if err != nil {
+		return nil, err
+	}
+	at := lineEnd(data, end, nl)
+	keyIndent := root.Content[0].Column - 1
+	step := 2
+	if cn := child(root, "common"); cn != nil && cn.Kind == yaml.MappingNode && len(cn.Content) > 0 && cn.Content[0].Column-1 > keyIndent {
+		step = cn.Content[0].Column - 1 - keyIndent
+	}
+	var text strings.Builder
+	text.WriteString(nl + strings.Repeat(" ", keyIndent) + "screens:")
+	text.WriteString(nl + strings.Repeat(" ", keyIndent+step) + a.Screen + ":")
+	for _, e := range a.Elements {
+		text.WriteString(nl + strings.Repeat(" ", keyIndent+2*step) + e.Name + ": " + flowText(e.Locator))
+	}
+	return append(append(append([]byte{}, data[:at]...), text.String()...), data[at:]...), nil
+}
+
+// addCommon puts the elements in the common section: below its last element, or in a new section at
+// the end of the file.
+func addCommon(data []byte, root *yaml.Node, a Addition) ([]byte, error) {
+	if root.Kind != yaml.MappingNode || len(root.Content) < 2 {
+		return nil, errors.New("the screens file is not written as a mapping that Semar can add to: add the elements by hand")
+	}
+	nl := "\n"
+	if bytes.Contains(data, []byte("\r\n")) {
+		nl = "\r\n"
+	}
+	var at int
+	var text strings.Builder
+	if cn := child(root, "common"); cn != nil {
+		if cn.Kind != yaml.MappingNode || cn.Style&yaml.FlowStyle != 0 || len(cn.Content) < 2 {
+			return nil, errors.New("the common elements are not written as a list of elements that Semar can add to: add the elements by hand")
+		}
+		for _, e := range a.Elements {
+			if child(cn, e.Name) != nil {
+				return nil, fmt.Errorf("the common elements already have the element %s", e.Name)
+			}
+		}
+		end, err := valueEnd(data, cn.Content[len(cn.Content)-1])
+		if err != nil {
+			return nil, err
+		}
+		at = lineEnd(data, end, nl)
+		indent := strings.Repeat(" ", cn.Content[0].Column-1)
+		for _, e := range a.Elements {
+			text.WriteString(nl + indent + e.Name + ": " + flowText(e.Locator))
+		}
+	} else {
+		end, err := valueEnd(data, root.Content[len(root.Content)-1])
+		if err != nil {
+			return nil, err
+		}
+		at = lineEnd(data, end, nl)
+		keyIndent := strings.Repeat(" ", root.Content[0].Column-1)
+		elementIndent := keyIndent + "  "
+		if screens := child(root, "screens"); screens != nil && screens.Kind == yaml.MappingNode && len(screens.Content) > 0 {
+			elementIndent = strings.Repeat(" ", screens.Content[0].Column-1)
+		}
+		text.WriteString(nl + keyIndent + "common:")
+		for _, e := range a.Elements {
+			text.WriteString(nl + elementIndent + e.Name + ": " + flowText(e.Locator))
 		}
 	}
 	return append(append(append([]byte{}, data[:at]...), text.String()...), data[at:]...), nil

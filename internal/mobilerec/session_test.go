@@ -383,10 +383,11 @@ func TestAScenarioNeedsACheck(t *testing.T) {
 	if _, err := s.Save(mobilerec.SaveOptions{}); !errors.Is(err, mobilerec.ErrNoCheck) {
 		t.Errorf("save with no check = %v", err)
 	}
+	// A flow takes a check too: it is saved on a step of the flow, as a check that a person wrote.
 	flowSession := r.session(mobilerec.KindFlow, "plain")
 	f, _ := flowSession.Start(context.Background())
-	if _, err := flowSession.Assert(context.Background(), mobilerec.Assert{Frame: f.ID, Target: mobilerec.Target{Index: 0}}); err == nil {
-		t.Error("a flow took a check")
+	if _, err := flowSession.Assert(context.Background(), mobilerec.Assert{Frame: f.ID, Target: pick(t, f, byID("email")), Kind: mobilerec.AssertExists}); err != nil {
+		t.Errorf("a flow refused a check: %v", err)
 	}
 }
 

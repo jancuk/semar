@@ -103,3 +103,50 @@ func TestHTMLEmbedsTheScreenshotOfADeviceStep(t *testing.T) {
 		t.Errorf("the page lacks the device step:\n%s", out)
 	}
 }
+
+func crashedActivity() []domain.Activity {
+	return []domain.Activity{{
+		Seq: 1, Surface: domain.SurfaceAndroid, Use: domain.UseCase{Scenario: "AND-1", Step: "pay"}, Why: "Pay", Target: "tap Cart",
+		Result:     "error: an element was not found; the app crashed: java.lang.IllegalStateException: Cart is empty",
+		CrashFile:  "crash-pay.txt",
+		LogcatFile: "logcat-pay.txt",
+	}, {
+		Seq: 2, Surface: domain.SurfaceAndroid, Use: domain.UseCase{Scenario: "AND-1", Step: "next"}, Target: "tap Next", Result: "error: x",
+		CrashFile: "../../etc/passwd", LogcatFile: "crash-x/y.txt",
+	}}
+}
+
+func TestMarkdownLinksTheCrashEvidenceOfAFailedDeviceStep(t *testing.T) {
+	var buf bytes.Buffer
+	if err := report.Markdown(&buf, report.Data{Run: domain.Run{ID: "r-1", Environment: "local"}, Activity: crashedActivity()}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	want := "- AND-1, step pay: Pay (tap Cart): error: an element was not found; the app crashed: java.lang.IllegalStateException: Cart is empty. [Crash report](crash-pay.txt). [Log of the app](logcat-pay.txt)\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("the report lacks %q:\n%s", want, out)
+	}
+	if strings.Contains(out, "passwd") || strings.Contains(out, "crash-x") {
+		t.Errorf("the report links a path that is not evidence of the run:\n%s", out)
+	}
+}
+
+func TestHTMLLinksTheCrashEvidenceOfAFailedDeviceStep(t *testing.T) {
+	d := htmlData()
+	d.Run.Results = append(d.Run.Results, domain.ScenarioResult{Scenario: "AND-1", Outcome: domain.OutcomeFailed, Reasons: []domain.Reason{}, Checks: []domain.CheckResult{}, Actions: []domain.ActionID{}})
+	d.Scenarios["AND-1"] = domain.Scenario{ID: "AND-1", Title: "Pay", Ticket: "PROJ-15", Surface: domain.SurfaceAndroid, Steps: []domain.Step{{ID: "pay", Action: "Pay"}, {ID: "next", Action: "Next"}}}
+	d.Activity = append(d.Activity, crashedActivity()...)
+	out := renderHTML(t, d)
+	for _, want := range []string{
+		"the app crashed: java.lang.IllegalStateException: Cart is empty",
+		`<a href="crash-pay.txt">Crash report</a>`,
+		`<a href="logcat-pay.txt">Log of the app</a>`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the page lacks %q", want)
+		}
+	}
+	if strings.Contains(out, "passwd") || strings.Contains(out, "crash-x") {
+		t.Error("the page links a path that is not evidence of the run")
+	}
+}

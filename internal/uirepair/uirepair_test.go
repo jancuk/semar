@@ -1,6 +1,7 @@
 package uirepair_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jancuk/semar/internal/domain"
@@ -68,5 +69,68 @@ func TestCandidatesForAnIDAndADesc(t *testing.T) {
 	// The id that the old locator has already is no candidate.
 	if got := uirepair.Candidates("x", domain.Locator{ID: "register"}, tree); len(got) != 0 {
 		t.Errorf("the same id = %+v", got)
+	}
+}
+
+func TestClosestAlwaysGivesUpToNInTheOrderOfLikenessThenTheTree(t *testing.T) {
+	tree := []uirepair.AXNode{
+		{Role: "text", Name: "Orders"}, {Role: "button", Name: "Hapus Semua"}, {Role: "button", Name: "Batal"}, {Role: "button", Name: "Hapus"},
+		{Role: "textbox", Name: "Email"}, {Role: "button", Name: "Simpan"}, {Role: "button", Name: "Kirim"},
+	}
+	old := domain.Locator{Role: "button", Name: "Hapuss"}
+	got := uirepair.Closest(old, tree, 5)
+	if len(got) != 5 {
+		t.Fatalf("got %d, want 5: %+v", len(got), got)
+	}
+	if got[0].Locator != (domain.Locator{Role: "button", Name: "Hapus"}) || got[1].Locator != (domain.Locator{Role: "button", Name: "Hapus Semua"}) {
+		t.Errorf("the order of likeness = %+v", got)
+	}
+	// Nothing is alike, and still five come back, in the order of the tree.
+	none := uirepair.Closest(domain.Locator{Role: "button", Name: "zzzzzzzz"}, tree, 5)
+	if len(none) != 5 || none[0].Locator.Name != "Orders" && none[0].Locator.Text != "Orders" {
+		t.Errorf("no likeness gave %+v", none)
+	}
+	// The same input gives the same answer.
+	again := uirepair.Closest(old, tree, 5)
+	for i := range got {
+		if got[i] != again[i] {
+			t.Fatalf("the order changed at %d: %+v and %+v", i, got[i], again[i])
+		}
+	}
+	if len(uirepair.Closest(old, tree[:2], 5)) != 2 || uirepair.Closest(old, tree, 0) != nil {
+		t.Error("a short tree or a zero limit")
+	}
+}
+
+func TestClosestNamesTheMatchesOfAnElementThatTwoNodesShare(t *testing.T) {
+	tree := []uirepair.AXNode{{Role: "button", Name: "Hapus"}, {Role: "button", Name: "Hapus"}, {Role: "button", Name: "Batal"}}
+	got := uirepair.Closest(domain.Locator{Role: "button", Name: "Hapus!"}, tree, 5)
+	if len(got) != 2 || got[0].Why != `button "Hapus" (2 matches)` {
+		t.Errorf("got %+v", got)
+	}
+	// A node with an id is named by the id, and a node with nothing to name it is left out.
+	byID := uirepair.Closest(domain.Locator{ID: "delete_btn"}, []uirepair.AXNode{{Role: "generic", ID: "com.shop:id/delete_button"}, {Role: "generic"}}, 5)
+	if len(byID) != 1 || byID[0].Locator.ID != "com.shop:id/delete_button" {
+		t.Errorf("by id = %+v", byID)
+	}
+}
+
+func TestClosestCapsEveryLabelItShows(t *testing.T) {
+	long := strings.Repeat("Reset code 884213 ", 20)
+	tree := []uirepair.AXNode{
+		{Role: "button", Name: long}, {Role: "", ID: "com.x:id/" + strings.Repeat("a", 90)}, {Role: "text", Desc: strings.Repeat("d", 80)},
+	}
+	got := uirepair.Closest(domain.Locator{Role: "button", Name: "x"}, tree, 5)
+	if len(got) == 0 {
+		t.Fatal("no candidates")
+	}
+	for _, c := range got {
+		if n := len([]rune(c.Why)); n > 80 {
+			t.Errorf("a label of %d characters: %q", n, c.Why)
+		}
+	}
+	// The locator stays exact: only what a person reads is cut.
+	if got[0].Locator.Name != strings.Join(strings.Fields(long), " ") {
+		t.Errorf("the locator was cut: %+v", got[0].Locator)
 	}
 }

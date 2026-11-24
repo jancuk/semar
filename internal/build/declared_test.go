@@ -2,6 +2,7 @@ package build_test
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"strings"
 	"testing"
@@ -26,8 +27,11 @@ func TestDeclaredAnswersForDeclaredServicesOnly(t *testing.T) {
 	if err != nil || got != (domain.BuildRef{Service: "orders", Commit: "probed1"}) {
 		t.Errorf("orders = %+v, %v", got, err)
 	}
-	if _, err := build.NewDeclared(nil, nil).Probe(context.Background(), "orders"); err == nil {
+	_, err = build.NewDeclared(nil, nil).Probe(context.Background(), "orders")
+	if err == nil {
 		t.Error("a service with neither a probe nor a declared build was answered")
+	} else if !errors.Is(err, build.ErrNoBuild) {
+		t.Errorf("err = %v, want build.ErrNoBuild", err)
 	}
 }
 

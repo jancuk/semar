@@ -5,6 +5,7 @@
 package android
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -13,9 +14,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jancuk/semar/internal/provider"
@@ -29,6 +32,10 @@ const (
 	// needs is more than this.
 	maxOutput = 4 << 20
 	tailSize  = 4 << 10
+	// maxStreamLine and maxStreamTotal bound what a Stream gives: a line of a log is cut at 16 KiB, and
+	// the stream ends after 4 MiB.
+	maxStreamLine  = 16 << 10
+	maxStreamTotal = 4 << 20
 )
 
 // Runner starts the adb program. The default runs it with os/exec, and a test passes its own.
@@ -40,6 +47,11 @@ type Runner interface {
 	Quiet(ctx context.Context, adb string, args ...string) error
 	// Start starts adb as a child that runs until it is killed or ends by itself.
 	Start(ctx context.Context, adb string, args ...string) (Child, error)
+	// Stream starts adb and gives its stdout as it is written, for a command that runs on, such as
+	// logcat. Reads are bounded: a line is cut at 16 KiB, and the reader ends after 4 MiB. Closing the
+	// reader stops the child. wait gives the end of the child, and it is nil for a child that Close or
+	// the context stopped.
+	Stream(ctx context.Context, adb string, args ...string) (rc io.ReadCloser, wait func() error, err error)
 }
 
 // Child is a program that runs in the background.
@@ -100,6 +112,91 @@ func (ExecRunner) Start(_ context.Context, adb string, args ...string) (Child, e
 		close(c.done)
 	}()
 	return c, nil
+}
+
+func (ExecRunner) Stream(ctx context.Context, adb string, args ...string) (io.ReadCloser, func() error, error) {
+	sctx, cancel := context.WithCancel(ctx)
+	cmd := exec.CommandContext(sctx, adb, args...)
+	cmd.WaitDelay = adbWaitDelay
+	var errOut limitedBuffer
+	errOut.max = 8 << 10
+	cmd.Stderr = &errOut
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, nil, commandError(args, err, "", "")
+	}
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return nil, nil, commandError(args, err, "", "")
+	}
+	st := &stream{br: bufio.NewReaderSize(out, maxStreamLine), cancel: cancel}
+	var once sync.Once
+	var werr error
+	var asked bool
+	wait := func() error {
+		once.Do(func() {
+			werr = cmd.Wait()
+			// Whether the child was stopped on purpose is known before cancel makes the context done.
+			asked = st.stopped.Load() || sctx.Err() != nil
+			cancel()
+		})
+		if werr == nil || asked {
+			return nil
+		}
+		return commandError(args, werr, errOut.String(), "")
+	}
+	return st, wait, nil
+}
+
+// stream is the bounded reader of Stream: it hands out whole lines, cuts a line that is longer than
+// maxStreamLine, and ends after maxStreamTotal bytes.
+type stream struct {
+	br      *bufio.Reader
+	cancel  context.CancelFunc
+	stopped atomic.Bool
+	pending []byte
+	total   int
+}
+
+func (s *stream) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if s.total >= maxStreamTotal {
+		return 0, io.EOF
+	}
+	for len(s.pending) == 0 {
+		line, err := s.br.ReadSlice('\n')
+		switch {
+		case errors.Is(err, bufio.ErrBufferFull):
+			// A line over the cap: keep its start, and drop the rest of it.
+			s.pending = append(bytes.Clone(line), '\n')
+			for {
+				_, e := s.br.ReadSlice('\n')
+				if !errors.Is(e, bufio.ErrBufferFull) {
+					break
+				}
+			}
+		case len(line) > 0:
+			s.pending = bytes.Clone(line)
+		case err != nil:
+			return 0, err
+		}
+	}
+	n := copy(p, s.pending)
+	if room := maxStreamTotal - s.total; n > room {
+		n = room
+	}
+	s.pending = s.pending[n:]
+	s.total += n
+	return n, nil
+}
+
+func (s *stream) Close() error {
+	s.stopped.Store(true)
+	s.cancel()
+	return nil
 }
 
 type execChild struct {
@@ -225,23 +322,59 @@ func (a *adb) shell(ctx context.Context, words ...string) (string, error) {
 	return a.out(ctx, "shell", shellCommand(words...))
 }
 
-// FindADB finds the adb program. The repository under test cannot choose it, so there is no key for it
-// in the configuration. The order is SEMAR_ADB_BIN (an absolute path), PATH, $ANDROID_HOME and
-// $ANDROID_SDK_ROOT, and the place where Android Studio installs the SDK. A program inside the
-// repository under test is refused.
+// The places adb is found, as FindADBWhere names them.
+const (
+	ADBFromEnv         = "SEMAR_ADB_BIN"
+	ADBFromPath        = "PATH"
+	ADBFromAndroidHome = "ANDROID_HOME"
+	ADBFromSDKRoot     = "ANDROID_SDK_ROOT"
+	ADBFromSDKDefault  = "sdk-default"
+	ADBFromHomebrew    = "homebrew"
+)
+
+// homebrewADB is where Homebrew puts adb (the android-platform-tools cask) on Apple silicon and on Intel.
+// isProgram follows the link that Homebrew makes.
+var homebrewADB = []string{"/opt/homebrew/bin/adb", "/usr/local/bin/adb"}
+
+// FindADB finds the adb program. See FindADBWhere for the order.
 func FindADB(lookup func(string) (string, bool), repoRoot string) (string, error) {
+	path, _, err := FindADBWhere(lookup, repoRoot)
+	return path, err
+}
+
+// FindADBWhere finds the adb program and says where it was found. The repository under test cannot choose
+// it, so there is no key for it in the configuration. The order is SEMAR_ADB_BIN (an absolute path),
+// PATH, $ANDROID_HOME, $ANDROID_SDK_ROOT, the place where Android Studio installs the SDK (sdk-default),
+// and on macOS the two places of Homebrew. The SDK places also serve a program that was started by a
+// window and not by a shell, whose PATH has none of the shell setup. A program inside the repository
+// under test is refused. source is one of SEMAR_ADB_BIN, PATH, ANDROID_HOME, ANDROID_SDK_ROOT,
+// sdk-default, and homebrew.
+func FindADBWhere(lookup func(string) (string, bool), repoRoot string) (path, source string, err error) {
+	return findADB(lookup, repoRoot, runtime.GOOS)
+}
+
+// findADB is FindADBWhere for the operating system goos, so that a test can try each one.
+func findADB(lookup func(string) (string, bool), repoRoot, goos string) (path, source string, err error) {
 	if lookup == nil {
 		lookup = os.LookupEnv
+	}
+	fail := func(e error) (string, string, error) { return "", "", e }
+	found := func(bin, from string) (string, string, error) {
+		bin, err := refuseInside(bin, repoRoot)
+		if err != nil {
+			return fail(err)
+		}
+		return bin, from, nil
 	}
 	if p, ok := lookup("SEMAR_ADB_BIN"); ok && p != "" {
 		bin, perr := provider.FindBinary(lookup, "SEMAR_ADB_BIN", "adb")
 		if perr != nil {
-			return "", perr
+			return fail(perr)
 		}
-		return refuseInside(bin, repoRoot)
+		return found(bin, ADBFromEnv)
 	}
 	name := "adb"
-	if runtime.GOOS == "windows" {
+	if goos == "windows" {
 		name = "adb.exe"
 	}
 	// PATH is read from the lookup, so that a test can change it. A relative entry is skipped: it would
@@ -252,19 +385,26 @@ func FindADB(lookup func(string) (string, bool), repoRoot string) (string, error
 				continue
 			}
 			if candidate := filepath.Join(dir, name); isProgram(candidate) {
-				return refuseInside(candidate, repoRoot)
+				return found(candidate, ADBFromPath)
 			}
 		}
 	}
-	for _, dir := range sdkDirs(lookup) {
-		if candidate := filepath.Join(dir, "platform-tools", name); isProgram(candidate) {
-			return refuseInside(candidate, repoRoot)
+	for _, d := range sdkDirs(lookup, goos) {
+		if candidate := filepath.Join(d.dir, "platform-tools", name); isProgram(candidate) {
+			return found(candidate, d.source)
 		}
 	}
-	return "", errors.New("adb was not found: install the Android SDK platform tools, then put adb on PATH, set ANDROID_HOME, or set SEMAR_ADB_BIN to its absolute path")
+	if goos == "darwin" {
+		for _, candidate := range homebrewADB {
+			if isProgram(candidate) {
+				return found(candidate, ADBFromHomebrew)
+			}
+		}
+	}
+	return fail(errors.New("adb was not found: install the Android SDK platform tools, then put adb on PATH, set ANDROID_HOME, or set SEMAR_ADB_BIN to its absolute path"))
 }
 
-// isProgram reports whether a path is a regular file that can be run.
+// isProgram reports whether a path is a regular file that can be run. A link is followed.
 func isProgram(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular() && (runtime.GOOS == "windows" || info.Mode().Perm()&0o111 != 0)
@@ -277,28 +417,72 @@ func refuseInside(bin, repoRoot string) (string, error) {
 	return bin, nil
 }
 
+type sdkDir struct{ dir, source string }
+
 // sdkDirs lists where the Android SDK may be, from the environment and from the default of Android Studio.
-func sdkDirs(lookup func(string) (string, bool)) []string {
-	var dirs []string
+func sdkDirs(lookup func(string) (string, bool), goos string) []sdkDir {
+	var dirs []sdkDir
 	for _, v := range []string{"ANDROID_HOME", "ANDROID_SDK_ROOT"} {
 		if p, ok := lookup(v); ok && p != "" && filepath.IsAbs(p) {
-			dirs = append(dirs, p)
+			dirs = append(dirs, sdkDir{p, v})
 		}
 	}
 	home, _ := lookup("HOME")
-	switch runtime.GOOS {
+	switch goos {
 	case "darwin":
 		if home != "" {
-			dirs = append(dirs, filepath.Join(home, "Library", "Android", "sdk"))
+			dirs = append(dirs, sdkDir{filepath.Join(home, "Library", "Android", "sdk"), ADBFromSDKDefault})
 		}
 	case "windows":
 		if p, ok := lookup("LOCALAPPDATA"); ok && p != "" {
-			dirs = append(dirs, filepath.Join(p, "Android", "Sdk"))
+			dirs = append(dirs, sdkDir{filepath.Join(p, "Android", "Sdk"), ADBFromSDKDefault})
 		}
 	default:
 		if home != "" {
-			dirs = append(dirs, filepath.Join(home, "Android", "Sdk"))
+			dirs = append(dirs, sdkDir{filepath.Join(home, "Android", "Sdk"), ADBFromSDKDefault})
 		}
 	}
 	return dirs
 }
+
+// ADBVersion runs adb version and gives the version of the platform tools, such as 36.0.0. Two adb
+// programs of different versions kill the server of each other, so a person needs to see which one
+// Semar uses.
+func ADBVersion(ctx context.Context, adb string) (string, error) {
+	return adbVersion(ctx, ExecRunner{}, adb)
+}
+
+func adbVersion(ctx context.Context, run Runner, adb string) (string, error) {
+	out, err := run.Output(ctx, adb, "version")
+	if err != nil {
+		return "", err
+	}
+	if v := ParseADBVersion(string(out)); v != "" {
+		return v, nil
+	}
+	return "", errors.New("adb version gave no version")
+}
+
+// ParseADBVersion reads the version of the platform tools from the output of adb version: the line
+// "Version 36.0.0-13206524" gives 36.0.0. Without that line it gives the version of the protocol, such as
+// 1.0.41, and "" when there is neither.
+func ParseADBVersion(out string) string {
+	proto := ""
+	for _, l := range strings.Split(out, "\n") {
+		l = strings.TrimSpace(l)
+		if v, ok := strings.CutPrefix(l, "Version "); ok {
+			if i := strings.IndexAny(v, "- \t"); i >= 0 {
+				v = v[:i]
+			}
+			if versionPattern.MatchString(v) {
+				return v
+			}
+		}
+		if v, ok := strings.CutPrefix(l, "Android Debug Bridge version "); ok && versionPattern.MatchString(v) {
+			proto = v
+		}
+	}
+	return proto
+}
+
+var versionPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}$`)

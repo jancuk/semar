@@ -1,6 +1,7 @@
 package flow_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -137,7 +138,18 @@ func TestValidateRefuses(t *testing.T) {
 		{"web surface", func(f *domain.Flow) { f.Surface = domain.SurfaceWeb }, "surface must be android"},
 		{"no steps", func(f *domain.Flow) { f.Steps = nil }, "at least one step"},
 		{"too many steps", func(f *domain.Flow) { f.Steps = many(51) }, "51 steps; at most 50"},
-		{"nested use", func(f *domain.Flow) { f.Steps[0] = domain.ScriptStep{Step: "start", Use: "other"} }, "does not use another flow"},
+		{"use with an action", func(f *domain.Flow) {
+			f.Steps[0] = domain.ScriptStep{Step: "start", Use: "other", Mobile: &domain.MobileAction{Do: domain.MobileLaunch}}
+		}, "has no action of its own"},
+		{"use with captures", func(f *domain.Flow) {
+			f.Steps[0] = domain.ScriptStep{Step: "start", Use: "other", Captures: []domain.Capture{{Name: "x", Element: "y"}}}
+		}, "takes no captures"},
+		{"with without use", func(f *domain.Flow) { f.Steps[0].With = map[string]string{"a": "b"} }, "with belongs to a step that has use"},
+		{"with a variable that is not known", func(f *domain.Flow) {
+			f.Steps[0] = domain.ScriptStep{Step: "start", Use: "other", With: map[string]string{"a": "{{nope}}"}}
+		}, "{{nope}} is not a param"},
+		{"a bad pattern", func(f *domain.Flow) { f.Steps[3].Captures[0].Pattern = "([a-z" }, "not a valid regular expression"},
+		{"a long pattern", func(f *domain.Flow) { f.Steps[3].Captures[0].Pattern = strings.Repeat("a", 201) }, "longer than 200"},
 		{"a request", func(f *domain.Flow) { f.Steps[0] = domain.ScriptStep{Step: "start", Request: &domain.APIRequest{}} }, "no request and no web action"},
 		{"a web action", func(f *domain.Flow) { f.Steps[0] = domain.ScriptStep{Step: "start", Web: &domain.WebAction{}} }, "no request and no web action"},
 		{"no action", func(f *domain.Flow) { f.Steps[0] = domain.ScriptStep{Step: "start"} }, "needs a mobile action"},
@@ -391,5 +403,46 @@ func TestWriteRefusesAnInvalidFlow(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".semar")); err == nil {
 		t.Error("a refused flow left a directory behind")
+	}
+}
+
+func TestRunWithBeforeStopsAtAStepBoundary(t *testing.T) {
+	d := shop()
+	eng, _, _ := engine(t, d, secrets{"env:SHOP_PASSWORD": "pw"}, false)
+	var seen []string
+	o := flow.Options{Before: func(_ context.Context, step string) error {
+		seen = append(seen, step)
+		if step == "login.password" {
+			return errors.New("paused by a person before step " + step)
+		}
+		return nil
+	}}
+	res, err := flow.RunWith(t.Context(), eng, screenFiles{shopScreens}, validFlow(t), map[string]string{"email": "a@b.c"}, map[string]string{"run.id": "run-1"}, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != flow.StatusRefused || res.Error != "paused by a person before step login.password" {
+		t.Fatalf("status = %q, error = %q", res.Status, res.Error)
+	}
+	if got := d.Typed(); len(got) != 1 || got[0] != "a@b.c" {
+		t.Errorf("typed = %q: the steps before the boundary ran, and the one after did not", got)
+	}
+	if len(seen) == 0 || seen[len(seen)-1] != "login.password" {
+		t.Errorf("Before saw %v", seen)
+	}
+}
+
+func TestRunWithBeforeStopsACancelledRun(t *testing.T) {
+	d := shop()
+	eng, _, _ := engine(t, d, secrets{"env:SHOP_PASSWORD": "pw"}, false)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	o := flow.Options{Before: func(context.Context, string) error { return nil }}
+	_, err := flow.RunWith(ctx, eng, screenFiles{shopScreens}, validFlow(t), map[string]string{"email": "a@b.c"}, map[string]string{"run.id": "run-1"}, o)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the cancellation", err)
+	}
+	if len(d.Typed()) != 0 {
+		t.Errorf("typed = %q after the cancel", d.Typed())
 	}
 }

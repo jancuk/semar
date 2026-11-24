@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -40,6 +42,8 @@ type Options struct {
 	Logger *slog.Logger
 }
 
+var _ mobile.Recoverer = (*Platform)(nil)
+
 // Platform is the Android device of a run. It is a mobile.Platform.
 type Platform struct {
 	o Options
@@ -52,6 +56,12 @@ type Platform struct {
 	startErr *mobile.Unavailable
 	appErr   map[string]*mobile.Unavailable
 	started  bool
+	// deviceReady is true once the device was chosen, leased, and has booted. A controller needs no more.
+	deviceReady bool
+	// ctl is the controller of the device, made on the first call of Controller, and ctlSess is its
+	// session at serverUrl.
+	ctl     *Controller
+	ctlSess *webdriver.Session
 
 	// Local mode.
 	adb     *adb
@@ -60,7 +70,9 @@ type Platform struct {
 	child   Child
 	port    int
 	session *webdriver.Session
-	apps    map[string]bool // services whose app was checked and installed
+	// local is the client of the server on the device, which Healthy asks.
+	local *webdriver.Client
+	apps  map[string]bool // services whose app was checked and installed
 
 	// serverUrl mode.
 	client *webdriver.Client
@@ -161,7 +173,11 @@ func (p *Platform) serial() string {
 
 func (p *Platform) localDriver(ctx context.Context, service string, app App) (*driver, *mobile.Unavailable) {
 	if !p.started {
-		if un := p.startLocal(ctx); un != nil {
+		un := p.startDevice(ctx)
+		if un == nil {
+			un = p.ensureServer(ctx)
+		}
+		if un != nil {
 			if ctx.Err() == nil {
 				p.startErr = un
 			}
@@ -191,47 +207,62 @@ func (p *Platform) version(ctx context.Context) string {
 	return firstLine(out)
 }
 
-// startLocal does what the whole run needs, once: it finds adb, picks the device, takes its lease,
-// installs the server, and starts it.
-func (p *Platform) startLocal(ctx context.Context) *mobile.Unavailable {
-	bin, err := p.o.FindADB()
-	if err != nil {
-		return &mobile.Unavailable{Reason: err.Error()}
+// startDevice does what a device needs, once: it finds adb, picks the device, takes its lease, and waits
+// until the device has booted. It is what a controller needs, and a run goes on with ensureServer. A call
+// after a start that failed continues where that one stopped.
+func (p *Platform) startDevice(ctx context.Context) *mobile.Unavailable {
+	if p.deviceReady {
+		return nil
 	}
-	a := &adb{bin: bin, run: p.o.Run}
-	// The daemon inherits the pipes of the program that starts it, so its output goes to the null device.
-	if err := p.o.Run.Quiet(ctx, bin, "start-server"); err != nil {
-		return &mobile.Unavailable{Reason: fmt.Sprintf("the adb server could not be started: %v", err)}
-	}
-	out, err := a.out(ctx, "devices", "-l")
-	if err != nil {
-		return &mobile.Unavailable{Reason: fmt.Sprintf("adb could not list the devices: %v", err)}
-	}
-	dev, un := ChooseDevice(ParseDevices(out), p.serial())
-	if un != nil {
-		return un
-	}
-	a.serial = dev.Serial
-
-	if p.o.Home != "" {
-		leases, err := fixture.OpenLeases(p.o.Home)
+	if p.adb == nil {
+		bin, err := p.o.FindADB()
 		if err != nil {
-			return &mobile.Unavailable{Reason: fmt.Sprintf("the lease of the device could not be taken: %v", err)}
+			return &mobile.Unavailable{Reason: err.Error()}
 		}
-		release, ok, err := leases.TryLock("android", "device", dev.Serial)
-		switch {
-		case err != nil:
-			return &mobile.Unavailable{Reason: fmt.Sprintf("the lease of the device could not be taken: %v", err)}
-		case !ok:
-			return &mobile.Unavailable{Reason: fmt.Sprintf("the device %s is used by another semar run: wait for it to end, or use another device", dev.Serial)}
+		a := &adb{bin: bin, run: p.o.Run}
+		// The daemon inherits the pipes of the program that starts it, so its output goes to the null device.
+		if err := p.o.Run.Quiet(ctx, bin, "start-server"); err != nil {
+			return &mobile.Unavailable{Reason: fmt.Sprintf("the adb server could not be started: %v", err)}
 		}
-		p.release = release
+		out, err := a.out(ctx, "devices", "-l")
+		if err != nil {
+			return &mobile.Unavailable{Reason: fmt.Sprintf("adb could not list the devices: %v", err)}
+		}
+		dev, un := ChooseDevice(ParseDevices(out), p.serial())
+		if un != nil {
+			return un
+		}
+		a.serial = dev.Serial
+
+		if p.o.Home != "" {
+			leases, err := fixture.OpenLeases(p.o.Home)
+			if err != nil {
+				return &mobile.Unavailable{Reason: fmt.Sprintf("the lease of the device could not be taken: %v", err)}
+			}
+			release, ok, err := leases.TryLock("android", "device", dev.Serial)
+			switch {
+			case err != nil:
+				return &mobile.Unavailable{Reason: fmt.Sprintf("the lease of the device could not be taken: %v", err)}
+			case !ok:
+				return &mobile.Unavailable{Reason: fmt.Sprintf("the device %s is used by another semar run: wait for it to end, or use another device", dev.Serial)}
+			}
+			p.release = release
+		}
+		p.adb, p.device = a, dev
 	}
-	p.adb, p.device = a, dev
-	if un := p.bootCompleted(ctx, a); un != nil {
+	if un := p.bootCompleted(ctx, p.adb); un != nil {
 		return un
 	}
-	return p.startServer(ctx, a)
+	p.deviceReady = true
+	return nil
+}
+
+// ensureServer installs the server, starts it, and opens the session, unless that was done.
+func (p *Platform) ensureServer(ctx context.Context) *mobile.Unavailable {
+	if p.session != nil {
+		return nil
+	}
+	return p.startServer(ctx, p.adb)
 }
 
 // prepareApp installs the APK of a service, or checks that the app is on the device. The file must be the
@@ -287,6 +318,18 @@ func (p *Platform) Close(ctx context.Context) error {
 		return context.WithTimeout(base, 3*time.Second)
 	}
 	var errs []error
+	// What a controller changed on the device is undone first, while the device still answers.
+	if p.ctl != nil {
+		errs = append(errs, p.ctl.undo(base)...)
+	}
+	if p.ctlSess != nil {
+		sctx, cancel := step()
+		if err := p.ctlSess.Delete(sctx); err != nil {
+			errs = append(errs, fmt.Errorf("the session of the controller could not be ended: %w", err))
+		}
+		cancel()
+		p.ctlSess = nil
+	}
 	if p.session != nil {
 		sctx, cancel := step()
 		if err := p.session.Delete(sctx); err != nil {
@@ -337,4 +380,150 @@ func (p *Platform) Close(ctx context.Context) error {
 		p.release = nil
 	}
 	return errors.Join(errs...)
+}
+
+// healthLimit is how long Healthy waits for the server.
+const healthLimit = 2 * time.Second
+
+// Healthy says whether the server on the device answers and still knows its session. It reads /status and
+// asks the session for the focused element, with two seconds for both. It is conservative: only a server
+// that cannot be reached, that does not answer in time, that is not ready, or that says its session is gone
+// is unhealthy. An answer that cannot be read, or that holds no element, is no sign of a dead server. A
+// server at serverUrl is not Semar's to restart, so it is always healthy here.
+func (p *Platform) Healthy(ctx context.Context) bool {
+	p.mu.Lock()
+	client, sess := p.local, p.session
+	p.mu.Unlock()
+	if client == nil || sess == nil {
+		return true
+	}
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, healthLimit)
+	defer cancel()
+	ready, err := client.Status(ctx)
+	if err != nil {
+		return parent.Err() != nil || !serverGone(err)
+	}
+	if !ready.Ready {
+		return false
+	}
+	if _, err := sess.Active(ctx); err != nil {
+		return parent.Err() != nil || !serverGone(err)
+	}
+	return true
+}
+
+// serverGone says that an error of a call shows a server that is dead or hung, or that lost its session:
+// the call did not reach it, did not end in time, or was answered with a code of a lost session.
+func serverGone(err error) bool {
+	var we *webdriver.Error
+	if errors.As(err, &we) {
+		switch strings.ToLower(we.Code) {
+		case "invalid session id", "no such session", "session not created":
+			return true
+		}
+		return false
+	}
+	var ne net.Error
+	return errors.Is(err, context.DeadlineExceeded) || errors.As(err, &ne) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+// recoverCleanup is how long each step that undoes the old server may take.
+const recoverCleanup = 3 * time.Second
+
+// Recover starts the UiAutomator2 server again, on a device that Semar started it on: it ends the old
+// session, stops the server packages and the instrumentation, forwards the port again, starts the
+// instrumentation, and opens a new session with the same settings. The apps that were prepared stay as
+// they are, so nothing is installed again, and the drivers that were handed out are dropped: they point
+// at a session that no longer exists. A server at serverUrl is not restarted. A restart that fails
+// leaves the platform unavailable for the rest of the run.
+func (p *Platform) Recover(ctx context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	switch {
+	case p.closed:
+		return errors.New("the device was released at the end of the run")
+	case p.o.Env.Remote():
+		return errors.New("restarting the server is not supported for a server at serverUrl")
+	case !p.started || p.adb == nil:
+		return errors.New("the server was not started, so there is nothing to restart")
+	}
+	ctx, cancel := context.WithTimeout(ctx, p.o.Env.StartLimit()+5*recoverCleanup)
+	defer cancel()
+	p.stopServer(ctx)
+	p.drivers = map[string]*driver{}
+	if un := p.launchServer(ctx, p.adb); un != nil {
+		p.startErr = un
+		return un
+	}
+	return nil
+}
+
+// stopServer ends the session, stops the server packages and the instrumentation, and removes the
+// forward, so that the server can be started again. Each step has its own time, and none of them fails
+// the call: it logs.
+func (p *Platform) stopServer(ctx context.Context) {
+	step := func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(ctx, recoverCleanup)
+	}
+	if p.session != nil {
+		sctx, c := step()
+		if err := p.session.Delete(sctx); err != nil {
+			p.o.Logger.DebugContext(ctx, "the old session could not be ended", "error", err)
+		}
+		c()
+		p.session = nil
+	}
+	for _, pkg := range []string{serverPackage, serverTestPackage} {
+		sctx, c := step()
+		if _, err := p.adb.shell(sctx, "am", "force-stop", pkg); err != nil {
+			p.o.Logger.DebugContext(ctx, "a server package could not be stopped", "package", pkg, "error", err)
+		}
+		c()
+	}
+	if p.child != nil {
+		t := time.NewTimer(500 * time.Millisecond)
+		select {
+		case <-p.child.Done():
+			t.Stop()
+		case <-t.C:
+			p.child.Kill()
+		}
+		p.child = nil
+	}
+	if p.port != 0 {
+		sctx, c := step()
+		if _, err := p.adb.out(sctx, "forward", "--remove", fmt.Sprintf("tcp:%d", p.port)); err != nil {
+			p.o.Logger.DebugContext(ctx, "the old forward could not be removed", "error", err)
+		}
+		c()
+		p.port = 0
+	}
+	p.local = nil
+}
+
+// Controller gives the controller of the device: the device with no app. It does what a start needs up to
+// the boot (adb, the device, its lease), and nothing on the device changes before a method of the
+// controller asks for it: the server of UiAutomator2 starts with the first call that reads or touches
+// the screen. The same controller is given on every call. A failure that a person can fix is a
+// *mobile.Unavailable, and a device that was not there is looked for again at the next call.
+func (p *Platform) Controller(ctx context.Context) (*Controller, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return nil, &mobile.Unavailable{Reason: "the device was released at the end of the run"}
+	}
+	if p.ctl != nil {
+		return p.ctl, nil
+	}
+	if !p.o.Env.Remote() {
+		if p.startErr != nil {
+			return nil, p.startErr
+		}
+		if un := p.startDevice(ctx); un != nil {
+			return nil, un
+		}
+	}
+	p.ctl = &Controller{p: p}
+	return p.ctl, nil
 }

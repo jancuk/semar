@@ -88,12 +88,16 @@ type ledgerView struct {
 // browserStep is one action of the browser or of a device: the step's action text beside the operation and the target.
 type browserStep struct {
 	Scenario, Step, Why, Target, Result, Screenshot string
+	// Crash and Logcat are the files of evidence of a device step that failed, when it has them.
+	Crash, Logcat string
 }
 
 type markdownView struct {
 	Browser, Device                    []browserStep
 	Blocked                            []blockedView
 	DocChecks                          []docView
+	Misses                             []missView
+	MissesMore                         int
 	RunID, Environment, Started, Ended string
 	EnvironmentKind                    string
 	BuildsStart, BuildsEnd, Counts     string
@@ -186,6 +190,10 @@ func (vw viewer) buildView(d Data) markdownView {
 	v.Device = vw.browserSteps(d.Activity, domain.SurfaceAndroid)
 	v.Blocked = vw.blockedViews(d.Activity)
 	v.DocChecks = vw.docViews(d.Activity)
+	v.Misses = vw.missViews(string(run.ID), d.Activity)
+	if n := len(Misses(d.Activity)); n > len(v.Misses) {
+		v.MissesMore = n - len(v.Misses)
+	}
 	return v
 }
 
@@ -279,6 +287,9 @@ func (vw viewer) checkViewOf(c domain.CheckResult, s domain.Scenario) checkView 
 }
 
 func checkLabel(c domain.CheckResult) string {
+	if c.Source == domain.SourceFlow {
+		return fmt.Sprintf("%s (flow check)", c.Step)
+	}
 	if c.Index < 0 {
 		return fmt.Sprintf("%s (invariant)", c.Step)
 	}
@@ -352,6 +363,10 @@ func utc(t time.Time) string {
 // path is linked only when it has this form.
 var screenshotPath = regexp.MustCompile(`^screenshots/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.(png|jpg)$`)
 
+// evidenceFile is where the engine puts the crash report and the log of a device step. Like a screenshot
+// path it is linked only when it has this form, because the activity log is read back from disk.
+var evidenceFile = regexp.MustCompile(`^(crash|logcat)-[A-Za-z0-9._-]+\.txt$`)
+
 func (vw viewer) browserSteps(acts []domain.Activity, surface domain.Surface) []browserStep {
 	var out []browserStep
 	for _, e := range acts {
@@ -367,6 +382,12 @@ func (vw viewer) browserSteps(acts []domain.Activity, surface domain.Surface) []
 		}
 		if screenshotPath.MatchString(e.Screenshot) {
 			b.Screenshot = e.Screenshot
+		}
+		if evidenceFile.MatchString(e.CrashFile) {
+			b.Crash = e.CrashFile
+		}
+		if evidenceFile.MatchString(e.LogcatFile) {
+			b.Logcat = e.LogcatFile
 		}
 		out = append(out, b)
 	}

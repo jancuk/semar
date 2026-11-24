@@ -221,3 +221,203 @@ func TestTheRunRecordsTheFlowThatRan(t *testing.T) {
 		t.Errorf("flows = %+v, want the id and the digest of login", got)
 	}
 }
+
+func withCheck(f domain.Flow, step, text string) domain.Flow {
+	for i := range f.Steps {
+		if string(f.Steps[i].Step) == step {
+			f.Steps[i].Expect = []domain.Expectation{{Check: domain.Check{Element: "welcome", Equals: text}, Source: domain.SourcePerson}}
+		}
+	}
+	return f
+}
+
+func sourceOf(f domain.Flow) fakeFlows {
+	return fakeFlows{flows: map[string]domain.Flow{"login": f}, digests: map[string]string{"login": "sha256:abc"}}
+}
+
+func flowChecksOf(res domain.ScenarioResult) []domain.CheckResult {
+	var out []domain.CheckResult
+	for _, c := range res.Checks {
+		if c.Source == domain.SourceFlow {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func TestAFalseFlowCheckFailsTheScenarioStep(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	sc, s := useScenario()
+	fm := &fakeMobile{}
+	r.withFlows(fm, sourceOf(withCheck(loginFlow(), "submit", "Hi Bob")))
+	r.deps.Screens = &fakeScreens{text: signInScreens}
+	got := r.runOne(t, replay.Single{Scenario: sc, Script: s})
+	res := compute(sc, got, r.builds(t))
+	if res.Outcome != domain.OutcomeFailed || !hasReason(res, "flow login, step submit: expected") {
+		t.Fatalf("outcome = %s, reasons = %+v", res.Outcome, res.Reasons)
+	}
+	if len(fm.calls) != 3 {
+		t.Errorf("%d calls: the step after the false flow check must not be sent", len(fm.calls))
+	}
+	fc := flowChecksOf(res)
+	if len(fc) != 1 || fc[0].State != domain.CheckFalse || fc[0].Index != -1 || fc[0].Step != "login" {
+		t.Errorf("flow checks = %+v", fc)
+	}
+	if ev := got.Steps["login"]; len(ev.FlowChecks) != 1 || ev.FlowChecks[0].Flow != "login" || ev.FlowChecks[0].Step != "submit" {
+		t.Errorf("evidence = %+v", ev.FlowChecks)
+	}
+}
+
+func TestAFlowCheckThatCannotBeEvaluatedStopsTheFlowToo(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	sc, s := useScenario()
+	fm := &fakeMobile{}
+	// The expected text names a variable that nothing gave, so the check is not evaluated, as in flow.Run.
+	r.withFlows(fm, sourceOf(withCheck(loginFlow(), "submit", "{{nothing}}")))
+	r.deps.Screens = &fakeScreens{text: signInScreens}
+	r.runOne(t, replay.Single{Scenario: sc, Script: s})
+	if len(fm.calls) != 3 {
+		t.Errorf("%d calls: the step after a flow check that was not evaluated must not be sent", len(fm.calls))
+	}
+}
+
+func TestATrueFlowCheckIsRecordedAndTheFlowStillNeedsTheScenarioToCheck(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	sc, s := useScenario()
+	fm := &fakeMobile{}
+	r.withFlows(fm, sourceOf(withCheck(loginFlow(), "submit", "Hi Ana")))
+	r.deps.Screens = &fakeScreens{text: signInScreens}
+	got := r.runOne(t, replay.Single{Scenario: sc, Script: s})
+	res := compute(sc, got, r.builds(t))
+	if res.Outcome != domain.OutcomePassed {
+		t.Fatalf("outcome = %s, reasons = %+v", res.Outcome, res.Reasons)
+	}
+	if fc := flowChecksOf(res); len(fc) != 1 || fc[0].State != domain.CheckTrue || fc[0].Source != domain.SourceFlow {
+		t.Errorf("flow checks = %+v", fc)
+	}
+	if by, n := res.ModelCount(); by != 0 || n != 1 {
+		t.Errorf("model count = %d of %d: a flow check is not an expected result", by, n)
+	}
+
+	// A scenario with only the use step still has no check of its own.
+	only := domain.Scenario{
+		APIVersion: "semar/v1", Kind: "Scenario", ID: "AND-3", Title: "Only the flow", Ticket: "SHOP-1", Intent: "x",
+		Surface: domain.SurfaceAndroid, AuthProfile: "alice",
+		Steps: []domain.Step{{ID: "login", Action: "Sign in"}},
+	}
+	os := domain.Script{APIVersion: "semar/v1", Kind: "Script", Scenario: only.ID, ExpectHash: domain.ExpectHash(only),
+		Steps: []domain.ScriptStep{{Step: "login", Use: "login", With: map[string]string{"email": "a@b.c"}}}}
+	r2 := newRig(t, rigOptions{})
+	r2.withFlows(&fakeMobile{}, sourceOf(withCheck(loginFlow(), "submit", "Hi Ana")))
+	r2.deps.Screens = &fakeScreens{text: signInScreens}
+	res = compute(only, r2.runOne(t, replay.Single{Scenario: only, Script: os}), r2.builds(t))
+	if res.Outcome != domain.OutcomeInconclusive || !hasReason(res, "the scenario has no check besides the invariants") {
+		t.Errorf("outcome = %s, reasons = %+v: a flow check must not count as the check of the scenario", res.Outcome, res.Reasons)
+	}
+}
+
+func TestAFalseFlowCheckInASetupStepBlocksTheScenario(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	sc, s := useScenario()
+	sc.Steps[0].Setup = true
+	s.ExpectHash = domain.ExpectHash(sc)
+	fm := &fakeMobile{}
+	r.withFlows(fm, sourceOf(withCheck(loginFlow(), "submit", "Hi Bob")))
+	r.deps.Screens = &fakeScreens{text: signInScreens}
+	got := r.runOne(t, replay.Single{Scenario: sc, Script: s})
+	res := compute(sc, got, r.builds(t))
+	if res.Outcome != domain.OutcomeBlocked || !hasReason(res, "setup failed: login flow login, step submit") {
+		t.Fatalf("outcome = %s, reasons = %+v", res.Outcome, res.Reasons)
+	}
+}
+
+func outerFlow() domain.Flow {
+	return domain.Flow{
+		APIVersion: "semar/v1", Kind: "Flow", ID: "outer", Surface: domain.SurfaceAndroid, Service: "shop-app", App: "shop-app",
+		Steps: []domain.ScriptStep{
+			{Step: "sign-in", Use: "login", With: map[string]string{"email": "ana@example.com"}},
+			{Step: "ready", Mobile: &domain.MobileAction{Do: domain.MobileWait, Screen: "SignIn", Element: "welcome"},
+				Expect: []domain.Expectation{{Check: domain.Check{Element: "welcome", Equals: "Hi Ana"}, Source: domain.SourcePerson}}},
+		},
+	}
+}
+
+func nestedSource(login domain.Flow) fakeFlows {
+	return fakeFlows{
+		flows:   map[string]domain.Flow{"login": login, "outer": outerFlow()},
+		digests: map[string]string{"login": "sha256:login", "outer": "sha256:outer"},
+	}
+}
+
+func nestedScenario() (domain.Scenario, domain.Script) {
+	sc, s := useScenario()
+	s.Steps[0].Use = "outer"
+	s.Steps[0].With = nil
+	return sc, s
+}
+
+func TestNestedFlowsRunInOrderAndAreAllRecorded(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	sc, s := nestedScenario()
+	fm := &fakeMobile{}
+	r.withFlows(fm, nestedSource(loginFlow()))
+	r.deps.Screens = &fakeScreens{text: signInScreens}
+	got := r.runOne(t, replay.Single{Scenario: sc, Script: s})
+	res := compute(sc, got, r.builds(t))
+	if res.Outcome != domain.OutcomePassed {
+		t.Fatalf("outcome = %s, reasons = %+v", res.Outcome, res.Reasons)
+	}
+	var why []string
+	for _, c := range fm.calls {
+		why = append(why, c.Why)
+	}
+	want := []string{"flow outer > flow login, step start", "flow outer > flow login, step email", "flow outer > flow login, step submit", "flow outer, step ready", "Read the welcome text"}
+	for i, w := range want {
+		if i >= len(why) || !strings.Contains(why[i], w) {
+			t.Fatalf("why = %q, want %q at %d", why, w, i)
+		}
+	}
+	if fm.calls[1].Action.Value != "ana@example.com" {
+		t.Errorf("typed = %+v", fm.calls[1].Action)
+	}
+	if !slices.Equal(got.Flows, []domain.FlowRef{{ID: "outer", Digest: "sha256:outer"}, {ID: "login", Digest: "sha256:login"}}) {
+		t.Errorf("flows = %+v", got.Flows)
+	}
+	if fc := flowChecksOf(res); len(fc) != 1 || fc[0].State != domain.CheckTrue {
+		t.Errorf("flow checks = %+v", fc)
+	}
+	if got.Captured["shown"] != "Hi Ana" {
+		t.Errorf("captured = %v: a nested capture must reach the scenario", got.Captured)
+	}
+}
+
+func TestAScreenThatANestedFlowNamesIsCheckedBeforeAnythingIsSent(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	sc, s := nestedScenario()
+	login := loginFlow()
+	login.Steps[1].Mobile.Element = "gone"
+	fm := &fakeMobile{}
+	r.withFlows(fm, nestedSource(login))
+	r.deps.Screens = &fakeScreens{text: signInScreens}
+	got := r.runOne(t, replay.Single{Scenario: sc, Script: s})
+	res := compute(sc, got, r.builds(t))
+	if res.Outcome != domain.OutcomeBlocked || !hasReason(res, "flow outer > flow login, step email") || len(fm.calls) != 0 {
+		t.Errorf("outcome = %s, reasons = %+v, calls = %d", res.Outcome, res.Reasons, len(fm.calls))
+	}
+}
+
+func TestAFlowThatUsesItselfBlocksTheScenario(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	sc, s := nestedScenario()
+	loop := outerFlow()
+	loop.Steps[0].Use = "outer"
+	loop.Steps[0].With = nil
+	fm := &fakeMobile{}
+	r.withFlows(fm, fakeFlows{flows: map[string]domain.Flow{"outer": loop}, digests: map[string]string{"outer": "sha256:outer"}})
+	r.deps.Screens = &fakeScreens{text: signInScreens}
+	got := r.runOne(t, replay.Single{Scenario: sc, Script: s})
+	res := compute(sc, got, r.builds(t))
+	if res.Outcome != domain.OutcomeBlocked || len(fm.calls) != 0 {
+		t.Errorf("outcome = %s, reasons = %+v, calls = %d", res.Outcome, res.Reasons, len(fm.calls))
+	}
+}

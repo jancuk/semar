@@ -528,6 +528,22 @@ func TestCaptures(t *testing.T) {
 	}
 }
 
+func TestCapturePatternTakesAGroupOfAJSONValue(t *testing.T) {
+	srv := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"data":{"label":"Order #A1B2 placed"}}`)
+	})
+	e, _ := newEngine(t, srv, setup{})
+	c := post("/v1/orders", `{}`)
+	c.Captures = []domain.Capture{
+		{Name: "ref", JSONPath: "$.data.label", Pattern: `#([A-Z0-9]+)`},
+		{Name: "none", JSONPath: "$.data.label", Pattern: `Invoice (\d+)`},
+	}
+	res := do(t, e, c)
+	if res.Captured["ref"] != "A1B2" || fmt.Sprint(res.Missing) != "[none]" {
+		t.Errorf("captured = %v, missing = %v", res.Captured, res.Missing)
+	}
+}
+
 func TestURL(t *testing.T) {
 	cases := []struct {
 		name   string

@@ -159,6 +159,52 @@ func TestTouchIsOneFingerMoveDownPauseMoveUp(t *testing.T) {
 	}
 }
 
+func TestTapSendsNDownUpPairsWithAGap(t *testing.T) {
+	srv, s := start(t, mobiletest.Options{})
+	if err := s.Tap(context.Background(), webdriver.Point{X: 7, Y: 9}, 2); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Actions []struct {
+			Actions []map[string]any
+		} `json:"actions"`
+	}
+	req := srv.Requests()[len(srv.Requests())-1]
+	if err := json.Unmarshal([]byte(req.Body), &body); err != nil || len(body.Actions) != 1 {
+		t.Fatalf("body = %s", req.Body)
+	}
+	acts := body.Actions[0].Actions
+	var kinds []string
+	for _, x := range acts {
+		kinds = append(kinds, x["type"].(string))
+	}
+	if strings.Join(kinds, ",") != "pointerMove,pointerDown,pointerUp,pause,pointerDown,pointerUp" {
+		t.Errorf("kinds = %v", kinds)
+	}
+	if acts[3]["duration"] != float64(60) || acts[0]["x"] != float64(7) || acts[0]["y"] != float64(9) {
+		t.Errorf("actions = %v", acts)
+	}
+	if got := srv.DoubleTaps(); len(got) != 1 || got[0] != [2]int{7, 9} {
+		t.Errorf("double taps = %v", got)
+	}
+	if touches := srv.Touches(); len(touches) != 1 || touches[0].Taps != 2 || touches[0].Hold != 0 {
+		t.Errorf("touches = %+v", touches)
+	}
+	if got := srv.Taps(); len(got) != 1 {
+		t.Errorf("taps = %v", got)
+	}
+}
+
+func TestTapOfOneIsASingleDownUp(t *testing.T) {
+	srv, s := start(t, mobiletest.Options{})
+	if err := s.Tap(context.Background(), webdriver.Point{X: 1, Y: 2}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if touches := srv.Touches(); len(touches) != 1 || touches[0].Taps != 1 || len(srv.DoubleTaps()) != 0 {
+		t.Errorf("touches = %+v", touches)
+	}
+}
+
 func TestTypingClearsThenSetsTheText(t *testing.T) {
 	srv, s := start(t, mobiletest.Options{})
 	ctx := context.Background()
@@ -432,5 +478,22 @@ func TestALoopbackServerIsNeverReachedThroughAProxy(t *testing.T) {
 		if u, _ := tr.Proxy(req); u != nil || asked {
 			t.Errorf("%s: proxy %v", host, u)
 		}
+	}
+}
+
+func TestClipboardDecodesTheBase64OfTheServer(t *testing.T) {
+	var hit string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = r.Method + " " + r.URL.Path
+		_, _ = w.Write([]byte(`{"value":"aGVsbG8gY2xpcA=="}`))
+	}))
+	defer srv.Close()
+	s, _ := webdriver.New(srv.URL).Attach("sess-1")
+	got, err := s.Clipboard(context.Background())
+	if err != nil || got != "hello clip" {
+		t.Fatalf("clipboard = %q, %v", got, err)
+	}
+	if hit != "POST /session/sess-1/appium/device/get_clipboard" {
+		t.Errorf("request = %s", hit)
 	}
 }

@@ -165,3 +165,73 @@ func TestServeEndsWhenTheListenerFails(t *testing.T) {
 		t.Error("stop did not run")
 	}
 }
+
+func TestHostAllowedIPv6Loopback(t *testing.T) {
+	req := func(local, host string) *http.Request {
+		r := httptest.NewRequest("GET", "http://x/", nil)
+		r.Host = host
+		a, _ := net.ResolveTCPAddr("tcp", local)
+		return r.WithContext(context.WithValue(r.Context(), http.LocalAddrContextKey, net.Addr(a)))
+	}
+	for _, c := range []struct {
+		local, host string
+		want        bool
+	}{
+		{"[::1]:8080", "[::1]:8080", true},
+		{"[::1]:8080", "[::1]:9", false},
+		{"[::1]:8080", "[::1]", false},
+		{"[::1]:8080", "::1", false},
+		{"127.0.0.1:8080", "[::1]:8080", true},
+		{"127.0.0.1:8080", "127.0.0.1:8080", true},
+		{"127.0.0.1:8080", "localhost:8080", true},
+		{"127.0.0.1:8080", "[::2]:8080", false},
+		{"127.0.0.1:8080", "evil.example:8080", false},
+	} {
+		if got := HostAllowed(req(c.local, c.host)); got != c.want {
+			t.Errorf("HostAllowed(local %s, host %s) = %v, want %v", c.local, c.host, got, c.want)
+		}
+	}
+}
+
+func TestBearerOrHeader(t *testing.T) {
+	for _, c := range []struct {
+		name, auth, header, want string
+	}{
+		{"bearer", "Bearer abc", "", "abc"},
+		{"bearer lower case scheme", "bearer abc", "", "abc"},
+		{"bearer wins", "Bearer abc", "other", "abc"},
+		{"header", "", "xyz", "xyz"},
+		{"basic ignored", "Basic abc", "", ""},
+		{"bare scheme", "Bearer ", "", ""},
+		{"neither", "", "", ""},
+	} {
+		r := httptest.NewRequest("GET", "http://x/", nil)
+		if c.auth != "" {
+			r.Header.Set("Authorization", c.auth)
+		}
+		if c.header != "" {
+			r.Header.Set(TokenHeader, c.header)
+		}
+		if got := BearerOrHeader(r); got != c.want {
+			t.Errorf("%s: BearerOrHeader = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestTokenEqual(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{tok, tok, true},
+		{tok, tok[:63] + "0", false},
+		{"abc", tok, false},
+		{"", "", false},
+		{"", tok, false},
+		{tok, "", false},
+	} {
+		if got := TokenEqual(c.a, c.b); got != c.want {
+			t.Errorf("TokenEqual(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}

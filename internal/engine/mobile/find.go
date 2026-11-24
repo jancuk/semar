@@ -91,6 +91,19 @@ func (r *reader) resolveDepth(name string, depth int) (resolved, error) {
 	if len(nodes) > maxMatches {
 		nodes = nodes[:maxMatches]
 	}
+	if loc.Index > 0 {
+		// The nth visible match, in the order of the tree, is the element. Past the last one, nothing is.
+		var visible []*Node
+		for _, n := range nodes {
+			if n.Visible {
+				visible = append(visible, n)
+			}
+		}
+		nodes = nil
+		if loc.Index <= len(visible) {
+			nodes = visible[loc.Index-1 : loc.Index]
+		}
+	}
 	var seen []*Node
 	for _, n := range nodes {
 		res.state.Count++
@@ -105,22 +118,22 @@ func (r *reader) resolveDepth(name string, depth int) (resolved, error) {
 	} else {
 		res.state.Text = ""
 	}
-	switch len(nodes) {
-	case 0:
-	case 1:
-		only := nodes[0]
+	only := res.node
+	if only == nil && len(nodes) == 1 {
+		only = nodes[0]
+	}
+	if only != nil {
 		res.state.Enabled, res.state.Checked = only.Enabled, only.Checked
-		if names := r.attrs[name]; len(names) > 0 {
-			for _, k := range names {
-				if v, has := only.Attrs[k]; has && !(only.Password && (k == "text" || k == "value")) {
-					if res.state.Attrs == nil {
-						res.state.Attrs = map[string]string{}
-					}
-					res.state.Attrs[k] = clip(v)
+		for _, k := range r.attrs[name] {
+			if v, has := only.Attrs[k]; has && !(only.Password && (k == "text" || k == "value")) {
+				if res.state.Attrs == nil {
+					res.state.Attrs = map[string]string{}
 				}
+				res.state.Attrs[k] = clip(v)
 			}
 		}
-	default:
+	}
+	if len(nodes) > 1 {
 		res.others = nameMatches(name, nodes)
 	}
 	r.memo[name] = res
@@ -174,11 +187,51 @@ func Find(t *Tree, loc domain.Locator, scope *Node) ([]*Node, error) {
 		case "class":
 			nodes = collect(t, scope, func(n *Node) bool { return n.Class == loc.Class })
 		}
+		if loc.HasText != "" {
+			nodes = withText(nodes, collapse(loc.HasText))
+		}
 		if len(nodes) > 0 {
 			return nodes, nil
 		}
 	}
 	return nil, nil
+}
+
+// withText keeps the nodes that show the text, or hold a visible node that shows it, as text or as a
+// description. Of those, only the innermost are kept: a node with another kept node inside it is dropped.
+func withText(nodes []*Node, want string) []*Node {
+	var kept []*Node
+	for _, n := range nodes {
+		if showsText(n, want) {
+			kept = append(kept, n)
+		}
+	}
+	var out []*Node
+	for _, n := range kept {
+		innermost := true
+		for _, o := range kept {
+			if o != n && inside(o, n) {
+				innermost = false
+				break
+			}
+		}
+		if innermost {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func showsText(n *Node, want string) bool {
+	if n.Text == want || collapse(n.Desc) == want {
+		return true
+	}
+	for _, k := range n.Children {
+		if k.Visible && showsText(k, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // idMatches is true for the whole id, or for the part after :id/, which is how a person names an

@@ -10,6 +10,14 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 )
 
+// FlowCheck is the result of one check of a step of a flow that a step used. It is not an expected result of
+// the scenario: it has no index, never counts as the check that a scenario needs, and keeps the source
+// person of the flow file.
+type FlowCheck struct {
+	Flow, Step string
+	Result     check.Result
+}
+
 type StepEvidence struct {
 	// Action is the evidence of the step. When a step ran more than one action, as a step that uses
 	// a flow does, it is the last one, or the one that failed or was refused.
@@ -19,6 +27,8 @@ type StepEvidence struct {
 	Prior      []domain.Action
 	Checks     []check.Result // one per Step.Expect, in order
 	Invariants []check.Result
+	// FlowChecks holds the checks of the flow steps that ran for this step, in order.
+	FlowChecks []FlowCheck
 }
 
 type Input struct {
@@ -202,6 +212,32 @@ func Compute(in Input) domain.ScenarioResult {
 				text := msgNotEvaluated
 				if inv.Detail != "" {
 					text += ": " + inv.Detail
+				}
+				add(domain.OutcomeInconclusive, step.ID, text)
+			}
+		}
+
+		for _, fc := range ev.FlowChecks {
+			r := fc.Result
+			res.Checks = append(res.Checks, domain.CheckResult{
+				Step: step.ID, Index: -1, Source: domain.SourceFlow,
+				State: r.State, Expected: r.Expected, Observed: r.Observed, Detail: r.Detail,
+			})
+			switch {
+			case refused:
+			case r.State == domain.CheckFalse && step.Setup:
+				add(domain.OutcomeBlocked, step.ID, fmt.Sprintf(SetupFailedPrefix+"%s flow %s, step %s: expected %s, observed %s", step.ID, fc.Flow, fc.Step, r.Expected, r.Observed))
+			case r.State == domain.CheckFalse:
+				text := fmt.Sprintf("step %s: flow %s, step %s: expected %s, observed %s", step.ID, fc.Flow, fc.Step, r.Expected, r.Observed)
+				if r.Detail != "" {
+					text += ": " + r.Detail
+				}
+				add(domain.OutcomeFailed, step.ID, text)
+			}
+			if r.State != domain.CheckTrue && r.State != domain.CheckFalse && !refused && a != nil && !noResponse {
+				text := msgNotEvaluated
+				if r.Detail != "" {
+					text += ": " + r.Detail
 				}
 				add(domain.OutcomeInconclusive, step.ID, text)
 			}

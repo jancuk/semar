@@ -1,0 +1,38 @@
+Drop box contents: 3 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats_error, system_app_anr}
+
+========================================
+2026-11-23 10:15:30 data_app_crash (text, 2113 bytes)
+Process: com.example.shop
+PID: 5678
+Flags: 0x38e83e46
+Package: com.example.shop v42 (2.4.1)
+Foreground: Yes
+Build: google/sdk_gphone64_arm64/emu64a:14/UE1A.230829.036/11228894:userdebug/dev-keys
+
+java.lang.IllegalStateException: Cart is empty
+	at com.example.shop.CartActivity.checkout(CartActivity.kt:88)
+	at com.example.shop.CartActivity.onCreate$lambda-3(CartActivity.kt:41)
+	at android.view.View.performClick(View.java:7506)
+Caused by: java.lang.NullPointerException
+	at com.example.shop.Cart.total(Cart.kt:12)
+
+========================================
+2026-11-23 10:15:30 data_app_crash (text, 250 bytes)
+Process: com.other.app
+PID: 6001
+Package: com.other.app v1 (1.0)
+
+java.lang.RuntimeException: boom
+	at com.other.app.Main.run(Main.kt:3)
+
+========================================
+2026-11-23 10:20:01 data_app_crash (text, 180 bytes)
+Process: com.example.shop
+PID: 7001
+Package: com.example.shop v42 (2.4.1)
+
+java.lang.OutOfMemoryError: Failed to allocate a 33554448 byte allocation
+	at android.graphics.Bitmap.nativeCreate(Native Method)

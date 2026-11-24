@@ -2,6 +2,8 @@ package screens
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/jancuk/semar/internal/domain"
@@ -40,8 +42,8 @@ func Check(s domain.Screens, uses []Use) []string {
 			}
 			continue
 		}
-		elements, ok := s.Screens[u.Screen]
-		if !ok {
+		_, ok := s.Screens[u.Screen]
+		if !ok && !allCommon(s, u.Elements) {
 			out = append(out, say(u.Where, ": ", "screen %s is not in the screens of %s; its screens are %s",
 				u.Screen, s.App, list(s.ScreenNames())))
 			continue
@@ -53,16 +55,19 @@ func Check(s domain.Screens, uses []Use) []string {
 				continue
 			}
 			seen[name] = true
-			if _, ok := elements[name]; !ok {
+			if _, ok := s.Locator(u.Screen, name); !ok {
 				out = append(out, say(u.Where, ": ", "element %s is not on screen %s of %s; its elements are %s",
-					name, u.Screen, s.App, list(s.ElementNames(u.Screen))))
+					name, u.Screen, s.App, list(elementsOf(s, u.Screen))))
 				continue
 			}
 			present = append(present, name)
 		}
 		for _, name := range Needed(s, u.Screen, present) {
-			l := elements[name]
+			l, _ := s.Locator(u.Screen, name)
 			switch {
+			case u.Surface != domain.SurfaceAndroid && (l.HasText != "" || l.Index != 0):
+				out = append(out, say(u.Where, ": ", "element %s on screen %s of %s uses hasText or index, which are for a device only",
+					name, u.Screen, s.App))
 			case u.Surface == domain.SurfaceAndroid && !l.ForMobile():
 				out = append(out, say(u.Where, ": ", "element %s on screen %s of %s cannot be found on a device: give it id, desc, role, name, text, xpath, or class",
 					name, u.Screen, s.App))
@@ -73,6 +78,21 @@ func Check(s domain.Screens, uses []Use) []string {
 		}
 	}
 	return out
+}
+
+// allCommon reports whether there are elements and the common elements of the file hold every one.
+func allCommon(s domain.Screens, names []string) bool {
+	for _, n := range names {
+		if _, ok := s.Common[n]; !ok {
+			return false
+		}
+	}
+	return len(names) > 0
+}
+
+// elementsOf lists what a screen can find by name: its own elements and the common ones, in order.
+func elementsOf(s domain.Screens, screen string) []string {
+	return slices.Sorted(maps.Keys(elementsWithCommon(s.Screens[screen], s.Common)))
 }
 
 // say puts where in front of the message, with the joint between them, and leaves both out when the

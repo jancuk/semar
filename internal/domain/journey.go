@@ -66,7 +66,7 @@ type LegUntil struct {
 }
 
 // LegStep is a scenario step with the request, or the browser action, that carries it out. Exactly
-// one of Request, Web, and Mobile is set, and Web and Mobile belong to a leg with their surface.
+// one of Request, Web, Mobile, and Use is set, and Web and Mobile belong to a leg with their surface.
 type LegStep struct {
 	ID       StepID        `yaml:"id"`
 	Setup    bool          `yaml:"setup,omitempty"`
@@ -77,6 +77,11 @@ type LegStep struct {
 	Web      *WebAction    `yaml:"web,omitempty"`
 	Mobile   *MobileAction `yaml:"mobile,omitempty"`
 	Captures []Capture     `yaml:"captures,omitempty"`
+	// Use runs the flow of that ID from .semar/flows, with the values of With for its params. Only a step
+	// of an android leg has it, and then it has no mobile action, no expect, and no captures: the flow
+	// captures what the leg needs, and the outputs of the leg may name those captures.
+	Use  string            `yaml:"use,omitempty"`
+	With map[string]string `yaml:"with,omitempty"`
 	// As names an auth profile for this step. It wins over the leg's.
 	As string `yaml:"as,omitempty"`
 }

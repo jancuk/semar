@@ -36,6 +36,10 @@ const (
 	maxLink       = 2048
 	longPress     = 700 * time.Millisecond
 	swipeDuration = 300 * time.Millisecond
+	// dragHold is how long a drag keeps the finger still before it moves, so that the screen picks the
+	// element up, and dragMove is how long the move takes.
+	dragHold = 600 * time.Millisecond
+	dragMove = 500 * time.Millisecond
 
 	refusedNoUseCase = "a write must belong to a scenario step, an exploration, or a probe"
 	refusedBudget    = "action budget reached"
@@ -71,7 +75,9 @@ type Options struct {
 	Settle        time.Duration
 	// CheckTimeout is how long the checks of a step wait for their condition after the screen settles.
 	CheckTimeout time.Duration
-	Clock        func() time.Time
+	// LogcatOnFailure writes the last lines of the log of the app, as evidence, when a step fails.
+	LogcatOnFailure bool
+	Clock           func() time.Time
 	// Sleep waits for d, or for the context. A test passes one that moves its clock.
 	Sleep   func(ctx context.Context, d time.Duration) error
 	TraceID func() string // 32 lower-case hex characters
@@ -110,6 +116,14 @@ type Engine struct {
 	reset map[string]bool
 	// device serializes the actions: one device does one thing at a time.
 	device sync.Mutex
+	// recovered is true once the engine has restarted the server of the device. It does so at most once.
+	recovered bool
+	// started is when the engine was made: the crashes before it are not those of the run.
+	started time.Time
+	// crashes holds the crashes that a step reported, so that a later step reports a new one, and
+	// evidence holds the names of the evidence files that were written.
+	crashes  map[string]bool
+	evidence map[string]int
 }
 
 func New(o Options) *Engine {
@@ -137,7 +151,7 @@ func New(o Options) *Engine {
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
 	}
-	return &Engine{o: o, reset: map[string]bool{}}
+	return &Engine{o: o, reset: map[string]bool{}, started: o.Clock(), crashes: map[string]bool{}, evidence: map[string]int{}}
 }
 
 func randomHex(n int) string {
@@ -160,6 +174,15 @@ func (e *Engine) Close(ctx context.Context) error {
 func (e *Engine) NewScenario() {
 	e.mu.Lock()
 	e.reset = map[string]bool{}
+	e.mu.Unlock()
+}
+
+// RefillBudget counts the actions again from none. A run has one budget for all its scenarios, and a
+// recording has one for each replay of its steps: a person who goes to a step again and again must not use
+// the budget up, and a replay is bounded by the steps that it has.
+func (e *Engine) RefillBudget() {
+	e.mu.Lock()
+	e.sent = 0
 	e.mu.Unlock()
 }
 
@@ -341,7 +364,10 @@ func refusalText(err error, label string) string {
 type notFoundMiss struct {
 	element string
 	state   domain.ElementState
-	repair  []domain.Candidate
+	// tree and old are what the candidates are made from, once, for the miss that the step ends with: a wait
+	// that polls would make them again for each screen that it reads.
+	tree *Tree
+	old  domain.Locator
 }
 
 type notFoundError struct {
@@ -370,41 +396,90 @@ func errorText(err error) string {
 }
 
 // run does the action, waits until the screen has settled, reads what the checks need, and records.
+//
+// A failure that is not a missing element may be a server on the device that died or hung. The engine
+// then asks the platform whether it is healthy, and restarts the server when it is not, once for the
+// whole run. An action that sent nothing yet is done again, so that the step still has one action. One
+// that was sent is not: the step keeps its error, which says that the server was restarted, and a write
+// has an unknown effect.
 func (e *Engine) run(ctx context.Context, d Driver, c Call, value, label string, a domain.Action, missing []string) (Result, error) {
 	actCtx, cancel := context.WithTimeout(ctx, e.o.ActionTimeout)
-	defer cancel()
+	defer func() { cancel() }()
+	renew := func() {
+		cancel()
+		actCtx, cancel = context.WithTimeout(ctx, e.o.ActionTimeout)
+	}
 
 	m := c.Action
 	began := e.o.Clock()
 	var opErr error
 	var miss *notFoundMiss
 	dispatched := false
+	restarted := false // the server was restarted after the action was sent
 
-	if e.needsReset(m.Service) {
-		if err := e.resetApp(actCtx, d, m); err != nil {
-			opErr = fmt.Errorf("the app could not be reset: %w", err)
-		} else {
-			e.markReset(m.Service)
+	attempt := func() {
+		opErr, miss, dispatched = nil, nil, false
+		if e.needsReset(m.Service) {
+			if err := e.resetApp(actCtx, d, m); err != nil {
+				opErr = fmt.Errorf("the app could not be reset: %w", err)
+			} else {
+				e.markReset(m.Service)
+			}
+		}
+		if opErr == nil {
+			miss, dispatched, opErr = e.perform(actCtx, d, c, value)
 		}
 	}
-	if opErr == nil {
-		miss, dispatched, opErr = e.perform(actCtx, d, c, value)
+	// recoverable says that an error may come from a server that is gone, and that the engine may still
+	// restart it.
+	recoverable := func(err error) bool { return err != nil && !isNotFound(err) && ctx.Err() == nil }
+	restart := func() bool {
+		nd, ok := e.restartServer(ctx, m.Service)
+		if !ok {
+			return false
+		}
+		d = nd
+		a.Mobile.Recovered = true
+		return true
+	}
+
+	attempt()
+	if recoverable(opErr) && restart() {
+		if dispatched {
+			restarted = true
+		} else {
+			renew()
+			attempt()
+		}
 	}
 	// An element that the action could not find is read as the action saw it. After the action the
 	// screen has changed: a button that was pressed may be gone, and that is no miss.
 	var settled *Tree
-	if actCtx.Err() == nil {
+	var states map[string]domain.ElementState
+	var repair, near []domain.Candidate
+	var readErr error
+	observe := func() {
+		settled, states, repair, near, readErr = nil, nil, nil, nil, nil
+		if actCtx.Err() != nil {
+			return
+		}
 		var err error
 		settled, err = e.settle(actCtx, d, e.o.Settle)
 		if err != nil && opErr == nil && actCtx.Err() == nil {
 			opErr = fmt.Errorf("the screen could not be read: %w", err)
 		}
+		if settled != nil && actCtx.Err() == nil {
+			states, repair, near, readErr = e.readUntil(actCtx, d, settled, c)
+		}
 	}
-	var states map[string]domain.ElementState
-	var repair []domain.Candidate
-	var readErr error
-	if settled != nil && actCtx.Err() == nil {
-		states, repair, readErr = e.readUntil(actCtx, d, settled, c)
+	acted := opErr == nil
+	observe()
+	if acted && !a.Mobile.Recovered && (recoverable(readErr) || recoverable(opErr)) && restart() {
+		// The action is done and only the read failed. A read can be made again, so the step is no
+		// worse than it was.
+		opErr = nil
+		renew()
+		observe()
 	}
 	if miss != nil {
 		if states == nil {
@@ -413,12 +488,18 @@ func (e *Engine) run(ctx context.Context, d Driver, c Call, value, label string,
 		if _, read := states[miss.element]; !read {
 			states[miss.element] = miss.state
 		}
+		missRepair := uirepair.Candidates(miss.element, miss.old, axNodes(miss.tree))
+		missNear := nearby(miss.element, miss.old, miss.tree)
 		if !slices.ContainsFunc(repair, func(x domain.Candidate) bool { return x.Element == miss.element }) {
-			repair = append(repair, miss.repair...)
+			repair = append(repair, missRepair...)
+		}
+		if !slices.ContainsFunc(near, func(x domain.Candidate) bool { return x.Element == miss.element }) {
+			near = append(near, missNear...)
 		}
 	}
 	a.Mobile.Elements = states
 	a.Mobile.Repair = repair
+	a.Mobile.Nearby = near
 	a.DurationMS = e.o.Clock().Sub(began).Milliseconds()
 
 	switch {
@@ -430,17 +511,58 @@ func (e *Engine) run(ctx context.Context, d Driver, c Call, value, label string,
 	case readErr != nil:
 		a.Err = "the screen could not be read: " + errorText(readErr)
 	}
+	if restarted && a.Err != "" && ctx.Err() == nil {
+		a.Err += ": the UiAutomator2 server stopped and was restarted, so the effect of the action is not known"
+	}
 	if shot, err := e.screenshot(ctx, d, a); err != nil {
 		e.o.Logger.DebugContext(ctx, "no screenshot", "error", err)
 	} else {
 		a.Mobile.Screenshot = shot
 	}
 
+	e.diagnose(ctx, d, c, &a, miss != nil || isNotFoundText(a.Err) || untilMissing(c.Until, states))
+
 	var captured map[string]string
 	if a.Err == "" || isNotFoundText(a.Err) {
 		captured, missing = capture(states, c.Captures)
 	}
 	return e.record(ctx, label, a, captured, missing)
+}
+
+// recoverLimit bounds a restart of the server. The platform has a start timeout of its own inside it.
+const recoverLimit = 3 * time.Minute
+
+// restartServer restarts the server of the device when the platform can and it is not healthy, and gives
+// the driver of the service again, because the old one belongs to a session that is gone. It does this
+// once per engine, even when it fails. It reports false when it did not restart.
+func (e *Engine) restartServer(ctx context.Context, service string) (Driver, bool) {
+	rc, ok := e.o.Platform.(Recoverer)
+	if !ok {
+		return nil, false
+	}
+	e.mu.Lock()
+	done := e.recovered
+	e.mu.Unlock()
+	if done || rc.Healthy(ctx) {
+		return nil, false
+	}
+	e.mu.Lock()
+	e.recovered = true
+	e.mu.Unlock()
+	e.o.Logger.WarnContext(ctx, "the UiAutomator2 server does not answer: it is restarted, once for this run")
+	rctx, cancel := context.WithTimeout(ctx, recoverLimit)
+	defer cancel()
+	if err := rc.Recover(rctx); err != nil {
+		e.o.Logger.WarnContext(ctx, "the UiAutomator2 server could not be restarted", "error", errorText(err))
+		return nil, false
+	}
+	d, err := e.o.Platform.Driver(ctx, service)
+	if err != nil {
+		e.o.Logger.WarnContext(ctx, "the device is not available after the restart", "error", errorText(err))
+		return nil, false
+	}
+	e.o.Logger.InfoContext(ctx, "the UiAutomator2 server was restarted")
+	return d, true
 }
 
 // resetApp puts the app in its starting state. A launch that names a reset mode overrides the one of the
@@ -484,6 +606,22 @@ func (e *Engine) perform(ctx context.Context, d Driver, c Call, value string) (*
 		return nil, true, d.Touch(ctx, Gesture{From: at, To: at})
 	case domain.MobileLongTap:
 		return nil, true, d.Touch(ctx, Gesture{From: at, To: at, Hold: longPress})
+	case domain.MobileDoubleTap:
+		return nil, true, d.Touch(ctx, Gesture{From: at, To: at, Taps: 2})
+	case domain.MobileDrag:
+		hold := dragHold
+		if m.Value != "" {
+			h, err := time.ParseDuration(value)
+			if err != nil || h <= 0 || h > domain.MobileDragHoldMax {
+				return nil, false, fmt.Errorf("the drag value must be a hold such as 800ms, up to %s, got %q", domain.MobileDragHoldMax, value)
+			}
+			hold = h
+		}
+		dest, miss, err := e.waitTarget(ctx, d, c, m.To)
+		if err != nil {
+			return miss, false, err
+		}
+		return nil, true, d.Touch(ctx, Gesture{From: at, To: dest.node.Bounds.Center(), Hold: hold, Move: dragMove})
 	case domain.MobileType:
 		if err := d.Touch(ctx, Gesture{From: at, To: at}); err != nil {
 			return nil, true, err
@@ -540,7 +678,7 @@ func (e *Engine) target(rd *reader, name string) (resolved, *notFoundMiss, error
 	}
 	var miss *notFoundMiss
 	if res.state.Count == 0 && res.state.Locator != nil {
-		miss = &notFoundMiss{element: name, state: res.state, repair: uirepair.Candidates(name, *res.state.Locator, axNodes(rd.tree))}
+		miss = &notFoundMiss{element: name, state: res.state, tree: rd.tree, old: *res.state.Locator}
 	}
 	return res, miss, notFoundError{name, res.state.Count}
 }
@@ -695,7 +833,7 @@ func swipeGesture(r Rect, direction string) Gesture {
 
 // read gives the state of every element that the step names, and the repair candidates for each
 // element that is not there and that a check or a capture reads the text of.
-func (e *Engine) read(t *Tree, c Call) (map[string]domain.ElementState, []domain.Candidate, error) {
+func (e *Engine) read(t *Tree, c Call) (map[string]domain.ElementState, []domain.Candidate, []domain.Candidate, error) {
 	m := c.Action
 	var names []string
 	needsText := map[string]bool{}
@@ -719,11 +857,11 @@ func (e *Engine) read(t *Tree, c Call) (map[string]domain.ElementState, []domain
 		}
 	}
 	states := make(map[string]domain.ElementState, len(names))
-	var repair []domain.Candidate
+	var repair, near []domain.Candidate
 	for _, name := range names {
 		res, err := rd.resolve(name)
 		if err != nil {
-			return states, repair, err
+			return states, repair, near, err
 		}
 		states[name] = res.state
 		if res.state.Count > 1 && needsText[name] {
@@ -736,6 +874,7 @@ func (e *Engine) read(t *Tree, c Call) (map[string]domain.ElementState, []domain
 		}
 		if res.state.Count == 0 && needsText[name] && res.state.Locator != nil {
 			repair = append(repair, uirepair.Candidates(name, *res.state.Locator, axNodes(t))...)
+			near = append(near, nearby(name, *res.state.Locator, t)...)
 		}
 	}
 	// An element that only the action named stays out of the record: the target is in it already, and
@@ -744,12 +883,13 @@ func (e *Engine) read(t *Tree, c Call) (map[string]domain.ElementState, []domain
 		if !slices.ContainsFunc(c.Watch, func(wt domain.Watched) bool { return wt.Element == name }) {
 			delete(states, name)
 			repair = slices.DeleteFunc(repair, func(cand domain.Candidate) bool { return cand.Element == name })
+			near = slices.DeleteFunc(near, func(cand domain.Candidate) bool { return cand.Element == name })
 		}
 	}
 	if len(states) == 0 {
 		states = nil
 	}
-	return states, repair, nil
+	return states, repair, near, nil
 }
 
 func watchOf(watch []domain.Watched, name string) *domain.Watched {
@@ -765,11 +905,11 @@ func watchOf(watch []domain.Watched, name string) *domain.Watched {
 // hold or CheckTimeout passes, and gives the last reading. A check that an element is not there, or
 // hidden, holds on a screen that has not drawn the element yet, so after such a check holds the engine
 // waits until the screen is still and reads once more.
-func (e *Engine) readUntil(ctx context.Context, d Driver, first *Tree, c Call) (map[string]domain.ElementState, []domain.Candidate, error) {
+func (e *Engine) readUntil(ctx context.Context, d Driver, first *Tree, c Call) (map[string]domain.ElementState, []domain.Candidate, []domain.Candidate, error) {
 	until := slices.DeleteFunc(slices.Clone(c.Until), func(k domain.Check) bool { return k.Element == "" })
-	states, repair, err := e.read(first, c)
+	states, repair, near, err := e.read(first, c)
 	if len(until) == 0 || err != nil {
-		return states, repair, err
+		return states, repair, near, err
 	}
 	deadline := e.o.Clock().Add(e.o.CheckTimeout)
 	held := e.hold(c, until, states, repair)
@@ -779,21 +919,21 @@ func (e *Engine) readUntil(ctx context.Context, d Driver, first *Tree, c Call) (
 		}
 		t, err := d.Source(ctx)
 		if err != nil {
-			return states, repair, err
+			return states, repair, near, err
 		}
-		if states, repair, err = e.read(t, c); err != nil {
-			return states, repair, err
+		if states, repair, near, err = e.read(t, c); err != nil {
+			return states, repair, near, err
 		}
 		held = e.hold(c, until, states, repair)
 	}
 	if held && slices.ContainsFunc(until, absence) {
 		t, err := e.settle(ctx, d, e.o.Settle)
 		if err != nil {
-			return states, repair, err
+			return states, repair, near, err
 		}
 		return e.read(t, c)
 	}
-	return states, repair, nil
+	return states, repair, near, nil
 }
 
 // absence is a check that holds when something is not shown.
@@ -877,7 +1017,12 @@ func capture(states map[string]domain.ElementState, caps []domain.Capture) (map[
 			missing = append(missing, c.Name)
 			continue
 		}
-		got[c.Name] = st.Text
+		v, ok := c.Extract(st.Text)
+		if !ok {
+			missing = append(missing, c.Name)
+			continue
+		}
+		got[c.Name] = v
 	}
 	return got, missing
 }
