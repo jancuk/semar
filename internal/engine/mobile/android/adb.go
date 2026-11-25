@@ -212,7 +212,7 @@ func (c *execChild) Kill() {
 	<-c.done
 }
 
-// commandError names the adb command by its first words, and gives the first line that adb wrote. It
+// commandError names the adb command by its first words, and gives the line that says why it failed. It
 // never holds the arguments: a link or a path may hold a value.
 func commandError(args []string, err error, stderr, stdout string) error {
 	name := "adb"
@@ -222,9 +222,9 @@ func commandError(args []string, err error, stderr, stdout string) error {
 			break
 		}
 	}
-	line := firstLine(stderr)
+	line := failureLine(stderr)
 	if line == "" {
-		line = firstLine(stdout)
+		line = failureLine(stdout)
 	}
 	var ee *exec.ExitError
 	switch {
@@ -242,13 +242,45 @@ func commandError(args []string, err error, stderr, stdout string) error {
 func firstLine(s string) string {
 	for _, l := range strings.Split(s, "\n") {
 		if l = strings.TrimSpace(l); l != "" {
-			if len(l) > 300 {
-				l = l[:300] + "..."
-			}
-			return l
+			return clipLine(l)
 		}
 	}
 	return ""
+}
+
+func clipLine(l string) string {
+	if len(l) > 300 {
+		return l[:300] + "..."
+	}
+	return l
+}
+
+// isFailureLine is true for a line of the output of am and pm that reports a failure.
+func isFailureLine(l string) bool {
+	return strings.HasPrefix(l, "Error") || strings.HasPrefix(l, "Exception") || strings.HasPrefix(l, "Failure") || strings.Contains(l, "Exception")
+}
+
+// failureLine is the line of the output that says why a command failed. The first line is not always
+// it: am start prints the intent, then "Error type 3", and only then the line that names the cause. It
+// prefers a failure line with a message after a colon, then any failure line, then the first line.
+func failureLine(s string) string {
+	bare := ""
+	for _, l := range strings.Split(s, "\n") {
+		l = strings.TrimSpace(l)
+		if !isFailureLine(l) {
+			continue
+		}
+		if _, msg, ok := strings.Cut(l, ":"); ok && strings.TrimSpace(msg) != "" {
+			return clipLine(l)
+		}
+		if bare == "" {
+			bare = l
+		}
+	}
+	if bare != "" {
+		return clipLine(bare)
+	}
+	return firstLine(s)
 }
 
 // limitedBuffer keeps the last max bytes that were written.

@@ -2,6 +2,7 @@ package android_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,6 +12,38 @@ import (
 
 	"github.com/jancuk/semar/internal/engine/mobile/android"
 )
+
+const amStartMissing = "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=com.amf.superapp.uat/com.amf.superapp.uat.ui.splash_v2.SplashV2Activity }\n" +
+	"Error type 3\n" +
+	"Error: Activity class {com.amf.superapp.uat/com.amf.superapp.uat.ui.splash_v2.SplashV2Activity} does not exist.\n"
+
+func TestFailureLinePicksTheLineThatNamesTheCause(t *testing.T) {
+	const cause = "Error: Activity class {com.amf.superapp.uat/com.amf.superapp.uat.ui.splash_v2.SplashV2Activity} does not exist."
+	for name, c := range map[string]struct{ in, want string }{
+		"am start with a missing class":    {amStartMissing, cause},
+		"a message after a bare error":     {"Error type 3\nError: bad thing\n", "Error: bad thing"},
+		"only a bare error":                {"Starting: Intent { }\nError type 3\n", "Error type 3"},
+		"an exception with a message":      {"\nException occurred while executing 'grant':\njava.lang.SecurityException: Permission X is not a changeable permission type\n\tat com.android.server.Foo\n", "java.lang.SecurityException: Permission X is not a changeable permission type"},
+		"an exception header alone":        {"Exception occurred while executing 'grant':\n", "Exception occurred while executing 'grant':"},
+		"a failure line":                   {"Performing Streamed Install\nFailure [INSTALL_FAILED_OLDER_SDK: min sdk]\n", "Failure [INSTALL_FAILED_OLDER_SDK: min sdk]"},
+		"no failure line: the first line":  {"\n  device offline\nmore\n", "device offline"},
+		"a colon with nothing after it":    {"Error:\nStarting: Intent\n", "Error:"},
+		"empty":                            {"", ""},
+		"a line over 300 bytes is clipped": {"Error: " + strings.Repeat("x", 400), "Error: " + strings.Repeat("x", 293) + "..."},
+	} {
+		if got := android.FailureLine(c.in); got != c.want {
+			t.Errorf("%s:\n got %q\nwant %q", name, got, c.want)
+		}
+	}
+}
+
+func TestCommandErrorGivesTheCauseOfAFailedStart(t *testing.T) {
+	err := android.CommandError([]string{"-s", "emulator-5554", "shell", "am start"}, errors.New("exit status 1"), "", amStartMissing)
+	want := "adb emulator-5554 failed: Error: Activity class {com.amf.superapp.uat/com.amf.superapp.uat.ui.splash_v2.SplashV2Activity} does not exist."
+	if err == nil || err.Error() != want {
+		t.Errorf("error = %v\nwant %s", err, want)
+	}
+}
 
 func TestShellQuoteHoldsEveryWordAsOne(t *testing.T) {
 	for in, want := range map[string]string{

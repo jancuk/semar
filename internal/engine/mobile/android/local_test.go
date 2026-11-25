@@ -200,13 +200,36 @@ func TestLaunchUsesTheActivityOrTheLauncher(t *testing.T) {
 	}
 }
 
+func TestLaunchOfARelativeActivityThatDoesNotExistSaysWhy(t *testing.T) {
+	missing := "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=com.amf.superapp.uat/com.amf.superapp.uat.ui.splash_v2.SplashV2Activity }\n" +
+		"Error type 3\n" +
+		"Error: Activity class {com.amf.superapp.uat/com.amf.superapp.uat.ui.splash_v2.SplashV2Activity} does not exist.\n"
+	for name, c := range map[string]struct {
+		activity string
+		hint     bool
+	}{
+		"a relative name": {".ui.splash_v2.SplashV2Activity", true},
+		"a full name":     {"com.amf.superapp.ui.splash_v2.SplashV2Activity", false},
+	} {
+		r := newRig(t, func(_ *rig, cfg *mobiletest.ADBConfig) { cfg.StartOutput = missing })
+		r.opts.Apps = map[string]android.App{"shop": {Package: pkgShop, Activity: c.activity}}
+		err := r.driver(r.platform()).Launch(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "Error: Activity class {com.amf.superapp.uat/com.amf.superapp.uat.ui.splash_v2.SplashV2Activity} does not exist.") {
+			t.Fatalf("%s: error = %v", name, err)
+		}
+		if got := strings.Contains(err.Error(), "applicationIdSuffix"); got != c.hint {
+			t.Errorf("%s: hint = %v, want %v: %v", name, got, c.hint, err)
+		}
+	}
+}
+
 func TestLaunchReadsTheOutputForAnError(t *testing.T) {
 	r := newRig(t, func(_ *rig, c *mobiletest.ADBConfig) {
 		c.StartOutput = "Starting: Intent { cmp=com.example.shop/.Nope }\nError type 3\nError: Activity class {com.example.shop/com.example.shop.Nope} does not exist."
 	})
 	d := r.driver(r.platform())
 	err := d.Launch(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "the app could not be started: Error type 3") {
+	if err == nil || !strings.Contains(err.Error(), "the app could not be started: Error: Activity class {com.example.shop/com.example.shop.Nope} does not exist.") {
 		t.Errorf("error = %v", err)
 	}
 	if err := d.Open(context.Background(), "shop://x"); err == nil || !strings.Contains(err.Error(), "the link could not be opened") {

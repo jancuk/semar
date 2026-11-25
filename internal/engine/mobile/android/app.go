@@ -196,7 +196,7 @@ func (l *adbLife) launch(ctx context.Context) error {
 		return err
 	}
 	out, err := l.a.shell(ctx, "am", "start", "-W", "--activity-clear-task", "-n", comp, "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER")
-	return startResult("the app could not be started", out, err)
+	return withActivityHint(startResult("the app could not be started", out, err), l.app)
 }
 
 // launcher is the component to start: the activity of the service, or the launcher activity that the
@@ -240,12 +240,24 @@ func startResult(what, out string, err error) error {
 		return fmt.Errorf("%s: %w", what, err)
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if line = strings.TrimSpace(line); strings.HasPrefix(line, "Error") || strings.Contains(line, "Exception") {
-			return fmt.Errorf("%s: %s", what, firstLine(line))
+		if isFailureLine(strings.TrimSpace(line)) {
+			return fmt.Errorf("%s: %s", what, failureLine(out))
 		}
 	}
 	return nil
 }
+
+// withActivityHint adds to a failed start of a missing class what a name that starts with a dot hides:
+// it resolves against the package of the app, and a build with an applicationIdSuffix has classes in
+// another package.
+func withActivityHint(err error, app App) error {
+	if err == nil || !strings.HasPrefix(app.Activity, ".") || !activityMissing.MatchString(err.Error()) {
+		return err
+	}
+	return fmt.Errorf("%w: appActivity %s is relative, so it resolves against the package %s, and the class may be in another package when the build has an applicationIdSuffix: name the full class, such as com.example.ui.MainActivity, or leave appActivity empty", err, app.Activity, app.Package)
+}
+
+var activityMissing = regexp.MustCompile(`Activity class \{[^}]*\} does not exist`)
 
 func (l *adbLife) key(ctx context.Context, code int) error { return l.sess.PressKeycode(ctx, code) }
 

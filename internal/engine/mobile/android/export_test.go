@@ -4,4 +4,6 @@ package android
 var (
 	ShellQuote   = shellQuote
 	ShellCommand = shellCommand
+	FailureLine  = failureLine
+	CommandError = commandError
 )
