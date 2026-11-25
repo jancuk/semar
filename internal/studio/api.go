@@ -50,6 +50,9 @@ type sessionReply struct {
 	Device   string           `json:"device,omitempty"`
 	Physical bool             `json:"physicalDevice"`
 	CanUndo  bool             `json:"canUndo"`
+	// Saved says that the steps would write the files of the last save again, so a verify of that save is
+	// still a verify of the recording. It is false when a step changed since, and after an undo.
+	Saved bool `json:"saved"`
 	// Cursor is the number of steps that the device has been taken through: a new step goes after them.
 	Cursor int `json:"cursor"`
 	// Dirty says that a deleted step was done on the device, so it is not where the steps say: Go here fixes it.
@@ -147,6 +150,7 @@ func (s *Server) snapshot(ctx context.Context, f *mobilerec.Frame, withImage boo
 		return out
 	}
 	out.Kind, out.ID, out.Device, out.Physical, out.CanUndo = sess.Kind(), sess.ID(), sess.Device(), s.physical, sess.Last() != nil
+	out.Saved = sess.SavedCurrent()
 	out.Steps = sess.Steps()
 	out.Cursor, out.Dirty, out.Common, out.ScreenNames = sess.Cursor(), sess.Dirty(), sess.CommonCount(), sess.ScreenNames()
 	if f != nil {

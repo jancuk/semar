@@ -103,6 +103,7 @@ type Session struct {
 	events    []*event
 	wantClear bool
 	last      *Saved
+	lastSig   string // draftSig of the draft that last was written from
 	notice    string
 
 	// at is the cursor: the number of steps that the device has been taken through. A new step goes at the

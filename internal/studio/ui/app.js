@@ -175,6 +175,7 @@
     $('side').hidden = !live;
     $('work').classList.toggle('is-idle', !live);
     for (const id of ['refresh', 'reset', 'finish', 'flow-run', 'delete-last']) $(id).disabled = !live || busy;
+    $('finish').textContent = finished && session && session.saved ? 'Saved: verify…' : 'Finish & Save';
     $('delete-last').disabled = !live || busy || !(session && session.steps && session.steps.length);
     for (const btn of $('tools').querySelectorAll('button')) btn.disabled = !live || (busy && !(quick && btn.dataset.quick));
     $('screen-name').disabled = !live || busy;
@@ -1002,7 +1003,16 @@
     for (const b of ['fin-verify-btn', 'fin-next', 'fin-save']) $(b).classList.toggle('primary', b === id);
   }
 
+  // A save that the steps have not changed since reopens as it was, with its verify, so that closing the
+  // dialog never makes a verify need a second save. The server says whether the steps are unchanged.
   function openFinish() {
+    if (finished && session && session.saved) {
+      $('fin-error').hidden = true;
+      finishView(true);
+      if ($('fin-verify').querySelector('.verify')) $('fin-verify-btn').textContent = 'Verify again';
+      $('dlg-finish').showModal();
+      return;
+    }
     finished = null;
     $('fin-error').hidden = true;
     finishView(false);
@@ -1038,6 +1048,7 @@
     session = Object.assign({}, session, r.data);
     showSaved();
     drawSteps();
+    syncControls();
   }
 
   // fileLabel says what a saved file is. The script of a scenario is stored under the hash of what the
@@ -1155,6 +1166,7 @@
     const box = $('fin-verify');
     if (!r.ok) { box.append(h('p', { class: 'error', text: r.data.error })); return; }
     take(r.data);
+    finished = null;
     clear(box);
     finishView(false);
     const err = $('fin-error');

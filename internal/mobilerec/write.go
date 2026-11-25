@@ -3,6 +3,7 @@ package mobilerec
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/jancuk/semar/internal/atomicfile"
+	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/flow"
 	"github.com/jancuk/semar/internal/idcheck"
@@ -85,8 +87,37 @@ func (s *Session) Save(o SaveOptions) (*Saved, error) {
 		return nil, err
 	}
 	s.known = nil
-	s.last = sv
+	s.last, s.lastSig = sv, draftSig(d)
 	return sv, nil
+}
+
+// SavedCurrent says whether the steps would write the files of the last save again: nothing the files hold
+// has changed since. A save that was undone, and a recording that was never saved, give false.
+func (s *Session) SavedCurrent() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.last == nil {
+		return false
+	}
+	d, err := s.buildLocked()
+	return err == nil && draftSig(d) == s.lastSig
+}
+
+// draftSig is the digest of what a draft writes to the flow or the scenario. The elements that it adds to
+// the screens file are left out: the save puts them there, so a later build adds none.
+func draftSig(d Draft) string {
+	b, err := json.Marshal(struct {
+		Kind     Kind
+		ID, App  string
+		Ticket   string
+		Flow     domain.Flow
+		Scenario domain.Scenario
+		Script   domain.Script
+	}{d.Kind, d.ID, d.App, d.Ticket, d.Flow, d.Scenario, d.Script})
+	if err != nil {
+		return ""
+	}
+	return sum(b)
 }
 
 // Undo puts the repository back as it was before the latest save. It is one shot, it refuses when a file

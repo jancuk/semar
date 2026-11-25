@@ -429,6 +429,7 @@ type frameBody struct {
 	} `json:"captured"`
 	Kind    string `json:"kind"`
 	CanUndo bool   `json:"canUndo"`
+	Saved   bool   `json:"saved"`
 	Flow    string `json:"flow"`
 	Error   string `json:"error"`
 	Stale   bool   `json:"stale"`
@@ -1536,5 +1537,35 @@ func TestStudioDiagnosesAStaleStartAndSavesTheFix(t *testing.T) {
 	}
 	if f = c.call("POST", "/api/verify", m{}, 200); f.Verify.Diagnosis != nil || f.Verify.Status != "completed" {
 		t.Errorf("verify after the fix = %+v", f.Verify)
+	}
+}
+
+func TestStudioSaysWhetherTheSavedFilesAreStillTheRecording(t *testing.T) {
+	r := newRig(t)
+	var verifies []string
+	c, _ := start(t, r.deps(&verifies))
+
+	f := c.call("POST", "/api/session/start", m{"kind": "flow", "id": "login"}, 200)
+	if f.Saved {
+		t.Error("a recording that was never saved says it is saved")
+	}
+	f = c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "type", "index": f.find(t, byID("email")), "value": "ana@example.com"}, 200)
+	c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "tap", "index": f.find(t, byDesc("Sign in"))}, 200)
+
+	if f = c.call("POST", "/api/finish", m{"kind": "flow", "id": "login"}, 200); !f.Saved {
+		t.Error("the answer to a save says the steps changed since")
+	}
+	if f = c.call("POST", "/api/session/refresh", m{}, 200); !f.Saved {
+		t.Error("a refresh changed no step, and the save is no longer current")
+	}
+	if f = c.call("POST", "/api/verify", m{}, 200); !f.Saved {
+		t.Error("a verify changed no step, and the save is no longer current")
+	}
+	if f = c.call("DELETE", "/api/timeline/last", m{}, 200); f.Saved {
+		t.Error("a step was deleted, and the answer still says the save is current")
+	}
+	f = c.call("POST", "/api/undo", m{}, 200)
+	if f.Saved || f.CanUndo {
+		t.Errorf("after undo: saved %v, canUndo %v", f.Saved, f.CanUndo)
 	}
 }
