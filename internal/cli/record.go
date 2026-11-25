@@ -508,7 +508,8 @@ func replayOnce(ctx context.Context, out io.Writer, o options, f recordTestFlags
 	replayOnceWithBuilds(ctx, out, o, f, envName, app, id, nil)
 }
 
-func replayOnceWithBuilds(ctx context.Context, out io.Writer, o options, f recordTestFlags, envName, app, id string, builds []string) {
+// replayOnceWithBuilds also gives the step that the replay failed at, or "" when it passed or did not finish.
+func replayOnceWithBuilds(ctx context.Context, out io.Writer, o options, f recordTestFlags, envName, app, id string, builds []string) string {
 	r := replayScenario(ctx, o, f.dir, envName, id, builds)
 	var exit exitError
 	switch {
@@ -530,6 +531,21 @@ func replayOnceWithBuilds(ctx context.Context, out io.Writer, o options, f recor
 		fmt.Fprintf(out, "  The files are written. Fix the step in the file, or record it again with --replace.\n  report: %s\n", r.report)
 	}
 	report.WriteBlocked(out, envName, "scenario", r.blocked)
+	return failedStep(r.result)
+}
+
+// failedStep is the step of the first reason that a scenario did not pass for, or "" when it passed, did not
+// finish, or has a reason that no step owns.
+func failedStep(res *domain.ScenarioResult) string {
+	if res == nil || res.Outcome == domain.OutcomePassed {
+		return ""
+	}
+	for _, rs := range res.Reasons {
+		if rs.Step != "" {
+			return string(rs.Step)
+		}
+	}
+	return ""
 }
 
 // recordingWindow is what a recorder needs to open: the profile that it browses on.

@@ -699,6 +699,9 @@ type finishRequest struct {
 	Title        string `json:"title"`
 	Replace      bool   `json:"replace"`
 	ConfirmClear bool   `json:"confirmClear"`
+	// ClearFirstLaunch sets the first launch to reset with clear before it saves: the fix of a verify that
+	// began on another screen than the recording.
+	ClearFirstLaunch bool `json:"clearFirstLaunch"`
 }
 
 type finishReply struct {
@@ -742,6 +745,12 @@ func (s *Server) postFinish(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ConfirmClear {
 		sess.ConfirmClear()
+	}
+	if req.ClearFirstLaunch {
+		if err := sess.ClearFirstLaunch(); err != nil {
+			s.failure(s.base, w, err)
+			return
+		}
 	}
 	sv, err := sess.Save(mobilerec.SaveOptions{Replace: req.Replace})
 	if err != nil {
@@ -818,6 +827,9 @@ func (s *Server) postVerify(w http.ResponseWriter, r *http.Request) {
 		f = nil
 	case f != nil:
 		res.Message += " The device is back at the start of the app."
+		if res.Diagnosis = sess.DiagnoseReplay(res.FailedStep); res.Diagnosis != nil {
+			res.Message += " " + res.Diagnosis.Message
+		}
 	}
 	reply(w, http.StatusOK, verifyReply{sessionReply: *s.snapshot(ctx, f, true), Verify: res})
 }

@@ -243,7 +243,7 @@ func recordMobile(ctx context.Context, cmd *cobra.Command, o options, f recordTe
 	}
 	repl := &mobilerec.REPL{Session: sess, In: in, Out: out, Replace: f.replace || f.resume}
 	if !f.noReplay {
-		repl.Verify = func(ctx context.Context, sv *mobilerec.Saved) (string, error) {
+		repl.Verify = func(ctx context.Context, sv *mobilerec.Saved) (mobilerec.VerifyOutcome, error) {
 			return verifyRecording(ctx, o, f, sess, overlay, verifyOpen, envName, kind, name, app)
 		}
 	}
@@ -282,36 +282,37 @@ func recordingFactory(o options, dir string, cfg config.Config, envName string, 
 // device back. A flow runs through flow.Run and is reported as completed, never as passed: it has no
 // check. A scenario is replayed by the runner of semar run, with the same environment: the secrets that
 // were typed and the serial of the device.
-func verifyRecording(ctx context.Context, o options, f recordTestFlags, sess *mobilerec.Session, overlay *mobilerec.Overlay, open mobilerec.PlatformFactory, envName string, kind mobilerec.Kind, name, app string) (string, error) {
+func verifyRecording(ctx context.Context, o options, f recordTestFlags, sess *mobilerec.Session, overlay *mobilerec.Overlay, open mobilerec.PlatformFactory, envName string, kind mobilerec.Kind, name, app string) (mobilerec.VerifyOutcome, error) {
 	if err := sess.Suspend(ctx); err != nil {
-		return "", err
+		return mobilerec.VerifyOutcome{}, err
 	}
-	var msg string
+	var out mobilerec.VerifyOutcome
 	var err error
 	if kind == mobilerec.KindFlow {
-		msg, err = verifyFlow(ctx, f.dir, overlay, open, name)
+		out.Message, out.FailedStep, err = verifyFlow(ctx, f.dir, overlay, open, name)
 	} else {
 		var buf bytes.Buffer
 		oo := o
 		oo.LookupEnv = overlay.Lookup
 		oo.Stdin = strings.NewReader("")
-		replayOnceWithBuilds(ctx, &buf, oo, f, envName, app, name, recordVerifyBuilds(f.dir, envName))
-		msg = strings.TrimRight(buf.String(), "\n")
+		out.FailedStep = replayOnceWithBuilds(ctx, &buf, oo, f, envName, app, name, recordVerifyBuilds(f.dir, envName))
+		out.Message = strings.TrimRight(buf.String(), "\n")
 	}
 	if _, rerr := sess.Resume(ctx); rerr != nil {
 		err = errors.Join(err, fmt.Errorf("the device could not be taken back: %w", rerr))
 	}
-	return msg, err
+	return out, err
 }
 
-func verifyFlow(ctx context.Context, dir string, overlay *mobilerec.Overlay, open mobilerec.PlatformFactory, id string) (string, error) {
+// verifyFlow also gives the step of the flow that failed, or "" when none did.
+func verifyFlow(ctx context.Context, dir string, overlay *mobilerec.Overlay, open mobilerec.PlatformFactory, id string) (string, string, error) {
 	entry, err := flow.Load(dir, id)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	h, err := open(ctx, overlay.Lookup)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer func() {
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), androidCloseLimit)
@@ -320,7 +321,7 @@ func verifyFlow(ctx context.Context, dir string, overlay *mobilerec.Overlay, ope
 	}()
 	res, err := flow.RunWith(ctx, h.Engine, screenSource{repo: dir}, entry.Flow, nil, map[string]string{"run.id": "verify-" + id}, flow.Options{Flows: flow.Loader(dir).Flow})
 	if err != nil {
-		return "", fmt.Errorf("the flow %s could not be run: %s", id, terminalSafe(oneLine(overlay.Scrub(err.Error()))))
+		return "", "", fmt.Errorf("the flow %s could not be run: %s", id, terminalSafe(oneLine(overlay.Scrub(err.Error()))))
 	}
 	text := fmt.Sprintf("Verified on a clean device session: the flow %s %s, in %s.", id, res.Status, plural(len(res.Steps), "step"))
 	if res.Error != "" {
@@ -332,7 +333,17 @@ func verifyFlow(ctx context.Context, dir string, overlay *mobilerec.Overlay, ope
 	case res.Status == flow.StatusCompleted:
 		text += "\n  A flow has no check, so it completes and does not pass."
 	}
-	return text, nil
+	return text, failedFlowStep(res), nil
+}
+
+// failedFlowStep is the first step of a flow run whose action failed or was refused.
+func failedFlowStep(res flow.RunResult) string {
+	for _, st := range res.Steps {
+		if st.Action.Err != "" || st.Action.Refused != "" {
+			return st.Name
+		}
+	}
+	return ""
 }
 
 // recordVerifyBuilds supplies a synthetic "recording" build for standalone Android services that have

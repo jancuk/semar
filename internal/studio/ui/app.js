@@ -1116,9 +1116,38 @@
       }
       out.append(ul);
     }
+    if (v.diagnosis && v.diagnosis.kind === 'stale-start') {
+      out.append(h('div', { class: 'verify-fix' },
+        h('button', { type: 'button', class: 'btn primary', text: 'Reset with clear, save and verify again', onclick: () => fixStart(false) })));
+    }
     if (v.report) out.append(h('div', { class: 'hint fin-path', text: 'Full report: ' + v.report }));
     box.append(out);
     out.scrollIntoView({ block: 'nearest' });
+  }
+
+  // fixStart is the fix that a verify offers when the replay began on another screen than the recording: it
+  // saves again over the files of the last save with the first launch resetting with clear, and verifies.
+  async function fixStart(confirmClear) {
+    if (busy) return;
+    const body = {
+      kind: finishKind(), id: $('fin-id').value, ticket: $('fin-ticket').value, title: $('fin-title').value,
+      replace: true, confirmClear: !!confirmClear, clearFirstLaunch: true,
+    };
+    setBusy(true, 'Saving…');
+    finishLocked(true);
+    const r = await api('POST', '/api/finish', body);
+    setBusy(false);
+    finishLocked(false);
+    if (r.status === 428 && r.data.needsConfirm) {
+      confirm('Physical device', r.data.error, 'Confirm', () => fixStart(true));
+      return;
+    }
+    if (!r.ok) { $('fin-verify').append(h('p', { class: 'error', text: r.data.error || 'Nothing was saved.' })); return; }
+    finished = r.data;
+    take(r.data);
+    showSaved();
+    drawSteps();
+    await verify();
   }
 
   async function undo() {

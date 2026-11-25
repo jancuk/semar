@@ -23,10 +23,18 @@ type REPL struct {
 	// Replace lets finish write over a flow or a scenario of the same ID.
 	Replace bool
 	// Verify runs what finish saved on a clean device session, and says how it ended. It is optional.
-	Verify func(ctx context.Context, saved *Saved) (string, error)
+	Verify func(ctx context.Context, saved *Saved) (VerifyOutcome, error)
 
 	frame *Frame
+	// diag is what the last verify found wrong with the start, for fix.
+	diag  *Diagnosis
 	lines *bufio.Scanner
+}
+
+// VerifyOutcome is how a verify ended: what to tell the person, and the step that failed, if one did.
+type VerifyOutcome struct {
+	Message    string
+	FailedStep string
 }
 
 const helpText = `Commands (N is the number of an element; N.K picks the Kth locator of loc N, in tap, long, type, secret, scroll, wait, swipe, assert):
@@ -54,6 +62,7 @@ const helpText = `Commands (N is the number of an element; N.K picks the Kth loc
   delete [S]               delete step S, or the last step (the device stays where it is)
   goto S|end               take the device through the first S steps, so that a new step goes after them
   finish                   save, and verify when the command can
+  fix                      after a verify that began on another screen: reset with clear on the first launch, save, and verify again
   undo                     take back the last save, when no file changed since
   quit                     leave`
 
@@ -285,7 +294,9 @@ func (r *REPL) command(ctx context.Context, line string) (quit bool) {
 	case "delete":
 		r.delete(args)
 	case "finish":
-		r.finish(ctx)
+		r.finish(ctx, r.Replace)
+	case "fix":
+		r.fix(ctx)
 	case "undo":
 		if err := r.Session.Undo(); err != nil {
 			r.fail(err)
@@ -504,15 +515,38 @@ func (r *REPL) useFlow(ctx context.Context, args []string) {
 	r.show(f)
 }
 
-func (r *REPL) finish(ctx context.Context) {
-	sv, err := r.Session.Save(SaveOptions{Replace: r.Replace})
+// fix sets the reset of the first launch to clear, and saves and verifies again over the files of the last
+// save, which is what the diagnosis of the verify asked for.
+func (r *REPL) fix(ctx context.Context) {
+	if r.diag == nil {
+		r.say("There is nothing to fix: a verify has not found that the replay began on another screen.")
+		return
+	}
+	err := r.Session.ClearFirstLaunch()
+	if errors.Is(err, ErrNeedsConfirm) {
+		r.say("The first launch must reset with clear, which deletes the data of the app on %s.", r.Session.Device())
+		if answer, _ := r.ask("Type yes to allow it: "); strings.EqualFold(strings.TrimSpace(answer), "yes") {
+			r.Session.ConfirmClear()
+			err = r.Session.ClearFirstLaunch()
+		}
+	}
+	if err != nil {
+		r.fail(err)
+		return
+	}
+	r.finish(ctx, true)
+}
+
+func (r *REPL) finish(ctx context.Context, replace bool) {
+	r.diag = nil
+	sv, err := r.Session.Save(SaveOptions{Replace: replace})
 	if errors.Is(err, ErrNeedsConfirm) {
 		r.say("A replay of this sign-in must start with reset: clear, which deletes the data of the app on %s.", r.Session.Device())
 		fmt.Fprint(r.Out, "Type yes to allow it: ")
 		answer, _ := r.readLine()
 		if strings.EqualFold(strings.TrimSpace(answer), "yes") {
 			r.Session.ConfirmClear()
-			sv, err = r.Session.Save(SaveOptions{Replace: r.Replace})
+			sv, err = r.Session.Save(SaveOptions{Replace: replace})
 		}
 	}
 	if err != nil {
@@ -531,13 +565,19 @@ func (r *REPL) finish(ctx context.Context) {
 		return
 	}
 	r.say("Verifying on a clean device session...")
-	msg, err := r.Verify(ctx, sv)
+	out, err := r.Verify(ctx, sv)
 	if err != nil {
 		r.fail(err)
 	} else {
-		r.say("%s", msg)
+		r.say("%s", out.Message)
+		r.diag = r.Session.DiagnoseReplay(out.FailedStep)
 	}
-	r.say("Next: undo takes the save back, quit leaves.")
+	if r.diag != nil {
+		r.say("%s", r.diag.Message)
+		r.say("Next: fix does that and verifies again, undo takes the save back, quit leaves.")
+	} else {
+		r.say("Next: undo takes the save back, quit leaves.")
+	}
 	if f := r.Session.Frame(); f != nil {
 		r.frame = f
 	}

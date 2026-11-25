@@ -195,8 +195,10 @@ func (s *Session) Title() string {
 	return s.o.Title
 }
 
-// Start opens the device, resets the app, and shows the first frame. A recording always starts with a
-// reset, so a replay starts where the recording did. A scenario with a flow to use runs the flow.
+// Start opens the device, resets the app, and shows the first frame. The reset is the one of the service,
+// and restart and none keep the data of the app: a recording that signs in leaves it signed in, and a replay
+// then starts signed in, unless the first launch resets with clear (DiagnoseReplay finds that case). A
+// scenario with a flow to use runs the flow.
 func (s *Session) Start(ctx context.Context) (*Frame, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

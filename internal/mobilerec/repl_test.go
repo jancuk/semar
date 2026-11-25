@@ -113,9 +113,9 @@ func TestREPLVerifyHook(t *testing.T) {
 	r := newRig(t)
 	s := r.session(mobilerec.KindFlow, "login")
 	out := runREPL(t, r, s, "type 2 ana@example.com\nsecret 3 SHOP_PASSWORD\n"+canary+"\ntap 4\nfinish\nquit\n", func(rp *mobilerec.REPL) {
-		rp.Verify = func(ctx context.Context, sv *mobilerec.Saved) (string, error) {
+		rp.Verify = func(ctx context.Context, sv *mobilerec.Saved) (mobilerec.VerifyOutcome, error) {
 			res := verifyFlow(t, r, s, "login")
-			return "The flow login " + res.Status + ".", nil
+			return mobilerec.VerifyOutcome{Message: "The flow login " + res.Status + "."}, nil
 		}
 	})
 	if !strings.Contains(out, "The flow login completed.") {

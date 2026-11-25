@@ -313,7 +313,7 @@ func (b *studioBackend) verify(ctx context.Context, sess *mobilerec.Session, _ *
 		if err != nil {
 			return studio.VerifyResult{}, fmt.Errorf("the flow %s could not be run: %s", sess.ID(), clean(err.Error()))
 		}
-		out := studio.VerifyResult{Status: res.Status, Message: fmt.Sprintf("Verified on a clean device session: the flow %s %s, in %s.", sess.ID(), res.Status, plural(len(res.Steps), "step"))}
+		out := studio.VerifyResult{Status: res.Status, FailedStep: failedFlowStep(res), Message: fmt.Sprintf("Verified on a clean device session: the flow %s %s, in %s.", sess.ID(), res.Status, plural(len(res.Steps), "step"))}
 		for _, st := range res.Steps {
 			row := studio.VerifyStep{Name: st.Name, Status: "done"}
 			switch {
@@ -345,7 +345,7 @@ func (b *studioBackend) verify(ctx context.Context, sess *mobilerec.Session, _ *
 	case r.result == nil:
 		return studio.VerifyResult{Status: "error", Message: "The scenario did not finish. " + clean(r.stderr)}, nil
 	}
-	out := studio.VerifyResult{Status: string(r.result.Outcome), Report: r.report}
+	out := studio.VerifyResult{Status: string(r.result.Outcome), Report: r.report, FailedStep: failedStep(r.result)}
 	names := actionNames(b.f.dir, r.run, r.result.Actions, sess.Steps())
 	for _, a := range r.result.Actions {
 		out.Steps = append(out.Steps, studio.VerifyStep{Name: clean(names[a]), Status: "done"})

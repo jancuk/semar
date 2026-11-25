@@ -445,6 +445,11 @@ type frameBody struct {
 		Steps   []struct {
 			Name string `json:"name"`
 		} `json:"steps"`
+		Diagnosis *struct {
+			Kind     string `json:"kind"`
+			Recorded string `json:"recorded"`
+			Actual   string `json:"actual"`
+		} `json:"diagnosis"`
 	} `json:"verify"`
 }
 
@@ -1494,5 +1499,42 @@ func TestStudioReusesEngineShotAndHidesSecrets(t *testing.T) {
 	}
 	if strings.Contains(c.seen.String(), canary) {
 		t.Error("the secret appeared in a studio response")
+	}
+}
+
+func TestStudioDiagnosesAStaleStartAndSavesTheFix(t *testing.T) {
+	r := newRig(t)
+	var verifies []string
+	d := r.deps(&verifies)
+	verify := d.Verify
+	d.Verify = func(ctx context.Context, sess *mobilerec.Session, saved *mobilerec.Saved) (studio.VerifyResult, error) {
+		res, err := verify(ctx, sess, saved)
+		text, _ := os.ReadFile(filepath.Join(r.repo, ".semar/flows/login.yaml"))
+		if err == nil && !strings.Contains(string(text), "reset: clear") {
+			res.Status, res.FailedStep = "failed", sess.Steps()[1].ID
+		}
+		return res, err
+	}
+	c, _ := start(t, d)
+
+	f := c.call("POST", "/api/session/start", m{"kind": "flow", "id": "login"}, 200)
+	f = c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "type", "index": f.find(t, byID("email")), "value": "ana@example.com"}, 200)
+	c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "tap", "index": f.find(t, byDesc("Sign in"))}, 200)
+	c.call("POST", "/api/finish", m{"kind": "flow", "id": "login"}, 200)
+
+	f = c.call("POST", "/api/verify", m{}, 200)
+	if f.Verify.Diagnosis == nil || f.Verify.Diagnosis.Kind != "stale-start" || f.Verify.Diagnosis.Actual != "Home" || f.Verify.Diagnosis.Recorded != "SignIn" {
+		t.Fatalf("verify = %+v", f.Verify)
+	}
+	if !strings.Contains(f.Verify.Message, "The replay began on Home, not SignIn") {
+		t.Errorf("the message does not carry the diagnosis: %q", f.Verify.Message)
+	}
+
+	c.call("POST", "/api/finish", m{"kind": "flow", "id": "login", "replace": true, "clearFirstLaunch": true}, 200)
+	if text, _ := os.ReadFile(filepath.Join(r.repo, ".semar/flows/login.yaml")); !strings.Contains(string(text), "reset: clear") {
+		t.Fatalf("the fix was not saved:\n%s", text)
+	}
+	if f = c.call("POST", "/api/verify", m{}, 200); f.Verify.Diagnosis != nil || f.Verify.Status != "completed" {
+		t.Errorf("verify after the fix = %+v", f.Verify)
 	}
 }

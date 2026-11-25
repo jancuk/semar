@@ -227,6 +227,7 @@ dialog { overflow-x: hidden; max-height: 92vh; }
 .verify { margin: var(--s-3) 0; padding: var(--s-3); border-radius: var(--r-s); background: var(--sunken); border-left: 3px solid var(--line-strong); }
 .verify.is-ok { border-left-color: var(--ok); }
 .verify.is-bad { border-left-color: var(--bad); }
+.verify-fix { margin-top: var(--s-2); }
 .verify-msg { margin-top: var(--s-1); font-size: 13px; }
 .verify-steps { list-style: none; margin: var(--s-2) 0 0; padding: 0; max-height: 180px; overflow: auto; font-size: 12px; }
 .verify-steps li { display: flex; gap: var(--s-2); padding: 2px 0; color: var(--text-2); }

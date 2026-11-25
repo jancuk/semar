@@ -87,6 +87,11 @@ type VerifyResult struct {
 	Message string       `json:"message"`
 	Steps   []VerifyStep `json:"steps,omitempty"`
 	Report  string       `json:"report,omitempty"`
+	// FailedStep is the ID of the step that the replay failed at, which the command fills in. The studio
+	// reads it to find why, and Diagnosis is what it found: the studio fills that in, after it has the
+	// device back.
+	FailedStep string               `json:"failedStep,omitempty"`
+	Diagnosis  *mobilerec.Diagnosis `json:"diagnosis,omitempty"`
 }
 
 // Deps are what the studio takes from the command. Tests replace each of them.
