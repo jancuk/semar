@@ -2,9 +2,15 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"math"
 	"slices"
+	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/jancuk/semar/internal/config"
 	"github.com/jancuk/semar/internal/domain"
@@ -62,16 +68,21 @@ func androidApps(repo string, env config.Environment, declared declaredBuilds) m
 // device needs it, so a run with no such step never looks for adb. It is nil when no service of the
 // environment has an android app.
 func (rg *envRig) mobileEngine(o options, repo string, env config.Environment, declared declaredBuilds, budget int) *mobile.Engine {
-	eng, _ := rg.mobileEngineOn(o, repo, env, declared, budget)
+	eng, _ := rg.mobileEngineOn(o, repo, env, declared, budget, 0)
 	return eng
 }
 
 // mobileEngineOn is mobileEngine that also gives the platform that the engine acts on, for a caller that
-// reads the screen itself, as the recorder does.
-func (rg *envRig) mobileEngineOn(o options, repo string, env config.Environment, declared declaredBuilds, budget int) (*mobile.Engine, mobile.Platform) {
+// reads the screen itself, as the recorder does. A zero settle uses the engine's default (3s).
+func (rg *envRig) mobileEngineOn(o options, repo string, env config.Environment, declared declaredBuilds, budget int, settle time.Duration) (*mobile.Engine, mobile.Platform) {
 	apps := androidApps(repo, env, declared)
 	if len(apps) == 0 {
 		return nil, nil
+	}
+	// A settle that the caller bounds is the one of a recording, where a person waits on every action.
+	var poll time.Duration
+	if settle > 0 {
+		poll = recordingPoll
 	}
 	home, _ := o.home()
 	services := map[string]mobile.Service{}
@@ -97,20 +108,93 @@ func (rg *envRig) mobileEngineOn(o options, repo string, env config.Environment,
 		Sleep: o.Sleep,
 	})
 	return mobile.New(mobile.Options{
-		Policy:          rg.policy,
-		Recorder:        rg.recorder,
-		Files:           rg.run,
-		Secrets:         rg.secrets,
-		Platform:        platform,
-		Services:        services,
-		Kind:            env.Kind,
-		Run:             rg.id,
-		Budget:          budget,
-		CheckTimeout:    env.Android.CheckTimeout(),
-		Clock:           o.Clock,
-		LogcatOnFailure: env.Android.LogcatOnFailure,
-		Sleep:           o.Sleep,
+		Policy:             rg.policy,
+		Recorder:           rg.recorder,
+		Files:              rg.run,
+		Secrets:            rg.secrets,
+		Platform:           platform,
+		Services:           services,
+		Kind:               env.Kind,
+		Run:                rg.id,
+		Budget:             budget,
+		Settle:             settle,
+		SettlePoll:         poll,
+		CheckTimeout:       env.Android.CheckTimeout(),
+		Clock:              o.Clock,
+		LogcatOnFailure:    env.Android.LogcatOnFailure,
+		AccessibilityCheck: env.Checks.AccessibilityMode() != "off",
+		Sleep:              o.Sleep,
 	}), platform
+}
+
+type androidDisplayFlags struct {
+	theme        string
+	fontScale    float64
+	fontScaleSet bool
+	locale       string
+}
+
+func addAndroidDisplayFlags(cmd *cobra.Command, f *androidDisplayFlags) {
+	cmd.Flags().StringVar(&f.theme, "android-theme", "", "set Android theme for the run (light or dark); restored when the run ends")
+	cmd.Flags().Float64Var(&f.fontScale, "android-font-scale", 0, "set Android system font scale for the run (0.5 to 3.0); restored when the run ends")
+	cmd.Flags().StringVar(&f.locale, "android-locale", "", "set Android per-app BCP-47 locale for the run (Android 13+, e.g. en-US); restored when the run ends")
+}
+
+func validateAndroidDisplayFlags(cmd *cobra.Command, f *androidDisplayFlags) error {
+	if f.theme != "" {
+		f.theme = strings.ToLower(strings.TrimSpace(f.theme))
+		if f.theme != "light" && f.theme != "dark" {
+			return fmt.Errorf("--android-theme must be light or dark, got %q", f.theme)
+		}
+	}
+	if cmd.Flags().Changed("android-font-scale") {
+		f.fontScaleSet = true
+		if math.IsNaN(f.fontScale) || math.IsInf(f.fontScale, 0) || f.fontScale < config.AndroidMinFontScale || f.fontScale > config.AndroidMaxFontScale {
+			return fmt.Errorf("--android-font-scale must be from %.1f to %.1f, got %g", config.AndroidMinFontScale, config.AndroidMaxFontScale, f.fontScale)
+		}
+	}
+	if f.locale != "" {
+		f.locale = strings.TrimSpace(f.locale)
+		if !config.ValidAndroidLocale(f.locale) {
+			return fmt.Errorf("--android-locale %q must be a BCP-47 locale such as en-US", f.locale)
+		}
+	}
+	return nil
+}
+
+func applyAndroidDisplayFlags(stderr io.Writer, env config.Environment, f androidDisplayFlags) (config.Environment, error) {
+	if f.theme == "" && !f.fontScaleSet && f.locale == "" {
+		return env, nil
+	}
+	if env.Android.Remote() {
+		return env, errors.New("--android-theme, --android-font-scale, and --android-locale need adb and cannot be used with android.serverUrl")
+	}
+	if len(androidServices(env)) == 0 {
+		if stderr != nil {
+			var passed []string
+			if f.theme != "" {
+				passed = append(passed, "--android-theme")
+			}
+			if f.fontScaleSet {
+				passed = append(passed, "--android-font-scale")
+			}
+			if f.locale != "" {
+				passed = append(passed, "--android-locale")
+			}
+			fmt.Fprintf(stderr, "semar: ignoring %s: this environment has no Android service\n", strings.Join(passed, ", "))
+		}
+		return env, nil
+	}
+	if f.theme != "" {
+		env.Android.Theme = f.theme
+	}
+	if f.fontScaleSet {
+		env.Android.FontScale = f.fontScale
+	}
+	if f.locale != "" {
+		env.Android.Locale = f.locale
+	}
+	return env, nil
 }
 
 const (

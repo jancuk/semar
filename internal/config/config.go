@@ -55,9 +55,19 @@ type Environment struct {
 }
 
 // Checks is environments.<name>.checks. Schema is fail, warn, or off, and empty means fail.
+// Accessibility is warn or off, and empty means warn.
 type Checks struct {
-	Schema       string       `yaml:"schema"`
-	ResponseTime ResponseTime `yaml:"responseTime"`
+	Schema        string       `yaml:"schema"`
+	ResponseTime  ResponseTime `yaml:"responseTime"`
+	Accessibility string       `yaml:"accessibility,omitempty"`
+}
+
+// AccessibilityMode is the accessibility check mode for mobile screens: warn (default) or off.
+func (c Checks) AccessibilityMode() string {
+	if c.Accessibility == "" {
+		return "warn"
+	}
+	return c.Accessibility
 }
 
 // ResponseTime is the time limit of a response. With no Limit nothing is checked. On is warn or
@@ -97,12 +107,20 @@ type Android struct {
 	// LogcatOnFailure writes the last 200 log lines of the app to the run directory when a mobile step
 	// fails. The crash report is written without it.
 	LogcatOnFailure bool `yaml:"logcatOnFailure,omitempty"`
+	// Theme sets the system dark/light theme for the run: light or dark. Empty leaves the device as it is.
+	Theme string `yaml:"theme,omitempty"`
+	// FontScale sets the system font_scale for the run, from 0.5 to 3.0. Zero leaves the device as it is.
+	FontScale float64 `yaml:"fontScale,omitempty"`
+	// Locale sets the per-app BCP-47 locale for the run (Android 13 or later), such as en-US.
+	Locale string `yaml:"locale,omitempty"`
 }
 
-// The defaults of Android, which a zero value in the file stands for.
+// The defaults and bounds of Android, which a zero value in the file stands for.
 const (
 	DefaultAndroidTimeout      = 5 * time.Second
 	DefaultAndroidStartTimeout = 60 * time.Second
+	AndroidMinFontScale        = 0.5
+	AndroidMaxFontScale        = 3.0
 )
 
 // CheckTimeout is how long a check of a screen waits for its condition.

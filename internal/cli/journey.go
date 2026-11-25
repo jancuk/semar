@@ -275,6 +275,7 @@ type journeyRunFlags struct {
 	builds   []string
 	dir      string
 	headed   bool
+	android  androidDisplayFlags
 }
 
 func newJourneyRunCommand(o options) *cobra.Command {
@@ -298,6 +299,9 @@ func newJourneyRunCommand(o options) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateAndroidDisplayFlags(cmd, &f.android); err != nil {
+				return err
+			}
 			return runJourneys(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f, args)
 		},
 	}
@@ -306,6 +310,7 @@ func newJourneyRunCommand(o options) *cobra.Command {
 	cmd.Flags().StringVar(&f.env, "env", "", "the environment of semar.yaml to run against; needed when there are several, and always for a production environment")
 	cmd.Flags().StringArrayVar(&f.builds, "build", nil, "the commit that a service with no build probe runs, as <commit> or <service>=<commit>; repeat for more")
 	cmd.Flags().BoolVar(&f.headed, "headed", false, "show the browser window of a web leg")
+	addAndroidDisplayFlags(cmd, &f.android)
 	addDirFlag(cmd, &f.dir)
 	return cmd
 }
@@ -362,6 +367,10 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 	if err != nil {
 		return err
 	}
+	env, err = applyAndroidDisplayFlags(stderr, env, f.android)
+	if err != nil {
+		return err
+	}
 	if env.Kind == config.KindProduction && f.env == "" {
 		return fmt.Errorf("the environment %q is a production environment; name it with --env %s to run against it", envName, envName)
 	}
@@ -392,6 +401,7 @@ func runJourneys(ctx context.Context, stdout, stderr io.Writer, o options, f jou
 	}
 	report.WriteBlocked(stdout, envName, "scenario", fin.blocked)
 	report.WriteDocWarnings(stdout, envName, fin.docs)
+	report.WriteA11yWarnings(stdout, envName, fin.a11y)
 	report.WriteMisses(stdout, string(record.ID), fin.misses)
 	fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
 	if interrupted {
@@ -517,7 +527,7 @@ func executeJourneys(ctx context.Context, stderr io.Writer, o options, dir strin
 			return finishedRun{}, err
 		}
 	}
-	return finishedRun{record: record, reportPath: filepath.Join(rg.store.Root(), "runs", string(rg.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts), misses: report.Misses(acts), docs: report.DocFindings(acts), reports: set}, nil
+	return finishedRun{record: record, reportPath: filepath.Join(rg.store.Root(), "runs", string(rg.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts), misses: report.Misses(acts), docs: report.DocFindings(acts), a11y: report.A11yFindings(acts), reports: set}, nil
 }
 
 // legStepAccounts is the as of each step of a leg that has one.

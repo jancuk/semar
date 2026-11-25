@@ -186,3 +186,44 @@ func TestAndroidLogcatOnFailure(t *testing.T) {
 		t.Error("a logcatOnFailure that is not a boolean must be refused")
 	}
 }
+
+func TestAndroidDisplayAndAccessibilityCheckRules(t *testing.T) {
+	good := "      theme: dark\n      fontScale: 1.5\n      locale: id-ID\n"
+	cfg, err := loadText(t, androidText(good, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := cfg.Environments["uat"]
+	if e.Android.Theme != "dark" || e.Android.FontScale != 1.5 || e.Android.Locale != "id-ID" {
+		t.Errorf("android = %+v", e.Android)
+	}
+	if e.Checks.AccessibilityMode() != "warn" {
+		t.Errorf("default accessibility mode = %q, want warn", e.Checks.AccessibilityMode())
+	}
+
+	for name, c := range map[string]struct{ env, want string }{
+		"bad theme":             {"      theme: neon\n", "android.theme must be light or dark"},
+		"fontScale too low":     {"      fontScale: 0.2\n", "android.fontScale must be from 0.5 to 3.0"},
+		"fontScale too high":    {"      fontScale: 3.5\n", "android.fontScale must be from 0.5 to 3.0"},
+		"bad locale":            {"      locale: en_US\n", "android.locale"},
+		"theme with serverUrl":  {"      serverUrl: http://127.0.0.1:4723\n      theme: dark\n", "does not use adb"},
+		"scale with serverUrl":  {"      serverUrl: http://127.0.0.1:4723\n      fontScale: 1.5\n", "does not use adb"},
+		"locale with serverUrl": {"      serverUrl: http://127.0.0.1:4723\n      locale: en-US\n", "does not use adb"},
+	} {
+		_, err := loadText(t, androidText(c.env, ""))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: want error with %q, got %v", name, c.want, err)
+		}
+	}
+
+	offCfg, err := loadText(t, androidHead+"    checks:\n      accessibility: off\n    services:\n      - name: shop-app\n        baseUrl: https://shop.uat.example.com\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offCfg.Environments["uat"].Checks.AccessibilityMode() != "off" {
+		t.Errorf("accessibility mode = %q, want off", offCfg.Environments["uat"].Checks.AccessibilityMode())
+	}
+	if _, err := loadText(t, androidHead+"    checks:\n      accessibility: fail\n    services:\n      - name: shop-app\n        baseUrl: https://shop.uat.example.com\n"); err == nil || !strings.Contains(err.Error(), "checks.accessibility") {
+		t.Errorf("checks.accessibility=fail: err = %v", err)
+	}
+}

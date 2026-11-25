@@ -3,6 +3,7 @@ package mobiletest
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/engine/mobile"
@@ -61,6 +62,9 @@ type FakeDriver struct {
 	OnReset func(mode string)
 	// Sources, when set, is a script of what Source returns, one per call. The last one repeats.
 	Sources []*mobile.Tree
+	// SourceDelay makes every Source wait this long first, or until its context ends, as a screen that is
+	// slow to read does.
+	SourceDelay time.Duration
 	// Clip is what Clipboard reads.
 	Clip string
 	Info mobile.About
@@ -75,6 +79,7 @@ type FakeDriver struct {
 	keys        []mobile.Key
 	links       []string
 	sourceCalls int
+	shotCalls   int
 	resetModes  []string
 }
 
@@ -130,6 +135,13 @@ func (f *FakeDriver) SourceCalls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.sourceCalls
+}
+
+// ScreenshotCalls is how many times a screenshot was taken.
+func (f *FakeDriver) ScreenshotCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.shotCalls
 }
 
 func (f *FakeDriver) Reset(context.Context) error {
@@ -189,7 +201,19 @@ func (f *FakeDriver) Open(_ context.Context, link string) error {
 	return f.OpenErr
 }
 
-func (f *FakeDriver) Source(context.Context) (*mobile.Tree, error) {
+func (f *FakeDriver) Source(ctx context.Context) (*mobile.Tree, error) {
+	f.mu.Lock()
+	delay := f.SourceDelay
+	f.mu.Unlock()
+	if delay > 0 {
+		t := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, ctx.Err()
+		case <-t.C:
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sourceCalls++
@@ -241,6 +265,7 @@ func (f *FakeDriver) Key(_ context.Context, k mobile.Key) error {
 func (f *FakeDriver) Screenshot(context.Context) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.shotCalls++
 	return f.Shot, f.ShotErr
 }
 

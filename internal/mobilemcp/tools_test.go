@@ -19,7 +19,7 @@ import (
 
 var wantTools = []string{
 	"mobile_list_available_devices", "mobile_use_device", "mobile_get_screen_size", "mobile_get_orientation",
-	"mobile_set_orientation", "mobile_fold_device", "mobile_set_location", "mobile_clipboard",
+	"mobile_set_orientation", "mobile_set_theme", "mobile_set_font_scale", "mobile_fold_device", "mobile_set_location", "mobile_clipboard",
 	"mobile_list_apps", "mobile_get_foreground_app", "mobile_launch_app", "mobile_terminate_app",
 	"mobile_install_app", "mobile_uninstall_app", "mobile_clear_app_data",
 	"mobile_take_screenshot", "mobile_save_screenshot", "mobile_list_elements_on_screen",
@@ -46,7 +46,7 @@ func TestToolsAreTheExpectedSetAndPassTheSchemaCheck(t *testing.T) {
 	if !reflect.DeepEqual(names, wantTools) {
 		t.Errorf("tools = %v", names)
 	}
-	if len(tools) != 32 {
+	if len(tools) != 34 {
 		t.Errorf("%d tools", len(tools))
 	}
 	for _, tool := range tools {
@@ -80,7 +80,7 @@ func TestToolsAreTheExpectedSetAndPassTheSchemaCheck(t *testing.T) {
 func TestSchemaGolden(t *testing.T) {
 	f := newFixture(t)
 	required := map[string][]string{
-		"mobile_use_device": {"device"}, "mobile_set_orientation": {"orientation"}, "mobile_fold_device": {"posture"},
+		"mobile_use_device": {"device"}, "mobile_set_orientation": {"orientation"}, "mobile_set_theme": {"theme"}, "mobile_set_font_scale": {"scale"}, "mobile_fold_device": {"posture"},
 		"mobile_launch_app": {"packageName"}, "mobile_terminate_app": {"packageName"}, "mobile_install_app": {"path"},
 		"mobile_uninstall_app": {"packageName"}, "mobile_clear_app_data": {"packageName"}, "mobile_save_screenshot": {"saveTo"},
 		"mobile_swipe_on_screen": {"direction"}, "mobile_press_button": {"button"}, "mobile_open_url": {"url"},
@@ -149,6 +149,22 @@ func TestDeviceToolsHappyPath(t *testing.T) {
 		t.Errorf("device orientation = %s", d.orient)
 	}
 	f.fails("mobile_set_orientation", `{"orientation":"sideways"}`, "portrait or landscape")
+
+	var th map[string]string
+	decode(t, f.ok("mobile_set_theme", `{"theme":"dark"}`), &th)
+	if th["theme"] != "dark" || th["previous"] != "light" || d.theme != "dark" {
+		t.Errorf("theme = %v, dev = %s", th, d.theme)
+	}
+	f.fails("mobile_set_theme", `{"theme":"neon"}`, "light or dark")
+
+	var fs map[string]float64
+	decode(t, f.ok("mobile_set_font_scale", `{"scale":1.5}`), &fs)
+	if fs["fontScale"] != 1.5 || fs["previous"] != 1.0 || d.fontScale != 1.5 {
+		t.Errorf("fontScale = %v, dev = %g", fs, d.fontScale)
+	}
+	f.fails("mobile_set_font_scale", `{"scale":0}`, "0.5 to 3.0")
+	f.fails("mobile_set_font_scale", `{"scale":4.0}`, "0.5 to 3.0")
+	f.fails("mobile_set_font_scale", `{}`, "scale is required")
 
 	f.ok("mobile_fold_device", `{"posture":"half-open"}`)
 	if d.called("Fold half-open") != 1 {
@@ -398,7 +414,7 @@ func TestLogsHappyPathAndSaveTo(t *testing.T) {
 		} `json:"entries"`
 	}
 	decode(t, f.ok("mobile_get_device_logs", `{"limit":50,"filter":["tag=OkHttp"],"recent":true}`), &got)
-	if got.Count != 2 || got.Entries[0].Tag != "OkHttp" {
+	if got.Count != 1 || got.Entries[0].Tag != "OkHttp" {
 		t.Errorf("got = %+v", got)
 	}
 	q := f.dev.logQuery

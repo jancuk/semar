@@ -276,6 +276,23 @@ type MobileRecord struct {
 	// LogcatFile is the path of the log tail of the app, relative to the run directory, written when
 	// android.logcatOnFailure is on.
 	LogcatFile string `json:"logcatFile,omitempty"`
+	// Accessibility holds non-failing accessibility warnings found on the settled screen, such as
+	// unlabeled interactive controls or touch targets smaller than 48dp. It never changes the verdict.
+	Accessibility []AccessibilityIssue `json:"accessibility,omitempty"`
+}
+
+// AccessibilityIssue is one accessibility problem found on a mobile screen. It is evidence only and
+// never changes the verdict.
+type AccessibilityIssue struct {
+	Screen     string `json:"screen,omitempty"`
+	Kind       string `json:"kind"`
+	Class      string `json:"class,omitempty"`
+	Role       string `json:"role,omitempty"`
+	ResourceID string `json:"resourceId,omitempty"`
+	Label      string `json:"label,omitempty"`
+	Bounds     string `json:"bounds,omitempty"`
+	WidthDP    int    `json:"widthDp,omitempty"`
+	HeightDP   int    `json:"heightDp,omitempty"`
 }
 
 // MobileCrash says that the app crashed, or did not respond, and where the report of the device is.

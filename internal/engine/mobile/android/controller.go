@@ -36,13 +36,15 @@ const maxClipboard = 64 << 10
 type Controller struct {
 	p *Platform
 
-	mu       sync.Mutex
-	drv      *driver
-	drvSess  *webdriver.Session
-	rotation *savedRotation
-	folded   bool
-	rec      *recording
-	ime      imeCache
+	mu        sync.Mutex
+	drv       *driver
+	drvSess   *webdriver.Session
+	rotation  *savedRotation
+	theme     *string
+	fontScale *savedFontScale
+	folded    bool
+	rec       *recording
+	ime       imeCache
 }
 
 // savedRotation is what the rotation settings were before the first SetOrientation.
@@ -494,6 +496,22 @@ func (c *Controller) undo(ctx context.Context) []error {
 		}
 		cancel()
 		c.folded = false
+	}
+	if c.fontScale != nil {
+		sctx, cancel := step()
+		if err := restoreFontScale(sctx, a, *c.fontScale); err != nil {
+			errs = append(errs, err)
+		}
+		cancel()
+		c.fontScale = nil
+	}
+	if c.theme != nil {
+		sctx, cancel := step()
+		if err := restoreTheme(sctx, a, *c.theme); err != nil {
+			errs = append(errs, err)
+		}
+		cancel()
+		c.theme = nil
 	}
 	return errs
 }

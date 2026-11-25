@@ -114,6 +114,8 @@ type Activity struct {
 	// log of the app that a device action kept as evidence of why it failed.
 	CrashFile  string `json:"crashFile,omitempty"`
 	LogcatFile string `json:"logcatFile,omitempty"`
+	// Accessibility holds non-failing accessibility warnings found on the screen of a device action.
+	Accessibility []AccessibilityIssue `json:"accessibility,omitempty"`
 }
 
 // ElementMiss is an element that a device step looked for and did not find. Repair holds the locators

@@ -52,6 +52,7 @@ type runFlags struct {
 	base       string
 	dir        string
 	headed     bool
+	android    androidDisplayFlags
 	// pauseOnFail is the value of --pause-on-fail.
 	pauseOnFail bool
 	// done is told how the scenarios of the run ended, and where the report is. semar record uses it to
@@ -102,6 +103,9 @@ func newRunCommand(o options) *cobra.Command {
 			if f.ci {
 				f.noPlan = true
 			}
+			if err := validateAndroidDisplayFlags(cmd, &f.android); err != nil {
+				return err
+			}
 			return runDaily(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), o, f)
 		},
 	}
@@ -118,6 +122,7 @@ func newRunCommand(o options) *cobra.Command {
 	cmd.Flags().StringVar(&f.base, "base", "", "the branch that the change is measured against (default: change.base, else the default branch of origin, else main)")
 	cmd.Flags().BoolVar(&f.pauseOnFail, "pause-on-fail", false, "stop at a step on a device that failed, show the closest elements, and wait for Enter; needs a terminal, and not with --ci")
 	cmd.Flags().BoolVar(&f.headed, "headed", false, "show the browser window of a web step")
+	addAndroidDisplayFlags(cmd, &f.android)
 	addDirFlag(cmd, &f.dir)
 	return cmd
 }
@@ -131,6 +136,7 @@ type finishedRun struct {
 	blocked     []report.BlockedHost
 	misses      []report.Miss
 	docs        []report.DocFinding
+	a11y        []report.A11yFinding
 	reports     reportSet
 }
 
@@ -189,7 +195,7 @@ func executeScenarios(ctx context.Context, stderr io.Writer, o options, dir stri
 			return finishedRun{}, err
 		}
 	}
-	return finishedRun{record: record, reportPath: filepath.Join(r.store.Root(), "runs", string(r.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts), misses: report.Misses(acts), docs: report.DocFindings(acts), reports: set}, nil
+	return finishedRun{record: record, reportPath: filepath.Join(r.store.Root(), "runs", string(r.id), reportFile), interrupted: interrupted, coverage: coverage, blocked: report.BlockedHosts(acts), misses: report.Misses(acts), docs: report.DocFindings(acts), a11y: report.A11yFindings(acts), reports: set}, nil
 }
 
 // effectsWords says what a test may change in an environment of this effects mode.

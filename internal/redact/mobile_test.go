@@ -25,6 +25,10 @@ func TestMobileRecordHoldsNoSecret(t *testing.T) {
 			Elements: map[string]domain.ElementState{"pw": {Found: true, Count: 1, Text: secret, Locator: loc, Attrs: map[string]string{"hint": "k=" + secret}}},
 			Repair:   []domain.Candidate{{Element: "pw", Locator: *loc, Why: "same name " + secret}},
 			Crash:    &domain.MobileCrash{Summary: "IllegalStateException: bad token " + secret, File: "crash-3.txt"},
+			Accessibility: []domain.AccessibilityIssue{{
+				Screen: "Screen-" + secret, Kind: "small_target", Class: "com.x." + secret,
+				ResourceID: "com.x:id/" + secret, Label: "Tap " + secret, Bounds: "[0,0][20,20]",
+			}},
 		},
 	}
 	out := r.Action(a)

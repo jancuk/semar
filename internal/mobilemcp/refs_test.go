@@ -286,3 +286,111 @@ func TestSeveralMatchesPreferTheSameBoxElseStale(t *testing.T) {
 	}
 	f.fails("mobile_click_on_screen_at_coordinates", `{"ref":"e1"}`, "stale")
 }
+
+func TestListingAccessibilityNotesCleanAndFailing(t *testing.T) {
+	makeTree := func(kids ...*mobile.Node) *mobile.Tree {
+		full := mobile.Rect{Right: 1080, Bottom: 2400}
+		win := &mobile.Node{Class: "android.widget.FrameLayout", Package: "com.shop", Enabled: true, Bounds: full, Children: kids}
+		tr := &mobile.Tree{Root: &mobile.Node{Class: "hierarchy", Bounds: full, Children: []*mobile.Node{win}}, Width: 1080, Height: 2400}
+		tr.Finish()
+		return tr
+	}
+	// Clean tree: 200x160 button at 420 dpi is ~76x61dp and labeled.
+	f := newFixture(t)
+	f.dev.setTree(makeTree(&mobile.Node{
+		Class: "android.widget.Button", Role: "button", Package: "com.shop", ID: "com.shop:id/ok", Text: "Continue", Enabled: true,
+		Bounds: mobile.Rect{Left: 100, Top: 400, Right: 300, Bottom: 560}, Attrs: map[string]string{"clickable": "true"},
+	}))
+	cleanText := textOf(f.ok("mobile_list_elements_on_screen", ""))
+	if strings.Contains(cleanText, "note: accessibility:") {
+		t.Errorf("clean screen had an accessibility note:\n%s", cleanText)
+	}
+
+	// Failing tree: unlabeled icon button + tiny labeled button + extra issues to test truncation & secret scrubbing.
+	f.scrub.Add("secret-token-xyz")
+	f.dev.setTree(makeTree(
+		&mobile.Node{Class: "android.widget.ImageButton", Role: "button", Package: "com.shop", ID: "com.shop:id/icon_secret-token-xyz", Enabled: true,
+			Bounds: mobile.Rect{Left: 100, Top: 200, Right: 300, Bottom: 400}, Attrs: map[string]string{"clickable": "true"}},
+		&mobile.Node{Class: "android.widget.Button", Role: "button", Package: "com.shop", ID: "com.shop:id/close", Desc: "Close", Enabled: true,
+			Bounds: mobile.Rect{Left: 400, Top: 200, Right: 480, Bottom: 280}, Attrs: map[string]string{"clickable": "true"}}, // 80px @ 420dpi = 30dp
+		&mobile.Node{Class: "android.widget.ImageButton", Role: "button", Package: "com.shop", Enabled: true,
+			Bounds: mobile.Rect{Left: 100, Top: 500, Right: 160, Bottom: 560}, Attrs: map[string]string{"clickable": "true"}}, // missing + small
+	))
+	got := textOf(f.ok("mobile_list_elements_on_screen", ""))
+	if !strings.Contains(got, "note: accessibility:") {
+		t.Fatalf("expected accessibility note:\n%s", got)
+	}
+	if strings.Contains(got, "secret-token-xyz") {
+		t.Errorf("secret leaked into accessibility note:\n%s", got)
+	}
+	if !strings.Contains(got, "2 missing labels") || !strings.Contains(got, "2 small touch targets (<48dp)") || !strings.Contains(got, "and 1 more") {
+		t.Errorf("unexpected accessibility note:\n%s", got)
+	}
+	if !strings.Contains(got, "e1 ") || !strings.Contains(got, `e2 "Close" (30x30dp)`) {
+		t.Errorf("expected eN refs in accessibility note:\n%s", got)
+	}
+}
+
+func TestScreenDensityRetriesAfterTransientScreenSizeError(t *testing.T) {
+	full := mobile.Rect{Right: 1080, Bottom: 2400}
+	small := &mobile.Node{
+		Class: "android.widget.Button", Role: "button", Package: "com.shop", ID: "com.shop:id/tiny", Desc: "Tiny", Enabled: true,
+		Bounds: mobile.Rect{Left: 400, Top: 200, Right: 480, Bottom: 280}, Attrs: map[string]string{"clickable": "true"},
+	}
+	win := &mobile.Node{Class: "android.widget.FrameLayout", Package: "com.shop", Enabled: true, Bounds: full, Children: []*mobile.Node{small}}
+	tr := &mobile.Tree{Root: &mobile.Node{Class: "hierarchy", Bounds: full, Children: []*mobile.Node{win}}, Width: 1080, Height: 2400}
+	tr.Finish()
+
+	f := newFixture(t)
+	f.dev.setTree(tr)
+	f.dev.err["ScreenSize"] = errBoom
+
+	// First call: ScreenSize fails transiently -> small-target check skipped, NOT permanently cached as 0.
+	first := textOf(f.ok("mobile_list_elements_on_screen", ""))
+	if strings.Contains(first, "small touch target") {
+		t.Errorf("unexpected small target note when ScreenSize failed:\n%s", first)
+	}
+
+	// Second call: ScreenSize succeeds -> small-target check runs and density is cached.
+	delete(f.dev.err, "ScreenSize")
+	second := textOf(f.ok("mobile_list_elements_on_screen", ""))
+	if !strings.Contains(second, "1 small touch target (<48dp)") {
+		t.Errorf("small target note missing after ScreenSize recovered:\n%s", second)
+	}
+	// Third call uses cached density without calling ScreenSize again.
+	before := f.dev.called("ScreenSize")
+	f.ok("mobile_list_elements_on_screen", "")
+	if after := f.dev.called("ScreenSize"); after != before {
+		t.Errorf("ScreenSize called again after caching: %d -> %d", before, after)
+	}
+}
+
+func TestA11yNoteDoesNotMisattributeRefOnSameBoundsWrapper(t *testing.T) {
+	full := mobile.Rect{Right: 1080, Bottom: 2400}
+	sameBounds := mobile.Rect{Left: 100, Top: 200, Right: 300, Bottom: 400}
+	// A checkable node with no label shares identical bounds with a listed TextView sibling.
+	// ListElements lists only the TextView (e1), NOT the unlabeled checkable node, while
+	// CheckAccessibility flags the checkable node as missing_label. refForIssue must match by
+	// exact *mobile.Node pointer so it omits e1 rather than pointing at the sibling TextView.
+	listed := &mobile.Node{
+		Class: "android.widget.TextView", Role: "text", Package: "com.shop", Text: "Label", Enabled: true,
+		Bounds: sameBounds, Attrs: map[string]string{"text": "Label"},
+	}
+	unlisted := &mobile.Node{
+		Class: "android.widget.CheckBox", Package: "com.shop", ID: "com.shop:id/toggle", Enabled: true,
+		Bounds: sameBounds, Attrs: map[string]string{"checkable": "true"},
+	}
+	win := &mobile.Node{Class: "android.widget.FrameLayout", Package: "com.shop", Enabled: true, Bounds: full, Children: []*mobile.Node{listed, unlisted}}
+	tr := &mobile.Tree{Root: &mobile.Node{Class: "hierarchy", Bounds: full, Children: []*mobile.Node{win}}, Width: 1080, Height: 2400}
+	tr.Finish()
+
+	f := newFixture(t)
+	f.dev.setTree(tr)
+	got := textOf(f.ok("mobile_list_elements_on_screen", ""))
+	if !strings.Contains(got, "note: accessibility: 1 missing label: id=toggle (missing label)") {
+		t.Errorf("expected checkable issue without misattributed ref, got:\n%s", got)
+	}
+	if strings.Contains(got, "e1 id=toggle") {
+		t.Errorf("unlisted node stole listed sibling's e1 ref:\n%s", got)
+	}
+}

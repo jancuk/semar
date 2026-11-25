@@ -158,7 +158,7 @@ func TestServerEndToEnd(t *testing.T) {
 	ctx := t.Context()
 	do := func(msg string) string { return string(srv.Handle(ctx, nil, []byte(msg))) }
 	list := do(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
-	if strings.Count(list, `"name":"mobile_`) != 32 || !strings.Contains(list, `"readOnlyHint":true`) || strings.Contains(list, "oneOf") || strings.Contains(list, "additionalProperties") {
+	if strings.Count(list, `"name":"mobile_`) != 34 || !strings.Contains(list, `"readOnlyHint":true`) || strings.Contains(list, "oneOf") || strings.Contains(list, "additionalProperties") {
 		t.Errorf("tools/list = %.300s", list)
 	}
 	got := do(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mobile_get_screen_size","arguments":{}}}`)

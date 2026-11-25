@@ -299,6 +299,9 @@ func stepText(e *event) string {
 	if verb == "" {
 		verb = string(e.do)
 	}
+	if e.do == domain.MobileSwipe && e.hint == "" && e.value != "" {
+		return swipeText(e.value)
+	}
 	text := verb
 	if e.hint != "" {
 		text += " " + e.hint

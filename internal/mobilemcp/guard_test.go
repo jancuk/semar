@@ -32,7 +32,7 @@ func TestObserveModeRefusesEveryToolThatChangesSomething(t *testing.T) {
 			}
 		}
 	}
-	if writes != 20 || reads != 12 {
+	if writes != 22 || reads != 12 {
 		t.Errorf("%d writes, %d reads", writes, reads)
 	}
 	if f.opens.Load() != 0 || len(f.dev.calls) > 40 {
@@ -40,7 +40,7 @@ func TestObserveModeRefusesEveryToolThatChangesSomething(t *testing.T) {
 		t.Logf("opens %d, calls %d", f.opens.Load(), len(f.dev.calls))
 	}
 	for _, c := range f.dev.calls {
-		for _, w := range []string{"Touch", "Key", "TypeFocused", "LaunchApp", "TerminateApp", "InstallAPK", "UninstallApp", "ClearAppData", "OpenURL", "StartRecording", "StopRecording", "SetOrientation", "Fold", "SetLocation", "ClearLocation", "SetClipboard"} {
+		for _, w := range []string{"Touch", "Key", "TypeFocused", "LaunchApp", "TerminateApp", "InstallAPK", "UninstallApp", "ClearAppData", "OpenURL", "StartRecording", "StopRecording", "SetOrientation", "SetTheme", "SetFontScale", "Fold", "SetLocation", "ClearLocation", "SetClipboard"} {
 			if strings.HasPrefix(c, w) {
 				t.Errorf("a write reached the device in observe mode: %s", c)
 			}

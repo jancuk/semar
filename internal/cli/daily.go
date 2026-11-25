@@ -57,6 +57,10 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 		return err
 	}
 	env = withServiceAuth(cfg, env)
+	env, err = applyAndroidDisplayFlags(stderr, env, f.android)
+	if err != nil {
+		return err
+	}
 
 	answers := newLineReader(o.Stdin)
 	sel, code, err := chooseRun(ctx, stdout, stderr, o, answers, f, cfg, envName)
@@ -122,6 +126,7 @@ func runDaily(ctx context.Context, stdout, stderr io.Writer, o options, f runFla
 		}
 		report.WriteBlocked(stdout, envName, "scenario", fin.blocked)
 		report.WriteDocWarnings(stdout, envName, fin.docs)
+		report.WriteA11yWarnings(stdout, envName, fin.a11y)
 		report.WriteMisses(stdout, string(fin.record.ID), fin.misses)
 		fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
 		sub := ""
@@ -451,6 +456,7 @@ func printScenarioRun(stdout io.Writer, envName string, fin finishedRun) error {
 	}
 	report.WriteBlocked(stdout, envName, "scenario", fin.blocked)
 	report.WriteDocWarnings(stdout, envName, fin.docs)
+	report.WriteA11yWarnings(stdout, envName, fin.a11y)
 	report.WriteMisses(stdout, string(fin.record.ID), fin.misses)
 	fmt.Fprintf(stdout, "report: %s\n", fin.reportPath)
 	return nil

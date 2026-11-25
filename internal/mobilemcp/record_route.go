@@ -83,7 +83,7 @@ func (m *Manager) runRecording(ctx context.Context, d *toolDef, call mcp.Call) (
 		return mcp.Result{}, refused(d.name, "the recording holds one device")
 	case "mobile_clipboard":
 		return m.recClipboard(ctx, call)
-	case "mobile_set_orientation", "mobile_fold_device", "mobile_set_location",
+	case "mobile_set_orientation", "mobile_set_theme", "mobile_set_font_scale", "mobile_fold_device", "mobile_set_location",
 		"mobile_terminate_app", "mobile_install_app", "mobile_uninstall_app":
 		return mcp.Result{}, refused(d.name, "a replay cannot repeat it, so it would make a recording that does not replay")
 	case "mobile_clear_app_data":

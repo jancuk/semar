@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -25,6 +26,14 @@ import (
 // recordingBudget is how many device actions a recording session may take: a person acts slowly, and a
 // session is not a run, but it has a limit.
 const recordingBudget = 2000
+
+// recordingSettle is the interactive settle budget for recording mode: snappier than replay's 3s default
+// while still letting short transitions finish.
+const recordingSettle = 1200 * time.Millisecond
+
+// recordingPoll is the fixed delay between the screen reads of a settle while recording. A read costs
+// about 25 ms, so a still screen is seen about 100 ms after it stops moving.
+const recordingPoll = 80 * time.Millisecond
 
 // mobileRecording says whether semar record records an app on a device: with --surface android, or with a
 // flag that only a device has. It is decided before Chrome is looked for.
@@ -183,11 +192,12 @@ func recordMobile(ctx context.Context, cmd *cobra.Command, o options, f recordTe
 		ticket = resume.Scenario.Ticket
 	}
 	overlay := mobilerec.NewOverlay(o.LookupEnv)
-	open := recordingFactory(o, f.dir, cfg, envName, env)
+	open := recordingFactory(o, f.dir, cfg, envName, env, recordingSettle)
+	verifyOpen := recordingFactory(o, f.dir, cfg, envName, env, 0)
 	sess, err := mobilerec.New(mobilerec.Options{
 		Repo: f.dir, Kind: kind, ID: name, Ticket: ticket, Service: svc.Name, App: app,
 		Open: open, Lookup: o.LookupEnv, Overlay: overlay, Reset: svc.Android.ResetMode(), Use: f.use,
-		Resume: resume, ResumeAt: f.at,
+		Resume: resume, ResumeAt: f.at, Settle: recordingSettle, SettlePoll: recordingPoll,
 		Clock: o.Clock, Sleep: o.Sleep, Now: o.Clock,
 	})
 	if err != nil {
@@ -234,7 +244,7 @@ func recordMobile(ctx context.Context, cmd *cobra.Command, o options, f recordTe
 	repl := &mobilerec.REPL{Session: sess, In: in, Out: out, Replace: f.replace || f.resume}
 	if !f.noReplay {
 		repl.Verify = func(ctx context.Context, sv *mobilerec.Saved) (string, error) {
-			return verifyRecording(ctx, o, f, sess, overlay, open, envName, kind, name, app)
+			return verifyRecording(ctx, o, f, sess, overlay, verifyOpen, envName, kind, name, app)
 		}
 	}
 	return repl.Run(ctx)
@@ -243,7 +253,7 @@ func recordMobile(ctx context.Context, cmd *cobra.Command, o options, f recordTe
 // recordingFactory opens a device session for a recording: a run of the purpose recording, an engine that
 // acts through the policy and the redactor of the environment, and the Android platform under it. Every
 // call opens a new one, with the environment that the recording reads: its secrets and its serial.
-func recordingFactory(o options, dir string, cfg config.Config, envName string, env config.Environment) mobilerec.PlatformFactory {
+func recordingFactory(o options, dir string, cfg config.Config, envName string, env config.Environment, settle time.Duration) mobilerec.PlatformFactory {
 	return func(ctx context.Context, lookup mobilerec.LookupEnv) (mobilerec.Handle, error) {
 		oo := o
 		oo.LookupEnv = lookup
@@ -251,7 +261,7 @@ func recordingFactory(o options, dir string, cfg config.Config, envName string, 
 		if err != nil {
 			return mobilerec.Handle{}, err
 		}
-		eng, platform := rg.mobileEngineOn(oo, dir, env, declaredBuilds{}, recordingBudget)
+		eng, platform := rg.mobileEngineOn(oo, dir, env, declaredBuilds{}, recordingBudget, settle)
 		if eng == nil {
 			return mobilerec.Handle{}, errors.New("no service of the environment has an app on a device")
 		}

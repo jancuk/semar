@@ -58,6 +58,13 @@ func PipelineSummary(w io.Writer, d Data, htmlPath string) error {
 		}
 		b.WriteString("\n")
 	}
+	if len(v.A11y) > 0 {
+		noun := "warnings"
+		if len(v.A11y) == 1 {
+			noun = "warning"
+		}
+		fmt.Fprintf(&b, "Accessibility: %d %s (no outcome changed; see the HTML report)\n\n", len(v.A11y), noun)
+	}
 	fmt.Fprintf(&b, "HTML report: `%s`\n", plain(htmlPath))
 	_, err := io.WriteString(w, b.String())
 	return err

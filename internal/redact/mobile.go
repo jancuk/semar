@@ -37,6 +37,17 @@ func mobileRecord(s *scrubber, m domain.MobileRecord) domain.MobileRecord {
 		c.Summary = s.text(c.Summary)
 		m.Crash = &c
 	}
+	if m.Accessibility != nil {
+		issues := make([]domain.AccessibilityIssue, len(m.Accessibility))
+		for i, iss := range m.Accessibility {
+			iss.Screen = s.text(iss.Screen)
+			iss.Class = s.text(iss.Class)
+			iss.ResourceID = s.text(iss.ResourceID)
+			iss.Label = s.text(iss.Label)
+			issues[i] = iss
+		}
+		m.Accessibility = issues
+	}
 	return m
 }
 

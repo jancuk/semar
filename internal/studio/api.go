@@ -15,6 +15,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jancuk/semar/internal/engine/mobile"
 	"github.com/jancuk/semar/internal/flow"
@@ -154,14 +155,18 @@ func (s *Server) snapshot(ctx context.Context, f *mobilerec.Frame, withImage boo
 		case f.Secret:
 			v.ImageHidden = true
 		case withImage:
-			png, err := sess.Capture(ctx)
-			switch {
-			case errors.Is(err, mobilerec.ErrSecretOnScreen):
-				v.ImageHidden = true
-			case err != nil:
-				v.ImageError = oneLine(sess.Overlay().Scrub(err.Error()))
-			default:
-				v.Image = jpegAddress(png)
+			if jpg := sess.LastShotJPEG(f.ID); len(jpg) > 0 {
+				v.Image = "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(jpg)
+			} else {
+				png, err := sess.Capture(ctx)
+				switch {
+				case errors.Is(err, mobilerec.ErrSecretOnScreen):
+					v.ImageHidden = true
+				case err != nil:
+					v.ImageError = oneLine(sess.Overlay().Scrub(err.Error()))
+				default:
+					v.Image = jpegAddress(png)
+				}
 			}
 		}
 		out.Frame = v
@@ -169,9 +174,14 @@ func (s *Server) snapshot(ctx context.Context, f *mobilerec.Frame, withImage boo
 	return out
 }
 
-// jpegAddress is a PNG of the device as a small JPEG data address. A picture that cannot be decoded is
-// sent as it is.
+const studioMaxShotSide = 960
+
+// jpegAddress is a PNG of the device as a small JPEG data address, downscaled to at most 960px on its
+// longest side. A picture that cannot be decoded as PNG is sent as it is.
 func jpegAddress(data []byte) string {
+	if shrunk, err := mobile.ShrinkTo(data, studioMaxShotSide, nil); err == nil {
+		return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(shrunk)
+	}
 	img, err := png.Decode(bytes.NewReader(data))
 	if err != nil {
 		if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil {
@@ -323,7 +333,7 @@ func (s *Server) postStart(w http.ResponseWriter, r *http.Request) {
 		ticket = s.d.TicketOf(req.ID)
 	}
 	sr := SessionRequest{
-		Kind: kind, ID: req.ID, Ticket: ticket, Title: req.Title, Service: req.Service, Serial: req.DeviceSerial,
+		Kind: kind, ID: id, Ticket: ticket, Title: req.Title, Service: req.Service, Serial: req.DeviceSerial,
 		Use: use, With: req.With, Replace: req.Replace, ConfirmClear: req.ConfirmClear,
 	}
 	if req.Resume != nil {
@@ -412,6 +422,45 @@ func (s *Server) postRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := sess.Refresh(s.base)
 	s.done(s.base, w, f, err, true)
+}
+
+type peekRequest struct {
+	FrameID uint64 `json:"frameId"`
+}
+
+type peekReply struct {
+	Changed bool `json:"changed"`
+	// Slow says that the screen takes longer to read than a peek may hold the device: the page stops asking.
+	Slow bool `json:"slow,omitempty"`
+	*sessionReply
+}
+
+// peekLimit bounds the one read of a peek. A person who clicks waits for it, so it must stay short.
+const peekLimit = 1500 * time.Millisecond
+
+// postPeek says whether the device still shows the frame that the page has, and gives the new screen when
+// it does not. The page asks a moment after an action, so that a screen that loaded late is not left stale.
+func (s *Server) postPeek(w http.ResponseWriter, r *http.Request) {
+	var req peekRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess := s.session(w)
+	if sess == nil {
+		return
+	}
+	f, changed, slow, err := sess.Peek(s.base, req.FrameID, peekLimit)
+	if err != nil {
+		s.failure(s.base, w, err)
+		return
+	}
+	if !changed {
+		reply(w, http.StatusOK, peekReply{Slow: slow})
+		return
+	}
+	reply(w, http.StatusOK, peekReply{Changed: true, sessionReply: s.snapshot(s.base, f, true)})
 }
 
 type actRequest struct {
@@ -763,9 +812,12 @@ func (s *Server) postVerify(w http.ResponseWriter, r *http.Request) {
 	for i := range res.Steps {
 		res.Steps[i].Detail = s.scrub(res.Steps[i].Detail)
 	}
-	if rerr != nil {
+	switch {
+	case rerr != nil:
 		res.Message += " The device could not be taken back: " + oneLine(s.scrub(rerr.Error()))
 		f = nil
+	case f != nil:
+		res.Message += " The device is back at the start of the app."
 	}
 	reply(w, http.StatusOK, verifyReply{sessionReply: *s.snapshot(ctx, f, true), Verify: res})
 }

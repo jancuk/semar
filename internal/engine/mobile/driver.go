@@ -61,6 +61,12 @@ type Foregrounder interface {
 	Foreground(ctx context.Context) (pkg string, err error)
 }
 
+// DensityReader is a Platform that can report the screen density of the device in dots per inch.
+// Zero means the density is unknown.
+type DensityReader interface {
+	ScreenDensity(ctx context.Context) int
+}
+
 // Driver is one app on one device.
 type Driver interface {
 	// Reset puts the app in the state that the scenario starts from: it is stopped, and with the

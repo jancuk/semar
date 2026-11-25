@@ -122,6 +122,15 @@ Each response was checked against the API document, and against the time limit w
 - {{ .Scenario }}, step {{ .Step }}, {{ .Operation }}: {{ .Text }} ({{ .Effect }})
 {{ end -}}
 {{ end -}}
+{{ if .A11y }}
+## Accessibility warnings
+
+Each settled mobile screen was checked for unlabeled interactive controls and touch targets smaller than 48dp. No outcome was changed.
+
+{{ range .A11y -}}
+- {{ .Scenario }}, step {{ .Step }}{{ if .Screen }} ({{ .Screen }}){{ end }}: {{ .Text }}
+{{ end -}}
+{{ end -}}
 {{ if .Misses }}
 ## Elements not found
 

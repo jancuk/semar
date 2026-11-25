@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"net/netip"
 	"net/url"
 	"path/filepath"
@@ -221,6 +222,9 @@ func validateChecks(p string, c Checks, add func(string, ...any)) {
 	if c.ResponseTime.Limit < 0 {
 		add("%s.responseTime.limit must not be negative", p)
 	}
+	if !slices.Contains([]string{"", "warn", "off"}, c.Accessibility) {
+		add("%s.accessibility must be warn or off, got %q", p, c.Accessibility)
+	}
 }
 
 const (
@@ -357,6 +361,7 @@ var (
 	androidSchemePattern     = regexp.MustCompile(`^[a-z][a-z0-9+.-]*$`)
 	androidPermissionPattern = regexp.MustCompile(`^[A-Za-z0-9_.]+$`)
 	androidAppPattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+.:/_@%~?=&-]{0,511}$`)
+	androidLocalePattern     = regexp.MustCompile(`^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8}){0,4}$`)
 )
 
 // deniedSchemes can never be the scheme of an open: they run code or read files.
@@ -442,6 +447,28 @@ func validateAndroid(p string, e Environment, add func(string, ...any)) {
 	}
 	if a.StartTimeout < 0 || a.StartTimeout > 5*time.Minute {
 		add("%s.startTimeout must be a duration from 0 to 5 minutes, got %s", p, a.StartTimeout)
+	}
+	if a.Theme != "" && a.Theme != "light" && a.Theme != "dark" {
+		add("%s.theme must be light or dark, got %q", p, a.Theme)
+	}
+	if a.FontScale != 0 {
+		if math.IsNaN(a.FontScale) || math.IsInf(a.FontScale, 0) || a.FontScale < AndroidMinFontScale || a.FontScale > AndroidMaxFontScale {
+			add("%s.fontScale must be from %.1f to %.1f, got %g", p, AndroidMinFontScale, AndroidMaxFontScale, a.FontScale)
+		}
+	}
+	if a.Locale != "" && !ValidAndroidLocale(a.Locale) {
+		add("%s.locale %q must be a BCP-47 locale such as en-US", p, a.Locale)
+	}
+	if a.ServerURL != "" {
+		if a.Theme != "" {
+			add("%s.theme is used with adb only, and serverUrl does not use adb", p)
+		}
+		if a.FontScale != 0 {
+			add("%s.fontScale is used with adb only, and serverUrl does not use adb", p)
+		}
+		if a.Locale != "" {
+			add("%s.locale is used with adb only, and serverUrl does not use adb", p)
+		}
 	}
 }
 
@@ -546,3 +573,6 @@ func ValidAndroidPackage(s string) bool { return androidPackagePattern.MatchStri
 
 // ValidAndroidSerial reports whether s is a serial that android.device takes.
 func ValidAndroidSerial(s string) bool { return androidDevicePattern.MatchString(s) }
+
+// ValidAndroidLocale reports whether s is a BCP-47 language tag of the simple kind that Android takes.
+func ValidAndroidLocale(s string) bool { return len(s) <= 35 && androidLocalePattern.MatchString(s) }

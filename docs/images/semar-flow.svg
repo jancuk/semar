@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="430" viewBox="0 0 960 430" role="img" aria-labelledby="t d">
+  <title id="t">How Semar works</title>
+  <desc id="d">A ticket and a code change go to semar plan, where a model drafts a Gherkin test, or a person records one in semar record. The test lives in the repository. semar run replays it with no model against an HTTP API, a web app in Chrome, or an Android app over adb. Every request, response and screenshot is kept as evidence with secrets removed. Code decides the verdict from the evidence, and the run writes report.md, report.html, junit.xml and summary.md.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#8a94a6"/>
+    </marker>
+    <style>
+      .bg { fill: #0f1520; }
+      .card { fill: #18212f; stroke: #2b3647; stroke-width: 1.5; }
+      .accent { fill: #12261d; stroke: #2f8f5b; stroke-width: 1.5; }
+      .model { fill: #2a2110; stroke: #b8862b; stroke-width: 1.5; }
+      .h { font: 600 15px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #e8edf5; }
+      .s { font: 12.5px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #a9b4c4; }
+      .code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #7fd1a3; }
+      .tag { font: 600 11px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; letter-spacing: 0.06em; }
+      .tag-model { fill: #e0b04d; }
+      .tag-code { fill: #6fd39b; }
+      .line { stroke: #8a94a6; stroke-width: 1.6; fill: none; }
+      .title { font: 700 22px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #f2f5fa; }
+      .sub { font: 14px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #a9b4c4; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="960" height="430" rx="14"/>
+
+  <text class="title" x="32" y="48">A model drafts the test. Code decides the result.</text>
+  <text class="sub" x="32" y="72">One workflow for an HTTP API, a web app and an Android app, the same for every person and every model.</text>
+
+  <!-- 1. Input -->
+  <rect class="card" x="32" y="104" width="164" height="118" rx="10"/>
+  <text class="h" x="48" y="132">Ticket + change</text>
+  <text class="s" x="48" y="156">acceptance criteria,</text>
+  <text class="s" x="48" y="174">the diff of the branch,</text>
+  <text class="s" x="48" y="192">the API document</text>
+
+  <!-- 2a. Plan (model) -->
+  <rect class="model" x="236" y="104" width="186" height="118" rx="10"/>
+  <text class="tag tag-model" x="252" y="126">A MODEL DRAFTS</text>
+  <text class="code" x="252" y="150">semar plan</text>
+  <text class="s" x="252" y="172">each draft checked by code,</text>
+  <text class="s" x="252" y="190">every model result marked</text>
+  <text class="s" x="252" y="208"><tspan class="code">by model</tspan></text>
+
+  <!-- 2b. Record (person) -->
+  <rect class="card" x="236" y="240" width="186" height="78" rx="10"/>
+  <text class="tag tag-code" x="252" y="262">OR A PERSON RECORDS</text>
+  <text class="code" x="252" y="286">semar record --ui</text>
+  <text class="s" x="252" y="306">web in Chrome, Android live</text>
+
+  <!-- 3. The test -->
+  <rect class="card" x="462" y="104" width="160" height="214" rx="10"/>
+  <text class="h" x="478" y="132">A test in your repo</text>
+  <text class="code" x="478" y="160">Feature: Refund</text>
+  <text class="code" x="492" y="180">Scenario: ...</text>
+  <text class="code" x="506" y="200">When ...</text>
+  <text class="code" x="506" y="220">Then ...</text>
+  <text class="s" x="478" y="252">reviewed in a pull</text>
+  <text class="s" x="478" y="270">request like any</text>
+  <text class="s" x="478" y="288">other code</text>
+
+  <!-- 4. Run (no model) -->
+  <rect class="accent" x="662" y="104" width="266" height="214" rx="10"/>
+  <text class="tag tag-code" x="678" y="126">CODE REPLAYS, NO MODEL</text>
+  <text class="code" x="678" y="150">semar run</text>
+  <text class="s" x="678" y="176">HTTP API · web in Chrome ·</text>
+  <text class="s" x="678" y="194">Android over adb, no Appium</text>
+  <text class="h" x="678" y="222">Evidence</text>
+  <text class="s" x="678" y="242">every request and response,</text>
+  <text class="s" x="678" y="259">a screenshot of each UI step,</text>
+  <text class="s" x="678" y="276">secrets removed</text>
+  <text class="h" x="678" y="300">Verdict: decided by code</text>
+
+  <!-- arrows -->
+  <path class="line" d="M196 163H230" marker-end="url(#arrow)"/>
+  <path class="line" d="M114 222V279H230" marker-end="url(#arrow)"/>
+  <path class="line" d="M422 163H456" marker-end="url(#arrow)"/>
+  <path class="line" d="M422 279H456" marker-end="url(#arrow)"/>
+  <path class="line" d="M622 211H656" marker-end="url(#arrow)"/>
+
+  <!-- 5. Reports -->
+  <rect class="card" x="32" y="348" width="896" height="58" rx="10"/>
+  <text class="h" x="48" y="382">Ship: yes or no</text>
+  <text class="s" x="180" y="382">report.md · report.html with screenshots · junit.xml · summary.md · exit code 0, 1 or 2 for your pipeline</text>
+  <path class="line" d="M795 318V342" marker-end="url(#arrow)"/>
+</svg>

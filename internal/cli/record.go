@@ -478,6 +478,7 @@ func makeFixtures(ctx context.Context, out, errw io.Writer, o options, dir strin
 // replayed is how the replay of a written scenario ended.
 type replayed struct {
 	result  *domain.ScenarioResult // nil when the scenario did not finish
+	run     domain.RunID
 	report  string
 	stderr  string
 	blocked []report.BlockedHost
@@ -492,7 +493,7 @@ func replayScenario(ctx context.Context, o options, dir, envName, id string, bui
 		scenarios: []string{id}, env: envName, dir: dir, builds: builds,
 		done: func(fin finishedRun) {
 			if len(fin.record.Results) == 1 {
-				r.result, r.report, r.blocked = &fin.record.Results[0], fin.reportPath, fin.blocked
+				r.result, r.run, r.report, r.blocked = &fin.record.Results[0], fin.record.ID, fin.reportPath, fin.blocked
 			}
 		},
 	}

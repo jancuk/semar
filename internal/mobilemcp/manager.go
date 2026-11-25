@@ -36,6 +36,10 @@ type Device interface {
 
 	Orientation(ctx context.Context) (string, error)
 	SetOrientation(ctx context.Context, orientation string) error
+	Theme(ctx context.Context) (string, error)
+	SetTheme(ctx context.Context, theme string) error
+	FontScale(ctx context.Context) (float64, error)
+	SetFontScale(ctx context.Context, scale float64) error
 	Fold(ctx context.Context, posture string) error
 	SetLocation(ctx context.Context, lat, lon float64) error
 	ClearLocation(ctx context.Context) error
@@ -138,6 +142,10 @@ type Manager struct {
 	// sleep is Options.Sleep, and fl is the state of semar_run_flow: its backend, and the flows that ran.
 	sleep func(ctx context.Context, d time.Duration) error
 	fl    flowState
+
+	density     int
+	densityDone bool
+	health      screenHealth
 
 	defs   []*toolDef
 	byName map[string]*toolDef
@@ -242,6 +250,8 @@ func (m *Manager) closeLocked(ctx context.Context) error {
 		recErr = m.endRecordingLocked(ctx)
 	}
 	m.refs.Reset("", nil)
+	m.density, m.densityDone = 0, false
+	m.health = screenHealth{}
 	// A screen recording that is still going is pulled to its file before the device is released: the
 	// release would delete it, and the agent asked for that video. The error, if any, is reported with the
 	// others (the server writes it to standard error).
@@ -278,6 +288,29 @@ func (m *Manager) device(ctx context.Context) (Device, error) {
 	}
 	m.dev, m.closeDev = dev, closeDev
 	return dev, nil
+}
+
+// screenDensity returns the cached screen density of the currently opened device, or 0 when unknown.
+func (m *Manager) screenDensity(ctx context.Context, dev Device) int {
+	if m.densityDone {
+		return m.density
+	}
+	if dev == nil {
+		return 0
+	}
+	if dev.Remote() {
+		m.densityDone = true
+		return 0
+	}
+	dctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	info, err := dev.ScreenSize(dctx)
+	if err != nil || ctx.Err() != nil {
+		return 0
+	}
+	m.density = info.Density
+	m.densityDone = true
+	return m.density
 }
 
 // noArgs refuses any argument, for a tool that takes none.

@@ -153,9 +153,11 @@ func (m *Manager) launchApp(ctx context.Context, call mcp.Call) (mcp.Result, err
 	if err != nil {
 		return mcp.Result{}, err
 	}
+	m.baselineHealth(ctx, dev)
 	if err := dev.LaunchApp(ctx, o); err != nil {
 		return mcp.Result{}, err
 	}
+	m.trackLaunch(pkg)
 	// A Flutter app builds its semantics late, and a debug build draws its first frame slowly.
 	if waited := m.warmAfterLaunch(ctx, dev); waited > 0 {
 		return textJSON(map[string]any{"launched": pkg, "waitedMs": waited.Milliseconds(), "note": "waited for the Flutter semantics tree to be built"})
@@ -181,6 +183,7 @@ func (m *Manager) terminateApp(ctx context.Context, call mcp.Call) (mcp.Result, 
 	if err := dev.TerminateApp(ctx, pkg); err != nil {
 		return mcp.Result{}, err
 	}
+	m.trackExit(pkg, false)
 	return textJSON(map[string]any{"terminated": pkg})
 }
 
@@ -233,9 +236,21 @@ func (m *Manager) destructive(ctx context.Context, call mcp.Call, what string, d
 }
 
 func (m *Manager) uninstallApp(ctx context.Context, call mcp.Call) (mcp.Result, error) {
-	return m.destructive(ctx, call, "uninstalling", func(d Device, pkg string) error { return d.UninstallApp(ctx, pkg) })
+	return m.destructive(ctx, call, "uninstalling", func(d Device, pkg string) error {
+		if err := d.UninstallApp(ctx, pkg); err != nil {
+			return err
+		}
+		m.trackExit(pkg, true)
+		return nil
+	})
 }
 
 func (m *Manager) clearAppData(ctx context.Context, call mcp.Call) (mcp.Result, error) {
-	return m.destructive(ctx, call, "clearing the data of", func(d Device, pkg string) error { return d.ClearAppData(ctx, pkg) })
+	return m.destructive(ctx, call, "clearing the data of", func(d Device, pkg string) error {
+		if err := d.ClearAppData(ctx, pkg); err != nil {
+			return err
+		}
+		m.trackExit(pkg, false)
+		return nil
+	})
 }

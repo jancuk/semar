@@ -386,6 +386,8 @@ func TestRecordRoutingOfCoordinatesAndKeys(t *testing.T) {
 	// Non-recordable tools are refused, and so are the ones that need a second session on the device.
 	for name, args := range map[string]string{
 		"mobile_set_orientation":        `{"orientation":"landscape"}`,
+		"mobile_set_theme":              `{"theme":"dark"}`,
+		"mobile_set_font_scale":         `{"scale":1.5}`,
 		"mobile_fold_device":            `{"posture":"folded"}`,
 		"mobile_set_location":           `{"latitude":1,"longitude":2}`,
 		"mobile_clipboard":              `{"text":"x"}`,

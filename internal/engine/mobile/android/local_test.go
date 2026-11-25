@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -42,7 +43,13 @@ func TestTheStartOrderAndTheCleanup(t *testing.T) {
 	// getprop of the version is quoted too.
 	want[10] = "shell 'getprop' 'ro.build.version.release'"
 	got := r.adb.Log()
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+	// The server runs in its own process, started in the background: its am instrument may be logged
+	// before or after the calls that follow it. It must come after the forward, and the rest keep their order.
+	instrument, forward := want[8], want[7]
+	at, fwd := slices.Index(got, instrument), slices.Index(got, forward)
+	others := slices.DeleteFunc(slices.Clone(got), func(s string) bool { return s == instrument })
+	wantRest := slices.DeleteFunc(slices.Clone(want), func(s string) bool { return s == instrument })
+	if at < 0 || fwd < 0 || at < fwd || strings.Join(others, "\n") != strings.Join(wantRest, "\n") {
 		t.Errorf("adb log:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	if r.server.Sessions() != 1 || r.server.Capabilities()["platformName"] != "Android" {

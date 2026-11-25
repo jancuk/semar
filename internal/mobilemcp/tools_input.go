@@ -413,6 +413,9 @@ func (m *Manager) pressButton(ctx context.Context, call mcp.Call) (mcp.Result, e
 	if err := dev.Key(ctx, code); err != nil {
 		return mcp.Result{}, err
 	}
+	if code == 3 || code == 187 || (code == 4 && closesKeyboard == "") { // HOME, APP_SWITCH / RECENTS, or BACK
+		m.trackIntentionalNav()
+	}
 	msg := "pressed " + strings.ToUpper(strings.TrimSpace(a.Button))
 	if closesKeyboard != "" {
 		msg += ": BACK closed the keyboard " + closesKeyboard + " and did not go back. Press BACK again to go back"
@@ -437,5 +440,6 @@ func (m *Manager) openURL(ctx context.Context, call mcp.Call) (mcp.Result, error
 	if err := dev.OpenURL(ctx, a.URL); err != nil {
 		return mcp.Result{}, err
 	}
+	m.trackIntentionalNav()
 	return mcp.TextResult("opened the link"), nil
 }

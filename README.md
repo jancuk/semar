@@ -1,5 +1,49 @@
 # Semar
 
+<p align="center">
+  <img src="docs/images/semar-flow.svg" alt="How Semar works: a ticket and a change go to semar plan, where a model drafts a test, or a person records one with semar record. The test lives in your repository. semar run replays it with no model against an HTTP API, a web app or an Android app, keeps the evidence, and code decides the verdict." width="900">
+</p>
+
+**A model drafts your tests. Code decides whether they pass.**
+
+Semar turns a ticket and a code change into tests for an HTTP API, a web app, or an Android app. A model writes the first draft, or you record the test by clicking through your app. After that, the test replays with no model on your laptop or in CI, and code reads the recorded evidence to decide the result.
+
+## Why Semar exists
+
+Ask an AI agent to test a change and the steps depend on which model you used and how you asked. The agent often decides by itself that the test passed, and you cannot see how it got there. Run it again and you pay for the model again, and you may get a different answer.
+
+Semar uses a model only to draft. Code checks each draft against the ticket and the API document, and every expected result that a model wrote says `by model` until a person takes it over. The test is a Gherkin file in your repository, so you review it in a pull request next to the code it tests. `semar run` replays it with no model call, and code decides the verdict from the evidence it recorded: each request and response, and a screenshot of each web and Android step, with secrets removed.
+
+## Who it is for
+
+| You are | What you get |
+| --- | --- |
+| A developer | Tests for your branch, drafted from its ticket before review, and one command that says whether the change can ship |
+| A QA engineer | Android and web tests that you record by clicking, with no test code to write, and an HTML report with a screenshot of each step |
+| New to the team | Five commands for a normal day, and a recorder that replays your recording once to check that it works |
+| The owner of a pipeline | JUnit XML, a Markdown summary, exit codes 0, 1 and 2, suites, and retries with a flaky mark |
+
+## Record an Android test without writing code
+
+```bash
+semar record --ui
+```
+
+The studio opens in your browser with a live view of your emulator or device. Click the app to record taps, typing and scrolls. Switch to Check mode and click any text to add an assertion. Finish and save writes a `.feature` file to your repository, then Verify replay runs it again on a fresh start of the app. Semar drives the device over `adb` with the UiAutomator2 server, so you need no Appium server and no Node.js.
+
+## Install
+
+Semar is one static binary. You need Go 1.26 or later and `git`. An Android test also needs `adb`, and a web test needs Chrome.
+
+```bash
+go install github.com/jancuk/semar/cmd/semar@latest
+semar version
+```
+
+Only `semar plan` needs a model. The default provider is Claude Code, installed and signed in. Codex, the Anthropic API, and any server with the OpenAI chat format work too. Every other command runs with no model.
+
+## One standard workflow
+
 Semar gives testing by an AI agent one standard workflow. It goes from the ticket and the change to tests, evidence, a verdict, and a report, and the steps are the same whoever runs them and whichever model drafts. A model drafts each test from the ticket and the API document, and then the test replays with no model, on your machine or in a pipeline. Semar tests an HTTP API, a web application, and an Android app.
 
 Code decides every result from recorded evidence. A model never says whether a test passed. A test counts as soon as it is written, and every result that a model wrote says `by model`.
@@ -215,7 +259,7 @@ A test of an Android app runs directly over `adb` with the UiAutomator2 server A
 
 A step can also capture the text of an element into `{{name}}` for the steps after it.
 
-Every Android step leaves a screenshot in the run. When a step does not find its element, the report lists the elements of the screen that look most like it, and `semar screens repair latest` prints candidates for the broken locator with no model. `--apply <screen>.<element>=<n>` writes the one you pick to the screens file. `semar run --pause-on-fail` stops at a failed step on the device and waits for Enter, so you can look at the screen. When the app crashed, the run keeps the crash report of the device.
+Every Android step leaves a screenshot in the run and checks the settled screen for unlabeled interactive controls and touch targets smaller than 48dp (skipping controls touching the screen edge or a scrollable container edge; non-failing warnings controlled by `checks.accessibility`). Runs also support dark/light theme, font scale, and per-app locale overrides (`android.theme`, `android.fontScale`, `android.locale`, or `--android-theme`, `--android-font-scale`, `--android-locale`), restored automatically when the run ends. When a step does not find its element, the report lists the elements of the screen that look most like it, and `semar screens repair latest` prints candidates for the broken locator with no model. `--apply <screen>.<element>=<n>` writes the one you pick to the screens file. `semar run --pause-on-fail` stops at a failed step on the device and waits for Enter, so you can look at the screen. When the app crashed, the run keeps the crash report of the device.
 
 ### Record Android flows and scenarios
 
@@ -232,7 +276,7 @@ Reusable flows live in `.semar/flows/<id>.yaml` and are invoked from scenarios a
 
 ### Let an AI agent drive it
 
-`semar mcp` serves Semar's tools to an agent over MCP: an Android device, a web page, and an API, with the same rules as a run. The agent can record a scenario, a flow, a web test, or a journey. Code replays what it recorded with no model, and every check that the agent wrote says `by model`. A web test or a journey is kept only when that replay passes. With `--studio`, a person can watch the device, pause the agent, take over, and hand back.
+`semar mcp` serves Semar's tools to an agent over MCP: an Android device, a web page, and an API, with the same rules as a run. The Android tools include dark/light theme and font-scale controls (`mobile_set_theme`, `mobile_set_font_scale`, restored on exit), and `mobile_list_elements_on_screen` (in text format, not JSON) surfaces zero-model accessibility notes and proactive crash / React Native / Flutter error notes. The agent can record a scenario, a flow, a web test, or a journey. Code replays what it recorded with no model, and every check that the agent wrote says `by model`. A web test or a journey is kept only when that replay passes. With `--studio`, a person can watch the device, pause the agent, take over, and hand back.
 
 ```bash
 claude mcp add semar -- semar mcp --dir .       # Claude Code
@@ -249,17 +293,6 @@ args = ["mcp", "--dir", "."]
 Without `.semar/semar.yaml`, it serves the Android tools alone. In a repository it serves every tool group that the configuration allows (`mobile`, `web`, `api`, `journey`), and `--surfaces` picks among them. The start line on standard error names the groups it serves. Against a production or read-only environment, or with `--read-only`, the server only observes and refuses every tool that changes something.
 
 See [Drive a device from an AI agent](docs/GUIDE.md#drive-a-device-from-an-ai-agent) for Cursor, Gemini CLI, Windsurf, the tools, and the safety rules.
-
-## Install
-
-Semar is one static binary. You need Go 1.26 or later and `git`. An Android test also needs `adb`, and a web test needs Chrome.
-
-```bash
-go install github.com/jancuk/semar/cmd/semar@latest
-semar version
-```
-
-Only `semar plan` needs a model. The default provider is Claude Code, installed and signed in. Codex, the Anthropic API, and any server with the OpenAI chat format work too. Every other command runs with no model.
 
 ## What leaves your machine
 

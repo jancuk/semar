@@ -12,7 +12,7 @@ const (
 
 // settle reads the tree like Settle, with the clock and the sleep of the engine.
 func (e *Engine) settle(ctx context.Context, d Driver, limit time.Duration) (*Tree, error) {
-	return Settle(ctx, d, limit, e.o.Clock, e.o.Sleep)
+	return SettleEvery(ctx, d, limit, e.o.SettlePoll, e.o.Clock, e.o.Sleep)
 }
 
 // Settle reads the tree until two reads in a row are alike, which means that the screen is still, or
@@ -22,6 +22,14 @@ func (e *Engine) settle(ctx context.Context, d Driver, limit time.Duration) (*Tr
 // costs two reads and a spinner costs few. A nil clock or sleep is the real one. The recorder and the
 // engine both use it, so what a person sees while recording is what a replay reads.
 func Settle(ctx context.Context, d Driver, limit time.Duration, clock func() time.Time, sleepFn func(context.Context, time.Duration) error) (*Tree, error) {
+	return SettleEvery(ctx, d, limit, 0, clock, sleepFn)
+}
+
+// SettleEvery is Settle with a fixed delay between reads when poll is above zero. A person who records
+// waits on every action, and the growing delay makes a screen that moved once cost half a second more
+// than it took: after the first delay, which stays 150 ms so that an app has the time to react, a fixed short delay
+// sees the still screen as soon as it is still. Zero is Settle.
+func SettleEvery(ctx context.Context, d Driver, limit, poll time.Duration, clock func() time.Time, sleepFn func(context.Context, time.Duration) error) (*Tree, error) {
 	if clock == nil {
 		clock = time.Now
 	}
@@ -48,7 +56,11 @@ func Settle(ctx context.Context, d Driver, limit time.Duration, clock func() tim
 			return prev, nil
 		}
 		prev = next
-		delay = min(delay*2, settleLast)
+		if poll > 0 {
+			delay = poll
+		} else {
+			delay = min(delay*2, settleLast)
+		}
 	}
 }
 

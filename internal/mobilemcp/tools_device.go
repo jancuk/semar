@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/jancuk/semar/internal/engine/mobile/android"
@@ -51,6 +52,22 @@ func (m *Manager) deviceTools() []*toolDef {
 				"orientation": mcp.Enum("The orientation to set.", "portrait", "landscape"),
 			}).Required("orientation"),
 			run: m.setOrientation,
+		},
+		{
+			name: "mobile_set_theme", title: "Set the theme",
+			desc: "Switch the device between light and dark theme. The prior theme is put back when the server ends.",
+			schema: mcp.Object(map[string]mcp.Schema{
+				"theme": mcp.Enum("The theme to set.", android.ThemeLight, android.ThemeDark),
+			}).Required("theme"),
+			run: m.setTheme,
+		},
+		{
+			name: "mobile_set_font_scale", title: "Set the font scale",
+			desc: "Set the system font scale between 0.5 and 3.0 to test large or small text. The prior font scale is put back when the server ends.",
+			schema: mcp.Object(map[string]mcp.Schema{
+				"scale": mcp.Number("The font scale factor, from 0.5 to 3.0.").With("minimum", android.MinFontScale).With("maximum", android.MaxFontScale),
+			}).Required("scale"),
+			run: m.setFontScale,
 		},
 		{
 			name: "mobile_fold_device", title: "Fold the device",
@@ -218,6 +235,63 @@ func (m *Manager) setOrientation(ctx context.Context, call mcp.Call) (mcp.Result
 	}
 	m.refs.Reset("", nil)
 	return textJSON(map[string]any{"orientation": o})
+}
+
+func (m *Manager) setTheme(ctx context.Context, call mcp.Call) (mcp.Result, error) {
+	var a struct {
+		Theme string `json:"theme"`
+	}
+	if err := args(call, &a); err != nil {
+		return mcp.Result{}, err
+	}
+	theme := strings.ToLower(strings.TrimSpace(a.Theme))
+	if theme != android.ThemeLight && theme != android.ThemeDark {
+		return mcp.Result{}, fmt.Errorf("theme must be %s or %s", android.ThemeLight, android.ThemeDark)
+	}
+	dev, err := m.device(ctx)
+	if err != nil {
+		return mcp.Result{}, err
+	}
+	prev, _ := dev.Theme(ctx)
+	if err := dev.SetTheme(ctx, theme); err != nil {
+		return mcp.Result{}, err
+	}
+	m.refs.Reset("", nil)
+	out := map[string]any{"theme": theme}
+	if prev != "" {
+		out["previous"] = prev
+	}
+	return textJSON(out)
+}
+
+func (m *Manager) setFontScale(ctx context.Context, call mcp.Call) (mcp.Result, error) {
+	var a struct {
+		Scale *float64 `json:"scale"`
+	}
+	if err := args(call, &a); err != nil {
+		return mcp.Result{}, err
+	}
+	if a.Scale == nil {
+		return mcp.Result{}, fmt.Errorf("scale is required and must be from %.1f to %.1f", android.MinFontScale, android.MaxFontScale)
+	}
+	scale := *a.Scale
+	if math.IsNaN(scale) || math.IsInf(scale, 0) || scale < android.MinFontScale || scale > android.MaxFontScale {
+		return mcp.Result{}, fmt.Errorf("scale must be from %.1f to %.1f", android.MinFontScale, android.MaxFontScale)
+	}
+	dev, err := m.device(ctx)
+	if err != nil {
+		return mcp.Result{}, err
+	}
+	prev, prevErr := dev.FontScale(ctx)
+	if err := dev.SetFontScale(ctx, scale); err != nil {
+		return mcp.Result{}, err
+	}
+	m.refs.Reset("", nil)
+	out := map[string]any{"fontScale": scale}
+	if prevErr == nil {
+		out["previous"] = prev
+	}
+	return textJSON(out)
 }
 
 func (m *Manager) foldDevice(ctx context.Context, call mcp.Call) (mcp.Result, error) {

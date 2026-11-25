@@ -427,9 +427,12 @@ func (s *Session) replayLocked(ctx context.Context, ev *event) error {
 			return err
 		}
 	}
-	got, err := s.runCall(ctx, ev.id, m, locs, caps)
-	maps.Copy(s.vars, got)
-	return err
+	res, err := s.runCall(ctx, ev.id, m, locs, caps, nil)
+	if err != nil {
+		return err
+	}
+	maps.Copy(s.vars, res.Captured)
+	return nil
 }
 
 // pickCandidate chooses a locator from the usable ones. 0 is the best one that is not a position: a

@@ -19,6 +19,7 @@ import (
 	"github.com/jancuk/semar/internal/domain"
 	"github.com/jancuk/semar/internal/engine/mobile"
 	"github.com/jancuk/semar/internal/engine/mobile/android"
+	"github.com/jancuk/semar/internal/evidence"
 	"github.com/jancuk/semar/internal/flow"
 	"github.com/jancuk/semar/internal/idcheck"
 	"github.com/jancuk/semar/internal/mobilerec"
@@ -204,21 +205,22 @@ func (b *studioBackend) newSession(req studio.SessionRequest) (*mobilerec.Sessio
 	if req.Serial != "" {
 		overlay.Pin(mobilerec.SerialEnv, req.Serial)
 	}
-	open := recordingFactory(b.o, b.f.dir, s.cfg, s.envName, s.env)
+	open := recordingFactory(b.o, b.f.dir, s.cfg, s.envName, s.env, recordingSettle)
+	verifyOpen := recordingFactory(b.o, b.f.dir, s.cfg, s.envName, s.env, 0)
 	reset := s.svc.Android.ResetMode()
 	if b.reset != "" {
 		reset = b.reset
 	}
 	sess, err := mobilerec.New(mobilerec.Options{
 		Repo: b.f.dir, Kind: req.Kind, ID: req.ID, Ticket: req.Ticket, Title: req.Title, Service: s.svc.Name, App: app,
-		Open: open, Lookup: b.o.LookupEnv, Overlay: overlay, Reset: reset, Author: b.author, Use: req.Use, UseWith: req.With, ConfirmClear: req.ConfirmClear, Resume: resume, ResumeAt: req.ResumeAt,
+		Open: open, Lookup: b.o.LookupEnv, Overlay: overlay, Reset: reset, Author: b.author, Use: req.Use, UseWith: req.With, ConfirmClear: req.ConfirmClear, Resume: resume, ResumeAt: req.ResumeAt, Settle: recordingSettle, SettlePoll: recordingPoll,
 		Clock: b.o.Clock, Sleep: b.o.Sleep, Now: b.o.Clock,
 	})
 	if err != nil {
 		return nil, err
 	}
 	b.mu.Lock()
-	b.cur = &studioCurrent{envName: s.envName, app: app, open: open}
+	b.cur = &studioCurrent{envName: s.envName, app: app, open: verifyOpen}
 	b.mu.Unlock()
 	return sess, nil
 }
@@ -248,6 +250,37 @@ func (b *studioBackend) recordable() ([]studio.Recording, error) {
 	}
 	slices.SortFunc(scenarios, func(a, c studio.Recording) int { return strings.Compare(a.ID, c.ID) })
 	return append(out, scenarios...), nil
+}
+
+// actionNames names each action of a replay by the text of its step, as the timeline shows it. An action
+// is stored under the ID of the recorder, a-0001, and the activity of the run says which step it did. An
+// action whose step is not found keeps the step ID, or its own ID.
+func actionNames(dir string, run domain.RunID, actions []domain.ActionID, steps []mobilerec.Step) map[domain.ActionID]string {
+	text := map[domain.StepID]string{}
+	for _, st := range steps {
+		text[domain.StepID(st.ID)] = st.Text
+	}
+	step := map[domain.ActionID]domain.StepID{}
+	if store, err := evidence.Open(semarDir(dir)); err == nil && run != "" {
+		if acts, err := store.Activity(run); err == nil {
+			for _, a := range acts {
+				step[domain.ActionID(fmt.Sprintf("a-%04d", a.Seq))] = a.Use.Step
+			}
+		}
+	}
+	out := make(map[domain.ActionID]string, len(actions))
+	for _, a := range actions {
+		id := step[a]
+		switch {
+		case text[id] != "":
+			out[a] = text[id]
+		case id != "":
+			out[a] = string(id)
+		default:
+			out[a] = string(a)
+		}
+	}
+	return out
 }
 
 // verify runs what was saved on a clean device session. The studio has given the device away, and takes
@@ -313,11 +346,34 @@ func (b *studioBackend) verify(ctx context.Context, sess *mobilerec.Session, _ *
 		return studio.VerifyResult{Status: "error", Message: "The scenario did not finish. " + clean(r.stderr)}, nil
 	}
 	out := studio.VerifyResult{Status: string(r.result.Outcome), Report: r.report}
+	names := actionNames(b.f.dir, r.run, r.result.Actions, sess.Steps())
+	for _, a := range r.result.Actions {
+		out.Steps = append(out.Steps, studio.VerifyStep{Name: clean(names[a]), Status: "done"})
+	}
+	held := 0
+	for _, c := range r.result.Checks {
+		if c.State == domain.CheckTrue {
+			held++
+		}
+		detail := "expected " + clean(c.Expected)
+		if c.Observed != "" {
+			detail += ", saw " + clean(c.Observed)
+		}
+		status := "held"
+		switch c.State {
+		case domain.CheckFalse:
+			status = "did not hold"
+		case domain.CheckNotEvaluated:
+			status = "not checked"
+		}
+		out.Steps = append(out.Steps, studio.VerifyStep{Name: "Check", Status: status, Detail: detail})
+	}
+	ran := fmt.Sprintf("The app was launched fresh and %s ran; %s of %s held.", plural(len(r.result.Actions), "action"), strconv.Itoa(held), plural(len(r.result.Checks), "check"))
 	if r.result.Outcome == domain.OutcomePassed {
-		out.Message = "Replayed once: passed."
+		out.Message = "Replayed once: passed. " + ran
 		return out, nil
 	}
-	out.Message = fmt.Sprintf("Replayed once: %s. The files are written: fix the step in the file, or record it again.", r.result.Outcome)
+	out.Message = fmt.Sprintf("Replayed once: %s. %s The files are written: fix the step in the file, or record it again.", r.result.Outcome, ran)
 	for _, rs := range r.result.Reasons {
 		name := string(rs.Step)
 		if name == "" {

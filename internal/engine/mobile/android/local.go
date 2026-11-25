@@ -42,7 +42,10 @@ type Options struct {
 	Logger *slog.Logger
 }
 
-var _ mobile.Recoverer = (*Platform)(nil)
+var (
+	_ mobile.Recoverer     = (*Platform)(nil)
+	_ mobile.DensityReader = (*Platform)(nil)
+)
 
 // Platform is the Android device of a run. It is a mobile.Platform.
 type Platform struct {
@@ -73,6 +76,15 @@ type Platform struct {
 	// local is the client of the server on the device, which Healthy asks.
 	local *webdriver.Client
 	apps  map[string]bool // services whose app was checked and installed
+
+	density     int
+	densityDone bool
+
+	savedTheme       *string
+	themeApplied     bool
+	savedFontScale   *savedFontScale
+	fontScaleApplied bool
+	savedLocales     []savedAppLocale
 
 	// serverUrl mode.
 	client *webdriver.Client
@@ -175,6 +187,9 @@ func (p *Platform) localDriver(ctx context.Context, service string, app App) (*d
 	if !p.started {
 		un := p.startDevice(ctx)
 		if un == nil {
+			un = p.applyDisplaySettings(ctx)
+		}
+		if un == nil {
 			un = p.ensureServer(ctx)
 		}
 		if un != nil {
@@ -196,6 +211,42 @@ func (p *Platform) localDriver(ctx context.Context, service string, app App) (*d
 		life:  &adbLife{a: p.adb, sess: p.session, app: app},
 		about: mobile.About{Device: p.device.Serial, Package: app.Package, Version: p.version(ctx)},
 	}, nil
+}
+
+// ScreenDensity returns the cached screen density of the device in dots per inch, or 0 when remote
+// or unknown.
+func (p *Platform) ScreenDensity(ctx context.Context) int {
+	p.mu.Lock()
+	if p.densityDone {
+		d := p.density
+		p.mu.Unlock()
+		return d
+	}
+	if p.closed || p.o.Env.Remote() || p.adb == nil {
+		p.mu.Unlock()
+		return 0
+	}
+	a := p.adb
+	p.mu.Unlock()
+
+	dctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	out, err := a.shell(dctx, "wm", "density")
+	if err != nil || ctx.Err() != nil {
+		return 0
+	}
+	dpi := 0
+	if v, ok := ParseWMDensity(out); ok {
+		dpi = v
+	}
+
+	p.mu.Lock()
+	if !p.closed {
+		p.density = dpi
+		p.densityDone = true
+	}
+	p.mu.Unlock()
+	return dpi
 }
 
 // version is the Android version of the device, or "".
@@ -276,7 +327,7 @@ func (p *Platform) prepareApp(ctx context.Context, app App) *mobile.Unavailable 
 		if len(paths) == 0 {
 			return &mobile.Unavailable{Reason: fmt.Sprintf("the app %s is not installed on the device, and the service lists no apk to install", app.Package)}
 		}
-		return nil
+		return p.applyLocaleForApp(ctx, app.Package)
 	}
 	apkPath, err := p.resolvePath(app.APK)
 	if err != nil {
@@ -291,8 +342,10 @@ func (p *Platform) prepareApp(ctx context.Context, app App) *mobile.Unavailable 
 			return &mobile.Unavailable{Reason: fmt.Sprintf("the APK %s changed after the build of this run was read: its result would belong to another build. Run again", baseName(apkPath))}
 		}
 	}
-	_, un := p.install(ctx, p.adb, app.Package, apkPath, false)
-	return un
+	if _, un := p.install(ctx, p.adb, app.Package, apkPath, false); un != nil {
+		return un
+	}
+	return p.applyLocaleForApp(ctx, app.Package)
 }
 
 func baseName(path string) string {
@@ -318,10 +371,12 @@ func (p *Platform) Close(ctx context.Context) error {
 		return context.WithTimeout(base, 3*time.Second)
 	}
 	var errs []error
-	// What a controller changed on the device is undone first, while the device still answers.
+	// What a controller or the run changed on the device is undone first, while the device still answers.
 	if p.ctl != nil {
 		errs = append(errs, p.ctl.undo(base)...)
 	}
+	errs = append(errs, p.undoDisplay(base)...)
+	p.density, p.densityDone = 0, false
 	if p.ctlSess != nil {
 		sctx, cancel := step()
 		if err := p.ctlSess.Delete(sctx); err != nil {

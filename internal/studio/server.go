@@ -215,6 +215,7 @@ func (s *Server) recordingRoutes(api *http.ServeMux) {
 	handle("/api/scaffold", map[string]http.HandlerFunc{"POST": s.postScaffold})
 	handle("/api/session/start", map[string]http.HandlerFunc{"POST": s.postStart})
 	handle("/api/session/refresh", map[string]http.HandlerFunc{"POST": s.postRefresh})
+	handle("/api/session/peek", map[string]http.HandlerFunc{"POST": s.postPeek})
 	handle("/api/session/act", map[string]http.HandlerFunc{"POST": s.postAct})
 	handle("/api/session/assert", map[string]http.HandlerFunc{"POST": s.postAssert})
 	handle("/api/session/screen", map[string]http.HandlerFunc{"POST": s.postScreen})

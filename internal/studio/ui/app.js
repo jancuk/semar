@@ -38,6 +38,8 @@
 
   function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
 
+  function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
   function banner(text, bad) {
     const b = $('banner');
     if (!text) { b.hidden = true; return; }
@@ -64,18 +66,117 @@
     return { ok: res.ok, status: res.status, data };
   }
 
-  function setBusy(on) {
+  function actLabel(a) {
+    if (!a || !a.do) return 'Working…';
+    switch (a.do) {
+      case 'tap': return 'Tapping…';
+      case 'longPress': return 'Long pressing…';
+      case 'doubleTap': return 'Double-tapping…';
+      case 'type': return 'Typing…';
+      case 'swipe': return 'Scrolling…';
+      case 'press': return 'Pressing key…';
+      case 'open': return 'Opening link…';
+      case 'wait': return 'Waiting…';
+      default: return 'Working…';
+    }
+  }
+
+  let slowTimer = 0;
+
+  function setBusy(on, label) {
     busy = on;
-    $('stage').classList.toggle('busy', on);
+    const stage = $('stage');
+    stage.classList.toggle('busy', on);
+    // The picture dims and the pill shows only when the device takes long: a quick action must not flash.
+    clearTimeout(slowTimer);
+    const pill = $('busy-pill');
+    const slow = (yes) => {
+      stage.classList.toggle('slow', yes);
+      if (pill) pill.hidden = !yes;
+    };
+    if (pill && on) $('busy-text').textContent = label || 'Working…';
+    // A check reads the screen once and is back in a moment: it waits like a quick action does.
+    if (on && !quick && label !== 'Adding check…') slow(true);
+    else if (on) slowTimer = setTimeout(() => slow(true), 900);
+    else slow(false);
+    const startBtn = $('start');
+    if (startBtn) startBtn.textContent = on && label === 'Starting app…' ? label : 'Start recording';
+    const openBtn = $('open-existing');
+    if (openBtn) openBtn.textContent = on && label === 'Reopening recording…' ? label : 'Open and replay';
     syncControls();
+  }
+
+  function syncStartKind(kind) {
+    const k = kind === 'flow' ? 'flow' : 'scenario';
+    $('start-kind').value = k;
+    for (const btn of document.querySelectorAll('.kind-card')) {
+      const on = btn.dataset.kind === k;
+      btn.classList.toggle('kind-card-on', on);
+      btn.setAttribute('aria-pressed', String(on));
+    }
   }
 
   // --- drawing ---
 
+  function drawModeHelper() {
+    const el = $('mode-helper');
+    if (!el) return;
+    if (mode === 'assert') {
+      el.className = 'mode-helper mode-assert';
+      el.textContent = 'Click any text or element on screen to add a verification check (required for scenarios).';
+    } else if (mode === 'capture') {
+      el.className = 'mode-helper mode-capture';
+      el.textContent = 'Click text on screen (like an order ID) to save it as {{name}} for later steps.';
+    } else {
+      el.className = 'mode-helper mode-act';
+      el.textContent = 'Click any button or field on the phone to record a tap or typing. Shift+click = long press · Right-click = pick locator · Mouse wheel = scroll.';
+    }
+  }
+
+  function drawReadiness() {
+    const box = $('readiness');
+    if (!box) return;
+    const live = !!session && !!frame;
+    box.hidden = !live;
+    if (!live) return;
+    clear(box);
+    const steps = (session && session.steps) || [];
+    const checks = steps.filter((s) => s.kind === 'assert').length;
+    const actions = steps.length - checks;
+    const isFlow = session && session.kind === 'flow';
+    if (isFlow) {
+      if (steps.length === 0) {
+        box.className = 'readiness neutral';
+        box.append(h('span', { class: 'readiness-msg', text: 'Click the phone to record your first step' }));
+      } else {
+        box.className = 'readiness ok';
+        box.append(h('span', { class: 'readiness-msg', text: plural(steps.length, 'step') + ' · Ready to save as a reusable flow' }));
+      }
+      return;
+    }
+    if (checks === 0) {
+      box.className = 'readiness warn';
+      const msg = actions > 0
+        ? plural(actions, 'action') + ' · Add at least 1 Check (Assert) before saving'
+        : 'Click the phone to record, then add at least 1 Check (Assert) before saving';
+      box.append(h('span', { class: 'readiness-msg', text: msg }));
+      if (mode !== 'assert') {
+        box.append(h('button', { type: 'button', class: 'btn readiness-btn', text: 'Switch to Check mode', onclick: () => { mode = 'assert'; syncControls(); } }));
+      }
+      return;
+    }
+    box.className = 'readiness ok';
+    box.append(h('span', { class: 'readiness-msg', text: 'Ready to save · ' + plural(actions, 'action') + ', ' + plural(checks, 'check') }));
+  }
+
   function syncControls() {
     const live = !!session && !!frame;
+    $('rec-controls').hidden = !live;
+    $('side').hidden = !live;
+    $('work').classList.toggle('is-idle', !live);
     for (const id of ['refresh', 'reset', 'finish', 'flow-run', 'delete-last']) $(id).disabled = !live || busy;
     $('delete-last').disabled = !live || busy || !(session && session.steps && session.steps.length);
+    for (const btn of $('tools').querySelectorAll('button')) btn.disabled = !live || (busy && !(quick && btn.dataset.quick));
     $('screen-name').disabled = !live || busy;
     $('setup-open').hidden = !(state && !state.hasConfig || state && state.problem);
     $('mode-act').classList.toggle('seg-on', mode === 'act');
@@ -89,6 +190,11 @@
     $('screen-rename').disabled = !live || busy;
     $('dirty-note').hidden = !(session && session.dirty);
     $('repick-note').hidden = repicking < 0;
+    $('open-existing').disabled = !$('open-pick').value || busy;
+    const ready = state && state.hasConfig && !state.problem;
+    if (!live) $('start').disabled = !ready || busy;
+    drawModeHelper();
+    drawReadiness();
   }
 
   function drawChips() {
@@ -138,11 +244,12 @@
 
   function drawFlows() {
     const flows = (state && state.flows) || [];
+    $('start-flow-row').hidden = flows.length === 0;
     for (const id of ['flow-pick', 'start-flow']) {
       const sel = $(id);
       const keep = sel.value;
       clear(sel);
-      sel.append(h('option', { value: '', text: id === 'start-flow' ? 'No flow' : flows.length ? 'Run an existing flow (use:)' : 'No flows saved yet' }));
+      sel.append(h('option', { value: '', text: id === 'start-flow' ? 'Start fresh (no flow)' : flows.length ? 'Run an existing flow (use:)' : 'No flows saved yet' }));
       for (const f of flows) sel.append(h('option', { value: f, text: f }));
       if (flows.includes(keep)) sel.value = keep;
     }
@@ -150,10 +257,11 @@
 
   function drawRecordings() {
     const list = (state && state.recordings) || [];
+    $('open-details').hidden = list.length === 0;
     const sel = $('open-pick');
     const keep = sel.value;
     clear(sel);
-    sel.append(h('option', { value: '', text: list.length ? 'Open a saved flow or scenario' : 'Nothing saved to open yet' }));
+    sel.append(h('option', { value: '', text: list.length ? 'Choose a saved flow or scenario…' : 'Nothing saved to open yet' }));
     for (const r of list) sel.append(h('option', { value: r.kind + ':' + r.id, text: r.kind + ' ' + r.id + (r.title ? ' (' + r.title + ')' : '') }));
     if (list.some((r) => r.kind + ':' + r.id === keep)) sel.value = keep;
     $('open-existing').disabled = !sel.value || busy;
@@ -265,13 +373,20 @@
   function drawTools() {
     const tools = $('tools');
     if (tools.childElementCount) return;
-    const press = (label, key) => h('button', { type: 'button', class: 'btn', text: label, onclick: () => act({ do: 'press', value: key }) });
-    const swipe = (label, dir) => h('button', { type: 'button', class: 'btn', text: label, onclick: () => act({ do: 'swipe', value: dir }) });
+    const press = (label, key) => h('button', { type: 'button', class: 'btn tool-btn', text: label, 'data-quick': '1', onclick: () => quickAct({ do: 'press', value: key }) });
+    const swipe = (label, dir) => h('button', { type: 'button', class: 'btn tool-btn', text: label, 'data-quick': '1', onclick: () => quickAct({ do: 'swipe', value: dir }) });
+    const group = (title, ...btns) => h('div', { class: 'tool-group' },
+      h('span', { class: 'tool-label', text: title }),
+      h('div', { class: 'tool-row' }, ...btns),
+    );
     tools.append(
-      press('Back', 'back'), press('Enter', 'enter'), press('Hide keyboard', 'hide-keyboard'),
-      swipe('Swipe up', 'up'), swipe('Swipe down', 'down'), swipe('Swipe left', 'left'), swipe('Swipe right', 'right'),
-      h('button', { type: 'button', class: 'btn', text: 'Open link', onclick: () => $('dlg-link').showModal() }),
-      h('button', { type: 'button', class: 'btn', text: 'Wait', onclick: () => act({ do: 'wait' }) }),
+      group('Keys', press('← Back', 'back'), press('↵ Enter', 'enter'), press('Hide keyboard', 'hide-keyboard')),
+      // The buttons say where the screen goes, as a scroll bar does. The finger moves the other way.
+      group('Scroll', swipe('↑ Up', 'down'), swipe('↓ Down', 'up'), swipe('← Left', 'right'), swipe('→ Right', 'left')),
+      group('More',
+        h('button', { type: 'button', class: 'btn tool-btn', text: 'Deep link', onclick: () => $('dlg-link').showModal() }),
+        h('button', { type: 'button', class: 'btn tool-btn', text: 'Wait', onclick: () => act({ do: 'wait' }) }),
+      ),
     );
   }
 
@@ -315,14 +430,14 @@
     repicking = -1;
     editing = -1;
     closeCandidates();
-    return run('DELETE', '/api/timeline/' + i);
+    return run('DELETE', '/api/timeline/' + i, undefined, undefined, 'Deleting step…');
   }
 
   // gotoStep resets the app and takes the device through the first n steps. A step that needs a secret or a
   // param that no file holds asks for it: the value is sent once and kept in memory by the server only.
   async function gotoStep(n, values, confirmClear) {
     if (busy) return;
-    setBusy(true);
+    setBusy(true, 'Replaying steps…');
     banner('');
     const r = await api('POST', '/api/timeline/goto', Object.assign({ n }, values || {}, confirmClear ? { confirmClear: true } : {}));
     setBusy(false);
@@ -436,7 +551,7 @@
     chosen = null;
     const r = await api('GET', '/api/session/candidates?frameId=' + frame.frameId + '&index=' + e.index + '&do=' + encodeURIComponent(op));
     if (!r.ok) {
-      if (r.status === 409) { await run('POST', '/api/session/refresh', {}); banner('The screen changed. This is the screen now.'); return; }
+      if (r.status === 409) { await run('POST', '/api/session/refresh', {}, undefined, 'Refreshing screen…'); banner('The screen changed. This is the screen now.'); return; }
       banner(r.data.error || 'The locators could not be listed.', true);
       return;
     }
@@ -482,7 +597,7 @@
     $('cand-title').textContent = 'Locators of step ' + (i + 1);
     for (const info of r.data.locators || []) {
       list.append(candRow(info, async (k) => {
-        const s = await run('POST', '/api/timeline/' + i + '/locator', { choice: k });
+        const s = await run('POST', '/api/timeline/' + i + '/locator', { choice: k }, undefined, 'Updating locator…');
         if (s.ok) { banner('Step ' + (i + 1) + ' uses that locator. The screens file is not rewritten: the element gets a new name when you save.'); closeCandidates(); }
       }, 'Use this'));
     }
@@ -503,7 +618,7 @@
     const i = repicking;
     repicking = -1;
     const body = pick.element ? { frameId: frame.frameId, element: pick.element.index } : Object.assign({ frameId: frame.frameId }, pick.point);
-    const r = await run('POST', '/api/timeline/' + i + '/locator', body);
+    const r = await run('POST', '/api/timeline/' + i + '/locator', body, undefined, 'Updating locator…');
     if (r.ok) banner('Step ' + (i + 1) + ' now points at that element.');
     syncControls();
   }
@@ -522,6 +637,8 @@
 
   // take adopts an answer that holds the recording.
   function take(data) {
+    // The locators of the panel belong to the frame they were listed on: a new frame closes the panel.
+    if (data.frame && frame && data.frame.frameId !== frame.frameId && !$('cand-panel').hidden) closeCandidates();
     session = Object.assign({}, session, data);
     // The answer always says whether the device is where the steps say: an old yes must not stay.
     if (Array.isArray(data.steps)) session.dirty = !!data.dirty;
@@ -560,12 +677,21 @@
   }
 
   // run sends a call that changes the recording, and handles the answers that every one can get.
-  async function run(method, path, body, retry) {
-    setBusy(true);
+  async function run(method, path, body, retry, label) {
+    setBusy(true, label || 'Working…');
     banner('');
+    const began = Date.now();
     const r = await api(method, path, body);
     setBusy(false);
-    if (r.ok) { take(r.data); return r; }
+    const took = Date.now() - began;
+    if (r.ok) {
+      take(r.data);
+      // The time is the device's: it reads the whole screen at least twice for every action.
+      if (path === '/api/session/act' && took > 4000) banner('The device took ' + Math.round(took / 1000) + ' s to read this screen. A screen with a web view or very many elements is slow to read, so every action on it is slow.');
+      // Any call that left the device on a screen may have left it on one that is still loading.
+      if (r.data && r.data.frame && path !== '/api/session/refresh') watchScreen(took);
+      return r;
+    }
     if (r.status === 409 && r.data.stale) {
       take(r.data.session);
       banner('The screen changed, so nothing was done. This is the screen now.');
@@ -582,7 +708,93 @@
   function act(a) {
     if (!frame) return Promise.resolve();
     const k = takeCandidate(a);
-    return run('POST', '/api/session/act', Object.assign({ frameId: frame.frameId }, k ? { candidate: k } : {}, a));
+    return run('POST', '/api/session/act', Object.assign({ frameId: frame.frameId }, k ? { candidate: k } : {}, a), undefined, actLabel(a));
+  }
+
+  // --- a screen that changes on its own ---
+  // An app may go on after the action is done: a page loads, a list fills. The page asks the device
+  // twice, a moment after each action, whether the screen is still the one in the picture, and shows the
+  // new one when it is not. The server cuts a question short after 1.5 s, because it holds the device
+  // and the person may be about to click: on a screen that is slower to read than that, the page stops
+  // asking until the next action.
+  let peekTimers = [];
+
+  function stopPeeking() {
+    for (const t of peekTimers) clearTimeout(t);
+    peekTimers = [];
+  }
+
+  function watchScreen(took) {
+    stopPeeking();
+    if (took > 8000) return;
+    for (const wait of [700, 2200]) peekTimers.push(setTimeout(peek, wait));
+  }
+
+  async function peek() {
+    if (busy || !frame || !session || document.querySelector('dialog[open]') || !$('cand-panel').hidden || repicking >= 0) return;
+    const id = frame.frameId;
+    const r = await api('POST', '/api/session/peek', { frameId: id });
+    if (!r.ok || r.data.slow) { stopPeeking(); return; }
+    if (!r.data.changed || busy || !frame || frame.frameId !== id || document.querySelector('dialog[open]') || !$('cand-panel').hidden || repicking >= 0) return;
+    take(r.data);
+    banner('The screen changed on its own, so the picture was updated.');
+  }
+
+  // --- quick actions ---
+  // A swipe, a key, and a tap show at once that they were taken: the picture moves with the finger, or a
+  // ring marks the tap, while the device does it. A swipe or a key that is clicked while another runs
+  // waits its turn, so that three clicks are three swipes.
+  let quick = false;
+  const waiting = [];
+
+  function motion(a) {
+    const img = $('shot');
+    if (a.do === 'swipe' && !('index' in a) && !('x' in a)) {
+      const by = { up: 'translateY(-28%)', down: 'translateY(28%)', left: 'translateX(-40%)', right: 'translateX(40%)' }[a.value];
+      if (by) { img.classList.add('moving'); img.style.transform = by; }
+    }
+  }
+
+  function still() {
+    const img = $('shot');
+    img.classList.remove('moving');
+    img.style.transform = '';
+  }
+
+  function ring(ev) {
+    const stage = $('stage');
+    const r = stage.getBoundingClientRect();
+    const dot = h('span', { class: 'tap-ring' });
+    dot.style.left = (ev.clientX - r.left) + 'px';
+    dot.style.top = (ev.clientY - r.top) + 'px';
+    stage.append(dot);
+    setTimeout(() => dot.remove(), 600);
+  }
+
+  async function quickAct(a) {
+    if (!frame) return undefined;
+    if (busy) {
+      if (quick && waiting.length < 4) waiting.push(a);
+      return undefined;
+    }
+    quick = true;
+    stopPeeking();
+    motion(a);
+    let r;
+    try {
+      r = await act(a);
+      // A swipe or a key acts on no element, so a screen that changed on its own just before does not
+      // make it wrong: it is sent once more, on the screen as it is now. A tap is not: it was aimed.
+      const plain = !('index' in a) && !('x' in a);
+      if (r && r.status === 409 && r.data && r.data.stale && plain && frame) r = await act(a);
+    } finally {
+      quick = false;
+      still();
+      syncControls();
+    }
+    const next = r && r.ok ? waiting.shift() : (waiting.length = 0, undefined);
+    if (next) return quickAct(next);
+    return r;
   }
 
   function onPick(pick, ev) {
@@ -600,7 +812,8 @@
     const e = pick.element;
     if (e && (e.editable || e.password)) { openType(e, t); return; }
     const doing = ev.shiftKey ? 'longPress' : 'tap';
-    act(Object.assign({ do: doing }, t)).then((r) => {
+    ring(ev);
+    quickAct(Object.assign({ do: doing }, t)).then((r) => {
       // No locator finds the element alone: show the ways to find it, so that the person can pick one.
       if (r && r.status === 422 && !r.data.needsSecret && e) openCandidates(e, 'tap');
     });
@@ -673,10 +886,18 @@
       const keep = chosen;
       const k = takeCandidate(t);
       if (k) body.candidate = k;
-      setBusy(true);
+      setBusy(true, 'Adding check…');
+      const began = Date.now();
       const r = await api('POST', '/api/session/assert', body);
       setBusy(false);
-      if (r.ok) { closeOn('dlg-assert'); take(r.data); banner('Check added.'); return; }
+      const took = Date.now() - began;
+      if (r.ok) {
+        closeOn('dlg-assert');
+        take(r.data);
+        // A check reads the screen once, to be sure that it is still the one in the picture.
+        banner(took > 4000 ? 'Check added. The device took ' + Math.round(took / 1000) + ' s to read this screen: a screen with a web view or very many elements is slow to read.' : 'Check added.');
+        return;
+      }
       if (r.status === 409 && r.data.stale) { closeOn('dlg-assert'); take(r.data.session); banner('The screen changed, so nothing was done. This is the screen now.'); return; }
       chosen = keep; // the dialog stays open, so a second try keeps the locator that was picked
       $('assert-error').textContent = r.data.error || 'The check was not added.';
@@ -715,7 +936,7 @@
       const keep = chosen;
       const k = takeCandidate(t);
       if (k) body.candidate = k;
-      setBusy(true);
+      setBusy(true, 'Capturing value…');
       const r = await api('POST', '/api/session/capture', body);
       setBusy(false);
       if (r.ok) {
@@ -756,17 +977,35 @@
   }
 
   function syncFinishForm() {
-    const flow = finishKind() === 'flow';
-    $('fin-ticket-row').hidden = flow;
-    $('fin-title-row').hidden = flow;
+    const isFlow = finishKind() === 'flow';
+    $('fin-ticket-row').hidden = isFlow;
+    $('fin-title-row').hidden = isFlow;
+    $('fin-id').placeholder = isFlow ? 'login' : 'SHOP-12-01';
+    $('fin-explain').textContent = isFlow
+      ? 'Saves a reusable .semar/flows/<name>.yaml building block you can run at the start of any scenario.'
+      : 'Saves a runnable test (.feature + script) that checks your app end-to-end.';
+  }
+
+  // The finish dialog has two views: the form, and what was saved with the verify under it.
+  function finishView(saved) {
+    $('fin-form').hidden = saved;
+    $('fin-result').hidden = !saved;
+    $('fin-save').hidden = saved;
+    $('fin-heading').textContent = saved ? 'Saved' : 'Finish and save';
+    for (const id of ['fin-undo', 'fin-verify-btn', 'fin-next']) $(id).hidden = !saved;
+    finishPrimary(saved ? 'fin-verify-btn' : 'fin-save');
+    $('fin-verify-btn').textContent = 'Verify replay';
+  }
+
+  // finishPrimary marks the one button that is the next thing to do.
+  function finishPrimary(id) {
+    for (const b of ['fin-verify-btn', 'fin-next', 'fin-save']) $(b).classList.toggle('primary', b === id);
   }
 
   function openFinish() {
     finished = null;
     $('fin-error').hidden = true;
-    $('fin-result').hidden = true;
-    $('fin-save').hidden = false;
-    for (const id of ['fin-undo', 'fin-verify-btn', 'fin-next']) $(id).hidden = true;
+    finishView(false);
     const kind = (session && session.kind) || 'scenario';
     document.querySelector('input[name="fin-kind"][value="' + kind + '"]').checked = true;
     if (session && session.id && session.id !== 'recording') $('fin-id').value = session.id;
@@ -775,14 +1014,18 @@
   }
 
   async function save(confirmClear) {
+    if (busy) return;
     const body = {
       kind: finishKind(), id: $('fin-id').value, ticket: $('fin-ticket').value, title: $('fin-title').value,
       replace: $('fin-replace').checked, confirmClear: !!confirmClear || $('fin-clear').checked,
     };
-    setBusy(true);
+    setBusy(true, 'Saving…');
+    $('fin-save').disabled = true;
     const r = await api('POST', '/api/finish', body);
+    $('fin-save').disabled = false;
     setBusy(false);
     const err = $('fin-error');
+    err.className = 'error';
     if (!r.ok) {
       err.textContent = r.data.error || 'Nothing was saved.';
       err.hidden = false;
@@ -797,42 +1040,85 @@
     drawSteps();
   }
 
+  // fileLabel says what a saved file is. The script of a scenario is stored under the hash of what the
+  // scenario expects, so its name means nothing to a person: the label does.
+  function fileLabel(f) {
+    if (f.includes('/flows/')) return 'Flow';
+    if (f.endsWith('.feature')) return 'Test steps';
+    if (f.includes('/screens/')) return 'Screen elements';
+    if (f.includes('/store/scripts/')) return 'Replay script';
+    return f.split('/').pop();
+  }
+
   function showSaved() {
-    $('fin-result').hidden = false;
-    $('fin-save').hidden = true;
-    for (const id of ['fin-undo', 'fin-verify-btn', 'fin-next']) $(id).hidden = false;
+    finishView(true);
+    const isFlow = finishKind() === 'flow';
+    $('fin-done-title').textContent = (isFlow ? 'Flow ' : 'Test ') + $('fin-id').value + ' is saved';
+    $('fin-done-sub').textContent = isFlow
+      ? 'Next: verify that it replays on a fresh app, or record the next activity.'
+      : 'Next: verify that it replays and passes on a fresh app.';
     const tabs = $('fin-tabs');
     clear(tabs);
     const files = finished.files || [];
+    $('fin-files').open = false;
+    $('fin-files-summary').textContent = 'Files written (' + files.length + ')';
     const show = (f) => {
       $('fin-preview').textContent = (finished.preview && finished.preview[f]) || '';
+      $('fin-path').textContent = f;
       for (const b of tabs.children) b.setAttribute('aria-pressed', String(b.dataset.file === f));
     };
-    for (const f of files) tabs.append(h('button', { type: 'button', class: 'btn', text: f, 'data-file': f, onclick: () => show(f) }));
+    for (const f of files) tabs.append(h('button', { type: 'button', class: 'btn', text: fileLabel(f), title: f, 'data-file': f, onclick: () => show(f) }));
     if (files.length) show(files.find((f) => f.includes('/flows/') || f.endsWith('.feature')) || files[0]);
     const notes = $('fin-verify');
     clear(notes);
     for (const n of finished.notes || []) notes.append(h('p', { class: 'hint', text: 'Note: ' + n + '.' }));
   }
 
+  // Nothing in the dialog can be clicked while the device replays: a second verify would be refused.
+  function finishLocked(on) {
+    for (const id of ['fin-undo', 'fin-close', 'fin-verify-btn', 'fin-next']) $(id).disabled = on;
+  }
+
   async function verify() {
-    setBusy(true);
+    if (busy) return;
     const box = $('fin-verify');
-    box.append(h('p', { class: 'hint', text: 'Verifying on a clean device session...' }));
+    const btn = $('fin-verify-btn');
+    for (const old of box.querySelectorAll('.verify, .verify-run, .error')) old.remove();
+    const note = h('div', { class: 'verify-run' },
+      h('span', { class: 'spinner', 'aria-hidden': 'true' }),
+      h('div', {},
+        h('div', { class: 'verify-run-title', text: 'Replaying on the device…' }),
+        h('div', { class: 'hint', text: 'The app restarts and every step runs again on its own. Leave the device alone until this ends.' })));
+    box.append(note);
+    finishLocked(true);
+    btn.textContent = 'Verifying…';
+    setBusy(true, 'Replaying the saved test…');
     const r = await api('POST', '/api/verify', {});
     setBusy(false);
+    finishLocked(false);
+    btn.textContent = 'Verify again';
+    note.remove();
     if (!r.ok) { box.append(h('p', { class: 'error', text: r.data.error || 'The verify failed.' })); return; }
     take(r.data);
     const v = r.data.verify;
     const good = v.status === 'completed' || v.status === 'passed';
-    const out = h('div', { class: 'verify' }, h('b', { class: good ? 'ok' : 'bad', text: v.status }), document.createTextNode(' ' + v.message));
+    finishPrimary(good ? 'fin-next' : 'fin-verify-btn');
+    const out = h('div', { class: 'verify ' + (good ? 'is-ok' : 'is-bad') },
+      h('div', { class: 'verify-head' }, h('b', { class: good ? 'ok' : 'bad', text: good ? '✓ Passed' : '✕ ' + v.status })),
+      h('div', { class: 'verify-msg', text: v.message }));
     if (v.steps && v.steps.length) {
-      const ul = h('ul');
-      for (const s of v.steps) ul.append(h('li', { text: s.name + ': ' + s.status + (s.detail ? ' (' + s.detail + ')' : '') }));
+      const ul = h('ol', { class: 'verify-steps' });
+      for (const s of v.steps) {
+        const fine = ['done', 'held'].includes(s.status);
+        ul.append(h('li', { class: fine ? '' : 'bad' },
+          h('span', { class: 'verify-step-mark', text: fine ? '✓' : '✕' }),
+          h('span', { text: s.name + (fine && s.status === 'done' ? '' : ': ' + s.status) + (s.detail ? ' (' + s.detail + ')' : '') })));
+      }
       out.append(ul);
     }
-    if (v.report) out.append(h('div', { class: 'hint', text: 'Report: ' + v.report }));
+    if (v.report) out.append(h('div', { class: 'hint fin-path', text: 'Full report: ' + v.report }));
     box.append(out);
+    out.scrollIntoView({ block: 'nearest' });
   }
 
   async function undo() {
@@ -841,10 +1127,11 @@
     if (!r.ok) { box.append(h('p', { class: 'error', text: r.data.error })); return; }
     take(r.data);
     clear(box);
-    box.append(h('p', { class: 'hint', text: 'Undone: the files are as they were before the save.' }));
-    $('fin-result').hidden = true;
-    $('fin-save').hidden = false;
-    for (const id of ['fin-undo', 'fin-verify-btn', 'fin-next']) $(id).hidden = true;
+    finishView(false);
+    const err = $('fin-error');
+    err.className = 'hint';
+    err.textContent = 'Undone: the files are as they were before the save.';
+    err.hidden = false;
   }
 
   async function nextActivity() {
@@ -856,7 +1143,7 @@
   async function next(use) {
     editing = -1;
     const body = { kind: 'scenario', useFlows: use ? [use] : [] };
-    const r = await run('POST', '/api/session/reset', body);
+    const r = await run('POST', '/api/session/reset', body, undefined, 'Resetting app…');
     if (r.ok) { $('fin-id').value = ''; await refreshState(); }
   }
 
@@ -866,6 +1153,33 @@
   }
 
   // --- wiring ---
+
+  // The mouse wheel over the phone swipes it, as a finger does: one recorded swipe for a burst of notches.
+  // Wheel down shows what is below, which is a finger that moves up.
+  let wheelDX = 0;
+  let wheelDY = 0;
+  let wheelTimer = 0;
+
+  function wireWheel() {
+    const stage = $('stage');
+    if (!stage) return;
+    stage.addEventListener('wheel', (ev) => {
+      if (mode !== 'act' || !frame || !session) return;
+      ev.preventDefault();
+      if (busy && !quick) return;
+      wheelDX += ev.deltaX;
+      wheelDY += ev.deltaY;
+      clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(() => {
+        const dx = wheelDX;
+        const dy = wheelDY;
+        wheelDX = wheelDY = 0;
+        if (!frame || Math.max(Math.abs(dx), Math.abs(dy)) < 8) return;
+        const dir = Math.abs(dy) >= Math.abs(dx) ? (dy > 0 ? 'up' : 'down') : (dx > 0 ? 'left' : 'right');
+        quickAct({ do: 'swipe', value: dir });
+      }, 60);
+    }, { passive: false });
+  }
 
   function boot() {
     const m = /(?:^|[#&])token=([0-9a-f]+)/.exec(location.hash);
@@ -882,6 +1196,10 @@
         if (d.id === 'dlg-type') $('type-value').value = '';
       });
     }
+    for (const btn of document.querySelectorAll('.kind-card')) {
+      btn.addEventListener('click', () => syncStartKind(btn.dataset.kind));
+    }
+    syncStartKind($('start-kind').value);
     $('mode-act').onclick = () => { mode = 'act'; syncControls(); };
     $('mode-assert').onclick = () => { mode = 'assert'; syncControls(); };
     $('mode-capture').onclick = () => { mode = 'capture'; syncControls(); };
@@ -899,12 +1217,12 @@
       // confirmation on a physical device: the call goes again with what was asked.
       const again = (x) => x === true
         ? reopen(true)
-        : run('POST', '/api/session/start', Object.assign({}, body, x), (y) => y === true ? reopen(true) : undefined).then(refreshState);
-      run('POST', '/api/session/start', body, again).then(refreshState);
+        : run('POST', '/api/session/start', Object.assign({}, body, x), (y) => y === true ? reopen(true) : undefined, 'Reopening recording…').then(refreshState);
+      run('POST', '/api/session/start', body, again, 'Reopening recording…').then(refreshState);
     };
     $('device').onchange = drawPhysical;
     $('setup-open').onclick = openSetup;
-    $('refresh').onclick = () => run('POST', '/api/session/refresh', {});
+    $('refresh').onclick = () => run('POST', '/api/session/refresh', {}, undefined, 'Refreshing screen…');
     $('finish').onclick = openFinish;
     $('reset').onclick = () => {
       const steps = (session && session.steps) || [];
@@ -916,7 +1234,7 @@
       repicking = -1;
       editing = -1;
       closeCandidates();
-      run('DELETE', '/api/timeline/last');
+      run('DELETE', '/api/timeline/last', undefined, undefined, 'Deleting step…');
     };
     $('flow-run').onclick = () => {
       const flow = $('flow-pick').value;
@@ -926,20 +1244,20 @@
         const [k, ...v] = part.split('=');
         if (k.trim()) with_[k.trim()] = v.join('=').trim();
       }
-      run('POST', '/api/session/use-flow', { flow, with: with_ });
+      run('POST', '/api/session/use-flow', { flow, with: with_ }, undefined, 'Running flow…');
     };
     $('screen-name').onchange = () => {
       const name = $('screen-name').value.trim();
       if (!name) return;
       const rename = $('screen-rename').checked && !!frame && !!frame.screen && frame.screen !== name;
       $('screen-rename').checked = false;
-      run('POST', '/api/session/screen', rename ? { name, rename: true, from: frame.screen } : { name });
+      run('POST', '/api/session/screen', rename ? { name, rename: true, from: frame.screen } : { name }, undefined, 'Updating screen…');
     };
     $('start').onclick = function start(confirmClear) {
       const service = $('start-service').value || (state && state.service) || '';
       const body = { kind: $('start-kind').value || 'scenario', service, deviceSerial: $('device').value, useFlows: $('start-flow').value ? [$('start-flow').value] : [], confirmClear: confirmClear === true };
       captures = [];
-      run('POST', '/api/session/start', body, (yes) => start(yes)).then(refreshState);
+      run('POST', '/api/session/start', body, (yes) => start(yes), 'Starting app…').then(refreshState);
     };
     $('form-link').onsubmit = (ev) => {
       ev.preventDefault();
@@ -961,7 +1279,11 @@
     for (const r of document.querySelectorAll('input[name="fin-kind"]')) r.addEventListener('change', syncFinishForm);
     $('fin-undo').onclick = undo;
     $('fin-verify-btn').onclick = verify;
+    // Escape must not close the dialog while the device replays.
+    $('dlg-finish').addEventListener('cancel', (ev) => { if (busy) ev.preventDefault(); });
+    $('dlg-finish').addEventListener('keydown', (ev) => { if (busy && ev.key === 'Escape') ev.preventDefault(); });
     $('fin-next').onclick = nextActivity;
+    wireWheel();
     $('form-confirm').onsubmit = (ev) => ev.preventDefault();
     if (!token) { render(); return; }
     load().then(loadDevices);

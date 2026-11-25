@@ -73,11 +73,16 @@ type Options struct {
 	// defaults are 30 and 3 seconds.
 	ActionTimeout time.Duration
 	Settle        time.Duration
+	// SettlePoll is a fixed delay between the reads of a settle. Zero is the growing delay of a replay.
+	SettlePoll time.Duration
 	// CheckTimeout is how long the checks of a step wait for their condition after the screen settles.
 	CheckTimeout time.Duration
 	// LogcatOnFailure writes the last lines of the log of the app, as evidence, when a step fails.
 	LogcatOnFailure bool
-	Clock           func() time.Time
+	// AccessibilityCheck runs zero-model accessibility checks on the settled screen of each step and
+	// stores any warnings as non-failing evidence.
+	AccessibilityCheck bool
+	Clock              func() time.Time
 	// Sleep waits for d, or for the context. A test passes one that moves its clock.
 	Sleep   func(ctx context.Context, d time.Duration) error
 	TraceID func() string // 32 lower-case hex characters
@@ -98,12 +103,19 @@ type Call struct {
 	Until    []domain.Check
 	Captures []domain.Capture
 	Why      string
+	// InitialTree, when non-nil, is a freshly read screen tree supplied by an interactive caller
+	// (such as the recorder) to avoid a redundant Source() before acting. Nil during replay.
+	InitialTree *Tree
 }
 
 type Result struct {
 	Action   domain.Action     // redacted, as stored
 	Captured map[string]string // raw values, for later steps only. Never store them
 	Missing  []string          // capture names that gave no value
+	// Tree is the final settled tree read after the action, if any. In-memory only; not serialized.
+	Tree *Tree `json:"-"`
+	// ShotJPEG is the shrunk JPEG screenshot taken after the action, if any. In-memory only; not serialized.
+	ShotJPEG []byte `json:"-"`
 }
 
 type Engine struct {
@@ -420,6 +432,7 @@ func (e *Engine) run(ctx context.Context, d Driver, c Call, value, label string,
 	attempt := func() {
 		opErr, miss, dispatched = nil, nil, false
 		if e.needsReset(m.Service) {
+			c.InitialTree = nil
 			if err := e.resetApp(actCtx, d, m); err != nil {
 				opErr = fmt.Errorf("the app could not be reset: %w", err)
 			} else {
@@ -448,6 +461,7 @@ func (e *Engine) run(ctx context.Context, d Driver, c Call, value, label string,
 		if dispatched {
 			restarted = true
 		} else {
+			c.InitialTree = nil
 			renew()
 			attempt()
 		}
@@ -469,7 +483,7 @@ func (e *Engine) run(ctx context.Context, d Driver, c Call, value, label string,
 			opErr = fmt.Errorf("the screen could not be read: %w", err)
 		}
 		if settled != nil && actCtx.Err() == nil {
-			states, repair, near, readErr = e.readUntil(actCtx, d, settled, c)
+			settled, states, repair, near, readErr = e.readUntil(actCtx, d, settled, c)
 		}
 	}
 	acted := opErr == nil
@@ -480,6 +494,15 @@ func (e *Engine) run(ctx context.Context, d Driver, c Call, value, label string,
 		opErr = nil
 		renew()
 		observe()
+	}
+	if e.o.AccessibilityCheck && settled != nil && ctx.Err() == nil {
+		density := 0
+		if dr, ok := e.o.Platform.(DensityReader); ok {
+			density = dr.ScreenDensity(actCtx)
+		}
+		if issues := CheckAccessibility(settled, WindowHints{App: a.Mobile.Package}, A11yOptions{Density: density}); len(issues) > 0 {
+			a.Mobile.Accessibility = toDomainA11y(a.Mobile.Screen, issues)
+		}
 	}
 	if miss != nil {
 		if states == nil {
@@ -514,10 +537,12 @@ func (e *Engine) run(ctx context.Context, d Driver, c Call, value, label string,
 	if restarted && a.Err != "" && ctx.Err() == nil {
 		a.Err += ": the UiAutomator2 server stopped and was restarted, so the effect of the action is not known"
 	}
-	if shot, err := e.screenshot(ctx, d, a); err != nil {
+	var shotJPEG []byte
+	if shot, data, err := e.screenshot(ctx, d, a); err != nil {
 		e.o.Logger.DebugContext(ctx, "no screenshot", "error", err)
 	} else {
 		a.Mobile.Screenshot = shot
+		shotJPEG = data
 	}
 
 	e.diagnose(ctx, d, c, &a, miss != nil || isNotFoundText(a.Err) || untilMissing(c.Until, states))
@@ -526,7 +551,12 @@ func (e *Engine) run(ctx context.Context, d Driver, c Call, value, label string,
 	if a.Err == "" || isNotFoundText(a.Err) {
 		captured, missing = capture(states, c.Captures)
 	}
-	return e.record(ctx, label, a, captured, missing)
+	res, err := e.record(ctx, label, a, captured, missing)
+	if err == nil {
+		res.Tree = settled
+		res.ShotJPEG = shotJPEG
+	}
+	return res, err
 }
 
 // recoverLimit bounds a restart of the server. The platform has a start timeout of its own inside it.
@@ -646,6 +676,12 @@ func (e *Engine) perform(ctx context.Context, d Driver, c Call, value string) (*
 // waitTarget polls until name is uniquely visible on the screen, for at most CheckTimeout. A transition
 // after launch or a tap can take a second to draw; polling avoids failing on the first frame.
 func (e *Engine) waitTarget(ctx context.Context, d Driver, c Call, name string) (resolved, *notFoundMiss, error) {
+	if c.InitialTree != nil {
+		rd := newReader(c.InitialTree, c.Locators)
+		if res, _, err := e.target(rd, name); err == nil {
+			return res, nil, nil
+		}
+	}
 	deadline := e.o.Clock().Add(e.o.CheckTimeout)
 	for {
 		tree, err := d.Source(ctx)
@@ -713,9 +749,13 @@ func (e *Engine) waitFor(ctx context.Context, d Driver, c Call) (*notFoundMiss, 
 // swipe moves a finger over the element, or over the screen when the action names none.
 func (e *Engine) swipe(ctx context.Context, d Driver, c Call) (*notFoundMiss, bool, error) {
 	m := c.Action
-	tree, err := d.Source(ctx)
-	if err != nil {
-		return nil, false, fmt.Errorf("the screen could not be read: %w", err)
+	tree := c.InitialTree
+	if tree == nil {
+		var err error
+		tree, err = d.Source(ctx)
+		if err != nil {
+			return nil, false, fmt.Errorf("the screen could not be read: %w", err)
+		}
 	}
 	region := screenRect(tree)
 	if m.Element != "" {
@@ -905,11 +945,12 @@ func watchOf(watch []domain.Watched, name string) *domain.Watched {
 // hold or CheckTimeout passes, and gives the last reading. A check that an element is not there, or
 // hidden, holds on a screen that has not drawn the element yet, so after such a check holds the engine
 // waits until the screen is still and reads once more.
-func (e *Engine) readUntil(ctx context.Context, d Driver, first *Tree, c Call) (map[string]domain.ElementState, []domain.Candidate, []domain.Candidate, error) {
+func (e *Engine) readUntil(ctx context.Context, d Driver, first *Tree, c Call) (*Tree, map[string]domain.ElementState, []domain.Candidate, []domain.Candidate, error) {
+	cur := first
 	until := slices.DeleteFunc(slices.Clone(c.Until), func(k domain.Check) bool { return k.Element == "" })
-	states, repair, near, err := e.read(first, c)
+	states, repair, near, err := e.read(cur, c)
 	if len(until) == 0 || err != nil {
-		return states, repair, near, err
+		return cur, states, repair, near, err
 	}
 	deadline := e.o.Clock().Add(e.o.CheckTimeout)
 	held := e.hold(c, until, states, repair)
@@ -919,21 +960,24 @@ func (e *Engine) readUntil(ctx context.Context, d Driver, first *Tree, c Call) (
 		}
 		t, err := d.Source(ctx)
 		if err != nil {
-			return states, repair, near, err
+			return cur, states, repair, near, err
 		}
-		if states, repair, near, err = e.read(t, c); err != nil {
-			return states, repair, near, err
+		cur = t
+		if states, repair, near, err = e.read(cur, c); err != nil {
+			return cur, states, repair, near, err
 		}
 		held = e.hold(c, until, states, repair)
 	}
 	if held && slices.ContainsFunc(until, absence) {
 		t, err := e.settle(ctx, d, e.o.Settle)
 		if err != nil {
-			return states, repair, near, err
+			return cur, states, repair, near, err
 		}
-		return e.read(t, c)
+		cur = t
+		states, repair, near, err = e.read(cur, c)
+		return cur, states, repair, near, err
 	}
-	return states, repair, near, nil
+	return cur, states, repair, near, nil
 }
 
 // absence is a check that holds when something is not shown.
@@ -958,24 +1002,24 @@ func (e *Engine) hold(c Call, until []domain.Check, states map[string]domain.Ele
 }
 
 // screenshot stores one JPEG of the screen, at most 1280 pixels on its longest side, and gives its path
-// below the run directory. It is evidence of the step, so a failure to take it never fails the step,
-// and a secure screen gives none.
-func (e *Engine) screenshot(ctx context.Context, d Driver, a domain.Action) (string, error) {
+// below the run directory together with the shrunk JPEG bytes. It is evidence of the step, so a failure
+// to take it never fails the step, and a secure screen gives none.
+func (e *Engine) screenshot(ctx context.Context, d Driver, a domain.Action) (string, []byte, error) {
 	if e.o.Files == nil {
-		return "", errors.New("the engine has no place for files")
+		return "", nil, errors.New("the engine has no place for files")
 	}
 	shotCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if ctx.Err() != nil {
-		return "", ctx.Err()
+		return "", nil, ctx.Err()
 	}
 	png, err := d.Screenshot(shotCtx)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	data, err := Shrink(png)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	e.mu.Lock()
 	e.shots++
@@ -991,9 +1035,9 @@ func (e *Engine) screenshot(ctx context.Context, d Driver, a domain.Action) (str
 	}
 	rel := "screenshots/" + dir + "/" + name + ".jpg"
 	if err := e.o.Files.WriteFile(rel, data); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return rel, nil
+	return rel, data, nil
 }
 
 func captureNames(caps []domain.Capture) []string {

@@ -990,12 +990,13 @@ environments:
   uat:
     checks:
       schema: warn               # fail (the default), warn, or off
+      accessibility: warn        # warn (the default) or off, for mobile screens
       responseTime:
         limit: 2s                # no limit when it is not set
         on: warn                 # warn (the default) or fail
 ```
 
-A warning changes no outcome. The run prints the warnings after the results, and `report.md` has a section "Checks against the API document":
+A warning changes no outcome. The run prints the warnings after the results, and `report.md` has sections "Checks against the API document" and "Accessibility warnings" when findings exist:
 
 ```text
 response checks: 2 warnings from environments.uat.checks, no outcome changed
@@ -1396,6 +1397,9 @@ environments:
       timeout: 5s                             # how long a check waits, from 0s to 1m
       startTimeout: 60s                       # how long the server may take to start, up to 5m
       logcatOnFailure: true                   # keep the end of the app's log when a step fails
+      theme: dark                             # optional: light or dark (adb only, restored after run)
+      fontScale: 1.5                          # optional: 0.5 to 3.0 (adb only, restored after run)
+      locale: en-US                           # optional: BCP-47 per-app locale on Android 13+ (restored after run)
     services:
       - name: shop-app
         baseUrl: https://shop.uat.example.com
@@ -1413,6 +1417,8 @@ environments:
 | `android.device` | The serial of the device. With no serial, Semar uses the one running emulator. A physical device is used only when it is named here or in `ANDROID_SERIAL`, because a reset can delete data and Semar never picks a personal phone. Two emulators, an `offline` device, and an `unauthorized` one end the scenario as `blocked` with the reason |
 | `android.timeout`, `android.startTimeout` | The wait of a check, and the wait for the server to start |
 | `android.logcatOnFailure` | When `true`, a step that fails also keeps the last 200 lines of the log of the app, as `logcat-<step>.txt` in the run. The default is `false` |
+| `android.theme`, `android.fontScale`, `android.locale` | Set dark/light theme (`light` or `dark`), system font scale (`0.5` to `3.0`), or per-app BCP-47 locale (Android 13+, e.g. `en-US`) for the run and restore them when it ends. Requires `adb` (refused with `serverUrl`). Override per run with `--android-theme`, `--android-font-scale`, and `--android-locale` |
+| `checks.accessibility` | `warn` (the default) checks every settled mobile screen for unlabeled interactive controls and touch targets smaller than 48dp (skipping controls touching the screen edge or a scrollable container edge) with no model call, reporting non-failing warnings in stdout and reports. Set `off` to disable |
 | `services[].android.appPackage` | The package of the app. Required |
 | `services[].android.appActivity` | The activity to start. Empty starts the launcher activity |
 | `services[].android.apk` | The file that Semar installs when the device has another one. See the build below |
@@ -1796,12 +1802,12 @@ The tables name every tool. The first table is the mobile group, which is on in 
 | Tools | What they do |
 | --- | --- |
 | `mobile_list_available_devices`, `mobile_use_device` | List the devices that adb sees, and choose one by its serial |
-| `mobile_get_screen_size`, `mobile_get_orientation`, `mobile_set_orientation`, `mobile_fold_device` | Read the screen, turn it, and fold a foldable. The size is as the screen is turned now. The settings are put back when the server ends |
+| `mobile_get_screen_size`, `mobile_get_orientation`, `mobile_set_orientation`, `mobile_set_theme`, `mobile_set_font_scale`, `mobile_fold_device` | Read the screen, turn it, switch dark/light theme, change system font scale (`0.5` to `3.0`), and fold a foldable. The size is as the screen is turned now. The settings are put back when the server ends |
 | `mobile_set_location`, `mobile_clipboard` | Set the location of an emulator, and read or set the clipboard (reads stay allowed in observe, takeover, and record modes; sets are gated) |
 | `mobile_list_apps`, `mobile_get_foreground_app`, `mobile_launch_app`, `mobile_terminate_app` | Find, start, and stop an app |
 | `mobile_install_app`, `mobile_uninstall_app`, `mobile_clear_app_data` | Change what is installed. A physical device needs `confirm: true` to uninstall or clear |
 | `mobile_take_screenshot`, `mobile_save_screenshot` | Take a picture, or save it in the output folder. Both are refused when the screen shows a secret |
-| `mobile_list_elements_on_screen` | List what can be acted on, grouped by window, each with a [ref](#refs-and-stale-refs) |
+| `mobile_list_elements_on_screen` | List what can be acted on, grouped by window, each with a [ref](#refs-and-stale-refs); in text format (not JSON), also includes concise `note:` lines for accessibility issues (missing labels, <48dp touch targets not touching a screen or scrollable container edge) and proactive crash or React Native / Flutter errors |
 | `mobile_click_on_screen_at_coordinates`, `mobile_double_tap_on_screen`, `mobile_long_press_on_screen_at_coordinates`, `mobile_drag_on_screen`, `mobile_swipe_on_screen` | Touch the screen at `x` and `y`, or at the element that a `ref` names. A drag takes `fromRef` and `toRef`, and `hold` in milliseconds |
 | `mobile_type_keys`, `mobile_press_button`, `mobile_open_url` | Type text, press a key, and open a link. See [Safety](#safety) for links |
 | `mobile_batch_commands` | Run 1 to 50 of the tools above in one call |
@@ -2542,6 +2548,9 @@ semar run [environment]
 | Flag | Meaning |
 | --- | --- |
 | `--all` | Run every scenario and every critical journey, not only those of the change |
+| `--android-font-scale <n>` | Set Android system font scale for the run (0.5 to 3.0); restored when the run ends |
+| `--android-locale <text>` | Set Android per-app BCP-47 locale for the run (Android 13+, e.g. en-US); restored when the run ends |
+| `--android-theme <text>` | Set Android theme for the run (light or dark); restored when the run ends |
 | `--base <text>` | The branch that the change is measured against (default: change.base, else the default branch of origin, else main) |
 | `--build <text>` | The commit that a service with no build probe runs, as \<commit> or \<service>=\<commit>; repeat for more |
 | `--ci` | Ask no question and plan nothing, as on a machine with no terminal |
@@ -2810,6 +2819,9 @@ semar journey run (<id>... | --critical | --all)
 | Flag | Meaning |
 | --- | --- |
 | `--all` | Run every valid journey in .semar/journeys |
+| `--android-font-scale <n>` | Set Android system font scale for the run (0.5 to 3.0); restored when the run ends |
+| `--android-locale <text>` | Set Android per-app BCP-47 locale for the run (Android 13+, e.g. en-US); restored when the run ends |
+| `--android-theme <text>` | Set Android theme for the run (light or dark); restored when the run ends |
 | `--build <text>` | The commit that a service with no build probe runs, as \<commit> or \<service>=\<commit>; repeat for more |
 | `--critical` | Run every journey with criticality critical |
 | `--env <text>` | The environment of semar.yaml to run against; needed when there are several, and always for a production environment |

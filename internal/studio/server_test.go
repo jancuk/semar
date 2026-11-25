@@ -3,9 +3,11 @@ package studio_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"net"
@@ -601,6 +603,10 @@ func TestStudioRecordsAFlowThenAScenarioThatUsesIt(t *testing.T) {
 	f = c.call("POST", "/api/verify", m{}, 200)
 	if f.Verify.Status != "passed" || len(verifies) != 2 {
 		t.Fatalf("verify scenario = %+v %v", f.Verify, verifies)
+	}
+	// The studio took the device back, so it says so, once.
+	if strings.Count(f.Verify.Message, "The device is back at the start of the app.") != 1 || strings.Contains(f.Verify.Message, "could not be taken back") {
+		t.Errorf("verify message = %q", f.Verify.Message)
 	}
 
 	// Undo takes the scenario back once, and a second undo has nothing to take back.
@@ -1385,5 +1391,108 @@ func TestStudioAsksForTheValuesOfAReopenedRecordingBeforeItStarts(t *testing.T) 
 	}
 	if code, _ := c.do("DELETE", "/api/timeline/99", m{}); code != 404 {
 		t.Errorf("deleting a step that is not there gave %d, want 404", code)
+	}
+}
+
+// Starting a flow without giving an ID up front uses the placeholder ID and lets the user name it on finish.
+func TestStudioStartsAFlowWithoutAnIDAndSavesIt(t *testing.T) {
+	r := newRig(t)
+	var verifies []string
+	c, _ := start(t, r.deps(&verifies))
+
+	f := c.call("POST", "/api/session/start", m{"kind": "flow"}, 200)
+	if f.Kind != "flow" || f.Frame == nil || f.Frame.Screen != "SignIn" {
+		t.Fatalf("start flow without id = %+v", f)
+	}
+	f = c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "tap", "index": f.find(t, byDesc("Sign in"))}, 200)
+	if f.Frame.Screen != "Home" {
+		t.Fatalf("after tap screen = %q, want Home", f.Frame.Screen)
+	}
+	f = c.call("POST", "/api/finish", m{"kind": "flow", "id": "quick-login"}, 200)
+	if !contains(f.Files, ".semar/flows/quick-login.yaml") || !r.exists(".semar/flows/quick-login.yaml") {
+		t.Fatalf("finish flow = %+v", f.Files)
+	}
+}
+
+// Recorded actions reuse the engine's settled tree and shrunk JPEG instead of settling or screenshotting twice,
+// downscale large fresh captures, and still hide screenshots whenever a secret is visible on screen.
+func TestStudioReusesEngineShotAndHidesSecrets(t *testing.T) {
+	r := newRig(t)
+	var verifies []string
+	c, _ := start(t, r.deps(&verifies))
+
+	// Start: 1 settle (2 Source calls) and 1 Screenshot call.
+	f := c.call("POST", "/api/session/start", m{}, 200)
+	if !strings.HasPrefix(f.Frame.Image, "data:image/jpeg;base64,") {
+		t.Fatalf("start image = %q", f.Frame.Image)
+	}
+	if got := r.d.ScreenshotCalls(); got != 1 {
+		t.Errorf("start Screenshot calls = %d, want 1", got)
+	}
+
+	// Tap: 1 resolve + 1 settle (3 Source calls total), 1 Screenshot call.
+	srcBefore, shotBefore := r.d.SourceCalls(), r.d.ScreenshotCalls()
+	f = c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "tap", "index": f.find(t, byDesc("Sign in"))}, 200)
+	if got := r.d.SourceCalls() - srcBefore; got != 3 {
+		t.Errorf("tap Source calls = %d, want 3 (1 resolve + 1 settle)", got)
+	}
+	if got := r.d.ScreenshotCalls() - shotBefore; got != 1 {
+		t.Errorf("tap Screenshot calls = %d, want 1", got)
+	}
+	if !strings.HasPrefix(f.Frame.Image, "data:image/jpeg;base64,") {
+		t.Errorf("tap image = %q", f.Frame.Image)
+	}
+
+	// Plain swipe: uses InitialTree (0 pre-action Source) + 1 settle (2 Source calls total), 1 Screenshot call.
+	srcBefore, shotBefore = r.d.SourceCalls(), r.d.ScreenshotCalls()
+	f = c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "swipe", "value": "up"}, 200)
+	if got := r.d.SourceCalls() - srcBefore; got != 2 {
+		t.Errorf("swipe Source calls = %d, want 2 (1 settle only)", got)
+	}
+	if got := r.d.ScreenshotCalls() - shotBefore; got != 1 {
+		t.Errorf("swipe Screenshot calls = %d, want 1", got)
+	}
+
+	// Fresh refresh downscales a large PNG screenshot to at most 960px on its longest side.
+	var bigBuf bytes.Buffer
+	if err := png.Encode(&bigBuf, image.NewRGBA(image.Rect(0, 0, 1080, 2160))); err != nil {
+		t.Fatal(err)
+	}
+	r.d.Shot = bigBuf.Bytes()
+	f = c.call("POST", "/api/session/refresh", m{}, 200)
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(f.Frame.Image, "data:image/jpeg;base64,"))
+	if err != nil {
+		t.Fatalf("decode refresh jpeg: %v", err)
+	}
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("decode jpeg config: %v", err)
+	}
+	if max(cfg.Width, cfg.Height) > 960 {
+		t.Errorf("refreshed image size = %dx%d, want longest side <= 960", cfg.Width, cfg.Height)
+	}
+
+	// Secret revealed directly by an action must hide the image and never serve the cached engine JPEG.
+	r.signed = false
+	r.d.Shot = tinyPNG()
+	f = c.call("POST", "/api/session/reset", m{}, 200)
+	f = c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "type", "index": f.find(t, byID("password")), "secretEnv": "SHOP_PASSWORD", "ephemeralSecret": canary}, 200)
+	r.d.OnTouch = func(mobile.Gesture) {
+		shown := signInScreen()
+		shown.Walk(func(n *mobile.Node) bool {
+			if strings.HasSuffix(n.ID, ":id/password") {
+				n.Password, n.Text = false, canary
+				n.Attrs["text"], n.Attrs["password"] = canary, ""
+			}
+			return true
+		})
+		r.d.Show(shown)
+	}
+	f = c.call("POST", "/api/session/act", m{"frameId": f.Frame.ID, "do": "tap", "index": f.find(t, byDesc("Sign in"))}, 200)
+	if !f.Frame.ImageHidden || f.Frame.Image != "" {
+		t.Errorf("secret revealed by action was not hidden: hidden=%v image=%q", f.Frame.ImageHidden, f.Frame.Image)
+	}
+	if strings.Contains(c.seen.String(), canary) {
+		t.Error("the secret appeared in a studio response")
 	}
 }

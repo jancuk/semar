@@ -9,3 +9,4 @@ testdata/e2e/.semar/store/
 docs/*
 !docs/GUIDE.md
 !docs/ROADMAP.md
+!docs/images/

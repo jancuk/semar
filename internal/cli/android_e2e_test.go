@@ -618,3 +618,71 @@ func TestAnAndroidScenarioWithNoAndroidServiceHasAGapAndIsBlocked(t *testing.T) 
 	contains(t, "stdout", res.stdout, "AND-1 is an Android scenario, which cannot run here: no service of the environment has an android app", "AND-1  blocked")
 	contains(t, "the report", r.lastReport(t), "service shop-app has no android app in this environment")
 }
+
+func TestAndroidDisplayFlagsAndA11yWarnings(t *testing.T) {
+	r := localRun(t, androidOptions{
+		adb: mobiletest.ADBConfig{
+			Canned: []mobiletest.Canned{
+				{Match: "'cmd' 'uimode' 'night' 'yes'", Out: ""},
+				{Match: "'cmd' 'uimode' 'night' 'no'", Out: ""},
+				{Match: "'cmd' 'uimode' 'night'", Out: "Night mode: no\n"},
+				{Match: "'settings' 'get' 'system' 'font_scale'", Out: "1.0\n"},
+				{Match: "'cmd' 'locale' 'get-app-locales' 'com.example.shop'", Out: "Locales for com.example.shop for user 0 are []\n"},
+				{Match: "'wm' 'density'", Out: "Physical density: 420\n"},
+			},
+		},
+	})
+	// Invalid flag values (including explicit 0) are rejected before running.
+	res := r.semar(t, t.Context(), "run", "--scenario", "AND-1", "--android-font-scale", "0")
+	if res.code == cli.ExitOK || !strings.Contains(res.stderr, "--android-font-scale") {
+		t.Errorf("font-scale 0: code=%d stderr=%q", res.code, res.stderr)
+	}
+	res = r.semar(t, t.Context(), "run", "--scenario", "AND-1", "--android-theme", "sepia")
+	if res.code == cli.ExitOK || !strings.Contains(res.stderr, "--android-theme") {
+		t.Errorf("theme sepia: code=%d stderr=%q", res.code, res.stderr)
+	}
+	res = r.semar(t, t.Context(), "run", "--scenario", "AND-1", "--android-locale", "bad_locale")
+	if res.code == cli.ExitOK || !strings.Contains(res.stderr, "--android-locale") {
+		t.Errorf("bad locale: code=%d stderr=%q", res.code, res.stderr)
+	}
+
+	// Valid flags apply display settings, run, print a11y warnings if any, and restore on close.
+	res = r.must(t, cli.ExitOK, "run", "--scenario", "AND-1", "--android-theme", "dark", "--android-font-scale", "1.5", "--android-locale", "id-ID")
+	lines := r.adb.Log()
+	log := adbLog(r)
+	for _, want := range []string{
+		"shell 'cmd' 'uimode' 'night' 'yes'",
+		"shell 'settings' 'put' 'system' 'font_scale' '1.5'",
+		"shell 'cmd' 'locale' 'set-app-locales' 'com.example.shop' '--user' 'current' '--locales' 'id-ID'",
+		"shell 'cmd' 'locale' 'set-app-locales' 'com.example.shop' '--user' 'current'",
+		"shell 'settings' 'put' 'system' 'font_scale' '1.0'",
+		"shell 'cmd' 'uimode' 'night' 'no'",
+	} {
+		found := false
+		for _, l := range lines {
+			if l == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("adb log lacks exact line %s:\n%s", want, log)
+		}
+	}
+	// signedOutScreen has a 120px-high Sign in button at 420dpi (~46dp < 48dp), so an accessibility warning appears without failing the run.
+	contains(t, "stdout", res.stdout, "accessibility checks:")
+	contains(t, "report", r.lastReport(t), "## Accessibility warnings")
+
+	// Remote environment rejects --android-theme.
+	rem := newAndroidRig(t, androidOptions{})
+	res = rem.semar(t, t.Context(), "run", "--scenario", "AND-1", "--android-theme", "dark")
+	if res.code == cli.ExitOK || !strings.Contains(res.stderr, "serverUrl") {
+		t.Errorf("remote --android-theme: code=%d stderr=%q", res.code, res.stderr)
+	}
+
+	// Environment with no Android services prints a notice on stderr instead of silently ignoring flags.
+	noAnd := newRepo(t, repoOptions{})
+	noAnd.addScript(t)
+	res = noAnd.must(t, cli.ExitOK, "run", "--scenario", scenarioID, "--android-theme", "dark")
+	contains(t, "stderr", res.stderr, "ignoring --android-theme: this environment has no Android service")
+}

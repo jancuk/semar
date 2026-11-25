@@ -32,27 +32,30 @@ type fakeDev struct {
 	emulator bool
 	remote   bool
 
-	tree     *mobile.Tree
-	treeErr  error
-	shot     []byte
-	touches  []mobile.Gesture
-	typed    []string
-	keys     []int
-	screen   android.ScreenInfo
-	orient   string
-	apps     []string
-	fgPkg    string
-	fgAct    string
-	clip     string
-	logs     []android.LogEntry
-	logQuery android.LogQuery
-	crashes  []android.Crash
-	crashErr error
-	recPath  string
-	recOpts  android.RecOptions
-	imePkg   string
-	imeErr   error
-	err      map[string]error // by method name: the error that the method gives
+	tree       *mobile.Tree
+	treeErr    error
+	shot       []byte
+	touches    []mobile.Gesture
+	typed      []string
+	keys       []int
+	screen     android.ScreenInfo
+	orient     string
+	theme      string
+	fontScale  float64
+	apps       []string
+	fgPkg      string
+	fgAct      string
+	clip       string
+	logs       []android.LogEntry
+	logQuery   android.LogQuery
+	logQueries []android.LogQuery
+	crashes    []android.Crash
+	crashErr   error
+	recPath    string
+	recOpts    android.RecOptions
+	imePkg     string
+	imeErr     error
+	err        map[string]error // by method name: the error that the method gives
 
 	// inflight and peak measure how many calls run at once.
 	inflight, peak atomic.Int32
@@ -62,13 +65,15 @@ type fakeDev struct {
 func newFake() *fakeDev {
 	return &fakeDev{
 		serial: "emulator-5554", emulator: true,
-		tree:   screenTree("d1", mobile.Rect{Left: 0, Top: 1560, Right: 1080, Bottom: 1680}, true),
-		shot:   pngBytes(1080, 2400),
-		screen: android.ScreenInfo{Width: 1080, Height: 2400, Density: 420},
-		orient: "portrait",
-		imePkg: "com.kb",
-		apps:   []string{"com.example.shop"},
-		err:    map[string]error{},
+		tree:      screenTree("d1", mobile.Rect{Left: 0, Top: 1560, Right: 1080, Bottom: 1680}, true),
+		shot:      pngBytes(1080, 2400),
+		screen:    android.ScreenInfo{Width: 1080, Height: 2400, Density: 420},
+		orient:    "portrait",
+		theme:     "light",
+		fontScale: 1.0,
+		imePkg:    "com.kb",
+		apps:      []string{"com.example.shop"},
+		err:       map[string]error{},
 	}
 }
 
@@ -159,6 +164,26 @@ func (d *fakeDev) SetOrientation(_ context.Context, o string) error {
 	d.orient = o
 	return d.enter("SetOrientation", o)
 }
+func (d *fakeDev) Theme(context.Context) (string, error) {
+	return d.theme, d.enter("Theme")
+}
+func (d *fakeDev) SetTheme(_ context.Context, theme string) error {
+	if err := d.enter("SetTheme", theme); err != nil {
+		return err
+	}
+	d.theme = theme
+	return nil
+}
+func (d *fakeDev) FontScale(context.Context) (float64, error) {
+	return d.fontScale, d.enter("FontScale")
+}
+func (d *fakeDev) SetFontScale(_ context.Context, scale float64) error {
+	if err := d.enter("SetFontScale", scale); err != nil {
+		return err
+	}
+	d.fontScale = scale
+	return nil
+}
 func (d *fakeDev) Fold(_ context.Context, p string) error { return d.enter("Fold", p) }
 func (d *fakeDev) SetLocation(_ context.Context, lat, lon float64) error {
 	return d.enter("SetLocation", lat, lon)
@@ -195,11 +220,67 @@ func (d *fakeDev) StopRecording(context.Context) (string, error) {
 	return d.recPath, d.enter("StopRecording")
 }
 func (d *fakeDev) Logs(_ context.Context, q android.LogQuery) ([]android.LogEntry, error) {
+	d.mu.Lock()
 	d.logQuery = q
-	return d.logs, d.enter("Logs")
+	d.logQueries = append(d.logQueries, q)
+	d.mu.Unlock()
+	if err := d.enter("Logs"); err != nil {
+		return nil, err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []android.LogEntry
+	for _, e := range d.logs {
+		if matchFakeLogFilters(e, q.Filters) {
+			out = append(out, e)
+		}
+	}
+	if q.Limit > 0 && len(out) > q.Limit {
+		out = out[len(out)-q.Limit:]
+	}
+	return out, nil
 }
+
+func matchFakeLogFilters(e android.LogEntry, filters []android.LogFilter) bool {
+	levelRank := func(l string) int { return strings.Index("SVDIWEF", l) }
+	for _, f := range filters {
+		var ok bool
+		switch f.Key {
+		case "tag":
+			ok = e.Tag == f.Value
+		case "level":
+			ok = levelRank(e.Level) >= levelRank(f.Value)
+		case "message":
+			ok = strings.Contains(e.Message, f.Value)
+		case "pid":
+			ok = fmt.Sprint(e.PID) == f.Value
+		default:
+			continue
+		}
+		if ok == f.Not {
+			return false
+		}
+	}
+	return true
+}
+
 func (d *fakeDev) ListCrashes(_ context.Context, pkg string, limit int) ([]android.Crash, error) {
-	return d.crashes, d.enter("ListCrashes", pkg)
+	if err := d.enter("ListCrashes", pkg); err != nil {
+		return nil, err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []android.Crash
+	for _, cr := range d.crashes {
+		if pkg != "" && cr.Package != pkg {
+			continue
+		}
+		out = append(out, cr)
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 func (d *fakeDev) GetCrash(_ context.Context, id string) (android.Crash, error) {
 	if err := d.enter("GetCrash", id); err != nil {

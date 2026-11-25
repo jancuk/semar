@@ -95,6 +95,9 @@ func (p *Platform) secretOf(field, ref string) (string, *mobile.Unavailable) {
 // remoteDriver starts a session at serverUrl for the app of a service. No adb is used: the server
 // installs the app, starts it, and stops it.
 func (p *Platform) remoteDriver(ctx context.Context, service string, app App) (*driver, *mobile.Unavailable) {
+	if p.o.Env.Theme != "" || p.o.Env.FontScale != 0 || p.o.Env.Locale != "" {
+		return nil, &mobile.Unavailable{Reason: "android.theme, android.fontScale, and android.locale need adb and cannot be used with serverUrl"}
+	}
 	if app.APK != "" {
 		apkPath, err := p.resolvePath(app.APK)
 		if err != nil {

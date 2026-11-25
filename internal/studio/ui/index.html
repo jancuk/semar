@@ -20,65 +20,92 @@
     <select id="device" aria-label="Device"></select>
   </label>
   <span class="badge warn" id="physical" hidden="hidden" title="A physical device: resetting the app may delete its data.">Physical device</span>
-  <span class="seg" role="group" aria-label="Mode">
-    <button type="button" class="btn seg-on" id="mode-act" aria-pressed="true">Act</button>
-    <button type="button" class="btn" id="mode-assert" aria-pressed="false">Assert</button>
-    <button type="button" class="btn" id="mode-capture" aria-pressed="false" title="Keep the text of an element, or a part of it, as {{name}} for the steps after it">Capture</button>
+  <span class="rec-controls" id="rec-controls" hidden="hidden">
+    <span class="seg" role="group" aria-label="Mode">
+      <button type="button" class="btn seg-on" id="mode-act" aria-pressed="true">Interact</button>
+      <button type="button" class="btn" id="mode-assert" aria-pressed="false">Check (Assert)</button>
+      <button type="button" class="btn" id="mode-capture" aria-pressed="false" title="Save text on screen as {{name}} for later steps">Capture Value</button>
+    </span>
+    <button type="button" class="btn" id="refresh" disabled="disabled">Refresh</button>
+    <button type="button" class="btn" id="reset" disabled="disabled">Reset</button>
+    <button type="button" class="btn primary" id="finish" disabled="disabled">Finish &amp; Save</button>
   </span>
-  <button type="button" class="btn" id="refresh" disabled="disabled">Refresh</button>
-  <button type="button" class="btn" id="reset" disabled="disabled">Reset</button>
-  <button type="button" class="btn primary" id="finish" disabled="disabled">Finish &amp; Save</button>
 </header>
 
 <div class="banner" id="banner" role="alert" hidden="hidden"></div>
 
-<main class="work">
+<main class="work is-idle" id="work">
   <section class="mirror" aria-label="Device">
     <div class="empty" id="no-token" hidden="hidden">
       <b>Open this page from Semar</b>
       <span>Run <code>semar record --ui</code> in a terminal and open the address it prints.</span>
     </div>
-    <div class="empty" id="start-panel" hidden="hidden">
-      <b id="start-title">Record an activity</b>
-      <span id="start-note">The app is reset first, so a replay starts where the recording does.</span>
+    <div class="empty start-card" id="start-panel" hidden="hidden">
+      <div class="start-head">
+        <b id="start-title">What would you like to record?</b>
+        <span class="start-sub" id="start-note">The app is reset first, so a replay starts where the recording does.</span>
+      </div>
+      <ol class="guide-steps" aria-label="How recording works">
+        <li><span class="guide-n">1</span><span>Click &amp; swipe the phone</span></li>
+        <li><span class="guide-n">2</span><span>Add a check (Assert) <em class="guide-tag">scenarios</em></span></li>
+        <li><span class="guide-n">3</span><span>Finish &amp; auto-verify</span></li>
+      </ol>
       <label class="field" id="start-service-row" hidden="hidden">App
         <select id="start-service"></select>
       </label>
-      <label class="field">Record
-        <select id="start-kind"><option value="scenario">A scenario</option><option value="flow">A flow</option></select>
-      </label>
-      <label class="field">Start with a flow
+      <select id="start-kind" hidden="hidden" aria-hidden="true"><option value="scenario">A scenario</option><option value="flow">A flow</option></select>
+      <div class="kind-cards" role="group" aria-label="Recording type">
+        <button type="button" class="kind-card kind-card-on" id="kind-scenario" data-kind="scenario" aria-pressed="true">
+          <span class="kind-head">
+            <span class="kind-title">Test Scenario</span>
+            <span class="kind-badge rec">Recommended</span>
+          </span>
+          <span class="kind-desc">Tests a user journey end-to-end and checks that it works. Needs at least 1 Check (Assert) so Semar knows if it passed.</span>
+        </button>
+        <button type="button" class="kind-card" id="kind-flow" data-kind="flow" aria-pressed="false">
+          <span class="kind-head">
+            <span class="kind-title">Reusable Flow</span>
+            <span class="kind-badge block">Building block</span>
+          </span>
+          <span class="kind-desc">Records repeatable setup steps (like Sign in or Onboarding) once, then reuse them at the start of any scenario. No check needed.</span>
+        </button>
+      </div>
+      <label class="field" id="start-flow-row" hidden="hidden">Start with a saved flow
         <select id="start-flow"></select>
       </label>
-      <button type="button" class="btn primary" id="start">Start recording</button>
-      <h3>Open existing</h3>
-      <label class="field">Saved flow or scenario
-        <select id="open-pick"></select>
-      </label>
-      <label class="field">Replay to step (empty: all the steps)
-        <input type="number" id="open-at" min="1" step="1" inputmode="numeric" disabled="disabled" />
-      </label>
-      <button type="button" class="btn" id="open-existing" disabled="disabled">Open and replay</button>
-      <span class="hint">The app is reset, the saved steps are replayed on the device, and new steps go after them. A password is asked again: no file holds it.</span>
+      <button type="button" class="btn primary start-go" id="start">Start recording</button>
+      <details class="reopen-box" id="open-details" hidden="hidden">
+        <summary>Reopen a saved flow or scenario</summary>
+        <div class="reopen-body">
+          <label class="field">Saved flow or scenario
+            <select id="open-pick"></select>
+          </label>
+          <label class="field">Replay to step (empty: all the steps)
+            <input type="number" id="open-at" min="1" step="1" inputmode="numeric" disabled="disabled" />
+          </label>
+          <button type="button" class="btn" id="open-existing" disabled="disabled">Open and replay</button>
+          <span class="hint">The app is reset, the saved steps are replayed on the device, and new steps go after them. A password is asked again: no file holds it.</span>
+        </div>
+      </details>
     </div>
     <div class="stage-wrap" id="stage-wrap" hidden="hidden">
+      <div class="mode-helper mode-act" id="mode-helper" role="status">Click any button or field on the phone to record a tap or typing. Shift+click = long press · Right-click = pick locator · Mouse wheel = scroll.</div>
       <div class="stage" id="stage">
         <img id="shot" alt="The screen of the device" />
         <svg id="overlay" aria-label="Elements of the screen"></svg>
         <div class="tip" id="tip" hidden="hidden"></div>
         <div class="hidden-shot" id="shot-hidden" hidden="hidden">The screen shows a secret, so the picture is hidden.</div>
+        <div class="busy-pill" id="busy-pill" hidden="hidden" role="status" aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="busy-text">Working…</span>
+        </div>
       </div>
       <div class="tools" id="tools"></div>
-      <p class="hint">Click an element to act. Shift+click presses and holds. Alt+click, or Assert mode, checks it.</p>
     </div>
   </section>
 
-  <aside class="side" aria-label="Timeline">
-    <label class="field">Screen name
-      <input type="text" id="screen-name" list="screen-names" autocomplete="off" spellcheck="false" disabled="disabled" />
-    </label>
-    <datalist id="screen-names"></datalist>
-    <label class="check"><input type="checkbox" id="screen-rename" disabled="disabled" /> Rename recorded steps on this screen</label>
+  <aside class="side" id="side" aria-label="Timeline" hidden="hidden">
+    <div class="readiness" id="readiness" hidden="hidden"></div>
     <p class="warn-note" id="dirty-note" hidden="hidden">A step that the device had done was deleted, so the device is not where the steps say. Use Go here on a step.</p>
     <p class="warn-note" id="repick-note" hidden="hidden">Click the element on the screen that the step should use.</p>
     <section class="cands" id="cand-panel" aria-label="Locators" hidden="hidden">
@@ -91,17 +118,27 @@
       <ul class="captured-list" id="captured-list"></ul>
       <p class="hint">Kept in this page and in memory for this session. The files hold the name and the pattern only.</p>
     </section>
-    <div class="row">
-      <select id="flow-pick" aria-label="Flow to run"></select>
-      <input type="text" id="flow-with" placeholder="name=value, ..." aria-label="Params of the flow" autocomplete="off" />
-      <button type="button" class="btn" id="flow-run" disabled="disabled">Run flow</button>
-    </div>
-    <div class="section-head">
+    <div class="section-head timeline-head">
       <h2>Timeline</h2>
       <button type="button" class="btn" id="delete-last" disabled="disabled">Delete last step</button>
     </div>
     <ol class="steps" id="steps"></ol>
-    <p class="hint" id="steps-empty">No steps yet.</p>
+    <p class="hint" id="steps-empty">No steps yet. Click the phone to record your first step.</p>
+    <details class="side-more" id="side-more">
+      <summary>Screen &amp; saved flows</summary>
+      <div class="side-more-body">
+        <label class="field">Screen name
+          <input type="text" id="screen-name" list="screen-names" autocomplete="off" spellcheck="false" disabled="disabled" />
+        </label>
+        <datalist id="screen-names"></datalist>
+        <label class="check"><input type="checkbox" id="screen-rename" disabled="disabled" /> Rename recorded steps on this screen</label>
+        <div class="row">
+          <select id="flow-pick" aria-label="Flow to run"></select>
+          <input type="text" id="flow-with" placeholder="name=value, ..." aria-label="Params of the flow" autocomplete="off" />
+          <button type="button" class="btn" id="flow-run" disabled="disabled">Run flow</button>
+        </div>
+      </div>
+    </details>
   </aside>
 </main>
 
@@ -195,26 +232,40 @@
 
 <dialog id="dlg-finish">
   <form method="dialog" id="form-finish">
-    <h2>Finish and save</h2>
-    <div class="seg" role="group" aria-label="What to save">
-      <label class="check"><input type="radio" name="fin-kind" value="flow" /> Reusable activity (flow)</label>
-      <label class="check"><input type="radio" name="fin-kind" value="scenario" checked="checked" /> Scenario</label>
+    <h2 id="fin-heading">Finish and save</h2>
+    <div id="fin-form">
+      <div class="seg fin-kind-row" role="group" aria-label="What to save">
+        <label class="check"><input type="radio" name="fin-kind" value="flow" /> Reusable Flow</label>
+        <label class="check"><input type="radio" name="fin-kind" value="scenario" checked="checked" /> Test Scenario</label>
+      </div>
+      <p class="hint fin-explain" id="fin-explain"></p>
+      <label class="field">Name (ID) <input type="text" id="fin-id" required="required" autocomplete="off" spellcheck="false" placeholder="SHOP-12-01" /></label>
+      <label class="field" id="fin-ticket-row">Ticket <input type="text" id="fin-ticket" autocomplete="off" spellcheck="false" /></label>
+      <label class="field" id="fin-title-row">Title <input type="text" id="fin-title" autocomplete="off" /></label>
+      <label class="check" id="fin-replace-row"><input type="checkbox" id="fin-replace" /> Replace the files of this name</label>
+      <label class="check" id="fin-clear-row" hidden="hidden"><input type="checkbox" id="fin-clear" /> Allow reset: clear on this device (deletes the data of the app)</label>
     </div>
-    <label class="field">Name (ID) <input type="text" id="fin-id" required="required" autocomplete="off" spellcheck="false" placeholder="login" /></label>
-    <label class="field" id="fin-ticket-row">Ticket <input type="text" id="fin-ticket" autocomplete="off" spellcheck="false" /></label>
-    <label class="field" id="fin-title-row">Title <input type="text" id="fin-title" autocomplete="off" /></label>
-    <label class="check" id="fin-replace-row"><input type="checkbox" id="fin-replace" /> Replace the files of this name</label>
-    <label class="check" id="fin-clear-row" hidden="hidden"><input type="checkbox" id="fin-clear" /> Allow reset: clear on this device (deletes the data of the app)</label>
     <p class="error" id="fin-error" hidden="hidden"></p>
     <div id="fin-result" hidden="hidden">
-      <h3>Saved</h3>
-      <div class="tabs" id="fin-tabs"></div>
-      <pre id="fin-preview" tabindex="0"></pre>
-      <div id="fin-verify"></div>
+      <div class="fin-done">
+        <span class="fin-mark" aria-hidden="true">✓</span>
+        <div>
+          <div class="fin-done-title" id="fin-done-title"></div>
+          <div class="hint" id="fin-done-sub"></div>
+        </div>
+      </div>
+      <div id="fin-verify" aria-live="polite"></div>
+      <details class="fin-files" id="fin-files">
+        <summary id="fin-files-summary">Files written</summary>
+        <div class="tabs" id="fin-tabs"></div>
+        <div class="hint fin-path" id="fin-path"></div>
+        <pre id="fin-preview" tabindex="0"></pre>
+      </details>
     </div>
     <div class="actions" id="fin-actions">
-      <button type="button" class="btn" data-close="dlg-finish">Close</button>
-      <button type="button" class="btn" id="fin-undo" hidden="hidden">Undo save</button>
+      <button type="button" class="btn quiet" id="fin-undo" hidden="hidden" title="Delete the files that this save wrote and go back to the form">Undo save</button>
+      <span class="actions-gap"></span>
+      <button type="button" class="btn" id="fin-close" data-close="dlg-finish">Close</button>
       <button type="button" class="btn" id="fin-verify-btn" hidden="hidden">Verify replay</button>
       <button type="button" class="btn" id="fin-next" hidden="hidden">Record next activity</button>
       <button type="submit" class="btn primary" id="fin-save">Save</button>

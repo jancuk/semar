@@ -96,6 +96,7 @@ type markdownView struct {
 	Browser, Device                    []browserStep
 	Blocked                            []blockedView
 	DocChecks                          []docView
+	A11y                               []a11yView
 	Misses                             []missView
 	MissesMore                         int
 	RunID, Environment, Started, Ended string
@@ -190,6 +191,7 @@ func (vw viewer) buildView(d Data) markdownView {
 	v.Device = vw.browserSteps(d.Activity, domain.SurfaceAndroid)
 	v.Blocked = vw.blockedViews(d.Activity)
 	v.DocChecks = vw.docViews(d.Activity)
+	v.A11y = vw.a11yViews(d.Activity)
 	v.Misses = vw.missViews(string(run.ID), d.Activity)
 	if n := len(Misses(d.Activity)); n > len(v.Misses) {
 		v.MissesMore = n - len(v.Misses)

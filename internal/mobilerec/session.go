@@ -1,6 +1,7 @@
 package mobilerec
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -72,9 +73,11 @@ type Options struct {
 	Author *domain.ProviderRef
 	// Settle bounds the wait for a still screen. The default is 3 seconds.
 	Settle time.Duration
-	Clock  func() time.Time
-	Sleep  func(ctx context.Context, d time.Duration) error
-	Now    func() time.Time
+	// SettlePoll is a fixed delay between the reads of a settle. Zero is the growing delay of a replay.
+	SettlePoll time.Duration
+	Clock      func() time.Time
+	Sleep      func(ctx context.Context, d time.Duration) error
+	Now        func() time.Time
 }
 
 // Session records one flow or one scenario. It is safe for use by one goroutine at a time: every call holds
@@ -90,11 +93,12 @@ type Session struct {
 	open    bool
 	started bool
 
-	seq    uint64
-	frame  *Frame
-	tree   *mobile.Tree
-	nodes  []*mobile.Node
-	screen string // the name that the person gave the screen of the frame, or ""
+	seq      uint64
+	frame    *Frame
+	tree     *mobile.Tree
+	nodes    []*mobile.Node
+	lastShot []byte // shrunk JPEG from the last engine action; nil when secret or refreshed directly
+	screen   string // the name that the person gave the screen of the frame, or ""
 
 	events    []*event
 	wantClear bool
@@ -276,6 +280,7 @@ func (s *Session) Suspend(ctx context.Context) error {
 }
 
 func (s *Session) closeLocked(ctx context.Context) error {
+	s.lastShot = nil
 	if !s.open {
 		return nil
 	}
@@ -311,7 +316,12 @@ func (s *Session) Close(ctx context.Context) error {
 }
 
 // Wipe drops the secrets and the pins of the session.
-func (s *Session) Wipe() { s.ov.Clear() }
+func (s *Session) Wipe() {
+	s.mu.Lock()
+	s.lastShot = nil
+	s.mu.Unlock()
+	s.ov.Clear()
+}
 
 // wrap scrubs an error, so that no message of the device or the engine carries a secret.
 func (s *Session) wrap(err error) error {
@@ -363,6 +373,39 @@ func (s *Session) Refresh(ctx context.Context) (*Frame, error) {
 	return s.refreshLocked(ctx)
 }
 
+// Peek reads the screen once and says whether it is still the one of the frame. A screen that changed on
+// its own, as when a page loads after the action was done, gives its new frame; a screen that did not
+// gives nil and false. A frame that is not the newest one gives nil and false too: its answer is on the way.
+// The read is cut short after limit, because Peek holds the device and a person may be about to act: a
+// screen that is slower to read than that gives slow, and nothing else.
+func (s *Session) Peek(ctx context.Context, frame uint64, limit time.Duration) (f *Frame, changed, slow bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.liveCheck(); err != nil {
+		return nil, false, false, err
+	}
+	if s.frame == nil || s.tree == nil || s.frame.ID != frame {
+		return nil, false, false, nil
+	}
+	d, err := s.drv(ctx)
+	if err != nil {
+		return nil, false, false, err
+	}
+	rctx, cancel := context.WithTimeout(ctx, limit)
+	t, err := d.Source(rctx)
+	cancel()
+	switch {
+	case err != nil && rctx.Err() != nil && ctx.Err() == nil:
+		return nil, false, true, nil
+	case err != nil:
+		return nil, false, false, s.wrap(fmt.Errorf("the screen could not be read: %w", err))
+	case t.Digest == s.tree.Digest:
+		return nil, false, false, nil
+	}
+	f, err = s.refreshLocked(ctx)
+	return f, err == nil, false, err
+}
+
 // Clipboard reads the clipboard of the device through the driver of the session, which holds the device.
 // It does not change what the recording knows: it is no step, and the frame stays.
 func (s *Session) Clipboard(ctx context.Context) (string, error) {
@@ -398,10 +441,11 @@ func (s *Session) settle(ctx context.Context) (*mobile.Tree, error) {
 	if err != nil {
 		return nil, err
 	}
-	return mobile.Settle(ctx, d, s.o.Settle, s.o.Clock, s.o.Sleep)
+	return mobile.SettleEvery(ctx, d, s.o.Settle, s.o.SettlePoll, s.o.Clock, s.o.Sleep)
 }
 
 func (s *Session) refreshLocked(ctx context.Context) (*Frame, error) {
+	s.lastShot = nil
 	t, err := s.settle(ctx)
 	if err != nil {
 		return nil, s.wrap(fmt.Errorf("the screen could not be read: %w", err))
@@ -500,6 +544,7 @@ func (s *Session) hints(t *mobile.Tree) mobile.WindowHints {
 // of the next action. The frame holds no secret value: the text of a node that shows one is redacted.
 func (s *Session) setFrame(t *mobile.Tree) *Frame {
 	s.seq++
+	s.lastShot = nil
 	f := &Frame{ID: s.seq, Width: t.Width, Height: t.Height, Screen: s.screenName(t), Notice: s.notice}
 	s.notice = ""
 	s.tree = t
@@ -664,16 +709,16 @@ func (s *Session) stepID(base string) string {
 	return id
 }
 
-// run sends one action through the engine, and gives back the error text of an action that did not go
-// through. The text has no secret in it.
-func (s *Session) run(ctx context.Context, step string, m domain.MobileAction, locs map[string]domain.Locator) error {
-	_, err := s.runCall(ctx, step, m, locs, nil)
-	return err
+// run sends one action through the engine, and gives back the engine result or the error text of an
+// action that did not go through. The text has no secret in it.
+func (s *Session) run(ctx context.Context, step string, m domain.MobileAction, locs map[string]domain.Locator, initial *mobile.Tree) (mobile.Result, error) {
+	return s.runCall(ctx, step, m, locs, nil, initial)
 }
 
-// runCall is run for an action that captures values: it gives back what was captured, raw, for the
-// variables of the session. A capture that found no value is a failure.
-func (s *Session) runCall(ctx context.Context, step string, m domain.MobileAction, locs map[string]domain.Locator, caps []domain.Capture) (map[string]string, error) {
+// runCall is run for an action that captures values: it gives back the engine result, including raw
+// captured values for the variables of the session, the final settled tree, and the shrunk screenshot.
+// A capture that found no value is a failure.
+func (s *Session) runCall(ctx context.Context, step string, m domain.MobileAction, locs map[string]domain.Locator, caps []domain.Capture, initial *mobile.Tree) (mobile.Result, error) {
 	m.Service, m.App = s.o.Service, s.o.App
 	// The engine reads the elements that a call watches: a capture reads its element after the action.
 	var watch []domain.Watched
@@ -684,33 +729,64 @@ func (s *Session) runCall(ctx context.Context, step string, m domain.MobileActio
 	}
 	res, err := s.h.Engine.Do(ctx, mobile.Call{
 		Use: s.use(step), By: domain.ActorPilot, Action: m, Locators: locs, Captures: caps, Watch: watch,
-		Why: "recording " + s.recordID(),
+		Why: "recording " + s.recordID(), InitialTree: initial,
 	})
 	if err != nil {
-		return nil, s.wrap(err)
+		return mobile.Result{}, s.wrap(err)
 	}
 	switch a := res.Action; {
 	case a.Refused != "":
-		return nil, fail("the action was refused: %s", s.ov.Scrub(a.Refused))
+		return mobile.Result{}, fail("the action was refused: %s", s.ov.Scrub(a.Refused))
 	case a.Err != "":
-		return nil, fail("the action failed: %s", s.ov.Scrub(a.Err))
+		return mobile.Result{}, fail("the action failed: %s", s.ov.Scrub(a.Err))
 	case len(res.Missing) > 0:
-		return nil, fail("the capture %s found no value", strings.Join(res.Missing, ", "))
+		return mobile.Result{}, fail("the capture %s found no value", strings.Join(res.Missing, ", "))
 	}
-	return res.Captured, nil
+	return res, nil
+}
+
+func (s *Session) treeHasSecret(t *mobile.Tree) bool {
+	if t == nil {
+		return false
+	}
+	secret := false
+	t.Walk(func(n *mobile.Node) bool {
+		if s.leaks(n) {
+			secret = true
+			return false
+		}
+		return true
+	})
+	return secret
+}
+
+// finishActionLocked builds the next frame from the settled tree returned by Engine.Do when available,
+// avoiding a second Settle() loop, and caches its shrunk JPEG only if no secret is visible on screen.
+func (s *Session) finishActionLocked(ctx context.Context, res mobile.Result) (*Frame, error) {
+	if res.Tree != nil {
+		f := s.setFrame(res.Tree)
+		if !f.Secret && !s.treeHasSecret(res.Tree) && len(res.ShotJPEG) > 0 {
+			s.lastShot = res.ShotJPEG
+		} else {
+			s.lastShot = nil
+		}
+		return f, nil
+	}
+	return s.refreshLocked(ctx)
 }
 
 // launchLocked resets the app and starts it. The reset of the launch is the one that the session was given.
 func (s *Session) launchLocked(ctx context.Context, record bool) (*Frame, error) {
 	m := domain.MobileAction{Do: domain.MobileLaunch, Reset: s.o.Reset}
 	step := s.stepID("start")
-	if err := s.run(ctx, step, m, nil); err != nil {
+	res, err := s.run(ctx, step, m, nil, nil)
+	if err != nil {
 		return nil, err
 	}
 	if record {
 		s.insertLocked(&event{id: step, text: "Start the app", setup: true, do: domain.MobileLaunch, reset: s.o.Reset})
 	}
-	return s.refreshLocked(ctx)
+	return s.finishActionLocked(ctx, res)
 }
 
 // Act does one thing on the device, as a person does, and records it when it went through. It acts on the
@@ -825,7 +901,7 @@ func (s *Session) actLocked(ctx context.Context, a Act) (*Frame, error) {
 		if a.Target != nil {
 			return s.onElement(ctx, a, ForAssert)
 		}
-		return s.plain(ctx, a, "swipe-"+a.Value, "Swipe "+a.Value)
+		return s.plain(ctx, a, "swipe-"+a.Value, swipeText(a.Value))
 	case domain.MobilePress:
 		return s.plain(ctx, a, "press-"+a.Value, "Press "+a.Value)
 	case domain.MobileOpenLink:
@@ -837,6 +913,16 @@ func (s *Session) actLocked(ctx context.Context, a Act) (*Frame, error) {
 		return s.plain(ctx, a, "wait", "Wait for the screen")
 	}
 	return nil, fail("the operation %q is not one that a recording does: use tap, longPress, doubleTap, drag, type, swipe, scroll, press, open, or wait", a.Do)
+}
+
+// swipeText names a swipe of the whole screen by the finger and by what it shows: a finger that moves up
+// shows what is below, which a person calls scrolling down.
+func swipeText(direction string) string {
+	shows := map[string]string{"up": "down", "down": "up", "left": "right", "right": "left"}[direction]
+	if shows == "" {
+		return "Swipe " + direction
+	}
+	return "Swipe " + direction + " (scroll " + shows + ")"
 }
 
 // plain acts with no element: a swipe of the screen, a key, a link, a wait.
@@ -856,7 +942,12 @@ func (s *Session) plain(ctx context.Context, a Act, id, text string) (*Frame, er
 		return nil, fail("%s", ps[0])
 	}
 	sid := s.stepID(id)
-	if err := s.run(ctx, sid, m, nil); err != nil {
+	var initial *mobile.Tree
+	if m.Do == domain.MobileSwipe && s.tree != nil && s.tree.Width > 0 && s.tree.Height > 0 {
+		initial = s.tree
+	}
+	res, err := s.run(ctx, sid, m, nil, initial)
+	if err != nil {
 		return nil, err
 	}
 	ev := &event{id: sid, text: text, do: m.Do, value: m.Value, screen: m.Screen, link: m.Link}
@@ -867,7 +958,7 @@ func (s *Session) plain(ctx context.Context, a Act, id, text string) (*Frame, er
 	if ev.do != domain.MobileWait && ev.do != domain.MobileSwipe && !(ev.do == domain.MobilePress && (a.Value == string(mobile.KeyHideKeyboard) || a.Value == string(mobile.KeyDelete) || a.Value == string(mobile.KeyTab))) {
 		s.screen = ""
 	}
-	return s.refreshLocked(ctx)
+	return s.finishActionLocked(ctx, res)
 }
 
 func (s *Session) screenOf(a Act) string {
@@ -925,6 +1016,7 @@ func (s *Session) onElement(ctx context.Context, a Act, p Purpose) (*Frame, erro
 		screen: screen, hint: HintOf(target), do: domain.MobileOp(a.Do), purpose: p,
 	}
 	ev.choose(best, alts)
+	initial := tree
 	m := domain.MobileAction{Do: ev.do, Screen: screen, Element: probeName}
 	if ev.do == domain.MobileDrag {
 		if a.To == nil {
@@ -945,6 +1037,7 @@ func (s *Session) onElement(ctx context.Context, a Act, p Purpose) (*Frame, erro
 		}
 		ev.chooseTo(HintOf(toTarget), toBest, toAlts)
 		m.To = ev.to.elem
+		initial = toTree
 	} else if a.To != nil {
 		return nil, fail("%s takes no element to drop on: only drag does", a.Do)
 	}
@@ -1001,14 +1094,15 @@ func (s *Session) onElement(ctx context.Context, a Act, p Purpose) (*Frame, erro
 		return nil, fail("%s", ps[0])
 	}
 	ev.id = s.stepID(string(ev.do) + "-" + HintOf(target))
-	if err := s.run(ctx, ev.id, m, locs); err != nil {
+	res, err := s.run(ctx, ev.id, m, locs, initial)
+	if err != nil {
 		return nil, err
 	}
 	s.addStep(ev)
 	if ev.do != domain.MobileWait && ev.do != domain.MobileScroll && ev.do != domain.MobileType && ev.do != domain.MobileSwipe {
 		s.screen = ""
 	}
-	return s.refreshLocked(ctx)
+	return s.finishActionLocked(ctx, res)
 }
 
 func quote(v string) string { return fmt.Sprintf("%q", oneLine(v)) }
@@ -1140,6 +1234,17 @@ func (s *Session) Assert(ctx context.Context, a Assert) (*Frame, error) {
 	s.notice = ""
 	s.frame = &f
 	return s.frame, nil
+}
+
+// LastShotJPEG returns the shrunk JPEG captured by the most recent engine action when it matches
+// frameID and the current frame holds no secret. Returns nil when a fresh Capture is needed.
+func (s *Session) LastShotJPEG(frameID uint64) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.started || !s.open || s.frame == nil || s.frame.ID != frameID || s.frame.Secret || len(s.lastShot) == 0 {
+		return nil
+	}
+	return bytes.Clone(s.lastShot)
 }
 
 // Capture takes a screenshot of the screen. It refuses a screen that shows a secret: the pixels of a
@@ -1311,6 +1416,7 @@ func (s *Session) eraseLocked(value string) {
 		kept = append(kept, ev)
 	}
 	s.events, s.at = kept, at
+	s.lastShot = nil
 	if s.frame != nil && s.tree != nil {
 		s.setFrame(s.tree)
 	}
@@ -1352,7 +1458,7 @@ func (s *Session) ResetSession(ctx context.Context, next *Next) (*Frame, error) 
 		}
 		s.o = o
 	}
-	s.events, s.at, s.dirty, s.wantClear, s.screen, s.last = nil, 0, false, false, "", nil
+	s.events, s.at, s.dirty, s.wantClear, s.screen, s.last, s.lastShot = nil, 0, false, false, "", nil, nil
 	s.gap, s.gapAt = false, 0
 	s.vars, s.newParams = map[string]string{}, nil
 	if s.o.Resume == nil {

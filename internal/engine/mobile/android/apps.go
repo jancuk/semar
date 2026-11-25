@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/jancuk/semar/internal/config"
@@ -159,15 +158,7 @@ func (c *Controller) LaunchApp(ctx context.Context, o LaunchOptions) error {
 
 // apiLevel is the API level of the device.
 func (c *Controller) apiLevel(ctx context.Context, a *adb) (int, error) {
-	out, err := a.shell(ctx, "getprop", "ro.build.version.sdk")
-	if err != nil {
-		return 0, fmt.Errorf("the Android version could not be read: %w", err)
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(firstLine(out)))
-	if err != nil {
-		return 0, errors.New("the Android version is not a number")
-	}
-	return n, nil
+	return apiLevelOf(ctx, a)
 }
 
 // serverPackages are the packages of the UiAutomator2 server, which Semar needs to talk to the device.

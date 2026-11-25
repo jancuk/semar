@@ -45,22 +45,37 @@ func fromMobileAction(a domain.Action, class effects.Class, evidencePath string)
 		crashFile = m.Crash.File
 	}
 	return domain.Activity{
-		Seq:        a.Seq,
-		At:         a.At,
-		Actor:      a.By,
-		Use:        a.Use,
-		Surface:    a.Surface,
-		Verb:       verb,
-		Target:     strings.TrimSpace(target),
-		Result:     result,
-		Why:        a.Why,
-		TraceID:    a.TraceID,
-		Evidence:   evidencePath,
-		Screenshot: m.Screenshot,
-		Misses:     mobileMisses(m),
-		CrashFile:  crashFile,
-		LogcatFile: m.LogcatFile,
+		Seq:           a.Seq,
+		At:            a.At,
+		Actor:         a.By,
+		Use:           a.Use,
+		Surface:       a.Surface,
+		Verb:          verb,
+		Target:        strings.TrimSpace(target),
+		Result:        result,
+		Why:           a.Why,
+		TraceID:       a.TraceID,
+		Evidence:      evidencePath,
+		Screenshot:    m.Screenshot,
+		Misses:        mobileMisses(m),
+		CrashFile:     crashFile,
+		LogcatFile:    m.LogcatFile,
+		Accessibility: mobileA11y(m),
 	}
+}
+
+func mobileA11y(m *domain.MobileRecord) []domain.AccessibilityIssue {
+	if len(m.Accessibility) == 0 {
+		return nil
+	}
+	out := make([]domain.AccessibilityIssue, len(m.Accessibility))
+	for i, iss := range m.Accessibility {
+		if iss.Screen == "" {
+			iss.Screen = m.Screen
+		}
+		out[i] = iss
+	}
+	return out
 }
 
 // mobileMisses lists the elements that the action looked for and did not find, in the order of their

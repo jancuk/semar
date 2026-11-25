@@ -67,7 +67,7 @@ func (m *Manager) listFrom(ctx context.Context, dev Device, t *mobile.Tree) *lis
 		})
 	}
 	m.refs.Reset(t.Digest, entries)
-	return &listing{tree: t, els: els, nodes: nodes, notes: m.listNotes(t, els)}
+	return &listing{tree: t, els: els, nodes: nodes, notes: m.listNotes(ctx, dev, t, hints, ws, els, nodes)}
 }
 
 func keyboardListed(els []mobilerec.Element, w mobile.Window) bool {
@@ -82,8 +82,9 @@ func keyboardListed(els []mobilerec.Element, w mobile.Window) bool {
 // listNotes gives what is worth saying about a screen as a whole. A Flutter app has no resource-id on its
 // elements unless it sets Semantics(identifier:), so a locator rests on the label, which a new wording
 // changes. A scrollable node that touches the edge of the screen, or whose items are cut by its own box,
-// holds more than the listing shows, because lazy lists keep only the items on screen.
-func (m *Manager) listNotes(t *mobile.Tree, els []mobilerec.Element) []string {
+// holds more than the listing shows, because lazy lists keep only the items on screen. It also includes
+// zero-model accessibility warnings and proactive crash / runtime error notes.
+func (m *Manager) listNotes(ctx context.Context, dev Device, t *mobile.Tree, hints mobile.WindowHints, ws []mobile.Window, els []mobilerec.Element, nodes []*mobile.Node) []string {
 	var notes []string
 	if isFlutter(t) {
 		for _, e := range els {
@@ -96,7 +97,102 @@ func (m *Manager) listNotes(t *mobile.Tree, els []mobilerec.Element) []string {
 	if scrollableCut(t) {
 		notes = append(notes, "list is scrollable: swipe to see more")
 	}
+	if a11yNote := m.a11yNote(ctx, dev, t, hints, nodes); a11yNote != "" {
+		notes = append(notes, a11yNote)
+	}
+	notes = append(notes, m.healthNotes(ctx, dev, t, ws)...)
 	return notes
+}
+
+const (
+	a11yNoteLimit    = 50
+	a11yNoteExamples = 3
+)
+
+func (m *Manager) a11yNote(ctx context.Context, dev Device, t *mobile.Tree, hints mobile.WindowHints, nodes []*mobile.Node) string {
+	density := m.screenDensity(ctx, dev)
+	issues := mobile.CheckAccessibility(t, hints, mobile.A11yOptions{Density: density, Limit: a11yNoteLimit})
+	if len(issues) == 0 {
+		return ""
+	}
+	missing, small := 0, 0
+	for _, iss := range issues {
+		switch iss.Kind {
+		case mobile.A11yMissingLabel:
+			missing++
+		case mobile.A11ySmallTarget:
+			small++
+		}
+	}
+	var counts []string
+	if missing == 1 {
+		counts = append(counts, "1 missing label")
+	} else if missing > 1 {
+		counts = append(counts, fmt.Sprintf("%d missing labels", missing))
+	}
+	if small == 1 {
+		counts = append(counts, "1 small touch target (<48dp)")
+	} else if small > 1 {
+		counts = append(counts, fmt.Sprintf("%d small touch targets (<48dp)", small))
+	}
+
+	var examples []string
+	for i := 0; i < len(issues) && len(examples) < a11yNoteExamples; i++ {
+		examples = append(examples, formatA11yExample(issues[i], nodes))
+	}
+	line := "accessibility: " + strings.Join(counts, ", ") + ": " + strings.Join(examples, ", ")
+	if more := len(issues) - len(examples); more > 0 {
+		line += fmt.Sprintf(", and %d more", more)
+	}
+	return collapse(m.scrub.Text(line))
+}
+
+func formatA11yExample(iss mobile.A11yIssue, nodes []*mobile.Node) string {
+	ref := refForIssue(iss, nodes)
+	name := ""
+	switch {
+	case iss.Label != "":
+		name = fmt.Sprintf("%q", truncateText(collapse(iss.Label), 40))
+	case iss.ResourceID != "":
+		id := iss.ResourceID
+		if i := strings.Index(id, ":id/"); i >= 0 {
+			id = id[i+4:]
+		}
+		name = "id=" + id
+	case iss.Role != "":
+		name = iss.Role
+	case iss.Class != "":
+		cls := iss.Class
+		if i := strings.LastIndex(cls, "."); i >= 0 {
+			cls = cls[i+1:]
+		}
+		name = cls
+	default:
+		name = fmt.Sprintf("[%d,%d][%d,%d]", iss.Bounds.Left, iss.Bounds.Top, iss.Bounds.Right, iss.Bounds.Bottom)
+	}
+	var parts []string
+	if ref != "" {
+		parts = append(parts, ref)
+	}
+	parts = append(parts, name)
+	if iss.Kind == mobile.A11ySmallTarget && iss.WidthDP > 0 && iss.HeightDP > 0 {
+		parts = append(parts, fmt.Sprintf("(%dx%ddp)", iss.WidthDP, iss.HeightDP))
+	} else if iss.Kind == mobile.A11yMissingLabel {
+		parts = append(parts, "(missing label)")
+	}
+	return strings.Join(parts, " ")
+}
+
+func refForIssue(iss mobile.A11yIssue, nodes []*mobile.Node) string {
+	if iss.Node == nil {
+		return ""
+	}
+	for i, n := range nodes {
+		if n == iss.Node {
+			return fmt.Sprintf("e%d", i+1)
+		}
+	}
+	return ""
 }
 
 // scrollableCut reports whether a visible scrollable node reaches the edge of the screen, or has a child
@@ -151,7 +247,7 @@ func (l *listing) text(m *Manager) string {
 		b.WriteByte('\n')
 	}
 	for _, n := range l.notes {
-		b.WriteString("note: " + n + "\n")
+		b.WriteString("note: " + m.scrub.Text(n) + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
