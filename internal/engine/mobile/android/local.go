@@ -290,12 +290,12 @@ func (p *Platform) startDevice(ctx context.Context) *mobile.Unavailable {
 			if err != nil {
 				return &mobile.Unavailable{Reason: fmt.Sprintf("the lease of the device could not be taken: %v", err)}
 			}
-			release, ok, err := leases.TryLock("android", "device", dev.Serial)
+			release, ok, holder, err := leases.TryLockHolder("android", "device", dev.Serial)
 			switch {
 			case err != nil:
 				return &mobile.Unavailable{Reason: fmt.Sprintf("the lease of the device could not be taken: %v", err)}
 			case !ok:
-				return &mobile.Unavailable{Reason: fmt.Sprintf("the device %s is used by another semar run: wait for it to end, or use another device", dev.Serial)}
+				return &mobile.Unavailable{Reason: busyDevice(dev.Serial, holder)}
 			}
 			p.release = release
 		}

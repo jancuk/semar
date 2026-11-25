@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -462,7 +463,7 @@ func TestTheDeviceLeaseKeepsTwoRunsApart(t *testing.T) {
 	t.Cleanup(func() { _ = second.Close(context.Background()) })
 	_, err := second.Driver(context.Background(), "shop")
 	un := unavailable(t, err)
-	if !strings.Contains(un.Reason, "the device emulator-5554 is used by another semar run") {
+	if !strings.Contains(un.Reason, "the device emulator-5554 is used by semar (pid "+strconv.Itoa(os.Getpid())+", since ") {
 		t.Errorf("reason = %q", un.Reason)
 	}
 	// The second run did not touch the packages of the device, and closing it must not stop the first run's server.

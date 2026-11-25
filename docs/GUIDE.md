@@ -2962,6 +2962,6 @@ Commit `semar.yaml`, `scenarios/`, `fixtures/`, `journeys/`, `obligations/`, `sc
 | `blocked` with "the UiAutomator2 server is not on the device" | Save the two server APKs in the Semar home under `android/`. See [Test an Android app](#test-an-android-app) |
 | An Android step is refused with "makes requests that Semar cannot see" | The environment is read only or production. Run the Android test in a test environment |
 | `semar login --user` says that the account is written on one line | Write the `web` block of the account in `semar.yaml` by hand. See [Sign in to a web application](#sign-in-to-a-web-application) |
-| `semar mcp` says that the device "is used by another semar run" | Another Semar process holds the device, such as a `semar record` or a `semar run`. End it, or start the server with `--device` for another device |
+| `semar mcp` says that the device "is used by `semar record --ui` (pid 20938, since 11.47)" | Another Semar process holds the device. The message names its subcommand and its process id, so close that one, such as your own open `semar record --ui`, or start the server with `--device` for another device. A holder that has not written its name yet shows as "another semar run" |
 | A tool says "ref e3 is stale" | The screen changed since the last listing. The answer shows the screen as it is now, with valid refs. Use them, or list the screen again |
 | A tool answers `human_in_control` | A person paused the agent in the studio. Call `semar_wait_for_control` and go on when it returns |

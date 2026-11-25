@@ -185,7 +185,7 @@ func TestControllerStartsOnlyTheDeviceAndHoldsItsLease(t *testing.T) {
 	other := android.New(r.opts)
 	t.Cleanup(func() { _ = other.Close(context.Background()) })
 	_, err := other.Controller(context.Background())
-	if un := unavailable(t, err); !strings.Contains(un.Reason, "used by another semar run") {
+	if un := unavailable(t, err); !strings.Contains(un.Reason, "is used by semar (pid "+strconv.Itoa(os.Getpid())+", since ") {
 		t.Errorf("reason = %q", un.Reason)
 	}
 	if err := p.Close(context.Background()); err != nil {

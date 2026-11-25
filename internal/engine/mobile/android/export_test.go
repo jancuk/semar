@@ -6,4 +6,5 @@ var (
 	ShellCommand = shellCommand
 	FailureLine  = failureLine
 	CommandError = commandError
+	BusyDevice   = busyDevice
 )

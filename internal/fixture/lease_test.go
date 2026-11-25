@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func openLeases(t *testing.T) *Leases {
@@ -69,6 +70,59 @@ func TestLeaseExcludesSecondHolder(t *testing.T) {
 		t.Fatalf("TryLock after release = %v, %v", ok, err)
 	}
 	r()
+}
+
+func TestLeaseTellsWhoHoldsIt(t *testing.T) {
+	l := openLeases(t)
+	release, ok, holder, err := l.TryLockHolder("android", "device", "emulator-5554")
+	if err != nil || !ok || holder != nil {
+		t.Fatalf("first TryLockHolder = %v, %v, %v", ok, holder, err)
+	}
+	defer release()
+	r, ok, holder, err := l.TryLockHolder("android", "device", "emulator-5554")
+	if err != nil || ok {
+		if ok {
+			r()
+		}
+		t.Fatalf("second TryLockHolder = %v, %v", ok, err)
+	}
+	if holder == nil || holder.PID != os.Getpid() || holder.Command != commandOf(os.Args) || time.Since(holder.Since) > time.Minute || time.Since(holder.Since) < 0 {
+		t.Errorf("holder = %+v", holder)
+	}
+	// A holder that left the lease file with other content is no holder.
+	f, err := os.OpenFile(filepath.Join(l.dir, leaseName("android", "device", "emulator-5554")), os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := f.Truncate(0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte("not json"), holderOffset); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, holder, err := l.TryLockHolder("android", "device", "emulator-5554"); err != nil || ok || holder != nil {
+		t.Errorf("a lease file with no holder: %v, %v, %v", ok, holder, err)
+	}
+}
+
+func TestCommandOfNamesTheSubcommandOnly(t *testing.T) {
+	for name, c := range map[string]struct {
+		args []string
+		want string
+	}{
+		"no arguments":        {[]string{"/usr/bin/semar"}, "semar"},
+		"a subcommand":        {[]string{"/usr/bin/semar", "run"}, "semar run"},
+		"the ui of a record":  {[]string{"semar", "record", "--ui"}, "semar record --ui"},
+		"values are left out": {[]string{"semar", "run", "--auth-token", "s3cret", "--ui", "AND-1"}, "semar run --ui"},
+		"a flag first":        {[]string{"semar", "--ui", "record"}, "semar --ui"},
+		"the test binary":     {[]string{"/tmp/fixture.test", "-test.run=X"}, "semar"},
+		"nothing":             {nil, "semar"},
+	} {
+		if got := commandOf(c.args); got != c.want {
+			t.Errorf("%s: commandOf(%q) = %q, want %q", name, c.args, got, c.want)
+		}
+	}
 }
 
 func TestLeaseFileNameAndMode(t *testing.T) {
@@ -171,11 +225,15 @@ func TestLeaseHeldByAnotherProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r, ok, err := l.TryLock("uat", "order.paid", "o-1"); err != nil || ok {
+	r, ok, holder, err := l.TryLockHolder("uat", "order.paid", "o-1")
+	if err != nil || ok {
 		if ok {
 			r()
 		}
 		t.Fatalf("TryLock while another process holds it = %v, %v", ok, err)
+	}
+	if holder == nil || holder.PID != cmd.Process.Pid {
+		t.Errorf("holder = %+v, want pid %d", holder, cmd.Process.Pid)
 	}
 
 	// A crash releases the lock: the operating system drops it with the process.
@@ -183,7 +241,7 @@ func TestLeaseHeldByAnotherProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = cmd.Wait()
-	r, ok, err := l.TryLock("uat", "order.paid", "o-1")
+	r, ok, err = l.TryLock("uat", "order.paid", "o-1")
 	if err != nil || !ok {
 		t.Fatalf("TryLock after the holder died = %v, %v", ok, err)
 	}
