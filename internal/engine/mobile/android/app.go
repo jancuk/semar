@@ -209,14 +209,9 @@ func (l *adbLife) launcher(ctx context.Context) (string, error) {
 	if act := l.app.Activity; act != "" {
 		comp = l.app.Package + "/" + act
 	} else {
-		out, err := l.a.shell(ctx, "cmd", "package", "resolve-activity", "--brief", "-c", "android.intent.category.LAUNCHER", l.app.Package)
-		if err != nil {
-			return "", fmt.Errorf("the launcher activity of %s could not be found: %w", l.app.Package, err)
-		}
-		for _, line := range strings.Split(out, "\n") {
-			if line = strings.TrimSpace(line); strings.Contains(line, "/") && !strings.Contains(line, " ") {
-				comp = line
-			}
+		var err error
+		if comp, err = l.a.launcherOf(ctx, l.app.Package); err != nil {
+			return "", err
 		}
 		if comp == "" {
 			return "", fmt.Errorf("the app %s has no launcher activity: name one with appActivity", l.app.Package)

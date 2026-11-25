@@ -161,7 +161,7 @@ A web step of such an account uses the browser profile of [`semar login`](#sign-
 
 **The build of a service on this machine.** A service with no build probe whose base URL is `localhost`, an address of `127.0.0.0/8`, or `::1` runs the working copy, so its build is the head commit of the repository. When tracked files differ from that commit, the build is the commit and a short digest of the difference, so a result from an earlier state of the files is `stale`. An untracked file is not part of it. `init` asks for nothing for such a service, and the header of a run, and its report, say that the build is the head commit and was not read from the service. `semar run --build <commit>` names another one.
 
-**Check a machine.** In a repository that has `.semar/semar.yaml`, `semar init` writes nothing. It checks this machine and prints one line for each item: `ok` or `missing` with the way to fix it. When a scenario or a journey leg runs on Android, it also checks `adb`, the device that a run would use, and the two server APKs, or that the server at `serverUrl` answers. The exit code is 0 when nothing is missing and 2 otherwise. Run it after you clone a repository that a colleague set up.
+**Check a machine.** In a repository that has `.semar/semar.yaml`, `semar init` writes nothing. It checks this machine and prints one line for each item: `ok` or `missing` with the way to fix it, or `info` for a note that needs no fix. When a scenario or a journey leg runs on Android, it also checks `adb`, the device that a run would use, and the two server APKs, or that the server at `serverUrl` answers. The exit code is 0 when nothing is missing and 2 otherwise. Run it after you clone a repository that a colleague set up.
 
 ### Configuration
 
@@ -1428,7 +1428,7 @@ environments:
 
 **A crash in a failed step.** When a step fails, or an element is missing and the app is no longer in front, Semar looks for a crash or an ANR that the device recorded for the app since the run began. It keeps the report as `crash-<step>.txt` in the run, redacted, and the step shows a one-line summary and a link to the file in `report.md` and `report.html`. This is evidence only and never changes an outcome. It needs no setting.
 
-`semar init` checks the machine for an Android scenario: `adb`, the device, and the server APKs. See [Check a machine](#set-up-a-repository).
+`semar init` checks the machine for an Android scenario: `adb`, the device, the server APKs, and the activity that a run starts. A wrong `appActivity` is reported there as `missing`, with the launcher that the device gives and the class to name. An app that is not on the device yet is noted as `info`, because Semar installs its `apk` at the first run. See [Check a machine](#set-up-a-repository).
 
 **The build is the APK.** A service with `apk`, no build probe, and no `--build` has the first 40 hexadecimal digits of the sha256 of that file as its build. Reading it needs no device, so `semar status` and an API-only run work with no emulator running. A new APK makes the earlier results `stale`. The order is the probe, then `--build`, then the APK, then the head commit of the repository. A missing file adds no APK build (falling back to the head commit when the service is on this machine), and the first step on a device still ends `blocked` because the file cannot be installed. Before the first step, Semar checks the file again, and it installs exactly that file.
 

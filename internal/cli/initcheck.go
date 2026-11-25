@@ -26,6 +26,7 @@ import (
 const (
 	stateOK      = "ok"
 	stateMissing = "missing"
+	stateInfo    = "info"
 )
 
 type checkItem struct{ state, text string }
@@ -290,6 +291,7 @@ func (m *machineCheck) android(ctx context.Context, o options, dir string, cfg c
 		}
 		serial := m.androidDevice(ctx, o, envName, env, bin)
 		m.androidServerAPKs(ctx, o, dir, envName, env, bin, serial)
+		m.androidActivities(ctx, envName, env, bin, serial)
 	}
 	if !named {
 		m.add(stateMissing, "%s on a device, and no test environment has a service with an android app: add android.appPackage to a service in semar.yaml", androidScenariosWords(n))
@@ -372,6 +374,38 @@ func (m *machineCheck) androidDevice(ctx context.Context, o options, envName str
 	}
 	m.add(stateOK, "%s: the device %s is ready", envName, dev.Serial)
 	return dev.Serial
+}
+
+// androidActivities checks, for each app of the environment, the activity that a run starts. An app that
+// is not on the device is only noted, because Semar installs its APK at the first run.
+func (m *machineCheck) androidActivities(ctx context.Context, envName string, env config.Environment, bin, serial string) {
+	if serial == "" {
+		return
+	}
+	for _, s := range env.Services {
+		a := s.Android
+		if a == nil {
+			continue
+		}
+		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		res, err := android.CheckActivity(cctx, android.ExecRunner{}, bin, serial, a.AppPackage, a.AppActivity)
+		cancel()
+		switch {
+		case err != nil:
+			m.add(stateMissing, "%s: the activity of %s could not be checked: %s", envName, s.Name, oneLine(err.Error()))
+		case !res.Installed && a.APK != "":
+			m.add(stateInfo, "%s: %s (%s) is not on the device yet: Semar installs %s at the first run", envName, s.Name, a.AppPackage, a.APK)
+		case !res.Installed:
+			m.add(stateInfo, "%s: %s (%s) is not on the device, so its activity was not checked: install it, or name an apk", envName, s.Name, a.AppPackage)
+		case res.Component != "":
+			m.add(stateOK, "%s: %s starts %s", envName, s.Name, res.Component)
+		case res.Launcher == "":
+			m.add(stateMissing, "%s: the activity %s is not in %s, and the package has no launcher activity: set appActivity to the class that starts the app", envName, a.AppActivity, a.AppPackage)
+		default:
+			_, class, _ := strings.Cut(res.Launcher, "/")
+			m.add(stateMissing, "%s: the activity %s is not in %s: the launcher is %s; set appActivity to %s or leave it empty", envName, a.AppActivity, a.AppPackage, res.Launcher, class)
+		}
+	}
 }
 
 // androidServerAPKs checks that Semar has the two UiAutomator2 server APKs, or that the device has the
