@@ -1527,7 +1527,7 @@ func TestStudioDiagnosesAStaleStartAndSavesTheFix(t *testing.T) {
 	if f.Verify.Diagnosis == nil || f.Verify.Diagnosis.Kind != "stale-start" || f.Verify.Diagnosis.Actual != "Home" || f.Verify.Diagnosis.Recorded != "SignIn" {
 		t.Fatalf("verify = %+v", f.Verify)
 	}
-	if !strings.Contains(f.Verify.Message, "The replay began on Home, not SignIn") {
+	if !strings.Contains(f.Verify.Message, "After the launch the app showed Home, and the step that failed was recorded on SignIn") {
 		t.Errorf("the message does not carry the diagnosis: %q", f.Verify.Message)
 	}
 

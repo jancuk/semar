@@ -10,8 +10,9 @@ import (
 // DiagnosisKind names a reason that a replay failed which is not in the steps.
 type DiagnosisKind string
 
-// DiagnosisStaleStart says that the replay began on another screen than the recording: the first launch
-// keeps the data of the app, and the recording changed it.
+// DiagnosisStaleStart says that the first step after the launch failed on another screen than it was
+// recorded on, and the first launch keeps the data of the app. The app may show a splash screen first, so
+// the screen after the launch is evidence, not proof, and the message says so.
 const DiagnosisStaleStart DiagnosisKind = "stale-start"
 
 // Diagnosis explains a failed verify. The studio and the terminal read Kind to offer the fix, and show
@@ -19,7 +20,7 @@ const DiagnosisStaleStart DiagnosisKind = "stale-start"
 type Diagnosis struct {
 	Kind DiagnosisKind `json:"kind"`
 	// Recorded is the screen that the failed step was recorded on, and Actual the screen that the replay
-	// began on. Reset is the reset that the first launch has.
+	// showed after the launch. Reset is the reset that the first launch has.
 	Recorded string `json:"recorded"`
 	Actual   string `json:"actual"`
 	Reset    string `json:"reset"`
@@ -76,7 +77,7 @@ func diagnoseStart(events []*event, serviceReset, failedStep, actual string) *Di
 }
 
 func startMessage(d *Diagnosis) string {
-	return fmt.Sprintf("The replay began on %s, not %s where the recording began. The first launch resets with %s, which keeps the data of the app, and the recording changed it (a sign-in, say). Save with reset: clear on the first launch.", d.Actual, d.Recorded, d.Reset)
+	return fmt.Sprintf("After the launch the app showed %s, and the step that failed was recorded on %s. The first launch resets with %s, which keeps the data of the app: when the recording changed it (a sign-in, say), a replay starts past the screen that the recording began on. Save with reset: clear on the first launch.", d.Actual, d.Recorded, d.Reset)
 }
 
 // ClearFirstLaunch sets the reset of the first launch to clear, so that the next save writes it. A physical

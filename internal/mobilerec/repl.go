@@ -62,7 +62,7 @@ const helpText = `Commands (N is the number of an element; N.K picks the Kth loc
   delete [S]               delete step S, or the last step (the device stays where it is)
   goto S|end               take the device through the first S steps, so that a new step goes after them
   finish                   save, and verify when the command can
-  fix                      after a verify that began on another screen: reset with clear on the first launch, save, and verify again
+  fix                      after a verify that failed at the first step on another screen: reset with clear on the first launch, save, and verify again
   undo                     take back the last save, when no file changed since
   quit                     leave`
 
@@ -519,7 +519,7 @@ func (r *REPL) useFlow(ctx context.Context, args []string) {
 // save, which is what the diagnosis of the verify asked for.
 func (r *REPL) fix(ctx context.Context) {
 	if r.diag == nil {
-		r.say("There is nothing to fix: a verify has not found that the replay began on another screen.")
+		r.say("There is nothing to fix: a verify has not found the first step after the launch failing on another screen.")
 		return
 	}
 	err := r.Session.ClearFirstLaunch()

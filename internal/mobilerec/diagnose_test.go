@@ -59,7 +59,7 @@ func TestDiagnoseReplayFindsAReplayThatBeganSignedIn(t *testing.T) {
 	if d.Kind != mobilerec.DiagnosisStaleStart || d.Actual != "Home" || d.Recorded != "SignIn" || d.NeedsConfirm {
 		t.Errorf("diagnosis = %+v", d)
 	}
-	for _, want := range []string{"The replay began on Home, not SignIn", "resets with restart", "Save with reset: clear on the first launch."} {
+	for _, want := range []string{"After the launch the app showed Home, and the step that failed was recorded on SignIn", "resets with restart", "Save with reset: clear on the first launch."} {
 		if !strings.Contains(d.Message, want) {
 			t.Errorf("message lacks %q: %s", want, d.Message)
 		}
@@ -183,7 +183,7 @@ func TestREPLFixResetsTheFirstLaunchAndVerifiesAgain(t *testing.T) {
 	}
 	for _, want := range []string{
 		"There is nothing to fix",
-		"The replay began on Home, not SignIn",
+		"After the launch the app showed Home, and the step that failed was recorded on SignIn",
 		"Next: fix does that and verifies again",
 		"The flow login completed.",
 	} {
