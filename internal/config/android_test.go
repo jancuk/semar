@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ func TestAndroidKeysLoad(t *testing.T) {
 		t.Errorf("android = %+v", e.Android)
 	}
 	a := e.Services[0].Android
-	if a == nil || a.AppPackage != "com.example.shop" || a.ResetMode() != config.ResetClear || len(a.Schemes) != 2 || a.Permissions[0] != "android.permission.CAMERA" {
+	if a == nil || a.AppPackage != "com.example.shop" || a.ResetMode() != config.ResetClear || len(a.Schemes) != 2 || a.Permissions.Names[0] != "android.permission.CAMERA" {
 		t.Fatalf("service android = %+v", a)
 	}
 }
@@ -123,28 +124,52 @@ func TestAndroidEnvironmentRules(t *testing.T) {
 	}
 }
 
+func TestAndroidPermissionsTakeAllOrAList(t *testing.T) {
+	for name, c := range map[string]struct {
+		yaml string
+		want config.Permissions
+	}{
+		"all":    {"          permissions: all\n", config.Permissions{All: true}},
+		"a list": {"          permissions: [android.permission.CAMERA, android.permission.RECORD_AUDIO]\n", config.Permissions{Names: []string{"android.permission.CAMERA", "android.permission.RECORD_AUDIO"}}},
+		"none":   {"", config.Permissions{}},
+		"null":   {"          permissions:\n", config.Permissions{}},
+	} {
+		cfg, err := loadText(t, androidText("", "          appPackage: com.a.b\n"+c.yaml))
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if got := cfg.Environments["uat"].Services[0].Android.Permissions; !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: permissions = %#v, want %#v", name, got, c.want)
+		}
+	}
+}
+
 func TestAndroidServiceRules(t *testing.T) {
 	farm := "      serverUrl: https://farm.example.com\n"
 	for name, c := range map[string]struct{ env, svc, want string }{
-		"no package":                  {"", "          appActivity: .Main\n", "appPackage is required"},
-		"a one-word package":          {"", "          appPackage: shop\n", "appPackage is required"},
-		"a package with a quote":      {"", "          appPackage: \"com.x'y\"\n", "appPackage"},
-		"an activity with a space":    {"", "          appPackage: com.a.b\n          appActivity: \"a b\"\n", "appActivity"},
-		"an apk that leaves":          {"", "          appPackage: com.a.b\n          apk: ../x.apk\n", "apk must be a path inside"},
-		"an apk with a far server":    {farm, "          appPackage: com.a.b\n          apk: x.apk\n", "apk cannot be used with a serverUrl"},
-		"an app without a far server": {"", "          appPackage: com.a.b\n          app: bs://abc\n", "app is used only with a serverUrl"},
-		"an app with a near server":   {"      serverUrl: http://127.0.0.1:4723\n", "          appPackage: com.a.b\n          app: bs://abc\n", "app is used only with a serverUrl"},
-		"an app with an apk":          {farm, "          appPackage: com.a.b\n          app: bs://abc\n          apk: x.apk\n", "apk or app, and not both"},
-		"an app with a space":         {farm, "          appPackage: com.a.b\n          app: \"bs://a b\"\n", "app \"bs://a b\""},
-		"a bad reset":                 {"", "          appPackage: com.a.b\n          reset: wipe\n", "reset must be"},
-		"an upper-case scheme":        {"", "          appPackage: com.a.b\n          schemes: [Shop]\n", "schemes[0]"},
-		"the http scheme":             {"", "          appPackage: com.a.b\n          schemes: [http]\n", "cannot be listed"},
-		"the intent scheme":           {"", "          appPackage: com.a.b\n          schemes: [intent]\n", "cannot be listed"},
-		"the javascript scheme":       {"", "          appPackage: com.a.b\n          schemes: [javascript]\n", "cannot be listed"},
-		"a scheme twice":              {"", "          appPackage: com.a.b\n          schemes: [shop, shop]\n", "listed twice"},
-		"a permission with a space":   {"", "          appPackage: com.a.b\n          permissions: [\"a b\"]\n", "permissions[0]"},
-		"a permission with a quote":   {"", "          appPackage: com.a.b\n          permissions: [\"a'; rm -rf /\"]\n", "permissions[0]"},
-		"an unknown key":              {"", "          appPackage: com.a.b\n          colour: red\n", "colour"},
+		"no package":                          {"", "          appActivity: .Main\n", "appPackage is required"},
+		"a one-word package":                  {"", "          appPackage: shop\n", "appPackage is required"},
+		"a package with a quote":              {"", "          appPackage: \"com.x'y\"\n", "appPackage"},
+		"an activity with a space":            {"", "          appPackage: com.a.b\n          appActivity: \"a b\"\n", "appActivity"},
+		"an apk that leaves":                  {"", "          appPackage: com.a.b\n          apk: ../x.apk\n", "apk must be a path inside"},
+		"an apk with a far server":            {farm, "          appPackage: com.a.b\n          apk: x.apk\n", "apk cannot be used with a serverUrl"},
+		"an app without a far server":         {"", "          appPackage: com.a.b\n          app: bs://abc\n", "app is used only with a serverUrl"},
+		"an app with a near server":           {"      serverUrl: http://127.0.0.1:4723\n", "          appPackage: com.a.b\n          app: bs://abc\n", "app is used only with a serverUrl"},
+		"an app with an apk":                  {farm, "          appPackage: com.a.b\n          app: bs://abc\n          apk: x.apk\n", "apk or app, and not both"},
+		"an app with a space":                 {farm, "          appPackage: com.a.b\n          app: \"bs://a b\"\n", "app \"bs://a b\""},
+		"a bad reset":                         {"", "          appPackage: com.a.b\n          reset: wipe\n", "reset must be"},
+		"an upper-case scheme":                {"", "          appPackage: com.a.b\n          schemes: [Shop]\n", "schemes[0]"},
+		"the http scheme":                     {"", "          appPackage: com.a.b\n          schemes: [http]\n", "cannot be listed"},
+		"the intent scheme":                   {"", "          appPackage: com.a.b\n          schemes: [intent]\n", "cannot be listed"},
+		"the javascript scheme":               {"", "          appPackage: com.a.b\n          schemes: [javascript]\n", "cannot be listed"},
+		"a scheme twice":                      {"", "          appPackage: com.a.b\n          schemes: [shop, shop]\n", "listed twice"},
+		"a permission with a space":           {"", "          appPackage: com.a.b\n          permissions: [\"a b\"]\n", "permissions[0]"},
+		"a permission with a quote":           {"", "          appPackage: com.a.b\n          permissions: [\"a'; rm -rf /\"]\n", "permissions[0]"},
+		"a permission scalar that is not all": {"", "          appPackage: com.a.b\n          permissions: some\n", "must be all or a list"},
+		"a permission mapping":                {"", "          appPackage: com.a.b\n          permissions: {a: b}\n", "must be all or a list"},
+		"all in a list":                       {"", "          appPackage: com.a.b\n          permissions: [android.permission.CAMERA, all]\n", "permissions[1]: all stands alone"},
+		"an unknown key":                      {"", "          appPackage: com.a.b\n          colour: red\n", "colour"},
 	} {
 		_, err := loadText(t, androidText(c.env, c.svc))
 		if err == nil || !strings.Contains(err.Error(), c.want) {

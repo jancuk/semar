@@ -99,7 +99,7 @@ func TestEveryDeviceShellWordIsQuotedInAWholeRun(t *testing.T) {
 	r := newRig(t, func(r *rig, _ *mobiletest.ADBConfig) {
 		r.opts = android.Options{}
 	})
-	r.opts.Apps = map[string]android.App{"shop": {Package: pkgShop, Reset: config.ResetClear, Permissions: []string{"android.permission.CAMERA"}}}
+	r.opts.Apps = map[string]android.App{"shop": {Package: pkgShop, Reset: config.ResetClear, Permissions: config.Permissions{Names: []string{"android.permission.CAMERA"}}}}
 	r.opts.Home, r.opts.RepoRoot = r.home, r.repo
 	r.opts.LookupEnv = func(k string) (string, bool) { v, ok := r.env[k]; return v, ok }
 	r.opts.Sleep, r.opts.Now = r.clk.Sleep, r.clk.Now
@@ -137,7 +137,7 @@ func TestResetStopsClearsAndGrants(t *testing.T) {
 		"none":    {"'pm' 'grant' 'com.example.shop' 'android.permission.CAMERA'"},
 	} {
 		r := newRig(t)
-		r.opts.Apps = map[string]android.App{"shop": {Package: pkgShop, Reset: mode, Permissions: []string{"android.permission.CAMERA"}}}
+		r.opts.Apps = map[string]android.App{"shop": {Package: pkgShop, Reset: mode, Permissions: config.Permissions{Names: []string{"android.permission.CAMERA"}}}}
 		p := r.platform()
 		d := r.driver(p)
 		n := len(r.adb.Shell())
@@ -163,7 +163,7 @@ func TestAPermissionThatCannotBeGrantedIsAnErrorOfTheReset(t *testing.T) {
 	r := newRig(t, func(_ *rig, c *mobiletest.ADBConfig) {
 		c.GrantOutput = "Exception occurred while executing 'grant':\njava.lang.SecurityException: Unknown permission"
 	})
-	r.opts.Apps = map[string]android.App{"shop": {Package: pkgShop, Permissions: []string{"android.permission.NOPE"}}}
+	r.opts.Apps = map[string]android.App{"shop": {Package: pkgShop, Permissions: config.Permissions{Names: []string{"android.permission.NOPE"}}}}
 	d := r.driver(r.platform())
 	err := d.Reset(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "the permission android.permission.NOPE could not be granted") {

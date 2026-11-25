@@ -185,8 +185,45 @@ type ServiceAndroid struct {
 	Reset string `yaml:"reset"`
 	// Schemes are the custom schemes that an open may use, besides http and https.
 	Schemes []string `yaml:"schemes"`
-	// Permissions are granted after each reset.
-	Permissions []string `yaml:"permissions"`
+	// Permissions are granted after each reset: a list of names, or all.
+	Permissions Permissions `yaml:"permissions"`
+}
+
+// PermissionsAll is the scalar that stands for every runtime permission that the app requests.
+const PermissionsAll = "all"
+
+// Permissions is what ServiceAndroid.Permissions holds: every runtime permission of the app (All), or the
+// listed names. The two exclude each other.
+type Permissions struct {
+	All   bool
+	Names []string
+}
+
+// Any reports whether the app is granted at least one permission.
+func (p Permissions) Any() bool { return p.All || len(p.Names) > 0 }
+
+// UnmarshalYAML reads the scalar all, or a list of names. Whether the names are valid is left to Validate.
+func (p *Permissions) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		switch {
+		case n.ShortTag() == "!!null":
+			*p = Permissions{}
+			return nil
+		case n.Value == PermissionsAll && n.ShortTag() == "!!str":
+			*p = Permissions{All: true}
+			return nil
+		}
+		return fmt.Errorf("line %d: permissions must be %s or a list of permission names, got %q", n.Line, PermissionsAll, n.Value)
+	case yaml.SequenceNode:
+		var names []string
+		if err := n.Decode(&names); err != nil {
+			return err
+		}
+		*p = Permissions{Names: names}
+		return nil
+	}
+	return fmt.Errorf("line %d: permissions must be %s or a list of permission names", n.Line, PermissionsAll)
 }
 
 // The values of ServiceAndroid.Reset.

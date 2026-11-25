@@ -29,7 +29,7 @@ type App struct {
 	// Reset is restart (the default), clear, or none.
 	Reset string
 	// Permissions are granted after each reset.
-	Permissions []string
+	Permissions config.Permissions
 }
 
 func (a App) resetMode() string {
@@ -167,16 +167,14 @@ func (l *adbLife) reset(ctx context.Context, override string) error {
 		return nil
 	}
 	l.granted = true
-	for _, perm := range l.app.Permissions {
-		out, err := l.a.shell(ctx, "pm", "grant", l.app.Package, perm)
-		if err != nil || containsFailure(out) {
-			if err == nil {
-				err = errors.New(firstLine(out))
-			}
-			return fmt.Errorf("the permission %s could not be granted: %w", perm, err)
+	perms := l.app.Permissions.Names
+	if l.app.Permissions.All {
+		var err error
+		if perms, err = l.a.requestedPermissions(ctx, l.app.Package); err != nil {
+			return err
 		}
 	}
-	return nil
+	return l.a.grantPermissions(ctx, l.app.Package, perms, l.app.Permissions.All)
 }
 
 // containsFailure is true for the output of am and pm that says it failed, which they do with an exit

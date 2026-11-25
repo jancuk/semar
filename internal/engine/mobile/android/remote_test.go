@@ -66,7 +66,7 @@ func TestRemoteCapabilities(t *testing.T) {
 		"appium:deviceName": "Pixel 8", "platformName": "iOS", "appium:appPackage": "evil.pkg", "appium:app": "bs://evil", "appium:noReset": false,
 		"appium:options": map[string]any{"a": 1},
 	}}
-	r := newRemote(t, mobiletest.Options{}, android.App{Package: pkgShop, Activity: ".Main", APK: apk, APKDigest: sum[:40], Permissions: []string{"android.permission.CAMERA"}}, env)
+	r := newRemote(t, mobiletest.Options{}, android.App{Package: pkgShop, Activity: ".Main", APK: apk, APKDigest: sum[:40], Permissions: config.Permissions{Names: []string{"android.permission.CAMERA"}}}, env)
 	p := android.New(r.opts)
 	t.Cleanup(func() { _ = p.Close(context.Background()) })
 	d := r.driver(p)

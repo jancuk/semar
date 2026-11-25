@@ -556,8 +556,10 @@ func validateServiceAndroid(p string, a ServiceAndroid, env Android, add func(st
 		seen[sc] = true
 	}
 	seen = map[string]bool{}
-	for i, perm := range a.Permissions {
+	for i, perm := range a.Permissions.Names {
 		switch {
+		case perm == PermissionsAll:
+			add("%s.permissions[%d]: all stands alone: write permissions: all, with no list", p, i)
 		case !androidPermissionPattern.MatchString(perm):
 			add("%s.permissions[%d] %q must be a permission name such as android.permission.CAMERA", p, i, perm)
 		case seen[perm]:

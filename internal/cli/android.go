@@ -51,7 +51,7 @@ func androidApps(repo string, env config.Environment, declared declaredBuilds) m
 			Activity:    a.AppActivity,
 			Ref:         a.App,
 			Reset:       a.ResetMode(),
-			Permissions: slices.Clone(a.Permissions),
+			Permissions: config.Permissions{All: a.Permissions.All, Names: slices.Clone(a.Permissions.Names)},
 		}
 		if a.APK != "" {
 			app.APK = a.APK

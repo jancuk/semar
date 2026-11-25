@@ -1409,7 +1409,7 @@ environments:
           apk: app/build/outputs/apk/debug/app-debug.apk   # in the repository, or an absolute path
           reset: restart                      # restart (default), clear, or none
           schemes: [shop]                     # custom schemes that an open step may use
-          permissions: [android.permission.CAMERA]         # granted after each reset
+          permissions: [android.permission.CAMERA]         # granted after each reset, or all of them: permissions: all
 ```
 
 | Key | Meaning |
@@ -1424,7 +1424,7 @@ environments:
 | `services[].android.apk` | The file that Semar installs when the device has another one. See the build below |
 | `services[].android.reset` | What happens before each scenario. `restart` stops the app and keeps its data. `clear` also deletes its data. `none` leaves it as it is. A `launch` step can name its own reset: see [The reset of a launch](#the-reset-of-a-launch) |
 | `services[].android.schemes` | The custom schemes, such as `shop`, that an `open` step may use. `http` and `https` follow the rules of the environment, and `file`, `content`, `intent`, and `javascript` are never opened |
-| `services[].android.permissions` | Permissions that Semar grants after each reset, because `clear` revokes them |
+| `services[].android.permissions` | Permissions that Semar grants after each reset, because `clear` revokes them. A list names them. The scalar `all` grants every runtime permission that the installed app requests, read from `dumpsys package`, with the background location last, so no system dialog such as the one for notifications blocks the first step. It cannot be mixed into a list. With `serverUrl`, `all` and a list both ask the server to grant the permissions that the app requests |
 
 **A crash in a failed step.** When a step fails, or an element is missing and the app is no longer in front, Semar looks for a crash or an ANR that the device recorded for the app since the run began. It keeps the report as `crash-<step>.txt` in the run, redacted, and the step shows a one-line summary and a link to the file in `report.md` and `report.html`. This is evidence only and never changes an outcome. It needs no setting.
 

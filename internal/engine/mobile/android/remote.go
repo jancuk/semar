@@ -51,7 +51,7 @@ func (p *Platform) remoteCaps(app App) map[string]any {
 	case app.Ref != "":
 		caps["appium:app"] = app.Ref
 	}
-	if len(app.Permissions) > 0 {
+	if app.Permissions.Any() {
 		caps["appium:autoGrantPermissions"] = true
 	}
 	return caps
