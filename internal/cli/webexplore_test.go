@@ -316,7 +316,15 @@ func TestAFlowThatTypesADateKeepsTheVariableAndTheTestFollowsTheRun(t *testing.T
 	}
 	data, err := os.ReadFile(files[0])
 	must(t, err)
-	if !strings.Contains(string(data), "{{date.plus7d}}") || strings.Contains(string(data), "2026-11-25") {
+	// storedAt is the wall-clock time the store kept the script, so it holds today's date.
+	// On 2026-11-25 that is the typed date too; only the steps must not hold it.
+	var steps []string
+	for line := range strings.Lines(string(data)) {
+		if !strings.HasPrefix(strings.TrimSpace(line), "storedAt:") {
+			steps = append(steps, line)
+		}
+	}
+	if body := strings.Join(steps, ""); !strings.Contains(body, "{{date.plus7d}}") || strings.Contains(body, "2026-11-25") {
 		t.Errorf("the script must hold the variable and not the date:\n%s", data)
 	}
 	s, err := script.Parse(data, files[0])

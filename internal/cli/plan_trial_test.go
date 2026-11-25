@@ -152,7 +152,9 @@ outputs: [id]
 			} else if strings.Contains(res.stdout, "trial:") || strings.Contains(res.stdout, "tried:") {
 				t.Errorf("stdout mentions the trial:\n%s", res.stdout)
 			}
-			contains(t, "plan.md", p.planMD(t), "## Trial run\n\n"+tc.md)
+			// plan.md escapes Markdown in the key path, so a "_" in the temporary directory
+			// (as in macOS's /var/folders/_0/...) shows as "\_". Compare the plain path.
+			contains(t, "plan.md", strings.ReplaceAll(p.planMD(t), `\_`, "_"), "## Trial run\n\n"+tc.md)
 			if n := p.app.Requests("", "/v1"); n != 0 {
 				t.Errorf("the environment received %d requests, want none", n)
 			}
