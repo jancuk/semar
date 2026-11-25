@@ -115,7 +115,8 @@ func (a *adb) grantPermissions(ctx context.Context, pkg string, perms []string, 
 		if err == nil && !containsFailure(out) {
 			continue
 		}
-		if lenient && isNotGrantable(out) {
+		// pm writes its refusal to stderr, which reaches here only inside err.
+		if lenient && (isNotGrantable(out) || err != nil && isNotGrantable(err.Error())) {
 			continue
 		}
 		if err == nil {

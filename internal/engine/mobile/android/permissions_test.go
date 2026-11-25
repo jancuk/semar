@@ -64,7 +64,7 @@ func TestPermissionsAllGrantsWhatTheAppRequests(t *testing.T) {
 			{Match: "'dumpsys' 'package' 'com.example.shop'", Out: testdata(t, "dumpsys_package_permissions.txt")},
 			{
 				Match: "'android.permission.SCHEDULE_EXACT_ALARM'", RC: 255,
-				Out: "\nException occurred while executing 'grant':\njava.lang.SecurityException: Permission android.permission.SCHEDULE_EXACT_ALARM requested by package com.example.shop is not a changeable permission type\n\tat com.android.server.Foo\n",
+				Err: "\nException occurred while executing 'grant':\njava.lang.SecurityException: Permission android.permission.SCHEDULE_EXACT_ALARM requested by package com.example.shop is not a changeable permission type\n\tat com.android.server.Foo\n",
 			},
 		}
 	})
@@ -86,7 +86,7 @@ func TestPermissionsAllStillFailsOnOtherGrantErrors(t *testing.T) {
 	r := newRig(t, func(_ *rig, c *mobiletest.ADBConfig) {
 		c.Canned = []mobiletest.Canned{
 			{Match: "'dumpsys' 'package' 'com.example.shop'", Out: "      runtime permissions:\n        android.permission.CAMERA: granted=false\n"},
-			{Match: "'pm' 'grant'", RC: 255, Out: "Exception occurred while executing 'grant':\njava.lang.SecurityException: Package com.example.shop has no permission to grant"},
+			{Match: "'pm' 'grant'", RC: 255, Err: "Exception occurred while executing 'grant':\njava.lang.SecurityException: Package com.example.shop has no permission to grant"},
 		}
 	})
 	r.opts.Apps = map[string]android.App{"shop": {Package: pkgShop, Permissions: config.Permissions{All: true}}}
